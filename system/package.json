@@ -1,0 +1,21 @@
+{
+  "name": "benten-system",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute benten-db --local --file=src/db/schema.sql",
+    "db:init:remote": "wrangler d1 execute benten-db --file=src/db/schema.sql",
+    "db:seed": "wrangler d1 execute benten-db --local --file=src/db/seed.sql",
+    "setup-admin": "wrangler d1 execute benten-db --local --file=src/db/setup_admin.sql"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241106.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.95.0"
+  }
+}

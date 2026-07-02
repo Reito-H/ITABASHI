@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KM支払い・券種ガイド</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #181c27;
+    --surface2: #1e2336;
+    --border: #2a2f45;
+    --accent: #f5c518;
+    --accent2: #e8a800;
+    --text: #e8ecf4;
+    --text2: #8890a8;
+    --text3: #555f7a;
+    --ok: #22c55e;
+    --ok-bg: rgba(34,197,94,0.12);
+    --ng: #ef4444;
+    --ng-bg: rgba(239,68,68,0.12);
+    --cond: #f97316;
+    --cond-bg: rgba(249,115,22,0.12);
+    --warn: #eab308;
+    --warn-bg: rgba(234,179,8,0.1);
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 2px solid var(--accent);
+    padding: 16px 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .logo-badge {
+    background: var(--accent);
+    color: #000;
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    padding: 4px 9px;
+    border-radius: 4px;
+  }
+  .logo-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.03em;
+  }
+  .logo-sub {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 1px;
+  }
+  .search-wrap {
+    flex: 1;
+    min-width: 200px;
+    max-width: 400px;
+    position: relative;
+  }
+  .search-wrap svg {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text3);
+    pointer-events: none;
+  }
+  #search {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 12px 8px 34px;
+    outline: none;
+    transition: border-color .2s;
+    font-family: inherit;
+  }
+  #search:focus { border-color: var(--accent); }
+  #search::placeholder { color: var(--text3); }
+  .search-count {
+    font-size: 11px;
+    color: var(--text3);
+    margin-top: 3px;
+    padding-left: 4px;
+  }
+
+  /* ── Tabs ── */
+  .tabs-wrap {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs-wrap::-webkit-scrollbar { display: none; }
+  .tabs {
+    display: flex;
+    padding: 0 16px;
+    gap: 0;
+    min-width: max-content;
+  }
+  .tab {
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: var(--text2);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 12px 18px;
+    transition: color .2s, border-color .2s;
+    white-space: nowrap;
+    position: relative;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab .tab-count {
+    background: var(--border);
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: 6px;
+    padding: 1px 6px;
+    vertical-align: middle;
+    color: var(--text2);
+  }
+  .tab.active .tab-count {
+    background: rgba(245,197,24,0.2);
+    color: var(--accent);
+  }
+
+  /* ── Main ── */
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 20px 16px 60px;
+  }
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ── Section header ── */
+  .sec-header {
+    margin-bottom: 20px;
+  }
+  .sec-title {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  .sec-title span {
+    color: var(--accent);
+  }
+  .sec-desc {
+    color: var(--text2);
+    font-size: 12px;
+  }
+
+  /* ── Warning banner ── */
+  .warn-banner {
+    background: var(--warn-bg);
+    border: 1px solid rgba(234,179,8,0.3);
+    border-left: 3px solid var(--warn);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #fde68a;
+    line-height: 1.7;
+  }
+  .warn-banner strong {
+    color: var(--warn);
+    font-weight: 700;
+  }
+
+  /* ── Cards grid ── */
+  .cards { display: flex; flex-direction: column; gap: 16px; }
+
+  /* ── Card ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .card-head {
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s;
+  }
+  .card-head:hover { background: var(--surface2); }
+  .card-title {
+    font-size: 14px;
+    font-weight: 700;
+    flex: 1;
+  }
+  .card-body {
+    padding: 16px 18px;
+  }
+  .card-toggle {
+    color: var(--text3);
+    transition: transform .2s;
+    flex-shrink: 0;
+  }
+  .card.collapsed .card-toggle { transform: rotate(-90deg); }
+  .card.collapsed .card-body { display: none; }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    flex-shrink: 0;
+  }
+  .badge-ok   { background: var(--ok-bg);   color: var(--ok);   border: 1px solid rgba(34,197,94,0.3); }
+  .badge-ng   { background: var(--ng-bg);   color: var(--ng);   border: 1px solid rgba(239,68,68,0.3); }
+  .badge-cond { background: var(--cond-bg); color: var(--cond); border: 1px solid rgba(249,115,22,0.3); }
+  .badge-info { background: rgba(99,102,241,0.12); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); }
+
+  /* ── Tag chips ── */
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .tag {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 12px;
+    padding: 3px 9px;
+  }
+  .tag.ok   { border-color: rgba(34,197,94,0.3);  color: #86efac; background: var(--ok-bg); }
+  .tag.ng   { border-color: rgba(239,68,68,0.3);  color: #fca5a5; background: var(--ng-bg); }
+  .tag.warn { border-color: rgba(234,179,8,0.3);  color: #fde68a; background: var(--warn-bg); }
+
+  /* ── Info grid ── */
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .info-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .info-item .label {
+    color: var(--text3);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .info-item .value {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .info-item .value.ok   { color: var(--ok); }
+  .info-item .value.ng   { color: var(--ng); }
+  .info-item .value.warn { color: var(--cond); }
+
+  /* ── Table ── */
+  .table-wrap { overflow-x: auto; margin-top: 8px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    background: var(--bg);
+    color: var(--text2);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    border-bottom: 1px solid rgba(42,47,69,0.6);
+    padding: 9px 12px;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  /* ── Note list ── */
+  .note-list {
+    list-style: none;
+    margin-top: 8px;
+  }
+  .note-list li {
+    color: var(--text2);
+    font-size: 12px;
+    padding: 3px 0 3px 16px;
+    position: relative;
+  }
+  .note-list li::before {
+    content: '›';
+    color: var(--accent);
+    font-weight: 700;
+    left: 0;
+    position: absolute;
+  }
+
+  /* ── Invalid list ── */
+  .invalid-list {
+    background: var(--ng-bg);
+    border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin-top: 8px;
+  }
+  .invalid-list-title {
+    color: var(--ng);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .invalid-list ul {
+    list-style: none;
+  }
+  .invalid-list ul li {
+    color: #fca5a5;
+    font-size: 12px;
+    padding: 2px 0 2px 14px;
+    position: relative;
+  }
+  .invalid-list ul li::before {
+    content: '×';
+    color: var(--ng);
+    font-weight: 700;
+    left: 0;
+    position: absolute;
+    font-size: 10px;
+    top: 4px;
+  }
+
+  /* ── Process pill ── */
+  .proc {
+    background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 4px;
+    color: #c7d2fe;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 7px;
+    white-space: nowrap;
+  }
+  .proc-2 {
+    background: rgba(168,85,247,0.15);
+    border: 1px solid rgba(168,85,247,0.25);
+    color: #d8b4fe;
+  }
+
+  /* ── Lost list ── */
+  .lost-list { display: flex; flex-direction: column; gap: 4px; }
+  .lost-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .lost-date {
+    color: var(--text3);
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    width: 68px;
+  }
+  .lost-type {
+    flex-shrink: 0;
+  }
+  .lost-name { color: var(--text); flex: 1; }
+  .lost-reason {
+    background: var(--ng-bg);
+    border: 1px solid rgba(239,68,68,0.25);
+    border-radius: 3px;
+    color: #fca5a5;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .lost-reason.haishi { background: rgba(239,68,68,0.08); }
+  .lost-reason.seikyufuno { background: rgba(249,115,22,0.12); color: #fdba74; border-color: rgba(249,115,22,0.25); }
+  .lost-reason.teishi { background: rgba(234,179,8,0.1); color: #fde68a; border-color: rgba(234,179,8,0.25); }
+
+  /* ── Divider ── */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 16px 0;
+  }
+
+  /* ── No result ── */
+  .no-result {
+    color: var(--text3);
+    font-size: 13px;
+    padding: 40px 0;
+    text-align: center;
+  }
+
+  /* ── Footer ── */
+  footer {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    color: var(--text3);
+    font-size: 11px;
+    padding: 16px 20px;
+    text-align: center;
+  }
+
+  /* ── Highlight ── */
+  mark {
+    background: rgba(245,197,24,0.35);
+    color: var(--text);
+    border-radius: 2px;
+    padding: 0 2px;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .tab { padding: 10px 13px; font-size: 12px; }
+    .lost-item { flex-wrap: wrap; gap: 6px; }
+    .lost-date { width: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="logo-badge">KM</span>
+        <span class="logo-title">支払い・券種ガイド</span>
+      </div>
+      <div class="logo-sub">国際自動車株式会社｜チャットボット復元データ 2026-06-11</div>
+    </div>
+  </div>
+  <div class="search-wrap">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input type="text" id="search" placeholder="キーワードで検索…" autocomplete="off">
+    <div class="search-count" id="search-count"></div>
+  </div>
+</header>
+
+<div class="tabs-wrap">
+  <div class="tabs">
+    <button class="tab active" data-tab="payment">支払い方法<span class="tab-count">5種</span></button>
+    <button class="tab" data-tab="fukushi">福祉タクシー券<span class="tab-count">31自治体</span></button>
+    <button class="tab" data-tab="ticket">タクシーチケット<span class="tab-count">93件</span></button>
+    <button class="tab" data-tab="national">全国提携会社<span class="tab-count">55社</span></button>
+    <button class="tab" data-tab="lost">受領不可・紛失<span class="tab-count">44件</span></button>
+  </div>
+</div>
+
+<main>
+
+<!-- ══════════ 支払い方法 ══════════ -->
+<section class="section active" id="tab-payment">
+  <div class="sec-header">
+    <div class="sec-title">支払い<span>方法</span></div>
+    <div class="sec-desc">乗務員向け決済手段一覧。タッチ決済・併用可否に注意。</div>
+  </div>
+
+  <div class="warn-banner">
+    <strong>⚠ 要更新</strong>　<strong>LINE Pay</strong> は 2025-04-30 に日本国内サービス終了。チャット登録から削除が必要。<strong>Ringo Pass</strong> も公式ページ掲載なし。確認・削除を推奨。
+  </div>
+
+  <div class="cards">
+
+    <!-- クレジットカード -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">クレジットカード</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ok">VISA</span>
+          <span class="tag ok">Mastercard</span>
+          <span class="tag ok">American Express</span>
+          <span class="tag ok">JCB</span>
+          <span class="tag ok">Diners Club</span>
+          <span class="tag ok">Saison</span>
+          <span class="tag ok">kmキャブカード</span>
+        </div>
+        <ul class="note-list" style="margin-top:12px">
+          <li><span class="tag ng" style="font-size:11px">不可</span> タッチ決済は利用不可</li>
+          <li>デビットカードはチャット内画像で示された券種のみ利用可</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 電子マネー -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">電子マネー</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ok">Suica</span>
+          <span class="tag ok">PASMO</span>
+          <span class="tag ok">KITACA</span>
+          <span class="tag ok">manaca</span>
+          <span class="tag ok">TOICA</span>
+          <span class="tag ok">ICOCA</span>
+          <span class="tag ok">はやかけん</span>
+          <span class="tag ok">nimoca</span>
+          <span class="tag ok">SUGOCA</span>
+          <span class="tag ok">QUICPay</span>
+          <span class="tag ok">iD</span>
+          <span class="tag ok">WAON</span>
+        </div>
+        <ul class="note-list" style="margin-top:12px">
+          <li>nanaco：操作案内のみ登録。利用可否の明記なし。</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- QRコード決済 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">QRコード決済</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ok">au PAY</span>
+          <span class="tag ok">d払い</span>
+          <span class="tag ok">PayPay</span>
+          <span class="tag ok">メルペイ</span>
+          <span class="tag ok">RPay（楽天ペイ）</span>
+          <span class="tag ok">J-Coin Pay</span>
+          <span class="tag ok">AEON Pay</span>
+          <span class="tag ok">銀聯（UnionPay）</span>
+          <span class="tag ok">WeChat Pay</span>
+          <span class="tag ok">Alipay</span>
+          <span class="tag warn">Ringo Pass ⚠要確認</span>
+          <span class="tag ng">LINE Pay（終了済）</span>
+        </div>
+        <ul class="note-list" style="margin-top:12px">
+          <li><strong style="color:var(--ng)">LINE Pay は 2025-04-30 サービス終了</strong>。チャットから削除推奨。</li>
+          <li>他の支払い方法との<strong style="color:var(--cond)">併用不可</strong></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- kmキャブカード -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">kmキャブカード</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="label">銀色・黒色</div>
+            <div class="value ok">繰り返し利用可</div>
+          </div>
+          <div class="info-item">
+            <div class="label">金色</div>
+            <div class="value warn">1回限り・必ず回収</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 割引 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ng">利用不可</span>
+        <span class="card-title">割引（km非対応）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ng">免許返納・運転経歴証明書による割引</span>
+          <span class="tag ng">障がい者本人の個人ETCカードによる割引</span>
+        </div>
+        <ul class="note-list" style="margin-top:10px">
+          <li>上記2種はkmタクシーでは適用不可</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════ 福祉タクシー券 ══════════ -->
+<section class="section" id="tab-fukushi">
+  <div class="sec-header">
+    <div class="sec-title">福祉タクシー<span>券</span></div>
+    <div class="sec-desc">共通処理：有効期限確認 ・ <span class="proc proc-2">未収2</span> ・ おつりなし</div>
+  </div>
+
+  <div class="warn-banner">
+    <strong>⚠ 公式ページとの差異</strong>　公式ページには <strong>新宿区・豊島区・千代田区</strong> が利用可として掲載されているが、チャット選択肢になし。要確認。<br>
+    調布市はチャット「制度終了」回答が正しいと思われるが、公式ページでは「利用可」と掲載中。
+  </div>
+
+  <div class="cards">
+
+    <!-- 利用可 28自治体 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">利用可（28自治体）</span>
+        <span style="color:var(--text3);font-size:12px;margin-left:auto;margin-right:12px">未収2・おつりなし</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ok">品川区</span><span class="tag ok">大田区</span><span class="tag ok">渋谷区</span>
+          <span class="tag ok">世田谷区</span><span class="tag ok">中野区</span><span class="tag ok">文京区</span>
+          <span class="tag ok">江東区</span><span class="tag ok">台東区</span><span class="tag ok">目黒区</span>
+          <span class="tag ok">杉並区</span><span class="tag ok">北区</span><span class="tag ok">板橋区</span>
+          <span class="tag ok">練馬区</span><span class="tag ok">足立区</span><span class="tag ok">江戸川区</span>
+          <span class="tag ok">三鷹市</span><span class="tag ok">武蔵野市</span><span class="tag ok">港区</span>
+          <span class="tag ok">墨田区</span><span class="tag ok">中央区</span><span class="tag ok">日野市</span>
+          <span class="tag ok">八王子市</span><span class="tag ok">立川市</span><span class="tag ok">東大和市</span>
+          <span class="tag ok">府中市</span><span class="tag ok">狛江市</span><span class="tag ok">相模原市</span>
+          <span class="tag ok">西東京市</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 条件付き -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-cond">条件付き</span>
+        <span class="card-title">条件付き利用可</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>自治体</th><th>処理</th><th>条件・注意</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>荒川区</strong></td>
+                <td><span class="proc proc-2">未収2</span></td>
+                <td>券上部に「リフト付自動車専用」赤スタンプのある券は<span style="color:var(--ng)">利用不可</span></td>
+              </tr>
+              <tr>
+                <td><strong>草加市</strong></td>
+                <td><span class="proc proc-2">未収2</span></td>
+                <td>1回につき<strong>2枚まで</strong>。切り離した利用券は無効（切り離さず受領）。おつりなし。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 利用不可 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ng">利用不可</span>
+        <span class="card-title">利用不可</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>自治体</th><th>理由</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>調布市</strong></td>
+                <td style="color:var(--text2)">2024-03-31 で制度終了</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════ タクシーチケット ══════════ -->
+<section class="section" id="tab-ticket">
+  <div class="sec-header">
+    <div class="sec-title">タクシー<span>チケット</span></div>
+    <div class="sec-desc">基本処理：<span class="proc">未収1</span>　チャット登録93件（利用可87件・不可4件・情報2件）</div>
+  </div>
+
+  <div class="cards">
+
+    <!-- 信販系 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">信販系・主要タクシーチケット（12券種）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ok">東京四社タクシーチケット</span>
+          <span class="tag ok">kmタクシーチケット</span>
+          <span class="tag ok">JCBタクシーチケット</span>
+          <span class="tag ok">UCタクシーチケット</span>
+          <span class="tag ok">三井住友カード（VISA）タクシーチケット</span>
+          <span class="tag ok">楽天カードタクシーチケット</span>
+          <span class="tag ok">三菱UFJニコスタクシーチケット</span>
+          <span class="tag ok">三菱UFJニコス（DC）タクシーチケット</span>
+          <span class="tag ok">京交信タクシーチケット</span>
+          <span class="tag ok">愛のタクシーチケット</span>
+          <span class="tag ok">青山キャピタルのタクシーチケット</span>
+          <span class="tag ok">JTBタクシーチケット</span>
+        </div>
+        <div class="invalid-list" style="margin-top:14px">
+          <div class="invalid-list-title">共通無効条件</div>
+          <ul>
+            <li>有効期限切れ（乗務日基準）※三菱UFJニコスは「一切受領不可」と明記</li>
+            <li>限度額・上限枚数超過</li>
+            <li>日付・金額等の変更、訂正</li>
+            <li>会員署名の記載なし</li>
+            <li>著しい破損、汚損</li>
+            <li>その他の記載不備</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 放送局 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">放送局発行チケット（3社）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ok">株式会社フジテレビジョン</span>
+          <span class="tag ok">読売テレビ</span>
+          <span class="tag ok">株式会社テレビ東京</span>
+        </div>
+        <div class="invalid-list" style="margin-top:14px">
+          <div class="invalid-list-title">無効条件</div>
+          <ul>
+            <li>有効期限から<strong>1か月以上</strong>経過</li>
+            <li>日付・金額等の変更、訂正</li>
+            <li>著しい破損、汚損</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 商品券・子育て券 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">商品券・子育て券（7種）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>名称</th><th>処理</th><th>おつり</th><th>備考</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>スマイル商品券（港区）</td><td><span class="proc">未収1</span></td><td style="color:var(--ng)">なし</td><td style="color:var(--text2)">限定券・電子版は不可</td></tr>
+              <tr><td>品川区内共通商品券</td><td><span class="proc">未収1</span></td><td style="color:var(--ng)">なし</td><td style="color:var(--text2)">券裏面へ記入不可</td></tr>
+              <tr><td>トイカード・こども商品券</td><td><span class="proc">未収1</span></td><td style="color:var(--ok)">あり</td><td style="color:var(--text2)">旧券（有効期限なし）は不可。カード型は裏面確認。</td></tr>
+              <tr><td>杉並子育て応援券（ゆりかご券）</td><td><span class="proc">未収1</span></td><td style="color:var(--ng)">なし</td><td style="color:var(--text2)">1回5,000円まで（500円券10枚）。「ゆりかご券」記載必須。</td></tr>
+              <tr><td>せたがや子育て利用券</td><td><span class="proc">未収1</span></td><td style="color:var(--ng)">なし</td><td></td></tr>
+              <tr><td>中央区出産支援祝タクシー利用券</td><td><span class="proc">未収1</span></td><td style="color:var(--ng)">なし</td><td></td></tr>
+              <tr><td>港区子どもタクシー利用券</td><td><span class="proc">未収1</span></td><td style="color:var(--ng)">なし</td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 他社クーポン 利用可 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">他社タクシークーポン（10社）―おつりあり</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ok">日個連東京都営業共同組合</span>
+          <span class="tag ok">東京都個人タクシー協同組合（東個協）</span>
+          <span class="tag ok">チェッカーキャブ</span>
+          <span class="tag ok">東都タクシーセンター</span>
+          <span class="tag ok">小田急グループ</span>
+          <span class="tag ok">東京自交</span>
+          <span class="tag ok">グリーンキャブ</span>
+          <span class="tag ok">京王自動車</span>
+          <span class="tag ok">東京無線</span>
+          <span class="tag ok">神奈川都市交通</span>
+        </div>
+        <ul class="note-list" style="margin-top:10px">
+          <li>処理：<span class="proc">未収1</span>・おつりあり</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 他社クーポン 利用不可 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ng">利用不可</span>
+        <span class="card-title">他社タクシークーポン（4種）―利用不可</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag ng">東京四社営業委員会の共通タクシークーポン</span>
+          <span class="tag ng">東旅協のタクシークーポン</span>
+          <span class="tag ng">中央無線のタクシークーポン</span>
+          <span class="tag ng">共同無線のタクシークーポン</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════ 全国提携会社 ══════════ -->
+<section class="section" id="tab-national">
+  <div class="sec-header">
+    <div class="sec-title">全国提携<span>会社</span></div>
+    <div class="sec-desc">全社 <span class="proc">未収1</span>　共通無効条件：変更・訂正 / 署名なし / 破損・汚損 / その他記載不備</div>
+  </div>
+
+  <div class="cards">
+
+    <!-- 共通のみ 43社 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-ok">利用可</span>
+        <span class="card-title">共通無効条件のみ（43社）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag">国際タクシー株式会社</span>
+          <span class="tag">西条タクシー株式会社</span>
+          <span class="tag">土浦タクシー株式会社</span>
+          <span class="tag">日本交通埼玉株式会社</span>
+          <span class="tag">埼京タクシー株式会社</span>
+          <span class="tag">株式会社つばめタクシー</span>
+          <span class="tag">ハッピータクシー株式会社</span>
+          <span class="tag">県南交通株式会社</span>
+          <span class="tag">上尾タクシー有限会社</span>
+          <span class="tag">菖蒲タクシー有限会社</span>
+          <span class="tag">観光タクシー有限会社</span>
+          <span class="tag">深谷タクシー有限会社（ふかやタクシー）</span>
+          <span class="tag">株式会社越谷タクシー</span>
+          <span class="tag">株式会社千代田交通</span>
+          <span class="tag">西武ハイヤー株式会社</span>
+          <span class="tag">株式会社織田のタクシー（OK TAXI）</span>
+          <span class="tag">株式会社埼玉交通</span>
+          <span class="tag">大宮交通株式会社</span>
+          <span class="tag">三共交通有限会社</span>
+          <span class="tag">熊谷構内タクシー株式会社</span>
+          <span class="tag">千葉構内タクシー株式会社</span>
+          <span class="tag">株式会社ダブリュータクシー</span>
+          <span class="tag">流山タクシー有限会社</span>
+          <span class="tag">有限会社北柏交通</span>
+          <span class="tag">有限会社染谷交通</span>
+          <span class="tag">今井タクシー有限会社</span>
+          <span class="tag">姉ヶ崎タクシー株式会社</span>
+          <span class="tag">日本交通株式会社（東京）</span>
+          <span class="tag">大和自動車交通株式会社</span>
+          <span class="tag">帝都自動車交通株式会社</span>
+          <span class="tag">八王子交通</span>
+          <span class="tag">神奈川都市交通株式会社</span>
+          <span class="tag">富山交通株式会社</span>
+          <span class="tag">山梨交通</span>
+          <span class="tag">スター無線</span>
+          <span class="tag">静鉄タクシー株式会社</span>
+          <span class="tag">名鉄グループ</span>
+          <span class="tag">豊栄タクシーグループ</span>
+          <span class="tag">近鉄タクシー株式会社</span>
+          <span class="tag">相互タクシー株式会社</span>
+          <span class="tag">日本タクシー株式会社</span>
+          <span class="tag">つばめタクシー株式会社（熊本）</span>
+          <span class="tag">信和事業協同組合（大和・中央無線）</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 限度額超過も無効 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-cond">条件付き</span>
+        <span class="card-title">限度額超過も無効（5社）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag warn">岡山県タクシー興業</span>
+          <span class="tag warn">函館タクシー株式会社</span>
+          <span class="tag warn">遠鉄タクシー株式会社</span>
+          <span class="tag warn">浜松交通株式会社</span>
+          <span class="tag warn">大阪タクシー交友会協同組合</span>
+        </div>
+        <ul class="note-list" style="margin-top:10px">
+          <li>上記5社は共通無効条件に加え、<strong style="color:var(--cond)">限度額超過</strong>も無効</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 有効期限切れも無効 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-cond">条件付き</span>
+        <span class="card-title">有効期限切れも無効（2社）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag warn">関東交通株式会社</span>
+          <span class="tag warn">ナショナルタクシー株式会社</span>
+        </div>
+        <ul class="note-list" style="margin-top:10px">
+          <li>上記2社は共通無効条件に加え、<strong style="color:var(--cond)">有効期限切れ</strong>も無効</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 両方無効 -->
+    <div class="card searchable">
+      <div class="card-head" onclick="toggleCard(this)">
+        <span class="badge badge-cond">条件付き</span>
+        <span class="card-title">有効期限切れ・限度額超過も無効（5社）</span>
+        <svg class="card-toggle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="tags">
+          <span class="tag warn">株式会社国際興業大阪</span>
+          <span class="tag warn">日本交通株式会社大阪</span>
+          <span class="tag warn">福岡西鉄タクシー株式会社</span>
+          <span class="tag warn">北海道交運事業協同組合（ナイスタクシーチケット）</span>
+          <span class="tag warn">明交タクシー</span>
+        </div>
+        <ul class="note-list" style="margin-top:10px">
+          <li>上記5社は共通無効条件に加え、<strong style="color:var(--cond)">有効期限切れ・限度額超過の両方</strong>も無効</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="margin-top:20px">
+    <div class="warn-banner">
+      <strong>全国提携会社の最新情報</strong>　東京四社営業委員会の公式ページで確認：<br>
+      <a href="https://www.tokyo-yonsha.gr.jp/about/alliance/alliance.php" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">https://www.tokyo-yonsha.gr.jp/about/alliance/alliance.php</a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ 受領不可・紛失 ══════════ -->
+<section class="section" id="tab-lost">
+  <div class="sec-header">
+    <div class="sec-title">受領不可・<span>紛失情報</span></div>
+    <div class="sec-desc">チャット内は「現在更新中」表示。2026-06-11時点 44件。</div>
+  </div>
+
+  <div class="lost-list" id="lost-list">
+
+    <div class="lost-item searchable"><span class="lost-date">2026.05.27</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社修和</span><span class="lost-reason seikyufuno">再通達・請求不能</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2026.05.25</span><span class="lost-type"><span class="badge badge-info">自社</span></span><span class="lost-name">防衛省</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2026.05.20</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">全国農業信用基金協会協議会</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2026.03.23</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">サンノックシステム株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2026.03.23</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">近鉄タクシー｜MURUI HAEDWARE CORPRATION</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2026.03.13</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">塩野義製薬株式会社</span><span class="lost-reason seikyufuno">再通達・請求不能</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2026.02.24</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">北栄産業株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2026.02.02</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社さくらケーシーエス</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.12.26</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">ダイヤリックス株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.11.25</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">日本原子力発電株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.11.13</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">堺相互タクシー株式会社</span><span class="lost-reason seikyufuno">請求不能</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.11.11</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">中央建設株式会社</span><span class="lost-reason seikyufuno">請求不能</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.09.30</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社修和</span><span class="lost-reason seikyufuno">請求不能</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.09.10</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社日本触媒</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.09.05</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">京成タクシー｜スズキ皮膚科内科クリニック</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.09.05</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">塩野義製薬株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.08.28</span><span class="lost-type"><span class="badge badge-info">自社</span></span><span class="lost-name">三井住友信託銀行</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.08.19</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">石川近鉄タクシーチケット｜㈲KECハイヤー北陸</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.08.19</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">千代田ビル管財株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.08.13</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社テレテック</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.08.12</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社サクライ</span><span class="lost-reason haishi">廃業</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.08.06</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">日本交通㈱大阪チケット｜株式会社野佐和商会</span><span class="lost-reason haishi">廃業</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.08.06</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">望月海運株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.29</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">リシュモンジャパン合同会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.18</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社日本触媒</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.14</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社東京楽天地</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.14</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">沖縄振興開発金融公庫東京支部</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.09</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">㈲あずさ監査法人</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.07</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">あいおいニッセイ同和損害保険株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.04</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">奈良近鉄タクシーチケット｜宗教法人賽山寺</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.07.04</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社エムワイフーズ</span><span class="lost-reason haishi">廃業</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.06.24</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">テラダイン株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.06.17</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">三共交通有限会社｜株式会社青山産業</span><span class="lost-reason seikyufuno">請求不能</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.06.17</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">日親電機株式会社</span><span class="lost-reason teishi">停止</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.06.10</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">近鉄タクシーチケット｜センチュリー総業株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.05.27</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">株式会社フジタ</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.04.22</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">日本眼科医連盟</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.04.04</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">マックスコンサルティング</span><span class="lost-reason seikyufuno">請求不能</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.03.27</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">北九州西鉄タクシー</span><span class="lost-reason haishi">廃業</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.03.24</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">東京貿易アテリアル株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.03.14</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">近鉄タクシーチケット｜是正和</span><span class="lost-reason">無効</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.03.12</span><span class="lost-type"><span class="badge badge-info">四社</span></span><span class="lost-name">住友林業株式会社</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.02.21</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">近鉄タクシーチケット｜生協連関西北陸地区</span><span class="lost-reason">紛失</span></div>
+    <div class="lost-item searchable"><span class="lost-date">2025.02.17</span><span class="lost-type"><span class="badge badge-ng" style="font-size:10px">広域</span></span><span class="lost-name">近鉄タクシーチケット｜小島歯科クリニック</span><span class="lost-reason teishi">取引停止</span></div>
+
+  </div>
+</section>
+
+</main>
+
+<footer>
+  KM 支払い・券種ガイド｜チャットボット復元データ 2026-06-11｜最新の制度・加盟状況は公式ページで確認すること
+</footer>
+
+<script>
+  // Tab switching
+  const tabs = document.querySelectorAll('.tab');
+  const sections = document.querySelectorAll('.section');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      sections.forEach(s => s.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+      applySearch(document.getElementById('search').value);
+    });
+  });
+
+  // Card collapse
+  function toggleCard(head) {
+    const card = head.closest('.card');
+    card.classList.toggle('collapsed');
+  }
+
+  // Search
+  const searchInput = document.getElementById('search');
+  const countEl = document.getElementById('search-count');
+
+  function highlight(text, query) {
+    if (!query) return text;
+    const re = new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    return text.replace(re, '<mark>$1</mark>');
+  }
+
+  function stripMark(el) {
+    el.querySelectorAll('mark').forEach(m => {
+      m.replaceWith(m.textContent);
+    });
+  }
+
+  function applySearch(query) {
+    query = query.trim();
+    const activeSection = document.querySelector('.section.active');
+    const items = activeSection.querySelectorAll('.searchable');
+    let visible = 0;
+
+    items.forEach(item => {
+      const rawText = item.textContent.toLowerCase();
+      const matches = !query || rawText.includes(query.toLowerCase());
+
+      // restore original text nodes before re-highlighting
+      stripMark(item);
+
+      if (matches) {
+        item.style.display = '';
+        visible++;
+        if (query) {
+          item.querySelectorAll('.card-title, .tag, .lost-name, td, .warn-banner').forEach(el => {
+            if (el.childNodes.length === 1 && el.childNodes[0].nodeType === 3) {
+              el.innerHTML = highlight(el.textContent, query);
+            }
+          });
+        }
+        // auto-expand card if it has matches inside
+        const card = item.closest('.card');
+        if (card && query) card.classList.remove('collapsed');
+      } else {
+        item.style.display = 'none';
+      }
+    });
+
+    if (query) {
+      countEl.textContent = visible + ' 件表示中';
+    } else {
+      countEl.textContent = '';
+    }
+  }
+
+  searchInput.addEventListener('input', e => applySearch(e.target.value));
+</script>
+</body>
+</html>

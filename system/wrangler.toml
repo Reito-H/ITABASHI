@@ -1,0 +1,37 @@
+name = "staff-mgmt"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "staff-db"
+database_id = "b50865b1-be1d-411c-bf71-fc9a7da3c5e0"
+
+[vars]
+ADMIN_URL_PREFIX = "/admin"
+RICHMENU_ID_PATTERN1 = "richmenu-7ddc3e80e06b72a49103d5237a89a4ee"
+RICHMENU_ID_PATTERN2 = "richmenu-05ff6e9b8d0827393a2fe5dfd663e49c"
+RICHMENU_ID_PATTERN3 = "richmenu-b900e947e7cc1012d129e96a6f278958"
+# シークレット値は wrangler secret put で登録すること（このファイルには記載しない）
+# npx wrangler secret put SETUP_KEY
+# npx wrangler secret put LINE_CHANNEL_SECRET
+# npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
+
+[[routes]]
+pattern = "bentenclub.com/s7db8q6wys*"
+zone_name = "bentenclub.com"
+
+[[routes]]
+pattern = "bentenclub.com/api*"
+zone_name = "bentenclub.com"
+
+[[routes]]
+pattern = "bentenclub.com/robots.txt"
+zone_name = "bentenclub.com"
+
+[triggers]
+crons = ["0 * * * *"]
+
+# ローカル開発用
+[dev]
+port = 8787
