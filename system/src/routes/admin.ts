@@ -118,15 +118,13 @@ app.get('/setup', async (c) => {
   }
 
   return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>初期設定</title>
-  <script src="https://cdn.tailwindcss.com"></script></head>
-  <body class="flex items-center justify-center min-h-screen bg-gray-100">
-  <div class="bg-white p-8 rounded-xl shadow w-80">
-    <h1 class="text-lg font-bold mb-4">管理者パスワード設定</h1>
-    <p class="text-sm text-gray-500 mb-4">8文字以上のパスワードを設定してください。</p>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);width:20rem}h1{font-size:1.1rem;font-weight:700;margin-bottom:1rem}p{font-size:.875rem;color:#6b7280;margin-bottom:1rem}input{width:100%;border:1px solid #e5e7eb;border-radius:.25rem;padding:.5rem .75rem;margin-bottom:.75rem;font-size:.875rem}button,a{display:block;width:100%;background:#2563eb;color:#fff;border:none;border-radius:.25rem;padding:.5rem;font-size:.875rem;text-align:center;cursor:pointer;text-decoration:none}</style></head>
+  <body><div class="box">
+    <h1>管理者パスワード設定</h1>
+    <p>8文字以上のパスワードを設定してください。</p>
     <form method="POST" action="${ADMIN_PATH}/setup?key=${escHtml(setupKey)}">
-      <input type="password" name="password" placeholder="新しいパスワード（8文字以上）" required minlength="8"
-        class="w-full border rounded px-3 py-2 mb-3 text-sm">
-      <button type="submit" class="w-full bg-blue-600 text-white rounded py-2 text-sm">設定する</button>
+      <input type="password" name="password" placeholder="新しいパスワード（8文字以上）" required minlength="8">
+      <button type="submit">設定する</button>
     </form>
   </div></body></html>`);
 });
@@ -153,13 +151,12 @@ app.post('/setup', async (c) => {
     'UPDATE admins SET password = ? WHERE username = ?'
   ).bind(hash, 'admin').run();
   return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>設定完了</title>
-  <script src="https://cdn.tailwindcss.com"></script></head>
-  <body class="flex items-center justify-center min-h-screen bg-gray-100">
-  <div class="bg-white p-8 rounded-xl shadow w-80 text-center">
-    <div class="text-4xl mb-4">✅</div>
-    <h1 class="text-lg font-bold mb-2">パスワード設定完了</h1>
-    <p class="text-sm text-gray-500 mb-4">ログイン画面からログインしてください。</p>
-    <a href="${ADMIN_PATH}/login" class="inline-block w-full bg-blue-600 text-white rounded py-2 text-sm text-center">ログイン画面へ</a>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);width:20rem;text-align:center}.emo{font-size:2.25rem;margin-bottom:1rem}h1{font-size:1.1rem;font-weight:700;margin-bottom:.5rem}p{font-size:.875rem;color:#6b7280;margin-bottom:1rem}a{display:block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem;font-size:.875rem;text-align:center;text-decoration:none}</style></head>
+  <body><div class="box">
+    <div class="emo">✅</div>
+    <h1>パスワード設定完了</h1>
+    <p>ログイン画面からログインしてください。</p>
+    <a href="${ADMIN_PATH}/login">ログイン画面へ</a>
   </div></body></html>`);
 });
 
@@ -171,10 +168,10 @@ app.get('/', async (c) => {
     c.env.DB.prepare(`
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN entry_type = '新卒' THEN 1 ELSE 0 END) AS new_count,
-        SUM(CASE WHEN entry_type != '新卒' THEN 1 ELSE 0 END) AS career_count
+        SUM(CASE WHEN (status IS NULL OR status != 'completed') THEN 1 ELSE 0 END) AS training_count,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS regular_count
       FROM employees WHERE is_active = 1
-    `).first<{ total: number; new_count: number; career_count: number }>(),
+    `).first<{ total: number; training_count: number; regular_count: number }>(),
     c.env.DB.prepare("SELECT COUNT(*) as cnt FROM bad_events WHERE (admin_memo IS NULL OR admin_memo = '')").first<{ cnt: number }>(),
     c.env.DB.prepare(`
       SELECT COUNT(DISTINCT emp_id) as cnt FROM interview_records
@@ -188,9 +185,9 @@ app.get('/', async (c) => {
       latitude: string; longitude: string; user_agent: string; logged_at: string;
     }>(),
   ]);
-  const empCount   = { cnt: empStats?.total      ?? 0 };
-  const newCount   = { cnt: empStats?.new_count   ?? 0 };
-  const careerCount = { cnt: empStats?.career_count ?? 0 };
+  const empCount     = { cnt: empStats?.total         ?? 0 };
+  const trainingCount = { cnt: empStats?.training_count ?? 0 };
+  const regularCount  = { cnt: empStats?.regular_count  ?? 0 };
 
   const recentEvents = await c.env.DB.prepare(`
     SELECT b.id, b.category, b.content, b.admin_memo, b.created_at, e.name
@@ -225,7 +222,7 @@ app.get('/', async (c) => {
   };
 
   const statCards = [
-    { label: '在籍新人数',       value: empCount?.cnt ?? 0,         sub: `新卒 ${newCount?.cnt ?? 0}名 / その他 ${careerCount?.cnt ?? 0}名`, color: '#1a3a5c' },
+    { label: '在籍社員数',       value: empCount.cnt,               sub: `研修中 ${trainingCount.cnt}名 / 配属済 ${regularCount.cnt}名`, color: '#1a3a5c' },
     { label: '未対応の報告',     value: unrespondedEvents?.cnt ?? 0, sub: '嫌なこと報告（管理者メモなし）',                                   color: (unrespondedEvents?.cnt ?? 0) > 0 ? '#b91c1c' : '#374151' },
     { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',                                           color: (overdueInterviews?.cnt ?? 0) > 0 ? '#b45309' : '#374151' },
   ].map(s => `
@@ -655,17 +652,20 @@ app.get('/settings', (c) => {
   const ADMIN = ADMIN_PATH;
   const adminLoginUrl = `https://bentenclub.com${ADMIN}/login`;
   const cards = [
-    { href: `${ADMIN}/announcements`,                 title: 'お知らせ配信',   desc: 'LINEで一斉送信・配信履歴の確認' },
-    { href: `${ADMIN}/line`,                          title: 'LINE管理',       desc: '招待コード発行・ユーザー紐付け状況' },
-    { href: `${ADMIN}/settings/schedule-types`,       title: 'シフト区分',     desc: 'プリセットボタンの区分名・色・目標回数' },
-    { href: `${ADMIN}/settings/coaches`,              title: '研修担当',       desc: 'シフト表の研修担当者（コーチ）一覧' },
-    { href: `${ADMIN}/settings/instructors`,          title: '班長・指導者',   desc: 'シフト表下部の班長・指導者一覧とLINE連携' },
-    { href: `${ADMIN}/settings/periods`,              title: '月度設定',       desc: '各月度の開始日・締め日の設定' },
-    { href: `${ADMIN}/settings/notifications`,        title: 'LINE通知設定',   desc: '班長向け定時通知の送信時刻・有効/無効設定' },
-    { href: `${ADMIN}/settings/offices`,               title: '営業所',         desc: '各営業所の電話番号・住所の管理' },
-    { href: `${ADMIN}/settings/vehicle-admins`,        title: '車番検索管理者一覧', desc: 'LINE車番連携済みユーザーの確認・強制解除' },
-    { href: `${ADMIN}/settings/vehicle-search-guide`, title: '車番検索ガイド', desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
-    { href: `${ADMIN}/settings/tutorial`,             title: 'チュートリアル', desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
+    { href: `${ADMIN}/settings/liff`,                 title: 'LINEリフ権限管理', desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
+    { href: `${ADMIN}/settings/lost-items`,           title: '忘れ物報告一覧',   desc: '社員報告・客問い合わせの履歴と状態管理', highlight: true },
+    { href: `${ADMIN}/settings/accidents`,            title: '事故報告一覧',     desc: '事故報告の履歴・進捗管理', highlight: true },
+    { href: `${ADMIN}/announcements`,                 title: 'お知らせ配信',     desc: 'LINEで一斉送信・配信履歴の確認' },
+    { href: `${ADMIN}/line`,                          title: 'LINE管理',         desc: '新人招待コード発行・紐付け状況' },
+    { href: `${ADMIN}/settings/schedule-types`,       title: 'シフト区分',       desc: 'プリセットボタンの区分名・色・目標回数' },
+    { href: `${ADMIN}/settings/coaches`,              title: '研修担当',         desc: 'シフト表の研修担当者（コーチ）一覧' },
+    { href: `${ADMIN}/settings/instructors`,          title: '班長・指導者',     desc: 'シフト表下部の班長・指導者一覧' },
+    { href: `${ADMIN}/settings/periods`,              title: '月度設定',         desc: '各月度の開始日・締め日の設定' },
+    { href: `${ADMIN}/settings/notifications`,        title: 'LINE通知設定',     desc: '班長向け定時通知の送信時刻・有効/無効設定' },
+    { href: `${ADMIN}/settings/offices`,              title: '営業所',           desc: '各営業所の電話番号・住所の管理' },
+    { href: `${ADMIN}/settings/vehicle-admins`,       title: '車番検索管理者一覧', desc: 'LINE車番連携済みユーザーの確認・強制解除' },
+    { href: `${ADMIN}/settings/vehicle-search-guide`, title: '車番検索ガイド',   desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
+    { href: `${ADMIN}/settings/tutorial`,             title: 'チュートリアル',   desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
   ];
   const html = `
     <div style="max-width:560px;">
@@ -691,11 +691,11 @@ app.get('/settings', (c) => {
       </div>
 
       <div style="display:flex;flex-direction:column;gap:12px;">
-        ${cards.map(card => `
-          <a href="${card.href}" style="display:flex;align-items:center;gap:16px;background:white;border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid #e5e7eb;transition:box-shadow 0.15s;"
+        ${cards.map((card: { href: string; title: string; desc: string; highlight?: boolean }) => `
+          <a href="${card.href}" style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
             onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
             <div>
-              <div style="font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:3px;">${card.title}</div>
+              <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};margin-bottom:3px;">${card.title}</div>
               <div style="font-size:12px;color:#6b7280;">${card.desc}</div>
             </div>
             <div style="margin-left:auto;color:#9ca3af;font-size:18px;">›</div>

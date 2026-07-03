@@ -5,9 +5,17 @@ export type Env = {
   SETUP_KEY?: string;
   LINE_CHANNEL_SECRET?: string;
   LINE_CHANNEL_ACCESS_TOKEN?: string;
+  // PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
   RICHMENU_ID_PATTERN1?: string;
   RICHMENU_ID_PATTERN2?: string;
   RICHMENU_ID_PATTERN3?: string;
+  // LIFF アプリID
+  LIFF_ID_LOST_ITEM?: string;
+  LIFF_ID_ACCIDENT?: string;
+  // 登録パスワード（wrangler secret put で設定）
+  LINE_REG_PWD_VEHICLE?: string;    // 車番管理者
+  LINE_REG_PWD_OPERATIONS?: string; // 運行管理者
+  LINE_REG_PWD_GENERAL?: string;    // 統括管理者
 };
 
 const PBKDF2_ITERATIONS = 600000;

@@ -19,6 +19,8 @@ import notificationsApi from './routes/api/notifications';
 import instructorInviteApi from './routes/api/instructor_invite';
 import { handleLineEvent } from './line_bot';
 import { handleCron } from './cron';
+import liffRoutes from './routes/liff';
+import adminLiffRoutes from './routes/admin_liff';
 import type { Env } from './auth';
 import { ADMIN_PATH, SECRET } from './config';
 
@@ -44,15 +46,31 @@ app.use('*', requireJapan);
 // セキュリティヘッダー
 app.use('*', async (c, next) => {
   await next();
+  const pathname = new URL(c.req.url).pathname;
+  const isLiff = pathname.startsWith('/liff');
+  const isForm = pathname.startsWith('/form');
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
-  c.res.headers.set('X-Frame-Options', 'DENY');
-  c.res.headers.set('Referrer-Policy', 'no-referrer');
-  // HSTS: 1年間HTTPSを強制
-  c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  c.res.headers.set('Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; frame-ancestors 'none';"
-  );
+  if (isLiff) {
+    // LIFF ページ: LINE SDKを許可、フレーム制限を緩和
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.line-scdn.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.line.me https://liff.line.me;"
+    );
+  } else if (isForm) {
+    // フォームページ: LINE外ブラウザでも開けるよう X-Frame-Options を外す
+    c.res.headers.set('Referrer-Policy', 'no-referrer');
+    c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
+    );
+  } else {
+    c.res.headers.set('X-Frame-Options', 'DENY');
+    c.res.headers.set('Referrer-Policy', 'no-referrer');
+    c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; frame-ancestors 'none';"
+    );
+  }
 });
 
 // robots.txt
@@ -73,6 +91,7 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
 app.route(`/${SECRET}/admin`, adminRoutes);
 app.route(`/${SECRET}/admin`, adminExtraRoutes);
 app.route(`/${SECRET}/admin`, adminStaffRoutes);
+app.route(`/${SECRET}/admin`, adminLiffRoutes);
 
 // =====================
 // API（認証必須）
@@ -81,6 +100,7 @@ app.route(`/${SECRET}/admin`, adminStaffRoutes);
 app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path === '/api/line/webhook') return next(); // Webhook は署名検証
+  if (path.startsWith('/api/liff/')) return next(); // LIFF API は LINE UID検証
   return requireAuth(c, next);
 });
 
@@ -128,6 +148,9 @@ app.post('/api/line/webhook', async (c) => {
 
   return c.text('OK');
 });
+
+// LIFF ページ（認証不要・公開）
+app.route('', liffRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

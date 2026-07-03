@@ -196,6 +196,7 @@ app.post('/csv-import', async (c) => {
       start_time?: string | null;
       avg_return_time?: string | null;
       used_cars?: string | null;
+      isLongAbsent?: boolean;
     }>;
   }>();
 
@@ -208,7 +209,8 @@ app.post('/csv-import', async (c) => {
   );
   if (valid.length === 0) return c.json({ error: '有効なデータがありません' }, 400);
 
-  // 1回のSELECTで既存社員を全取得（subrequest: 1回）
+  // 既存社員はUPDATE、未登録社員はINSERT（status='completed'で一般社員として追加）
+  // status='completed' にすることで新人シフト管理には一切出てこない
   const inClause = valid.map(e => `'${e.emp_no.replace(/'/g, "''")}'`).join(',');
   const existingRows = await c.env.DB.prepare(
     `SELECT emp_no FROM employees WHERE emp_no IN (${inClause})`
@@ -216,22 +218,25 @@ app.post('/csv-import', async (c) => {
   const existingSet = new Set((existingRows.results ?? []).map(r => r.emp_no));
 
   const toInsert = valid.filter(e => !existingSet.has(e.emp_no));
-  const toUpdate = valid.filter(e => existingSet.has(e.emp_no));
+  const toUpdate = valid.filter(e =>  existingSet.has(e.emp_no));
 
   type D1Stmt = ReturnType<typeof c.env.DB.prepare>;
   const statements: D1Stmt[] = [];
 
   for (const emp of toInsert) {
+    const enrollStatus = emp.isLongAbsent ? '長欠' : '通常';
     statements.push(
       c.env.DB.prepare(
         `INSERT OR IGNORE INTO employees
-           (emp_no, name, name_kana, division, team, work_schedule, start_time, avg_return_time, used_cars)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (emp_no, name, name_kana, division, team, work_schedule, start_time,
+            avg_return_time, used_cars, status, enrollment_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`
       ).bind(
         emp.emp_no, emp.name, emp.name_kana ?? null,
         emp.division ?? null, emp.team ?? null,
         emp.work_schedule ?? null, emp.start_time ?? null,
-        emp.avg_return_time ?? null, emp.used_cars ?? null
+        emp.avg_return_time ?? null, emp.used_cars ?? null,
+        enrollStatus
       )
     );
   }
@@ -247,6 +252,7 @@ app.post('/csv-import', async (c) => {
            start_time      = COALESCE(?, start_time),
            avg_return_time = COALESCE(?, avg_return_time),
            used_cars       = ?,
+           enrollment_status = CASE WHEN ? = 1 THEN '長欠' ELSE enrollment_status END,
            updated_at      = datetime('now', 'localtime')
          WHERE emp_no = ?`
       ).bind(
@@ -255,6 +261,7 @@ app.post('/csv-import', async (c) => {
         emp.work_schedule ?? null, emp.start_time ?? null,
         emp.avg_return_time ?? null,
         emp.used_cars ?? null,
+        emp.isLongAbsent ? 1 : 0,
         emp.emp_no
       )
     );
@@ -272,6 +279,75 @@ app.post('/csv-import', async (c) => {
   }
 
   return c.json({ ok: true, inserted: toInsert.length, updated: toUpdate.length, errors });
+});
+
+// emp_noベースの一括退職処理（CSVインポート退職候補向け）
+app.post('/retire-by-empno', async (c) => {
+  const data = await c.req.json<{ empNos: string[] }>();
+  if (!Array.isArray(data?.empNos) || data.empNos.length === 0) return c.json({ error: 'emp_noが指定されていません' }, 400);
+  const valid = data.empNos.filter(n => /^\d{8}$/.test(n));
+  if (valid.length === 0) return c.json({ error: '有効なemp_noがありません' }, 400);
+  const placeholders = valid.map(() => '?').join(',');
+  const result = await c.env.DB.prepare(
+    `UPDATE employees SET is_active = 0,
+       retirement_date = COALESCE(NULLIF(retirement_date,''), date('now','localtime')),
+       updated_at = datetime('now','localtime')
+     WHERE emp_no IN (${placeholders})`
+  ).bind(...valid).run();
+  return c.json({ ok: true, count: result.meta.changes });
+});
+
+// emp_noベースの一括完全削除（CSVインポート退職候補向け）
+app.post('/purge-by-empno', async (c) => {
+  const data = await c.req.json<{ empNos: string[] }>();
+  if (!Array.isArray(data?.empNos) || data.empNos.length === 0) return c.json({ error: 'emp_noが指定されていません' }, 400);
+  const valid = data.empNos.filter(n => /^\d{8}$/.test(n));
+  if (valid.length === 0) return c.json({ error: '有効なemp_noがありません' }, 400);
+  const placeholders = valid.map(() => '?').join(',');
+  const rows = await c.env.DB.prepare(
+    `SELECT id FROM employees WHERE emp_no IN (${placeholders})`
+  ).bind(...valid).all<{ id: number }>();
+  const ids = (rows.results ?? []).map(r => r.id);
+  if (ids.length > 0) {
+    const ip = ids.map(() => '?').join(',');
+    const relTables = ['shift_entries','sales_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
+    for (const t of relTables) {
+      await c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id IN (${ip})`).bind(...ids).run();
+    }
+    await c.env.DB.prepare(`DELETE FROM employees WHERE id IN (${ip})`).bind(...ids).run();
+  }
+  return c.json({ ok: true, count: ids.length });
+});
+
+// 一括退職処理（論理削除）
+app.post('/bulk-retire', async (c) => {
+  const data = await c.req.json<{ ids: number[] }>();
+  if (!Array.isArray(data?.ids) || data.ids.length === 0) return c.json({ error: 'IDが指定されていません' }, 400);
+  const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
+  if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
+  const placeholders = ids.map(() => '?').join(',');
+  await c.env.DB.prepare(
+    `UPDATE employees SET is_active = 0,
+       retirement_date = COALESCE(NULLIF(retirement_date,''), date('now','localtime')),
+       updated_at = datetime('now','localtime')
+     WHERE id IN (${placeholders})`
+  ).bind(...ids).run();
+  return c.json({ ok: true, count: ids.length });
+});
+
+// 一括完全削除（物理削除）
+app.post('/bulk-purge', async (c) => {
+  const data = await c.req.json<{ ids: number[] }>();
+  if (!Array.isArray(data?.ids) || data.ids.length === 0) return c.json({ error: 'IDが指定されていません' }, 400);
+  const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
+  if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
+  const placeholders = ids.map(() => '?').join(',');
+  const relTables = ['shift_entries','sales_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
+  for (const t of relTables) {
+    await c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id IN (${placeholders})`).bind(...ids).run();
+  }
+  await c.env.DB.prepare(`DELETE FROM employees WHERE id IN (${placeholders})`).bind(...ids).run();
+  return c.json({ ok: true, count: ids.length });
 });
 
 // 社員完全削除（物理削除・関連データも全削除）

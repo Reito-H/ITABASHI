@@ -26,8 +26,33 @@ export function layout(title: string, content: string, activePage: string = ''):
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>${escHtml(title)} | Benten管理システム</title>
-  <script src="https://cdn.tailwindcss.com"></script>
   <style>
+    /* Tailwind utility subset — CDN不要のインラインCSS */
+    .flex{display:flex}.grid{display:grid}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.hidden{display:none}.block{display:block}.inline-block{display:inline-block}
+    .items-center{align-items:center}.justify-between{justify-content:space-between}.justify-center{justify-content:center}
+    .gap-1{gap:.25rem}.gap-2{gap:.5rem}.gap-3{gap:.75rem}.gap-4{gap:1rem}
+    .space-y-2>*+*{margin-top:.5rem}.space-y-4>*+*{margin-top:1rem}.space-y-5>*+*{margin-top:1.25rem}
+    .min-h-screen{min-height:100vh}.overflow-auto{overflow:auto}.overflow-hidden{overflow:hidden}
+    .w-full{width:100%}.w-80{width:20rem}.w-12{width:3rem}
+    .max-w-xs{max-width:20rem}.max-w-xl{max-width:36rem}.max-w-2xl{max-width:42rem}.max-w-3xl{max-width:48rem}
+    .p-6{padding:1.5rem}.p-8{padding:2rem}
+    .px-3{padding-left:.75rem;padding-right:.75rem}.px-4{padding-left:1rem;padding-right:1rem}.px-5{padding-left:1.25rem;padding-right:1.25rem}.px-6{padding-left:1.5rem;padding-right:1.5rem}
+    .py-1{padding-top:.25rem;padding-bottom:.25rem}.py-2{padding-top:.5rem;padding-bottom:.5rem}.py-3{padding-top:.75rem;padding-bottom:.75rem}.py-4{padding-top:1rem;padding-bottom:1rem}.py-8{padding-top:2rem;padding-bottom:2rem}
+    .pt-2{padding-top:.5rem}.pb-4{padding-bottom:1rem}
+    .mb-1{margin-bottom:.25rem}.mb-2{margin-bottom:.5rem}.mb-3{margin-bottom:.75rem}.mb-4{margin-bottom:1rem}.mb-5{margin-bottom:1.25rem}.mb-6{margin-bottom:1.5rem}
+    .mt-1{margin-top:.25rem}.mt-2{margin-top:.5rem}.mt-6{margin-top:1.5rem}
+    .bg-white{background:#fff}.bg-gray-50{background:#f9fafb}.bg-gray-100{background:#f3f4f6}.bg-gray-600{background:#4b5563}.bg-gray-700{background:#374151}.bg-blue-600{background:#2563eb}.bg-indigo-600{background:#4f46e5}
+    .text-white{color:#fff}.text-gray-300{color:#d1d5db}.text-gray-400{color:#9ca3af}.text-gray-500{color:#6b7280}.text-gray-600{color:#4b5563}.text-gray-700{color:#374151}.text-gray-800{color:#1f2937}.text-red-500{color:#ef4444}.text-red-600{color:#dc2626}
+    .text-xs{font-size:.75rem;line-height:1rem}.text-sm{font-size:.875rem;line-height:1.25rem}.text-lg{font-size:1.125rem;line-height:1.75rem}.text-4xl{font-size:2.25rem;line-height:2.5rem}
+    .font-bold{font-weight:700}.font-semibold{font-weight:600}.font-medium{font-weight:500}.font-mono{font-family:ui-monospace,monospace}
+    .text-center{text-align:center}.text-left{text-align:left}.uppercase{text-transform:uppercase}.tracking-wider{letter-spacing:.05em}
+    .rounded{border-radius:.25rem}.rounded-lg{border-radius:.5rem}.rounded-xl{border-radius:.75rem}
+    .shadow{box-shadow:0 1px 3px 0 rgba(0,0,0,.1),0 1px 2px -1px rgba(0,0,0,.1)}.shadow-sm{box-shadow:0 1px 2px 0 rgba(0,0,0,.05)}
+    .border{border:1px solid #e5e7eb}.border-b{border-bottom:1px solid #e5e7eb}.border-gray-200{border-color:#e5e7eb}.border-gray-300{border-color:#d1d5db}
+    .cursor-pointer{cursor:pointer}
+    .hover\:bg-gray-50:hover{background:#f9fafb}.hover\:bg-gray-200:hover{background:#e5e7eb}.hover\:bg-gray-700:hover{background:#374151}.hover\:bg-blue-700:hover{background:#1d4ed8}
+    .focus\:ring-2:focus{box-shadow:0 0 0 2px rgba(59,130,246,.5)}.focus\:ring-blue-500:focus{outline:2px solid #3b82f6}
+    /* ===== */
     * { box-sizing: border-box; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #f5f5f5; margin: 0; }
     .sidebar {
