@@ -14,6 +14,7 @@ export function layout(title: string, content: string, activePage: string = ''):
     { href: `${ADMIN_PATH}/shift`,        label: '新人シフト管理',  id: 'shift' },
     { href: `${ADMIN_PATH}/newcomers`,    label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,        label: '社員管理',        id: 'staff' },
+    { href: `${ADMIN_PATH}/staff/search`, label: '社員絞り込み検索', id: 'staff-search' },
     { href: `${ADMIN_PATH}/events`,       label: '報告一覧',        id: 'events' },
     { href: `${ADMIN_PATH}/vehicles`,     label: '車両検索',        id: 'vehicles' },
     { href: `${ADMIN_PATH}/inspection`,   label: '点検管理',        id: 'inspection' },

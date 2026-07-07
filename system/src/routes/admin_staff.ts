@@ -45,6 +45,10 @@ const START_TIMES: Record<string, string[]> = {
 };
 const ALL_TIMES = ['6:00', '6:50', '8:00', '9:30', '15:00', '16:00', '18:00', '19:00'];
 
+function toKatakana(str: string): string {
+  return str.replace(/[ぁ-ゖ]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+}
+
 function calcAge(birthDate: string | null): number | null {
   if (!birthDate) return null;
   const today = new Date(Date.now() + 9 * 60 * 60 * 1000); // JST
@@ -107,9 +111,15 @@ app.get('/staff', async (c) => {
     conditions.push('enrollment_status = ?'); params.push(filterStatus);
   }
   if (q) {
-    const pattern = `%${q}%`;
-    conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
-    params.push(pattern, pattern, pattern);
+    const qk = toKatakana(q);
+    const p = `%${q}%`, pk = `%${qk}%`;
+    if (q !== qk) {
+      conditions.push('(name LIKE ? OR name_kana LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
+      params.push(p, p, pk, p);
+    } else {
+      conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
+      params.push(p, p, p);
+    }
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -950,6 +960,389 @@ app.get('/staff/new', (c) => {
 });
 
 
+// ===== 社員絞り込み検索 =====
+app.get('/staff/search', async (c) => {
+  const submitted = c.req.query('s') === '1';
+  const q = (c.req.query('q') ?? '').trim();
+  const divArr   = c.req.queries('div') ?? [];
+  const wsArr    = c.req.queries('ws')  ?? [];
+  const stArr    = c.req.queries('st')  ?? [];
+  const enArr    = c.req.queries('en')  ?? [];
+  const whtArr   = c.req.queries('wht') ?? [];
+  const act   = c.req.query('act')  ?? 'all';
+  const nw    = c.req.query('nw')   ?? 'all';
+  const hc    = c.req.query('hc')   ?? 'all';
+  const ca    = c.req.query('ca')   ?? '';
+  const sfu   = c.req.query('sfu')  ?? '';
+  const hf    = c.req.query('hf')   ?? '';
+  const ht    = c.req.query('ht')   ?? '';
+  const rf    = c.req.query('rf')   ?? '';
+  const rt    = c.req.query('rt')   ?? '';
+  const ami   = c.req.query('ami')  ?? '';
+  const ama   = c.req.query('ama')  ?? '';
+  const car   = c.req.query('car')  ?? 'all';
+  const tmin  = c.req.query('tmin') ?? '';
+  const tmax  = c.req.query('tmax') ?? '';
+
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (q) {
+    const qk = toKatakana(q);
+    const p = `%${q}%`, pk = `%${qk}%`;
+    if (q !== qk) {
+      conditions.push('(name LIKE ? OR name_kana LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
+      params.push(p, p, pk, p);
+    } else {
+      conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
+      params.push(p, p, p);
+    }
+  }
+  if (act === '1') conditions.push('is_active = 1');
+  else if (act === '0') conditions.push('is_active = 0');
+
+  if (divArr.length > 0) {
+    const valid = divArr.filter(d => ['1','2','3','4'].includes(d)).map(Number);
+    if (valid.length > 0) {
+      conditions.push(`division IN (${valid.map(() => '?').join(',')})`);
+      params.push(...valid);
+    }
+  }
+  if (tmin && !isNaN(parseInt(tmin))) { conditions.push('team >= ?'); params.push(parseInt(tmin)); }
+  if (tmax && !isNaN(parseInt(tmax))) { conditions.push('team <= ?'); params.push(parseInt(tmax)); }
+
+  if (wsArr.length > 0) {
+    const valid = wsArr.filter(w => ['a','b','B','D','H'].includes(w));
+    if (valid.length > 0) {
+      conditions.push(`work_schedule IN (${valid.map(() => '?').join(',')})`);
+      params.push(...valid);
+    }
+  }
+  if (stArr.length > 0) {
+    const valid = stArr.filter(t => ALL_TIMES.includes(t));
+    if (valid.length > 0) {
+      conditions.push(`start_time IN (${valid.map(() => '?').join(',')})`);
+      params.push(...valid);
+    }
+  }
+  if (enArr.length > 0) {
+    const valid = enArr.filter(e => ['通常','育休','病欠','傷病','長欠'].includes(e));
+    if (valid.length > 0) {
+      conditions.push(`enrollment_status IN (${valid.map(() => '?').join(',')})`);
+      params.push(...valid);
+    }
+  }
+  if (whtArr.length > 0) {
+    const valid = whtArr.filter(w => ['労フル','労短'].includes(w));
+    if (valid.length > 0) {
+      conditions.push(`work_hours_type IN (${valid.map(() => '?').join(',')})`);
+      params.push(...valid);
+    }
+  }
+  if (nw === '1') {
+    conditions.push("(status = 'training' OR (status IS NULL AND status != 'completed'))");
+  } else if (nw === '0') {
+    conditions.push("status = 'completed'");
+  }
+  if (hc === '1') conditions.push('is_hanchyo = 1');
+  else if (hc === '0') conditions.push('is_hanchyo = 0');
+  if (ca === '1') conditions.push('is_caution = 1');
+  if (sfu === '1') conditions.push('is_sales_followup = 1');
+  if (hf) { conditions.push('hire_date >= ?'); params.push(hf); }
+  if (ht) { conditions.push('hire_date <= ?'); params.push(ht); }
+  if (rf) { conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date >= ?"); params.push(rf); }
+  if (rt) { conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date <= ?"); params.push(rt); }
+  if (car === '1') conditions.push("car_no IS NOT NULL AND car_no != ''");
+  else if (car === '0') conditions.push("(car_no IS NULL OR car_no = '')");
+
+  const ageExpr = `CAST((strftime('%Y','now','+9 hours') - strftime('%Y',birth_date) - (strftime('%m-%d','now','+9 hours') < strftime('%m-%d',birth_date))) AS INTEGER)`;
+  if (ami && !isNaN(parseInt(ami))) {
+    conditions.push(`(birth_date IS NOT NULL AND birth_date != '' AND ${ageExpr} >= ?)`);
+    params.push(parseInt(ami));
+  }
+  if (ama && !isNaN(parseInt(ama))) {
+    conditions.push(`(birth_date IS NOT NULL AND birth_date != '' AND ${ageExpr} <= ?)`);
+    params.push(parseInt(ama));
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  let staffRows: StaffRow[] = [];
+  if (submitted) {
+    const stmt = c.env.DB.prepare(
+      `SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,work_hours_type,enrollment_status,hire_date,retirement_date,birth_date,car_no,avg_return_time,is_caution,is_sales_followup,is_hanchyo,status,is_active FROM employees ${where} ORDER BY division, team, seq_no, id`
+    );
+    const result = params.length ? await stmt.bind(...params).all<StaffRow>() : await stmt.all<StaffRow>();
+    staffRows = result.results ?? [];
+  }
+
+  const chk = (arr: string[], val: string) => arr.includes(val) ? 'checked' : '';
+  const radio = (cur: string, val: string) => cur === val ? 'checked' : '';
+
+  const LABEL = 'font-size:12px;color:#374151;cursor:pointer;display:flex;align-items:center;gap:5px;';
+  const CB_GROUP = 'display:flex;flex-wrap:wrap;gap:6px 14px;';
+  const SEC = 'margin-bottom:18px;';
+  const SEC_LABEL = 'font-size:10px;font-weight:700;color:#9ca3af;display:block;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #f3f4f6;padding-bottom:4px;';
+
+  const TH = 'padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap;';
+  const TD = 'padding:8px 10px;border-bottom:1px solid #f3f4f6;vertical-align:middle;font-size:12px;';
+
+  const resultRows = submitted ? staffRows.map(e => {
+    const enStatus = e.enrollment_status ?? '通常';
+    const bg = ENROLLMENT_COLORS[enStatus] ?? '#f3f4f6';
+    const tc = ENROLLMENT_TEXT_COLORS[enStatus] ?? '#374151';
+    const age = calcAge(e.birth_date);
+    const isNewcomerFlag = e.status === 'training' || (e.status !== 'completed' && !e.status);
+    return `
+    <tr style="cursor:pointer;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''" onclick="location.href='${ADMIN_PATH}/staff/${e.id}'">
+      <td style="${TD}font-family:monospace;color:#9ca3af;">${escHtml(e.emp_no)}</td>
+      <td style="${TD}">
+        <div style="font-weight:600;color:#1f2937;">${escHtml(e.name)}</div>
+        ${e.name_kana ? `<div style="font-size:11px;color:#9ca3af;">${escHtml(e.name_kana)}</div>` : ''}
+        <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+          ${e.is_hanchyo ? '<span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">班長</span>' : ''}
+          ${isNewcomerFlag ? '<span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">新人</span>' : ''}
+        </div>
+      </td>
+      <td style="${TD}color:#6b7280;white-space:nowrap;">${e.division ? e.division+'課' : ''}${e.team ? ' '+e.team+'班' : ''}${!e.division&&!e.team?'—':''}</td>
+      <td style="${TD}white-space:nowrap;text-align:center;">${e.work_schedule ?? '—'}</td>
+      <td style="${TD}white-space:nowrap;text-align:center;">${e.start_time ?? '—'}</td>
+      <td style="${TD}white-space:nowrap;text-align:center;">${e.work_hours_type ?? '—'}</td>
+      <td style="${TD}white-space:nowrap;"><span style="background:${bg};color:${tc};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;">${escHtml(enStatus)}</span></td>
+      <td style="${TD}white-space:nowrap;color:#6b7280;">${e.hire_date ? escHtml(e.hire_date) : '—'}</td>
+      <td style="${TD}text-align:center;white-space:nowrap;">${age !== null ? age+'歳' : '—'}</td>
+      <td style="${TD}white-space:nowrap;text-align:center;">${e.car_no ? `<span style="font-family:monospace;">${escHtml(e.car_no)}</span>` : '—'}</td>
+      <td style="${TD}text-align:center;">${e.is_caution ? '<span style="background:#fecaca;color:#991b1b;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;">注意</span>' : '—'}</td>
+      <td style="${TD}text-align:center;">${e.is_sales_followup ? '<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;">要</span>' : '—'}</td>
+    </tr>`;
+  }).join('') : '';
+
+  const activeCount = conditions.length;
+
+  const content = `
+<div style="font-family:'Hiragino Sans','Meiryo',sans-serif;">
+  <!-- ページヘッダー -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <div>
+      <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0 0 2px;">社員絞り込み検索</h2>
+      <div style="font-size:12px;color:#9ca3af;">複数条件を組み合わせて社員を絞り込みます</div>
+    </div>
+    <a href="${ADMIN_PATH}/staff" style="font-size:12px;color:#2563eb;text-decoration:none;">← 社員名簿に戻る</a>
+  </div>
+
+  <div style="display:flex;gap:16px;align-items:flex-start;">
+
+    <!-- 検索フォーム（左パネル） -->
+    <div style="width:260px;flex-shrink:0;position:sticky;top:80px;max-height:calc(100vh - 100px);overflow-y:auto;">
+      <form method="get" action="${ADMIN_PATH}/staff/search" id="search-form">
+        <input type="hidden" name="s" value="1">
+
+        <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:16px;">
+
+          <!-- キーワード -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">キーワード</label>
+            <input type="text" name="q" value="${escHtml(q)}" placeholder="氏名・フリガナ・社員番号"
+              style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:12px;box-sizing:border-box;">
+          </div>
+
+          <!-- 在籍区分 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">在籍区分</label>
+            <div style="${CB_GROUP}">
+              <label style="${LABEL}"><input type="radio" name="act" value="all" ${radio(act,'all')}> 全員</label>
+              <label style="${LABEL}"><input type="radio" name="act" value="1" ${radio(act,'1')}> 在籍中</label>
+              <label style="${LABEL}"><input type="radio" name="act" value="0" ${radio(act,'0')}> 退職済</label>
+            </div>
+          </div>
+
+          <!-- 課 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">課</label>
+            <div style="${CB_GROUP}">
+              ${[1,2,3,4].map(n => `<label style="${LABEL}"><input type="checkbox" name="div" value="${n}" ${chk(divArr,String(n))}> ${n}課</label>`).join('')}
+            </div>
+          </div>
+
+          <!-- 班番号 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">班番号</label>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="number" name="tmin" value="${escHtml(tmin)}" min="1" max="99" placeholder="最小"
+                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
+              <span style="font-size:12px;color:#9ca3af;">〜</span>
+              <input type="number" name="tmax" value="${escHtml(tmax)}" min="1" max="99" placeholder="最大"
+                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
+            </div>
+          </div>
+
+          <!-- 勤務体系 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">勤務体系</label>
+            <div style="${CB_GROUP}">
+              ${['a','b','B','D','H'].map(w => `<label style="${LABEL}"><input type="checkbox" name="ws" value="${w}" ${chk(wsArr,w)}> ${w}</label>`).join('')}
+            </div>
+            <div style="font-size:10px;color:#bbb;margin-top:4px;">a/B:早番 &nbsp;b:夜番 &nbsp;D:日勤 &nbsp;H:半夜</div>
+          </div>
+
+          <!-- 出勤時間 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">出勤時間</label>
+            <div style="${CB_GROUP}">
+              ${ALL_TIMES.map(t => `<label style="${LABEL}"><input type="checkbox" name="st" value="${t}" ${chk(stArr,t)}> ${t}</label>`).join('')}
+            </div>
+          </div>
+
+          <!-- 在籍状態 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">在籍状態</label>
+            <div style="${CB_GROUP}">
+              ${['通常','育休','病欠','傷病','長欠'].map(e => `<label style="${LABEL}"><input type="checkbox" name="en" value="${e}" ${chk(enArr,e)}> ${e}</label>`).join('')}
+            </div>
+          </div>
+
+          <!-- 労働時間区分 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">労働時間区分</label>
+            <div style="${CB_GROUP}">
+              <label style="${LABEL}"><input type="checkbox" name="wht" value="労フル" ${chk(whtArr,'労フル')}> 労フル</label>
+              <label style="${LABEL}"><input type="checkbox" name="wht" value="労短" ${chk(whtArr,'労短')}> 労短</label>
+            </div>
+          </div>
+
+          <!-- 新人・班長 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">社員属性</label>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">新人</div>
+            <div style="${CB_GROUP} margin-bottom:8px;">
+              <label style="${LABEL}"><input type="radio" name="nw" value="all" ${radio(nw,'all')}> 問わない</label>
+              <label style="${LABEL}"><input type="radio" name="nw" value="1" ${radio(nw,'1')}> 新人のみ</label>
+              <label style="${LABEL}"><input type="radio" name="nw" value="0" ${radio(nw,'0')}> 一般社員</label>
+            </div>
+            <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">班長</div>
+            <div style="${CB_GROUP}">
+              <label style="${LABEL}"><input type="radio" name="hc" value="all" ${radio(hc,'all')}> 問わない</label>
+              <label style="${LABEL}"><input type="radio" name="hc" value="1" ${radio(hc,'1')}> 班長のみ</label>
+              <label style="${LABEL}"><input type="radio" name="hc" value="0" ${radio(hc,'0')}> 班長以外</label>
+            </div>
+          </div>
+
+          <!-- フラグ -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">フラグ</label>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <label style="${LABEL}"><input type="checkbox" name="ca" value="1" ${ca==='1'?'checked':''}> 要注意のみ表示</label>
+              <label style="${LABEL}"><input type="checkbox" name="sfu" value="1" ${sfu==='1'?'checked':''}> 売上要後追いのみ</label>
+            </div>
+          </div>
+
+          <!-- 担当車番 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">担当車番</label>
+            <div style="${CB_GROUP}">
+              <label style="${LABEL}"><input type="radio" name="car" value="all" ${radio(car,'all')}> 問わない</label>
+              <label style="${LABEL}"><input type="radio" name="car" value="1" ${radio(car,'1')}> あり</label>
+              <label style="${LABEL}"><input type="radio" name="car" value="0" ${radio(car,'0')}> なし</label>
+            </div>
+          </div>
+
+          <!-- 年齢 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">年齢</label>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <input type="number" name="ami" value="${escHtml(ami)}" min="18" max="99" placeholder="最小"
+                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
+              <span style="font-size:12px;color:#9ca3af;">〜</span>
+              <input type="number" name="ama" value="${escHtml(ama)}" min="18" max="99" placeholder="最大"
+                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
+              <span style="font-size:12px;color:#9ca3af;">歳</span>
+            </div>
+          </div>
+
+          <!-- 入社日 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">入社日</label>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <input type="date" name="hf" value="${escHtml(hf)}"
+                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
+              <div style="font-size:11px;color:#9ca3af;text-align:center;">〜</div>
+              <input type="date" name="ht" value="${escHtml(ht)}"
+                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
+            </div>
+          </div>
+
+          <!-- 退職日 -->
+          <div style="${SEC}">
+            <label style="${SEC_LABEL}">退職日</label>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <input type="date" name="rf" value="${escHtml(rf)}"
+                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
+              <div style="font-size:11px;color:#9ca3af;text-align:center;">〜</div>
+              <input type="date" name="rt" value="${escHtml(rt)}"
+                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
+            </div>
+          </div>
+
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button type="submit"
+            style="flex:1;padding:10px;background:#1a3a5c;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">
+            検索${activeCount > 0 ? ` <span style="background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:11px;">${activeCount}</span>` : ''}
+          </button>
+          <a href="${ADMIN_PATH}/staff/search"
+            style="padding:10px 14px;background:#f3f4f6;color:#374151;border-radius:7px;font-size:13px;text-decoration:none;display:flex;align-items:center;">
+            リセット
+          </a>
+        </div>
+      </form>
+    </div>
+
+    <!-- 検索結果（右パネル） -->
+    <div style="flex:1;min-width:0;">
+      ${!submitted ? `
+      <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:60px;text-align:center;">
+        <div style="font-size:40px;margin-bottom:16px;color:#d1d5db;">◎</div>
+        <div style="font-size:14px;color:#374151;font-weight:600;margin-bottom:8px;">条件を設定して検索してください</div>
+        <div style="font-size:12px;color:#9ca3af;">左パネルで絞り込み条件を選択し、「検索」ボタンを押してください</div>
+      </div>
+      ` : `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-size:13px;color:#6b7280;font-weight:600;">${staffRows.length}名 見つかりました</div>
+        ${activeCount > 0 ? `<div style="font-size:11px;color:#9ca3af;">${activeCount}件の条件で絞り込み中</div>` : ''}
+      </div>
+      <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow-x:auto;margin-bottom:40px;">
+        ${staffRows.length > 0 ? `
+        <table style="width:100%;border-collapse:collapse;min-width:900px;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="${TH}">社員番号</th>
+              <th style="${TH}">氏名</th>
+              <th style="${TH}">課・班</th>
+              <th style="${TH}text-align:center;">体系</th>
+              <th style="${TH}text-align:center;">出勤時間</th>
+              <th style="${TH}text-align:center;">労働区分</th>
+              <th style="${TH}">在籍状態</th>
+              <th style="${TH}">入社日</th>
+              <th style="${TH}text-align:center;">年齢</th>
+              <th style="${TH}text-align:center;">車番</th>
+              <th style="${TH}text-align:center;">要注意</th>
+              <th style="${TH}text-align:center;">後追い</th>
+            </tr>
+          </thead>
+          <tbody>${resultRows}</tbody>
+        </table>
+        ` : `
+        <div style="padding:50px;text-align:center;color:#9ca3af;font-size:13px;">条件に一致する社員が見つかりませんでした</div>
+        `}
+      </div>
+      `}
+    </div>
+  </div>
+</div>`;
+
+  return c.html(layout('社員絞り込み検索', content, 'staff-search'));
+});
+
 // ===== 社員詳細・編集 =====
 app.get('/staff/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
@@ -988,9 +1381,15 @@ app.get('/staff/:id', async (c) => {
     conditions.push('enrollment_status = ?'); navParams.push(filterStatus);
   }
   if (q) {
-    const pattern = `%${q}%`;
-    conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
-    navParams.push(pattern, pattern, pattern);
+    const qk = toKatakana(q);
+    const p = `%${q}%`, pk = `%${qk}%`;
+    if (q !== qk) {
+      conditions.push('(name LIKE ? OR name_kana LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
+      navParams.push(p, p, pk, p);
+    } else {
+      conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
+      navParams.push(p, p, p);
+    }
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const idStmt = c.env.DB.prepare(`SELECT id, name FROM employees ${where} ORDER BY division, team, seq_no, id`);
