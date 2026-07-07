@@ -3,6 +3,7 @@
 import { Hono } from 'hono';
 import { layout, escHtml } from '../html/layout';
 import { ADMIN_PATH } from '../config';
+import { getSessionFromCookie, validateSession } from '../auth';
 import type { Env } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -150,10 +151,11 @@ app.get('/settings/liff', async (c) => {
     </div>
 
     <script>
+    const ADMIN_PATH = '${ADMIN_PATH}';
     async function changeRole(id) {
       const sel = document.getElementById('role-sel-' + id);
       const role = sel.value;
-      const res = await fetch('/api/liff-users/' + id + '/role', {
+      const res = await fetch(ADMIN_PATH + '/api/liff-users/' + id + '/role', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role }),
@@ -163,7 +165,7 @@ app.get('/settings/liff', async (c) => {
     }
     async function deleteUser(id, name) {
       if (!confirm(name + ' を削除しますか？\\nLINE連携が解除されます。')) return;
-      const res = await fetch('/api/liff-users/' + id, { method: 'DELETE' });
+      const res = await fetch(ADMIN_PATH + '/api/liff-users/' + id, { method: 'DELETE' });
       if (res.ok) { location.reload(); }
       else { alert('削除に失敗しました'); }
     }
@@ -179,6 +181,15 @@ app.get('/settings/liff', async (c) => {
 app.get('/settings/lost-items', async (c) => {
   const typeFilter = c.req.query('type') ?? '';
   const statusFilter = c.req.query('status') ?? '';
+
+  // 管理者名を取得
+  const cookie = c.req.header('Cookie') ?? null;
+  const sid = getSessionFromCookie(cookie);
+  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
+  const adminRow = adminId
+    ? await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(adminId).first<{ username: string }>()
+    : null;
+  const adminName = adminRow?.username ?? '管理者';
 
   let where = 'WHERE 1=1';
   const binds: string[] = [];
@@ -198,6 +209,7 @@ app.get('/settings/lost-items', async (c) => {
     item_description: string | null; pickup_location: string | null; dropoff_location: string | null;
     customer_name: string | null; customer_phone: string | null; return_method: string | null;
     notes: string | null; status: string; created_at: string;
+    resolved_by_name: string | null; resolved_at: string | null;
   }>();
 
   const all = reports.results ?? [];
@@ -211,6 +223,9 @@ app.get('/settings/lost-items', async (c) => {
     const empStr = r.employee_name
       ? `${r.employee_division ? r.employee_division + '課' : ''}${r.employee_team ? r.employee_team + '班' : ''} ${r.employee_name}`
       : '—';
+    const resolvedInfo = r.status === 'resolved' && r.resolved_by_name
+      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">対応: ${escHtml(r.resolved_by_name)}${r.resolved_at ? ' ' + r.resolved_at.slice(5, 16) : ''}</div>`
+      : '';
     return `<tr>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
@@ -222,6 +237,7 @@ app.get('/settings/lost-items', async (c) => {
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(r.item_description ?? '')}">${escHtml(r.item_description ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
         <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
+        ${resolvedInfo}
       </td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
         <button onclick="toggleStatus(${r.id},'${r.status}')"
@@ -278,12 +294,14 @@ app.get('/settings/lost-items', async (c) => {
     </div>
 
     <script>
+    var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
+    var ADMIN_NAME = ${JSON.stringify(adminName)};
     async function toggleStatus(id, current) {
       const next = current === 'resolved' ? 'open' : 'resolved';
-      const res = await fetch('/api/liff/lost-items/' + id + '/status', {
+      const res = await fetch(ADMIN_PATH + '/api/liff/lost-items/' + id + '/status', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
+        body: JSON.stringify({ status: next, resolvedBy: next === 'resolved' ? ADMIN_NAME : null }),
       });
       if (res.ok) { location.reload(); }
       else { alert('更新に失敗しました'); }
@@ -298,6 +316,15 @@ app.get('/settings/lost-items', async (c) => {
 // GET /settings/accidents — 事故報告一覧
 // ===================================================
 app.get('/settings/accidents', async (c) => {
+  // 管理者名を取得
+  const cookie = c.req.header('Cookie') ?? null;
+  const sid = getSessionFromCookie(cookie);
+  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
+  const adminRow = adminId
+    ? await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(adminId).first<{ username: string }>()
+    : null;
+  const adminName = adminRow?.username ?? '管理者';
+
   const reports = await c.env.DB.prepare(`
     SELECT * FROM accident_reports ORDER BY created_at DESC LIMIT 200
   `).all<{
@@ -305,6 +332,7 @@ app.get('/settings/accidents', async (c) => {
     employee_name: string | null; employee_division: number | null; employee_team: number | null;
     accident_type: string | null; location: string | null; car_status: string | null;
     summary_text: string | null; status: string; created_at: string;
+    resolved_by_name: string | null; resolved_at: string | null;
   }>();
 
   const all = reports.results ?? [];
@@ -315,6 +343,9 @@ app.get('/settings/accidents', async (c) => {
     const empStr = r.employee_name
       ? `${r.employee_division ? r.employee_division + '課' : ''}${r.employee_team ? r.employee_team + '班' : ''} ${r.employee_name}`
       : '—';
+    const resolvedInfo = r.status === 'resolved' && r.resolved_by_name
+      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">対応: ${escHtml(r.resolved_by_name)}${r.resolved_at ? ' ' + r.resolved_at.slice(5, 16) : ''}</div>`
+      : '';
     return `<tr>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
@@ -325,6 +356,7 @@ app.get('/settings/accidents', async (c) => {
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;">${escHtml(r.car_status ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
         <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
+        ${resolvedInfo}
       </td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
         <button onclick="toggleAccidentStatus(${r.id},'${r.status}')"
@@ -363,12 +395,14 @@ app.get('/settings/accidents', async (c) => {
       </div>
     </div>
     <script>
+    var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
+    var ADMIN_NAME = ${JSON.stringify(adminName)};
     async function toggleAccidentStatus(id, current) {
       const next = current === 'resolved' ? 'open' : 'resolved';
-      const res = await fetch('/api/liff/accident-reports/' + id + '/status', {
+      const res = await fetch(ADMIN_PATH + '/api/liff/accident-reports/' + id + '/status', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
+        body: JSON.stringify({ status: next, resolvedBy: next === 'resolved' ? ADMIN_NAME : null }),
       });
       if (res.ok) { location.reload(); }
       else { alert('更新に失敗しました'); }
@@ -426,9 +460,17 @@ app.delete('/api/liff-users/:id', async (c) => {
 // ===================================================
 app.put('/api/liff/lost-items/:id/status', async (c) => {
   const id = parseInt(c.req.param('id'));
-  const { status } = await c.req.json<{ status: string }>();
+  const { status, resolvedBy } = await c.req.json<{ status: string; resolvedBy?: string | null }>();
   if (status !== 'open' && status !== 'resolved') return c.json({ error: 'invalid' }, 400);
-  await c.env.DB.prepare('UPDATE lost_item_reports SET status = ? WHERE id = ?').bind(status, id).run();
+  if (status === 'resolved') {
+    await c.env.DB.prepare(
+      `UPDATE lost_item_reports SET status = ?, resolved_by_name = ?, resolved_at = datetime('now','localtime') WHERE id = ?`
+    ).bind(status, resolvedBy ?? '管理者', id).run();
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE lost_item_reports SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
+    ).bind(status, id).run();
+  }
   return c.json({ ok: true });
 });
 
@@ -437,9 +479,17 @@ app.put('/api/liff/lost-items/:id/status', async (c) => {
 // ===================================================
 app.put('/api/liff/accident-reports/:id/status', async (c) => {
   const id = parseInt(c.req.param('id'));
-  const { status } = await c.req.json<{ status: string }>();
+  const { status, resolvedBy } = await c.req.json<{ status: string; resolvedBy?: string | null }>();
   if (status !== 'open' && status !== 'resolved') return c.json({ error: 'invalid' }, 400);
-  await c.env.DB.prepare('UPDATE accident_reports SET status = ? WHERE id = ?').bind(status, id).run();
+  if (status === 'resolved') {
+    await c.env.DB.prepare(
+      `UPDATE accident_reports SET status = ?, resolved_by_name = ?, resolved_at = datetime('now','localtime') WHERE id = ?`
+    ).bind(status, resolvedBy ?? '管理者', id).run();
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE accident_reports SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
+    ).bind(status, id).run();
+  }
   return c.json({ ok: true });
 });
 

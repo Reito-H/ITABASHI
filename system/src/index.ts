@@ -21,6 +21,8 @@ import { handleLineEvent } from './line_bot';
 import { handleCron } from './cron';
 import liffRoutes from './routes/liff';
 import adminLiffRoutes from './routes/admin_liff';
+import adminInspectionRoutes from './routes/admin_inspection';
+import inspectionApi from './routes/api/inspection';
 import type { Env } from './auth';
 import { ADMIN_PATH, SECRET } from './config';
 
@@ -51,6 +53,8 @@ app.use('*', async (c, next) => {
   const isForm = pathname.startsWith('/form');
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
+  c.res.headers.set('Cache-Control', 'no-store');
+  c.res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
   if (isLiff) {
     // LIFF ページ: LINE SDKを許可、フレーム制限を緩和
     c.res.headers.set('Content-Security-Policy',
@@ -92,6 +96,7 @@ app.route(`/${SECRET}/admin`, adminRoutes);
 app.route(`/${SECRET}/admin`, adminExtraRoutes);
 app.route(`/${SECRET}/admin`, adminStaffRoutes);
 app.route(`/${SECRET}/admin`, adminLiffRoutes);
+app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 
 // =====================
 // API（認証必須）
@@ -118,6 +123,7 @@ app.route('/api/instructors', instructorsApi);
 app.route('/api/period-settings', periodSettingsApi);
 app.route('/api/notifications', notificationsApi);
 app.route('/api/instructor-invite', instructorInviteApi);
+app.route('/api/inspection', inspectionApi);
 
 // =====================
 // LINE Webhook（署名検証あり・認証不要）

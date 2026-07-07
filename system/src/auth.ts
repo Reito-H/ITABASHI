@@ -12,6 +12,7 @@ export type Env = {
   // LIFF アプリID
   LIFF_ID_LOST_ITEM?: string;
   LIFF_ID_ACCIDENT?: string;
+  LIFF_ID_STAFF_LOOKUP?: string;
   // 登録パスワード（wrangler secret put で設定）
   LINE_REG_PWD_VEHICLE?: string;    // 車番管理者
   LINE_REG_PWD_OPERATIONS?: string; // 運行管理者

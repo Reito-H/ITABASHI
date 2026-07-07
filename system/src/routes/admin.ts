@@ -650,7 +650,6 @@ app.get('/shift/print/:empId', async (c) => {
 // ===== 設定トップ（カード一覧）=====
 app.get('/settings', (c) => {
   const ADMIN = ADMIN_PATH;
-  const adminLoginUrl = `https://bentenclub.com${ADMIN}/login`;
   const cards = [
     { href: `${ADMIN}/settings/liff`,                 title: 'LINEリフ権限管理', desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
     { href: `${ADMIN}/settings/lost-items`,           title: '忘れ物報告一覧',   desc: '社員報告・客問い合わせの履歴と状態管理', highlight: true },
@@ -666,29 +665,11 @@ app.get('/settings', (c) => {
     { href: `${ADMIN}/settings/vehicle-admins`,       title: '車番検索管理者一覧', desc: 'LINE車番連携済みユーザーの確認・強制解除' },
     { href: `${ADMIN}/settings/vehicle-search-guide`, title: '車番検索ガイド',   desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
     { href: `${ADMIN}/settings/tutorial`,             title: 'チュートリアル',   desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
+    { href: `${ADMIN}/settings/status`,               title: 'システムステータス', desc: 'サーバー・DB・API・通信状態の確認・アクセスQRコード' },
   ];
   const html = `
     <div style="max-width:560px;">
       <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
-
-      <!-- QRコード -->
-      <div style="background:white;border-radius:12px;padding:20px 24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:20px;">
-        <div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">管理画面 アクセスQRコード</div>
-        <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">このQRコードをスキャンすると管理画面のログインページが開きます</div>
-        <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
-          <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;display:inline-block;line-height:0;">
-            <div id="qr-container"></div>
-          </div>
-          <div style="flex:1;min-width:160px;">
-            <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">アクセス先URL</div>
-            <div style="font-size:11px;color:#374151;word-break:break-all;background:#f3f4f6;padding:6px 8px;border-radius:4px;font-family:monospace;">${escHtml(adminLoginUrl)}</div>
-            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-              <button onclick="downloadQR()" style="padding:6px 14px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">保存</button>
-              <button onclick="copyUrl()" style="padding:6px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;" id="copy-btn">URLコピー</button>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div style="display:flex;flex-direction:column;gap:12px;">
         ${cards.map((card: { href: string; title: string; desc: string; highlight?: boolean }) => `
@@ -701,35 +682,7 @@ app.get('/settings', (c) => {
             <div style="margin-left:auto;color:#9ca3af;font-size:18px;">›</div>
           </a>`).join('')}
       </div>
-    </div>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    <script>
-      var QR_URL = ${JSON.stringify(adminLoginUrl)};
-      var qrObj = new QRCode(document.getElementById('qr-container'), {
-        text: QR_URL,
-        width: 160,
-        height: 160,
-        colorDark: '#1e3a5f',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.M
-      });
-      function downloadQR() {
-        var canvas = document.querySelector('#qr-container canvas');
-        if (canvas) {
-          var link = document.createElement('a');
-          link.download = '管理画面QRコード.png';
-          link.href = canvas.toDataURL('image/png');
-          link.click();
-        }
-      }
-      function copyUrl() {
-        navigator.clipboard.writeText(QR_URL).then(function() {
-          var btn = document.getElementById('copy-btn');
-          btn.textContent = 'コピー済';
-          setTimeout(function() { btn.textContent = 'URLコピー'; }, 2000);
-        });
-      }
-    </script>`;
+    </div>`;
   return c.html(layout('設定', html, 'settings'));
 });
 
@@ -1234,7 +1187,7 @@ app.get('/settings/vehicle-search-guide', (c) => {
     <h3><span class="num">2</span>初回設定（LINE連携）</h3>
     <p style="font-size:13px;">初回のみ1回だけ設定が必要です。以下の手順で自己申請できます。</p>
     <ol class="vg-steps">
-      <li>スマートフォンで「ITABASHI公式LINE」を友達追加する（上のQRコードから）</li>
+      <li>スマートフォンで「弁天クラブ公式LINE」を友達追加する（上のQRコードから）</li>
       <li>トーク画面に <span class="vg-cmd">車番連携</span> と入力して送信する</li>
       <li>名前の入力を求められるので、<strong>漢字フルネーム</strong>を送信する（例: 板橋太郎）</li>
       <li>パスワードの入力を求められるので、事務所から共有されたパスワードを送信する</li>
@@ -1298,7 +1251,7 @@ app.get('/settings/vehicle-search-guide', (c) => {
   </div>
 
   <div style="margin-top:36px;padding-top:20px;border-top:2px solid #e5e7eb;text-align:center;font-size:11px;color:#9ca3af;">
-    弁天クラブ 車番検索ガイド &nbsp;|&nbsp; ご不明な点は事務所スタッフまで
+    弁天クラブ 車番検索ガイド &nbsp;|&nbsp; 2026年7月版 &nbsp;|&nbsp; ご不明な点は事務所スタッフまで
   </div>
 </div>`;
   return c.html(layout('車番検索ガイド', html, 'settings'));
@@ -1363,10 +1316,10 @@ app.get('/settings/tutorial', (c) => {
   <!-- 表紙 -->
   <div class="tut-cover">
     <div style="font-size:11px;color:#9ca3af;letter-spacing:0.15em;margin-bottom:16px;">STAFF MANAGEMENT SYSTEM</div>
-    <div class="tut-cover-title">新人管理システム<br>使い方ガイド</div>
+    <div class="tut-cover-title">Benten管理システム<br>使い方ガイド</div>
     <div style="margin:16px auto;width:48px;height:3px;background:#1e3a5f;border-radius:2px;"></div>
     <div class="tut-cover-sub">管理者・現場スタッフ 共通マニュアル</div>
-    <div class="tut-cover-sub" style="margin-top:6px;font-size:12px;">最終更新: 2026年6月</div>
+    <div class="tut-cover-sub" style="margin-top:6px;font-size:12px;">最終更新: 2026年7月</div>
   </div>
 
   <!-- 目次 -->
@@ -1445,7 +1398,30 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;">一覧の「面談」列のボタンをクリックするとオン/オフが切り替わります。<span class="tut-badge" style="background:#1a3a5c;color:white;">対象</span> になるとフォローリスト・面談管理で優先表示されます。</p>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍絞り込み・並び替え</p>
-    <p style="font-size:13px;">ページ上部のボタンでステータス・課・入社年度で絞り込み、列ヘッダーのリンクで並び替えができます。</p>
+    <p style="font-size:13px;">ページ上部のボタンで課・在籍状態・退職状況などで絞り込み、列ヘッダーのクリックで並び替えができます。「条件選択▼」ドロップダウンを使うと、在籍中・退職者・新人などの条件で一括チェックできます。</p>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍退職者管理・退職候補</p>
+    <p style="font-size:13px;">退職フィルターで以下の絞り込みが可能です。退職処理は社員詳細ページ、または一覧で複数選択して一括実行できます。</p>
+    <table class="tut-table">
+      <tr><th>フィルター</th><th>内容</th></tr>
+      <tr><td>退職候補</td><td>在籍中だが長欠状態または退職日を過ぎている社員（除外フラグなし）</td></tr>
+      <tr><td>30日以内</td><td>30日以内に退職予定の社員（一覧に黄色バナーで表示）</td></tr>
+      <tr><td>退職日あり</td><td>退職日が設定されている全社員</td></tr>
+    </table>
+    <div class="tut-tip">退職候補に出た社員を候補から除外したい場合は、社員詳細ページの「退職候補から除外」ボタンを使います。候補リストから非表示になります（在籍は継続）。「退職候補に戻す」で再表示できます。</div>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍班長として登録する</p>
+    <p style="font-size:13px;">社員詳細ページ上部の「班長として登録」ボタンをクリックすると班長フラグが付き、一覧で<span class="tut-badge" style="background:#fef3c7;color:#92400e;">班長</span>バッジが表示されます。再度クリックで解除できます。</p>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍一括CSVインポート</p>
+    <p style="font-size:13px;">出庫データCSV（Shift-JIS形式）を読み込み、社員情報を一括更新・追加します。</p>
+    <ol class="tut-steps">
+      <li>一覧右上の「CSVインポート」ボタンをクリック</li>
+      <li>CSVファイルをドラッグ＆ドロップ、またはクリックして選択</li>
+      <li>プレビューで追加・更新内容を確認（長期不在・シフト変化の警告も表示）</li>
+      <li>「インポート実行」をクリックして反映</li>
+    </ol>
+    <div class="tut-note">CSVインポートで追加された社員は一般社員として登録されます。新人シフト管理には自動で追加されません。</div>
   </div>
 
   <!-- 1-3 シフト管理 -->
@@ -1618,7 +1594,7 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>LINE通知設定</td><td>班長へのシフトリマインダーなど定時通知の有効/無効・送信時刻を設定</td></tr>
       <tr><td>車両検索管理者</td><td>LINEで「車番連携」と送信し、自己申請で権限を取得（管理画面からの手動登録は廃止）</td></tr>
       <tr><td>車番検索ガイド</td><td>班長・指導者向けLINE車番検索の使い方ページ（印刷・配布用）</td></tr>
-      <tr><td>アクセスQRコード</td><td>管理画面ログインページのQRコードを表示・ダウンロード</td></tr>
+      <tr><td>システムステータス</td><td>サーバー・DB・APIの稼働状態確認。管理画面アクセスQRコードの表示・ダウンロードもここから</td></tr>
       <tr><td>チュートリアル</td><td>このマニュアル（印刷・PDF出力対応）</td></tr>
     </table>
   </div>
@@ -1736,7 +1712,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <div style="margin-top:40px;padding-top:20px;border-top:2px solid #e5e7eb;text-align:center;font-size:11px;color:#9ca3af;">
-    新人管理システム 使い方ガイド &nbsp;|&nbsp; 2026年6月版 &nbsp;|&nbsp; ご不明な点は事務所スタッフまでお問い合わせください
+    Benten管理システム 使い方ガイド &nbsp;|&nbsp; 2026年7月版 &nbsp;|&nbsp; ご不明な点は事務所スタッフまでお問い合わせください
   </div>
 </div>`;
 
@@ -2932,6 +2908,173 @@ app.get('/info/export', async (c) => {
       'Content-Disposition': 'attachment; filename="new_employee_info.csv"'
     }
   });
+});
+
+// ===== システムステータス =====
+app.get('/settings/status', async (c) => {
+  const adminLoginUrl = `https://bentenclub.com${ADMIN_PATH}/login`;
+  let dbOk = false;
+  let dbMsg = '';
+  let empCount = 0;
+  try {
+    const res = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM employees').first<{ cnt: number }>();
+    empCount = res?.cnt ?? 0;
+    dbOk = true;
+  } catch (e: any) {
+    dbMsg = String(e?.message ?? e);
+  }
+
+  const html = settingsSubHeader('システムステータス') + `
+    <div style="max-width:600px;">
+      <!-- アクセスQRコード -->
+      <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:16px;">
+        <div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">管理画面 アクセスQRコード</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">このQRコードをスキャンすると管理画面のログインページが開きます</div>
+        <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+          <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;display:inline-block;line-height:0;">
+            <div id="qr-container"></div>
+          </div>
+          <div style="flex:1;min-width:160px;">
+            <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">アクセス先URL</div>
+            <div style="font-size:11px;color:#374151;word-break:break-all;background:#f3f4f6;padding:6px 8px;border-radius:4px;font-family:monospace;">${escHtml(adminLoginUrl)}</div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+              <button onclick="downloadQR()" style="padding:6px 14px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">保存</button>
+              <button onclick="copyUrl()" style="padding:6px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;" id="copy-btn-qr">URLコピー</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="font-size:12px;color:#9ca3af;" id="checked-at">確認中...</div>
+        <button onclick="runChecks()" style="padding:6px 14px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">再確認</button>
+      </div>
+
+      <!-- サーバー・DB（サーバーサイド確認済み） -->
+      <div style="background:white;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:12px;">
+        <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px;">サーバー・データベース</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:13px;color:#374151;">Cloudflare Workersサーバー</span>
+            <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#dcfce7;color:#16a34a;">正常</span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span style="font-size:13px;color:#374151;">D1 データベース接続</span>
+            ${dbOk
+              ? `<span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#dcfce7;color:#16a34a;">正常（社員 ${empCount}件）</span>`
+              : `<span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#fee2e2;color:#dc2626;" title="${escHtml(dbMsg)}">エラー</span>`
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- APIエンドポイント（クライアントサイドチェック） -->
+      <div style="background:white;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:12px;">
+        <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px;">APIエンドポイント</div>
+        <div style="display:flex;flex-direction:column;gap:8px;" id="api-checks">
+          <div style="font-size:12px;color:#9ca3af;">確認中...</div>
+        </div>
+      </div>
+
+      <!-- 通信ログ -->
+      <div style="background:white;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;">
+        <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px;">最近の通信ログ</div>
+        <div id="net-log" style="font-size:11px;font-family:monospace;color:#6b7280;line-height:1.7;max-height:200px;overflow-y:auto;">確認中...</div>
+      </div>
+    </div>
+    <script>
+      var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
+      var API_TARGETS = [
+        { label: '社員一覧 API', url: ADMIN_PATH + '/api/employees' },
+        { label: '社員CSVインポート API', url: ADMIN_PATH + '/api/employees/csv-import', method: 'POST', body: '', expect: [400, 405, 200] },
+        { label: 'シフト区分 API', url: '/api/schedule-types' },
+        { label: 'コーチ API', url: '/api/coaches' },
+        { label: 'LINE通知設定 API', url: '/api/notifications' },
+        { label: 'LIFF LINEユーザー API', url: ADMIN_PATH + '/api/liff-users' },
+      ];
+      var logs = [];
+
+      function statusBadge(ok, ms, note) {
+        var label = note || (ok ? '正常' : 'エラー');
+        var style = ok
+          ? 'background:#dcfce7;color:#16a34a;'
+          : 'background:#fee2e2;color:#dc2626;';
+        var msStr = ms != null ? ' (' + ms + 'ms)' : '';
+        return '<span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;' + style + '">' + label + msStr + '</span>';
+      }
+
+      async function checkEndpoint(t) {
+        var start = performance.now();
+        try {
+          var opts = { method: t.method || 'GET', credentials: 'include' };
+          if (t.body !== undefined && t.method === 'POST') {
+            opts.headers = { 'Content-Type': 'application/json' };
+            opts.body = t.body;
+          }
+          var res = await fetch(t.url, opts);
+          var ms = Math.round(performance.now() - start);
+          var ok = t.expect ? t.expect.includes(res.status) : (res.status < 400);
+          logs.push('[' + new Date().toLocaleTimeString('ja-JP') + '] ' + (ok ? 'OK' : 'NG') + ' ' + res.status + ' ' + t.url + ' (' + ms + 'ms)');
+          return { ok, ms, status: res.status };
+        } catch (e) {
+          var ms2 = Math.round(performance.now() - start);
+          logs.push('[' + new Date().toLocaleTimeString('ja-JP') + '] ERR ' + t.url + ' — ' + e.message);
+          return { ok: false, ms: ms2, status: null, err: e.message };
+        }
+      }
+
+      async function runChecks() {
+        document.getElementById('api-checks').innerHTML = '<div style="font-size:12px;color:#9ca3af;">確認中...</div>';
+        document.getElementById('net-log').textContent = '確認中...';
+        logs = [];
+
+        var results = await Promise.all(API_TARGETS.map(t => checkEndpoint(t)));
+        var rows = API_TARGETS.map(function(t, i) {
+          var r = results[i];
+          var note = r.err ? 'ネットワークエラー' : (r.status != null ? ('HTTP ' + r.status) : null);
+          return '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+            '<span style="font-size:13px;color:#374151;">' + t.label + '</span>' +
+            statusBadge(r.ok, r.ms, r.ok ? null : note) +
+            '</div>';
+        }).join('');
+        document.getElementById('api-checks').innerHTML = rows;
+        document.getElementById('net-log').innerHTML = logs.map(function(l) {
+          return '<div>' + l + '</div>';
+        }).join('');
+        document.getElementById('checked-at').textContent = '最終確認: ' + new Date().toLocaleString('ja-JP');
+      }
+
+      runChecks();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script>
+      var QR_URL = ${JSON.stringify(adminLoginUrl)};
+      if (typeof QRCode !== 'undefined') {
+        new QRCode(document.getElementById('qr-container'), {
+          text: QR_URL, width: 160, height: 160,
+          colorDark: '#1e3a5f', colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.M
+        });
+      }
+      function downloadQR() {
+        var canvas = document.querySelector('#qr-container canvas');
+        if (canvas) {
+          var link = document.createElement('a');
+          link.download = '管理画面QRコード.png';
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        }
+      }
+      function copyUrl() {
+        navigator.clipboard.writeText(QR_URL).then(function() {
+          var btn = document.getElementById('copy-btn-qr');
+          btn.textContent = 'コピー済';
+          setTimeout(function() { btn.textContent = 'URLコピー'; }, 2000);
+        });
+      }
+    </script>`;
+
+  return c.html(layout('システムステータス', html, 'settings'));
 });
 
 export default app;

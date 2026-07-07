@@ -95,6 +95,7 @@ app.post('/', async (c) => {
 // 送信されたフィールドのみ更新。null を明示的に送ればクリア可能。
 app.put('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ error: 'Invalid ID' }, 400);
   const data = await c.req.json<{
     name?: string;
     name_kana?: string | null;
@@ -120,6 +121,8 @@ app.put('/:id', async (c) => {
     problem_notes?: string | null;
     retirement_date?: string | null;
     avg_return_time?: string | null;
+    exclude_retirement_candidate?: number;
+    is_hanchyo?: number;
   }>();
 
   const sets: string[] = [];
@@ -151,6 +154,8 @@ app.put('/:id', async (c) => {
   if (data.problem_notes !== undefined)  { sets.push('problem_notes = ?');        vals.push(data.problem_notes ?? null); }
   if (data.retirement_date !== undefined)  { sets.push('retirement_date = ?');   vals.push(data.retirement_date ?? null); }
   if (data.avg_return_time !== undefined)  { sets.push('avg_return_time = ?');   vals.push(data.avg_return_time ?? null); }
+  if (data.exclude_retirement_candidate !== undefined) { sets.push('exclude_retirement_candidate = ?'); vals.push(data.exclude_retirement_candidate); }
+  if (data.is_hanchyo !== undefined)       { sets.push('is_hanchyo = ?');        vals.push(data.is_hanchyo); }
 
   if (sets.length === 0) return c.json({ ok: true });
 
@@ -167,6 +172,7 @@ app.put('/:id', async (c) => {
 // 社員無効化（論理削除 = 退職処理）
 app.delete('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ error: 'Invalid ID' }, 400);
   await c.env.DB.prepare(
     "UPDATE employees SET is_active = 0, updated_at = datetime('now', 'localtime') WHERE id = ?"
   ).bind(id).run();
@@ -176,6 +182,7 @@ app.delete('/:id', async (c) => {
 // 在籍復帰
 app.post('/:id/reinstate', async (c) => {
   const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ error: 'Invalid ID' }, 400);
   await c.env.DB.prepare(
     "UPDATE employees SET is_active = 1, retirement_date = NULL, updated_at = datetime('now', 'localtime') WHERE id = ?"
   ).bind(id).run();
@@ -211,11 +218,16 @@ app.post('/csv-import', async (c) => {
 
   // 既存社員はUPDATE、未登録社員はINSERT（status='completed'で一般社員として追加）
   // status='completed' にすることで新人シフト管理には一切出てこない
-  const inClause = valid.map(e => `'${e.emp_no.replace(/'/g, "''")}'`).join(',');
-  const existingRows = await c.env.DB.prepare(
-    `SELECT emp_no FROM employees WHERE emp_no IN (${inClause})`
-  ).all<{ emp_no: string }>();
-  const existingSet = new Set((existingRows.results ?? []).map(r => r.emp_no));
+  const LOOKUP_CHUNK = 100;
+  const existingSet = new Set<string>();
+  for (let ci = 0; ci < valid.length; ci += LOOKUP_CHUNK) {
+    const lc = valid.slice(ci, ci + LOOKUP_CHUNK);
+    const ph = lc.map(() => '?').join(',');
+    const rows = await c.env.DB.prepare(
+      `SELECT emp_no FROM employees WHERE emp_no IN (${ph})`
+    ).bind(...lc.map(e => e.emp_no)).all<{ emp_no: string }>();
+    for (const r of (rows.results ?? [])) existingSet.add(r.emp_no);
+  }
 
   const toInsert = valid.filter(e => !existingSet.has(e.emp_no));
   const toUpdate = valid.filter(e =>  existingSet.has(e.emp_no));
@@ -309,51 +321,74 @@ app.post('/purge-by-empno', async (c) => {
   ).bind(...valid).all<{ id: number }>();
   const ids = (rows.results ?? []).map(r => r.id);
   if (ids.length > 0) {
-    const ip = ids.map(() => '?').join(',');
     const relTables = ['shift_entries','sales_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
-    for (const t of relTables) {
-      await c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id IN (${ip})`).bind(...ids).run();
+    const CHUNK = 100;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const ph = chunk.map(() => '?').join(',');
+      await c.env.DB.batch([
+        ...relTables.map(t => c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id IN (${ph})`).bind(...chunk)),
+        c.env.DB.prepare(`DELETE FROM employees WHERE id IN (${ph})`).bind(...chunk),
+      ]);
     }
-    await c.env.DB.prepare(`DELETE FROM employees WHERE id IN (${ip})`).bind(...ids).run();
   }
   return c.json({ ok: true, count: ids.length });
 });
 
 // 一括退職処理（論理削除）
 app.post('/bulk-retire', async (c) => {
-  const data = await c.req.json<{ ids: number[] }>();
-  if (!Array.isArray(data?.ids) || data.ids.length === 0) return c.json({ error: 'IDが指定されていません' }, 400);
-  const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
-  if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
-  const placeholders = ids.map(() => '?').join(',');
-  await c.env.DB.prepare(
-    `UPDATE employees SET is_active = 0,
-       retirement_date = COALESCE(NULLIF(retirement_date,''), date('now','localtime')),
-       updated_at = datetime('now','localtime')
-     WHERE id IN (${placeholders})`
-  ).bind(...ids).run();
-  return c.json({ ok: true, count: ids.length });
+  try {
+    const data = await c.req.json<{ ids: number[] }>();
+    if (!Array.isArray(data?.ids) || data.ids.length === 0) return c.json({ error: 'IDが指定されていません' }, 400);
+    const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
+    if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
+    // D1 はパラメータ数に上限があるため 100 件ずつ処理
+    const CHUNK = 100;
+    let total = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      await c.env.DB.prepare(
+        `UPDATE employees SET is_active = 0,
+           retirement_date = COALESCE(NULLIF(retirement_date,''), date('now','localtime')),
+           updated_at = datetime('now','localtime')
+         WHERE id IN (${placeholders})`
+      ).bind(...chunk).run();
+      total += chunk.length;
+    }
+    return c.json({ ok: true, count: total });
+  } catch (e: unknown) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
 });
 
 // 一括完全削除（物理削除）
 app.post('/bulk-purge', async (c) => {
-  const data = await c.req.json<{ ids: number[] }>();
-  if (!Array.isArray(data?.ids) || data.ids.length === 0) return c.json({ error: 'IDが指定されていません' }, 400);
-  const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
-  if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
-  const placeholders = ids.map(() => '?').join(',');
-  const relTables = ['shift_entries','sales_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
-  for (const t of relTables) {
-    await c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id IN (${placeholders})`).bind(...ids).run();
+  try {
+    const data = await c.req.json<{ ids: number[] }>();
+    if (!Array.isArray(data?.ids) || data.ids.length === 0) return c.json({ error: 'IDが指定されていません' }, 400);
+    const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
+    if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
+    const CHUNK = 100;
+    const relTables = ['shift_entries','sales_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const ph = chunk.map(() => '?').join(',');
+      await c.env.DB.batch([
+        ...relTables.map(t => c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id IN (${ph})`).bind(...chunk)),
+        c.env.DB.prepare(`DELETE FROM employees WHERE id IN (${ph})`).bind(...chunk),
+      ]);
+    }
+    return c.json({ ok: true, count: ids.length });
+  } catch (e: unknown) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
-  await c.env.DB.prepare(`DELETE FROM employees WHERE id IN (${placeholders})`).bind(...ids).run();
-  return c.json({ ok: true, count: ids.length });
 });
 
 // 社員完全削除（物理削除・関連データも全削除）
 app.delete('/:id/purge', async (c) => {
   const id = parseInt(c.req.param('id'));
-  // 関連テーブルを順に削除
+  if (isNaN(id)) return c.json({ error: 'Invalid ID' }, 400);
   const tables = [
     'shift_entries',
     'sales_records',
@@ -363,10 +398,10 @@ app.delete('/:id/purge', async (c) => {
     'line_users',
     'interview_records',
   ];
-  for (const table of tables) {
-    await c.env.DB.prepare(`DELETE FROM ${table} WHERE emp_id = ?`).bind(id).run();
-  }
-  await c.env.DB.prepare('DELETE FROM employees WHERE id = ?').bind(id).run();
+  await c.env.DB.batch([
+    ...tables.map(t => c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id = ?`).bind(id)),
+    c.env.DB.prepare('DELETE FROM employees WHERE id = ?').bind(id),
+  ]);
   return c.json({ ok: true });
 });
 

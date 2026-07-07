@@ -1,0 +1,495 @@
+import { Hono } from 'hono';
+import { layout } from '../html/layout';
+import { ADMIN_PATH } from '../config';
+import type { Env } from '../auth';
+
+const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
+
+
+function inspectionPage(adminPath: string): string {
+  return `
+<style>
+.ins-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:14px}
+.ins-controls label{font-size:12px;color:#555;font-weight:600}
+.ins-controls select{padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;font-family:inherit;background:#fff;cursor:pointer}
+.dept-tabs{display:flex;gap:4px}
+.dept-btn{padding:5px 16px;border:1px solid #c5d5e8;border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit;background:#fff;color:#1a4a8a}
+.dept-btn:hover{background:#e8f0fa}
+.dept-btn.active{background:#1a4a8a;color:#fff;border-color:#1a4a8a;font-weight:600}
+.ins-legend{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:8px 14px;background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.07);font-size:12px;align-items:center}
+.ins-legend-dot{width:12px;height:12px;border-radius:2px;flex-shrink:0;display:inline-block}
+.ins-dept-title{font-size:15px;font-weight:700;color:#1a4a8a;margin-bottom:8px}
+.ins-table-wrap{overflow-x:auto;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.ins-table{border-collapse:collapse;width:100%;background:#fff;min-width:500px}
+.ins-table th{background:#d4e4f7;padding:9px 6px;font-size:13px;text-align:center;border:1px solid #b0c8e4;font-weight:700;color:#1a3a6a}
+.ins-table td{border:1px solid #d4dde8;vertical-align:top;padding:0}
+.ins-date-cell{text-align:center;font-size:14px;font-weight:700;padding:6px 4px;background:#fafbfc;color:#333}
+.ins-date-cell.sat{background:#ddeeff;color:#004488}
+.ins-date-cell.sun{background:#ffdddd;color:#880000}
+.ins-han-cell{min-height:34px;position:relative;padding:4px 28px 4px 4px;cursor:pointer}
+.ins-han-cell:hover{background:#f8faff}
+.vtags{display:flex;flex-wrap:wrap;gap:3px;min-height:22px}
+.vtag{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:3px;font-size:13px;font-weight:700;cursor:pointer;line-height:1.3}
+.vtag:hover{opacity:.75}
+.vt-inspect{color:#000;background:#f4f4f4;border:1px solid #bbb}
+.vt-shaken {color:#c00;background:#fff0f0;border:1px solid #c00}
+.vt-bomb   {color:#0055bb;background:#eef3ff;border:1px solid #0055bb}
+.vt-sub    {color:#077;background:#efffef;border:1px solid #077}
+.vt-recall {color:#000;background:#fff;border:2px solid #333}
+.vt-time{font-size:10px;color:#777;font-weight:400}
+.ins-add-btn{position:absolute;top:50%;right:4px;transform:translateY(-50%);background:#3366aa;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:.7}
+.ins-add-btn:hover{opacity:1}
+.ins-modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200}
+.ins-modal-box{background:#fff;border-radius:10px;padding:24px;width:380px;max-width:95vw;box-shadow:0 8px 30px rgba(0,0,0,.2)}
+.ins-modal-title{font-size:15px;font-weight:700;margin-bottom:16px;color:#1a3a6a;border-bottom:1px solid #e0e8f4;padding-bottom:10px}
+.ins-field{margin-bottom:14px}
+.ins-field label{display:block;font-size:12px;color:#555;font-weight:600;margin-bottom:6px}
+.ins-field input{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:5px;font-size:15px;font-family:inherit}
+.ins-field input:focus{outline:none;border-color:#5b9ef4}
+.type-btns{display:flex;flex-wrap:wrap;gap:6px}
+.type-btn{padding:6px 11px;border:2px solid #ddd;border-radius:4px;cursor:pointer;font-size:12px;font-weight:700;font-family:inherit;background:#fff}
+.type-btn.sel{box-shadow:0 0 0 3px rgba(60,120,220,.3)}
+.tb-inspect{color:#000;border-color:#aaa}.tb-inspect.sel{background:#f4f4f4;border-color:#666}
+.tb-shaken {color:#c00;border-color:#c00}.tb-shaken.sel{background:#fff0f0}
+.tb-bomb   {color:#0055bb;border-color:#0055bb}.tb-bomb.sel{background:#eef3ff}
+.tb-sub    {color:#077;border-color:#077}.tb-sub.sel{background:#efffef}
+.tb-recall {color:#000;border-color:#333;border-width:2px}.tb-recall.sel{background:#f8f8f8}
+.ins-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;border-top:1px solid #eee;padding-top:14px}
+.btn-p{padding:7px 18px;background:#1a4a8a;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:600}
+.btn-s{padding:7px 18px;background:#eee;color:#444;border:1px solid #ccc;border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit}
+.btn-d{padding:7px 18px;background:#dc3545;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit}
+.btn-xl{padding:9px 22px;background:#28a745;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:14px;font-family:inherit;font-weight:700}
+.ins-preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.ins-prev-dept{border:1px solid #dde8f4;border-radius:6px;padding:12px}
+.ins-prev-dept h4{font-size:13px;font-weight:700;color:#1a4a8a;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #eee}
+.ins-prev-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:6px}
+.ins-prev-lbl{font-size:11px;color:#777;min-width:60px;padding-top:2px;font-weight:600}
+.ins-prev-tags{display:flex;flex-wrap:wrap;gap:3px}
+.ins-nodata{color:#bbb;font-size:12px;padding:4px 0}
+.ins-tab-bar{display:flex;gap:0;border-bottom:2px solid #d0dcea;margin-bottom:16px}
+.ins-tab{padding:9px 20px;border:none;background:none;cursor:pointer;font-size:13px;font-family:inherit;color:#666;border-bottom:3px solid transparent;margin-bottom:-2px}
+.ins-tab.active{color:#1a4a8a;border-bottom-color:#1a4a8a;font-weight:700}
+.ins-panel{display:none}
+.ins-panel.active{display:block}
+.ins-data-tools{margin-top:14px;background:#fff;border-radius:8px;padding:10px 14px;box-shadow:0 1px 4px rgba(0,0,0,.08);display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn-t{padding:5px 12px;border:1px solid #ccc;border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;background:#f8f8f8;color:#444}
+.btn-t.red{border-color:#dc3545;color:#dc3545}
+.ins-save-badge{font-size:12px;color:#28a745;margin-left:auto}
+</style>
+
+<div class="ins-tab-bar">
+  <button class="ins-tab active" onclick="insShowTab('input')">月次入力（定期点検表）</button>
+  <button class="ins-tab" onclick="insShowTab('output')">日次出力・過去データ（点検車検確認表）</button>
+</div>
+
+<!-- ===== 月次入力 ===== -->
+<div id="ins-panel-input" class="ins-panel active">
+  <div class="ins-controls">
+    <label>年月：</label>
+    <select id="ins-year-in" onchange="insOnYMChange()"></select>年
+    <select id="ins-month-in" onchange="insOnYMChange()"></select>月
+    <span style="color:#bbb">｜</span>
+    <label>課：</label>
+    <div class="dept-tabs">
+      <button class="dept-btn active" onclick="insSelDept(1)" id="ins-dept-1">1課</button>
+      <button class="dept-btn" onclick="insSelDept(2)" id="ins-dept-2">2課</button>
+      <button class="dept-btn" onclick="insSelDept(3)" id="ins-dept-3">3課</button>
+      <button class="dept-btn" onclick="insSelDept(4)" id="ins-dept-4">4課</button>
+    </div>
+    <span id="ins-save-badge" class="ins-save-badge"></span>
+  </div>
+
+  <div class="ins-legend">
+    <strong style="font-size:12px;color:#444">凡例：</strong>
+    <span><span class="ins-legend-dot" style="background:#f4f4f4;border:1px solid #bbb"></span> 点検（黒）</span>
+    <span><span class="ins-legend-dot" style="background:#fff0f0;border:1px solid #c00"></span> 車検（赤）</span>
+    <span><span class="ins-legend-dot" style="background:#eef3ff;border:1px solid #0055bb"></span> ボンベ交換（青）</span>
+    <span><span class="ins-legend-dot" style="background:#efffef;border:1px solid #077"></span> 代替（緑）</span>
+    <span><span class="ins-legend-dot" style="background:#fff;border:2px solid #333"></span> リコール</span>
+    <span style="font-size:11px;color:#999;margin-left:6px">※ 車番クリックで編集・削除、＋で追加</span>
+  </div>
+
+  <div class="ins-dept-title" id="ins-dept-title"></div>
+  <div class="ins-table-wrap">
+    <div id="ins-table-container"></div>
+  </div>
+
+  <div class="ins-data-tools">
+    <label style="font-size:12px;color:#666;font-weight:600">この月・課のデータ：</label>
+    <button class="btn-t red" onclick="insClearMonth()">🗑 全削除</button>
+  </div>
+</div>
+
+<!-- ===== 日次出力 ===== -->
+<div id="ins-panel-output" class="ins-panel">
+  <div class="ins-controls">
+    <label>出力日：</label>
+    <select id="ins-year-out" onchange="insUpdateDays();insRenderCanvas()"></select>年
+    <select id="ins-month-out" onchange="insUpdateDays();insRenderCanvas()"></select>月
+    <select id="ins-day-out" onchange="insRenderCanvas()"></select>日
+    <button class="btn-xl" onclick="insCopyImage()">📋 クリップボードにコピー</button>
+    <button class="btn-p" onclick="insDownloadImage()">💾 画像保存</button>
+    <span id="ins-copy-badge" class="ins-save-badge"></span>
+  </div>
+  <div style="background:#fff;border-radius:8px;padding:16px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow-x:auto">
+    <canvas id="ins-canvas" style="max-width:100%;height:auto;display:block;border:1px solid #e0e8f4;border-radius:4px"></canvas>
+  </div>
+</div>
+
+<!-- モーダル -->
+<div id="ins-modal" class="ins-modal-overlay" style="display:none" onclick="if(event.target===this)insCloseModal()">
+  <div class="ins-modal-box">
+    <div class="ins-modal-title" id="ins-modal-title">車両追加</div>
+    <div class="ins-field">
+      <label>車番</label>
+      <input type="text" id="ins-vnum" placeholder="例: 5064" maxlength="10" onkeydown="if(event.key==='Enter')insSaveVehicle()">
+    </div>
+    <div class="ins-field">
+      <label>種別</label>
+      <div class="type-btns">
+        <button class="type-btn tb-inspect sel" onclick="insSelType('inspect')">点検（黒）</button>
+        <button class="type-btn tb-shaken"       onclick="insSelType('shaken')">車検（赤）</button>
+        <button class="type-btn tb-bomb"          onclick="insSelType('bomb')">ボンベ（青）</button>
+        <button class="type-btn tb-sub"           onclick="insSelType('sub')">代替（緑）</button>
+        <button class="type-btn tb-recall"        onclick="insSelType('recall')">リコール</button>
+      </div>
+    </div>
+    <div class="ins-field">
+      <label>出庫時間（任意）</label>
+      <input type="text" id="ins-vtime" placeholder="例: 8:00　ナイト　15:00　休車" maxlength="10">
+    </div>
+    <div class="ins-actions">
+      <button class="btn-d" id="ins-btn-del" style="display:none" onclick="insDeleteVehicle()">削除</button>
+      <button class="btn-s" onclick="insCloseModal()">キャンセル</button>
+      <button class="btn-p" onclick="insSaveVehicle()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const INS_PATH = '';
+
+const IS = {
+  year: new Date().getFullYear(),
+  month: new Date().getMonth()+1,
+  dept: 1,
+  modal: {day:null,han:null,id:null},
+  cache: {}  // {YYYYMM_ka: [{id,day,han,vehicle_num,type,dep_time},...]}
+};
+let insSelTypeCur = 'inspect';
+
+// ===== 初期化 =====
+(function insInit(){
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth()+1, d = now.getDate();
+  ['ins-year-in','ins-year-out'].forEach(id=>{
+    const el=document.getElementById(id);
+    for(let i=y-1;i<=y+2;i++) el.add(new Option(i+'年',i));
+    el.value=y;
+  });
+  ['ins-month-in','ins-month-out'].forEach(id=>{
+    const el=document.getElementById(id);
+    for(let i=1;i<=12;i++) el.add(new Option(i+'月',i));
+    el.value=m;
+  });
+  insUpdateDays();
+  const dayEl=document.getElementById('ins-day-out');
+  dayEl.value=Math.min(d,parseInt(dayEl.options[dayEl.options.length-1].value));
+  IS.year=y; IS.month=m;
+  insRefreshTable();
+})();
+
+function insDIM(y,m){return new Date(y,m,0).getDate();}
+function insUpdateDays(){
+  const y=+document.getElementById('ins-year-out').value;
+  const m=+document.getElementById('ins-month-out').value;
+  const el=document.getElementById('ins-day-out');
+  const cur=+el.value||1;
+  el.innerHTML='';
+  for(let d=1;d<=insDIM(y,m);d++) el.add(new Option(d+'日',d));
+  el.value=Math.min(cur,insDIM(y,m));
+}
+
+// ===== タブ =====
+function insShowTab(tab){
+  ['input','output'].forEach(t=>{
+    document.getElementById('ins-panel-'+t).classList.toggle('active',t===tab);
+    document.querySelectorAll('.ins-tab').forEach((b,i)=>b.classList.toggle('active',i===(tab==='input'?0:1)));
+  });
+  if(tab==='output') insRenderCanvas();
+}
+
+// ===== 課選択 =====
+function insSelDept(d){
+  IS.dept=d;
+  for(let i=1;i<=4;i++) document.getElementById('ins-dept-'+i).classList.toggle('active',i===d);
+  insRefreshTable();
+}
+
+// ===== データ取得 =====
+function insGetYM(){
+  const y=+document.getElementById('ins-year-in').value;
+  const m=+document.getElementById('ins-month-in').value;
+  return String(y)+String(m).padStart(2,'0');
+}
+function insCacheKey(){return insGetYM()+'_'+IS.dept;}
+
+async function insFetchData(ym, ka){
+  const key=ym+'_'+ka;
+  if(IS.cache[key]) return IS.cache[key];
+  const res=await fetch(INS_PATH+'/api/inspection/schedule?ym='+ym+'&ka='+ka);
+  IS.cache[key]=await res.json();
+  return IS.cache[key];
+}
+
+function insGetDayVehicles(data,day){
+  const h1=data.filter(r=>r.day===day&&r.han===1);
+  const h2=data.filter(r=>r.day===day&&r.han===2);
+  return {h1,h2};
+}
+
+// ===== テーブル描画 =====
+function insOnYMChange(){
+  IS.year=+document.getElementById('ins-year-in').value;
+  IS.month=+document.getElementById('ins-month-in').value;
+  insRefreshTable();
+}
+
+async function insRefreshTable(){
+  document.getElementById('ins-dept-title').textContent=IS.dept+'課　定期点検表（'+IS.month+'月）';
+  const ym=insGetYM();
+  const data=await insFetchData(ym,IS.dept);
+  const days=insDIM(IS.year,IS.month);
+  let html='<table class="ins-table"><colgroup><col style="width:44%"><col style="width:12%"><col style="width:44%"></colgroup><thead><tr><th>《1班》</th><th>日付</th><th>《2班》</th></tr></thead><tbody>';
+  for(let day=1;day<=days;day++){
+    const dow=new Date(IS.year,IS.month-1,day).getDay();
+    const dc=dow===0?'sun':dow===6?'sat':'';
+    const {h1,h2}=insGetDayVehicles(data,day);
+    html+='<tr><td class="ins-han-cell"><div class="vtags" id="ins-tags-'+day+'-1">'+insRenderTags(h1,day,1)+'</div><button class="ins-add-btn" onclick="insOpenModal('+day+',1)">＋</button></td><td class="ins-date-cell '+dc+'">'+day+'</td><td class="ins-han-cell"><div class="vtags" id="ins-tags-'+day+'-2">'+insRenderTags(h2,day,2)+'</div><button class="ins-add-btn" onclick="insOpenModal('+day+',2)">＋</button></td></tr>';
+  }
+  html+='</tbody></table>';
+  document.getElementById('ins-table-container').innerHTML=html;
+}
+
+function insRenderTags(vehicles,day,han){
+  return vehicles.map(v=>'<span class="vtag vt-'+v.type+'" onclick="insOpenModal('+day+','+han+','+v.id+')" title="'+v.type+'">'+insEsc(v.vehicle_num)+(v.dep_time?'<span class="vt-time">'+insEsc(v.dep_time)+'</span>':'')+'</span>').join('');
+}
+
+function insEsc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// ===== モーダル =====
+function insOpenModal(day,han,id=null){
+  IS.modal={day,han,id};
+  document.getElementById('ins-modal-title').textContent=id?day+'日 '+han+'班 - 車両編集':day+'日 '+han+'班 - 車両追加';
+  document.getElementById('ins-btn-del').style.display=id?'':'none';
+  let num='',type='inspect',time='';
+  if(id){
+    const ym=insGetYM();
+    const v=IS.cache[ym+'_'+IS.dept]?.find(r=>r.id===id);
+    if(v){num=v.vehicle_num;type=v.type;time=v.dep_time||'';}
+  }
+  document.getElementById('ins-vnum').value=num;
+  document.getElementById('ins-vtime').value=time;
+  insSelType(type);
+  document.getElementById('ins-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('ins-vnum').focus(),50);
+}
+function insCloseModal(){document.getElementById('ins-modal').style.display='none';}
+function insSelType(t){
+  insSelTypeCur=t;
+  document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('sel'));
+  document.querySelector('.tb-'+t)?.classList.add('sel');
+}
+
+async function insSaveVehicle(){
+  const num=document.getElementById('ins-vnum').value.trim();
+  const time=document.getElementById('ins-vtime').value.trim();
+  if(!num){alert('車番を入力してください');return;}
+  const {day,han,id}=IS.modal;
+  const ym=insGetYM();
+  if(id){
+    await fetch(INS_PATH+'/api/inspection/schedule/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vehicle_num:num,type:insSelTypeCur,dep_time:time})});
+    const v=IS.cache[ym+'_'+IS.dept]?.find(r=>r.id===id);
+    if(v){v.vehicle_num=num;v.type=insSelTypeCur;v.dep_time=time;}
+  } else {
+    const res=await fetch(INS_PATH+'/api/inspection/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym,ka:IS.dept,day,han,vehicle_num:num,type:insSelTypeCur,dep_time:time})});
+    const j=await res.json();
+    if(!IS.cache[ym+'_'+IS.dept]) IS.cache[ym+'_'+IS.dept]=[];
+    IS.cache[ym+'_'+IS.dept].push({id:j.id,day,han,vehicle_num:num,type:insSelTypeCur,dep_time:time});
+  }
+  insRefreshTags(day,han);
+  insShowBadge();
+  insCloseModal();
+}
+
+async function insDeleteVehicle(){
+  const {day,han,id}=IS.modal;
+  if(!id) return;
+  const ym=insGetYM();
+  await fetch(INS_PATH+'/api/inspection/schedule/'+id,{method:'DELETE'});
+  const arr=IS.cache[ym+'_'+IS.dept];
+  if(arr){const i=arr.findIndex(r=>r.id===id);if(i>=0)arr.splice(i,1);}
+  insRefreshTags(day,han);
+  insShowBadge();
+  insCloseModal();
+}
+
+function insRefreshTags(day,han){
+  const ym=insGetYM();
+  const data=IS.cache[ym+'_'+IS.dept]||[];
+  const vehicles=data.filter(r=>r.day===day&&r.han===han);
+  const el=document.getElementById('ins-tags-'+day+'-'+han);
+  if(el) el.innerHTML=insRenderTags(vehicles,day,han);
+}
+
+function insShowBadge(){
+  const el=document.getElementById('ins-save-badge');
+  el.textContent='✓ 保存済み';
+  setTimeout(()=>{el.textContent='';},2000);
+}
+
+// ===== 月データ全削除 =====
+async function insClearMonth(){
+  const ym=insGetYM();
+  if(!confirm(IS.year+'年'+IS.month+'月 '+IS.dept+'課のデータを全て削除しますか？')) return;
+  await fetch(INS_PATH+'/api/inspection/schedule?ym='+ym+'&ka='+IS.dept,{method:'DELETE'});
+  delete IS.cache[ym+'_'+IS.dept];
+  insRefreshTable();
+}
+
+// ===== Canvas出力 =====
+const INS_COL={inspect:'#000',shaken:'#cc0000',bomb:'#0044bb',sub:'#006600',recall:'#000'};
+
+async function insRenderCanvas(){
+  const y=+document.getElementById('ins-year-out').value;
+  const m=+document.getElementById('ins-month-out').value;
+  const day=+document.getElementById('ins-day-out').value;
+  const ym=String(y)+String(m).padStart(2,'0');
+  const res=await fetch(INS_PATH+'/api/inspection/day?ym='+ym+'&day='+day);
+  const all=await res.json();
+  const W=2400,H=1404;
+  const canvas=document.getElementById('ins-canvas');
+  canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext('2d');
+  // 游ゴシック優先（元Excelと同じフォントファミリー）
+  const FN='"游ゴシック","Yu Gothic","Hiragino Sans","Meiryo","Noto Sans JP",sans-serif';
+  // 列レイアウト（元Excel実測比率）
+  const LX=0,LW=100;
+  const KX=[100,525,950,1391];
+  const IVW=[261,279,279,279],ITW=[164,146,162,133]; // 点検実施
+  const SVW=[281,282,282,282],STW=[144,143,159,130]; // 車検・ボンベ
+  const NX=1803,NW=597;
+  // 行レイアウト
+  const HH=75;
+  const IY=75,IH=582,IR=39;
+  const PY=657,PH=269,PR=18;
+  const SY=926,SH=269,SR=18;
+  const BOY=1195,BH=209,BR=14;
+  const IRH=IH/IR,PRH=PH/PR,SRH=SH/SR,BRH=BH/BR;
+  // データ
+  const Ka=Array.from({length:4},(_,i)=>{
+    const r=all.filter(x=>x.ka===i+1);
+    return {ins:r.filter(x=>['inspect','sub','recall'].includes(x.type)),sha:r.filter(x=>x.type==='shaken'),bom:r.filter(x=>x.type==='bomb')};
+  });
+  // 白背景
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  // ラベル列：textRotation=255相当（文字を縦に積む）
+  function drawStackedText(text,secY,secH){
+    const chars=[...text];
+    const n=chars.length;
+    const fsz=Math.min(30,secH/(n*1.4));
+    const spacing=Math.min(secH/n,fsz*1.9);
+    const totalH=spacing*(n-1)+fsz;
+    const sy0=secY+(secH-totalH)/2+fsz/2;
+    ctx.font=fsz+'px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
+    for(let k=0;k<n;k++) ctx.fillText(chars[k],LX+LW/2,sy0+k*spacing);
+  }
+  drawStackedText('点検実施車両',IY,IH);
+  drawStackedText('AI.PCS',PY,PH);
+  drawStackedText('車検',SY,SH);
+  drawStackedText('ボンベ交換',BOY,BH);
+  // ヘッダー（背景なし、テキストのみ）
+  ctx.font='18px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(m+'月'+day+'日',LX+LW/2,HH/2);
+  const KN=['１課','２課','３課','４課'];
+  for(let i=0;i<4;i++){
+    const cx=KX[i],cw=IVW[i]+ITW[i];
+    ctx.font='40px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(KN[i],cx+cw/2,HH/2);
+  }
+  ctx.font='26px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('備考',NX+NW/2,HH/2);
+  // 車両番号：大セル内に縦並び・上下中央（元ExcelのverticalAlign=center）
+  function fillCell(secY,secH,vx,vw,tx,tw,vehicles){
+    if(!vehicles.length) return;
+    const lh=43; // 1行の高さ（16pt×2.489≒40px + 余白）
+    const totalH=vehicles.length*lh;
+    const sy0=secY+(secH-totalH)/2+lh/2;
+    for(let j=0;j<vehicles.length;j++){
+      const v=vehicles[j],ly=sy0+j*lh;
+      ctx.font='40px '+FN;ctx.fillStyle=INS_COL[v.type]||'#000';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(v.vehicle_num,vx+vw/2,ly);
+      if(v.dep_time){
+        ctx.font='28px '+FN;ctx.fillStyle='#555';
+        ctx.fillText(v.dep_time,tx+tw/2,ly);
+      }
+    }
+  }
+  for(let i=0;i<4;i++) fillCell(IY,IH,KX[i],IVW[i],KX[i]+IVW[i],ITW[i],Ka[i].ins);
+  for(let i=0;i<4;i++) fillCell(SY,SH,KX[i],SVW[i],KX[i]+SVW[i],STW[i],Ka[i].sha);
+  for(let i=0;i<4;i++) fillCell(BOY,BH,KX[i],SVW[i],KX[i]+SVW[i],STW[i],Ka[i].bom);
+  // 備考テキスト（11pt相当、左揃え）
+  function nY(row){if(row<=44)return IY+(row-6)*IRH;if(row<=62)return PY+(row-45)*PRH;if(row<=80)return SY+(row-63)*SRH;return BOY+(row-81)*BRH;}
+  function nRH(row){if(row<=44)return IRH;if(row<=62)return PRH;if(row<=80)return SRH;return BRH;}
+  const NOTES=[[6,'・Ｈ勤以外は７時までに工場へ'],[10,'・６時、７時の出庫は不可'],[14,'　間違い出庫に要注意！'],[18,'・Ｈ勤は11時までに工場へ'],[30,'　間違い出庫に要注意！'],[45,'・全車両6時30までに工場へ'],[49,'・午前中に出庫はできません！'],[69,'・7時までにいれられるように'],[73,'・仮検受けないと使えなくなる'],[77,'・整備依頼書「LT27 交換」をつけて']];
+  ctx.font='26px '+FN;ctx.fillStyle='#000';ctx.textAlign='left';ctx.textBaseline='middle';
+  for(const [row,txt] of NOTES) ctx.fillText(txt,NX+10,nY(row)+nRH(row)*2);
+  // グリッド線（元Excelと同じthin=1px、背景色なし）
+  ctx.strokeStyle='#000';ctx.lineWidth=1;
+  ctx.strokeRect(0.5,0.5,W-1,H-1);
+  for(const sy of [HH,IY+IH,PY+PH,SY+SH]){ctx.beginPath();ctx.moveTo(0,sy);ctx.lineTo(W,sy);ctx.stroke();}
+  for(const vx of [LW,KX[1],KX[2],KX[3],NX]){ctx.beginPath();ctx.moveTo(vx,0);ctx.lineTo(vx,H);ctx.stroke();}
+  // 車両/時間サブ列区切り（セクションごとに位置が異なる、内部行線なし）
+  for(let i=0;i<4;i++){
+    const iv=KX[i]+IVW[i];
+    ctx.beginPath();ctx.moveTo(iv,IY);ctx.lineTo(iv,IY+IH);ctx.stroke();
+    const sv=KX[i]+SVW[i];
+    ctx.beginPath();ctx.moveTo(sv,SY);ctx.lineTo(sv,SY+SH);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(sv,BOY);ctx.lineTo(sv,BOY+BH);ctx.stroke();
+  }
+}
+
+async function insCopyImage(){
+  await insRenderCanvas();
+  const canvas=document.getElementById('ins-canvas');
+  canvas.toBlob(async blob=>{
+    try{
+      await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+      const el=document.getElementById('ins-copy-badge');
+      el.textContent='✓ コピー完了';
+      setTimeout(()=>{el.textContent='';},2000);
+    }catch(e){
+      insDownloadImage();
+    }
+  });
+}
+
+function insDownloadImage(){
+  const canvas=document.getElementById('ins-canvas');
+  const m=document.getElementById('ins-month-out').value;
+  const d=document.getElementById('ins-day-out').value;
+  const a=document.createElement('a');
+  a.download='点検車検確認表_'+m+'月'+d+'日.png';
+  a.href=canvas.toDataURL('image/png');
+  a.click();
+}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')insCloseModal();});
+</script>`;
+}
+
+app.get('/inspection', (c) => {
+  return c.html(layout('点検管理', inspectionPage(ADMIN_PATH), 'inspection'));
+});
+
+export default app;

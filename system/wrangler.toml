@@ -11,11 +11,12 @@ database_id = "b50865b1-be1d-411c-bf71-fc9a7da3c5e0"
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
 RICHMENU_ID_PATTERN1 = "richmenu-7ddc3e80e06b72a49103d5237a89a4ee"
-RICHMENU_ID_PATTERN2 = "richmenu-1666054af5d427c6ae217c15fad1a6c9"
-RICHMENU_ID_PATTERN3 = "richmenu-6e17e85b29aafb772d8b7f6d88b58422"
+RICHMENU_ID_PATTERN2 = "richmenu-81a0e64f41558aeb4747a494537b80b4"
+RICHMENU_ID_PATTERN3 = "richmenu-81a0e64f41558aeb4747a494537b80b4"
 # LIFFアプリID（LINE Developers で作成後に設定）
 LIFF_ID_LOST_ITEM = "2010598812-y7oZBhGe"
 LIFF_ID_ACCIDENT = "2010598812-PaLPe9HP"
+LIFF_ID_STAFF_LOOKUP = "2010598812-vWkyVtxt"
 # シークレット値は wrangler secret put で登録すること（このファイルには記載しない）
 # npx wrangler secret put SETUP_KEY
 # npx wrangler secret put LINE_CHANNEL_SECRET

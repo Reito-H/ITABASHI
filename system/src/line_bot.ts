@@ -25,6 +25,7 @@ type Vehicle = {
   office2: string | null;
   radio_no2: number | null;
   division: string | null;
+  team: string | null;
   office_phone: string | null;
 };
 
@@ -59,21 +60,25 @@ async function searchVehicles(db: D1Database, query: string): Promise<Vehicle[]>
 
 function formatVehicleResults(query: string, vehicles: Vehicle[]): string {
   if (vehicles.length === 0) {
-    return `🔍 「${query}」の検索結果\n\n該当する車両が見つかりませんでした。`;
+    return `「${query}」に該当する車両が見つかりませんでした。`;
   }
-  const lines = [`🔍 「${query}」の検索結果（${vehicles.length}件）`];
+  const blocks: string[] = [];
   for (const v of vehicles) {
-    const isRadioMatch = v.radio_no != null && String(v.radio_no) === query;
-    const label = isRadioMatch ? '【無線番号一致】' : '【ナンバー一致】';
-    lines.push('');
-    lines.push(`━━ ${label} ━━`);
-    if (v.radio_no != null)  lines.push(`無線番号: ${v.radio_no}`);
-    if (v.plate_no)          lines.push(`車両番号: ${v.plate_no}`);
-    if (v.car_type)          lines.push(`車種: ${v.car_type}`);
-    if (v.office)            lines.push(`営業所: ${v.office}`);
-    if (v.division)          lines.push(`課: ${v.division}`);
+    const lines: string[] = [];
+    if (v.radio_no != null) lines.push(`無線番号: ${v.radio_no}`);
+    if (v.plate_no)         lines.push(`車両番号: ${v.plate_no}`);
+    if (v.car_type)         lines.push(`車種: ${v.car_type}`);
+    if (v.office)           lines.push(`営業所: ${v.office}`);
+    // 課・班（班データがある場合のみ表示）
+    if (v.division || v.team) {
+      const divTeam = v.division
+        ? (v.team ? `${v.division}${v.team}班` : v.division)
+        : `${v.team}班`;
+      lines.push(divTeam);
+    }
+    blocks.push(lines.join('\n'));
   }
-  return lines.join('\n');
+  return blocks.join('\n\n──────\n\n');
 }
 
 async function getState(db: D1Database, lineUid: string): Promise<ConvState> {

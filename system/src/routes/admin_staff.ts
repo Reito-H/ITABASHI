@@ -29,7 +29,11 @@ type StaffRow = {
   problem_notes: string | null;
   is_active: number;
   status: string | null;
+  exclude_retirement_candidate: number;
+  is_hanchyo: number;
 };
+
+type StaffNav = { prevId: number | null; prevName: string | null; nextId: number | null; nextName: string | null };
 
 // 勤務体系ごとの出勤時間選択肢
 const START_TIMES: Record<string, string[]> = {
@@ -43,7 +47,7 @@ const ALL_TIMES = ['6:00', '6:50', '8:00', '9:30', '15:00', '16:00', '18:00', '1
 
 function calcAge(birthDate: string | null): number | null {
   if (!birthDate) return null;
-  const today = new Date();
+  const today = new Date(Date.now() + 9 * 60 * 60 * 1000); // JST
   const bd = new Date(birthDate);
   let age = today.getFullYear() - bd.getFullYear();
   const m = today.getMonth() - bd.getMonth();
@@ -82,8 +86,9 @@ app.get('/staff', async (c) => {
   const filterRetirement = c.req.query('retire') ?? '';
 
   if (filterRetirement === 'candidate') {
-    // 退職候補 = 在籍中だが長欠、または退職日が既に経過している人（active強制）
+    // 退職候補 = 在籍中だが長欠、または退職日が既に経過している人（除外フラグなし）
     conditions.push('is_active = 1');
+    conditions.push('exclude_retirement_candidate = 0');
     conditions.push('(enrollment_status = \'長欠\' OR (retirement_date IS NOT NULL AND retirement_date != \'\' AND retirement_date < ?))');
     params.push(todayStr);
   } else {
@@ -108,7 +113,7 @@ app.get('/staff', async (c) => {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,car_no,enrollment_status,retirement_date,is_caution,is_active,status FROM employees ${where} ORDER BY division, team, seq_no, id`);
+  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,car_no,enrollment_status,retirement_date,is_caution,is_active,status,exclude_retirement_candidate,is_hanchyo FROM employees ${where} ORDER BY division, team, seq_no, id`);
 
   // staffRows と退職クエリを並列実行
   const [staffRows, upcomingRetirements] = await Promise.all([
@@ -185,6 +190,10 @@ app.get('/staff', async (c) => {
     const retDateVal = e.retirement_date ?? '';
     return `
     <tr data-id="${e.id}" data-bg="${rowBg}" data-hover="${rowHover}"
+      data-active="${e.is_active ?? 1}"
+      data-has-ret="${e.retirement_date ? '1' : '0'}"
+      data-newcomer="${isNewcomer ? '1' : '0'}"
+      data-enrollment="${escHtml(enStatus)}"
       style="cursor:pointer;background:${rowBg};"
       onmouseover="if(!this.classList.contains('sel'))this.style.background='${rowHover}'"
       onmouseout="if(!this.classList.contains('sel'))this.style.background='${rowBg}'"
@@ -196,7 +205,11 @@ app.get('/staff', async (c) => {
       <td style="${C}" data-val="${escHtml(e.name)}">
         <div style="font-size:13px;font-weight:600;color:#1f2937;">${escHtml(e.name)}</div>
         ${e.name_kana ? `<div style="font-size:11px;color:#9ca3af;">${escHtml(e.name_kana)}</div>` : ''}
-        ${isNewcomer ? '<span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">新人</span>' : ''}
+        <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+          ${e.is_hanchyo ? '<span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">班長</span>' : ''}
+          ${isNewcomer ? '<span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">新人</span>' : ''}
+          ${e.exclude_retirement_candidate ? '<span style="background:#f3f4f6;color:#6b7280;padding:1px 5px;border-radius:3px;font-size:10px;">候補除外</span>' : ''}
+        </div>
       </td>
       <td style="${C}font-size:12px;color:#6b7280;white-space:nowrap;" data-val="${String(e.division ?? 99).padStart(2,'0')}${String(e.team ?? 99).padStart(2,'0')}">${e.division ? e.division + '課' : ''}${e.team ? ' ' + e.team + '班' : ''}${!e.division && !e.team ? '—' : ''}</td>
       <td style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.work_schedule ?? ''}">${e.work_schedule ?? '—'}</td>
@@ -254,7 +267,27 @@ app.get('/staff', async (c) => {
 
   <!-- ヘッダー -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <span style="font-size:13px;color:#6b7280;" id="staff-count">${(staffRows.results ?? []).length}名</span>
+    <div style="display:flex;align-items:center;gap:10px;position:relative;">
+      <span style="font-size:13px;color:#6b7280;" id="staff-count">${(staffRows.results ?? []).length}名</span>
+      <div style="position:relative;display:inline-block;">
+        <button onclick="toggleSelMenu()" id="sel-menu-btn" style="padding:5px 10px;background:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px;">
+          条件選択 <span style="font-size:10px;">▼</span>
+        </button>
+        <div id="sel-menu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:200;white-space:nowrap;overflow:hidden;min-width:180px;">
+          <div style="padding:6px 0;">
+            <div style="font-size:10px;color:#9ca3af;padding:4px 14px;font-weight:700;letter-spacing:0.05em;">表示中から選択</div>
+            <button onclick="selectByCond('all')" class="sel-opt">表示中全員</button>
+            <button onclick="selectByCond('active')" class="sel-opt">在籍中のみ</button>
+            <button onclick="selectByCond('retired')" class="sel-opt">退職者のみ</button>
+            <button onclick="selectByCond('has-ret')" class="sel-opt">退職日設定あり</button>
+            <button onclick="selectByCond('soon-ret')" class="sel-opt">30日以内退職予定</button>
+            <button onclick="selectByCond('newcomer')" class="sel-opt">新人のみ</button>
+            <div style="border-top:1px solid #f3f4f6;margin:4px 0;"></div>
+            <button onclick="selectByCond('none')" class="sel-opt" style="color:#dc2626;">選択解除</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div style="display:flex;gap:8px;">
       <button onclick="toggleCsvImport()" style="padding:8px 14px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">
         CSVインポート
@@ -361,6 +394,10 @@ app.get('/staff', async (c) => {
   </div>
 </div>
 
+<style>
+.sel-opt{display:block;width:100%;padding:8px 14px;background:none;border:none;text-align:left;font-size:13px;color:#374151;cursor:pointer;}
+.sel-opt:hover{background:#f3f4f6;}
+</style>
 <script>
 // ===== テーブル ソート・選択 =====
 const ADMIN_PATH_S = '${ADMIN_PATH}';
@@ -387,7 +424,7 @@ function sortTable(col) {
 
 function rowClick(e, id) {
   if (e.target.type === 'checkbox') return;
-  location.href = ADMIN_PATH_S + '/staff/' + id;
+  location.href = ADMIN_PATH_S + '/staff/' + id + location.search;
 }
 
 function onCbChange(cb) {
@@ -407,6 +444,52 @@ function toggleAll(master) {
     cb.checked = master.checked;
     onCbChange(cb);
   });
+}
+
+// ===== 条件選択メニュー =====
+function toggleSelMenu() {
+  const menu = document.getElementById('sel-menu');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+document.addEventListener('click', function(e) {
+  const btn = document.getElementById('sel-menu-btn');
+  const menu = document.getElementById('sel-menu');
+  if (menu && btn && !btn.contains(e.target) && !menu.contains(e.target)) {
+    menu.style.display = 'none';
+  }
+});
+
+function selectByCond(cond) {
+  document.getElementById('sel-menu').style.display = 'none';
+  const todayStr = new Date(Date.now() + 9*60*60*1000).toISOString().split('T')[0];
+  const in30Days = new Date(Date.now() + 9*60*60*1000 + 30*24*60*60*1000).toISOString().split('T')[0];
+
+  document.querySelectorAll('.row-cb').forEach(cb => {
+    const tr = cb.closest('tr');
+    let match = false;
+    if (cond === 'all')      match = true;
+    else if (cond === 'none') match = false;
+    else if (cond === 'active')   match = tr.dataset.active === '1';
+    else if (cond === 'retired')  match = tr.dataset.active === '0';
+    else if (cond === 'has-ret')  match = tr.dataset.hasRet === '1';
+    else if (cond === 'soon-ret') {
+      const d = tr.querySelector('td[data-val]') ? null : null;
+      // 退職日セルはindex 8（0始まり）
+      const retCell = tr.cells[8];
+      const retVal = retCell ? retCell.dataset.val : '';
+      match = retVal >= todayStr && retVal <= in30Days;
+    }
+    else if (cond === 'newcomer') match = tr.dataset.newcomer === '1';
+    cb.checked = match;
+    onCbChange(cb);
+  });
+
+  // cb-all の indeterminate 更新
+  const all = document.getElementById('cb-all');
+  const total = document.querySelectorAll('.row-cb').length;
+  const checked = document.querySelectorAll('.row-cb:checked').length;
+  all.indeterminate = checked > 0 && checked < total;
+  all.checked = total > 0 && checked === total;
 }
 
 function updateBar() {
@@ -434,10 +517,19 @@ async function bulkRetire() {
   const ids = getSelectedIds();
   if (!ids.length) return;
   if (!confirm(ids.length + '名を退職処理しますか？（論理削除・復元可能）')) return;
-  const res = await fetch('/api/employees/bulk-retire', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ids })
-  });
-  if (res.ok) location.reload(); else alert('エラーが発生しました');
+  try {
+    const res = await fetch('/api/employees/bulk-retire', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ids })
+    });
+    if (res.ok) {
+      location.reload();
+    } else {
+      const json = await res.json().catch(() => ({}));
+      alert('退職処理に失敗しました: ' + (json.error || res.status));
+    }
+  } catch (err) {
+    alert('通信エラー: ' + err.message);
+  }
 }
 
 async function bulkPurge() {
@@ -445,10 +537,19 @@ async function bulkPurge() {
   if (!ids.length) return;
   if (!confirm('【警告】' + ids.length + '名を完全削除します。\\nシフト・売上・面談データも全て消えます。\\nこの操作は取り消せません。')) return;
   if (!confirm('本当によろしいですか？')) return;
-  const res = await fetch('/api/employees/bulk-purge', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ids })
-  });
-  if (res.ok) location.reload(); else alert('エラーが発生しました');
+  try {
+    const res = await fetch('/api/employees/bulk-purge', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ids })
+    });
+    if (res.ok) {
+      location.reload();
+    } else {
+      const json = await res.json().catch(() => ({}));
+      alert('完全削除に失敗しました: ' + (json.error || res.status));
+    }
+  } catch (err) {
+    alert('通信エラー: ' + err.message);
+  }
 }
 
 // ===== CSV インポート =====
@@ -460,8 +561,8 @@ const EXISTING_EMP_NOS = new Set(${JSON.stringify((staffRows.results ?? []).map(
 // ===== UI 操作 =====
 function toggleCsvImport() {
   const panel = document.getElementById('csv-import-panel');
-  const isOpen = panel.style.display !== 'none';
-  panel.style.display = isOpen ? 'none' : 'block';
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
 }
 
 function handleCsvDrop(event) {
@@ -686,8 +787,8 @@ function renderCsvPreview() {
       h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
         '<label style="font-size:11px;font-weight:700;color:#374151;cursor:pointer;">' +
         '<input type="checkbox" id="ret-all-cb" onchange="retToggleAll(this)"> 全選択</label>' +
-        '<button style="'+btnStyle+'background:#fee2e2;color:#dc2626;" onclick="retBulkAction(\'retire\')">退職処理</button>' +
-        '<button style="'+btnStyle+'background:#374151;color:white;" onclick="retBulkAction(\'purge\')">完全削除</button>' +
+        '<button style="'+btnStyle+'background:#fee2e2;color:#dc2626;" onclick="retBulkAction(&#39;retire&#39;)">退職処理</button>' +
+        '<button style="'+btnStyle+'background:#374151;color:white;" onclick="retBulkAction(&#39;purge&#39;)">完全削除</button>' +
         '</div>';
 
       if (absent.length) {
@@ -830,7 +931,7 @@ async function executeCsvImport() {
 
 function clearCsvImport() {
   csvParsedData = [];
-  ['csv-preview','csv-result','csv-retirement-candidates'].forEach((id: string)=>{
+  ['csv-preview','csv-result','csv-retirement-candidates'].forEach((id)=>{
     const el=document.getElementById(id); if(el) el.style.display='none';
   });
   document.getElementById('csv-file-input').value='';
@@ -848,16 +949,80 @@ app.get('/staff/new', (c) => {
   return c.html(layout('社員管理 — 新規登録', staffForm(null), 'staff'));
 });
 
+
 // ===== 社員詳細・編集 =====
 app.get('/staff/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
-  const emp = await c.env.DB.prepare('SELECT * FROM employees WHERE id = ?').bind(id).first<StaffRow>();
+  if (isNaN(id)) return c.notFound();
+
+  // フィルター引き継ぎ（一覧→詳細ナビ用）
+  const q = (c.req.query('q') ?? '').trim();
+  const filterDiv = c.req.query('div') ?? 'all';
+  const filterStatus = c.req.query('enrollment') ?? 'all';
+  const filterActive = c.req.query('active') ?? '1';
+  const filterRetirement = c.req.query('retire') ?? '';
+
+  const conditions: string[] = [];
+  const navParams: (string | number)[] = [];
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const todayStr = nowJST.toISOString().split('T')[0];
+  const in30Days = new Date(nowJST.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  if (filterRetirement === 'candidate') {
+    conditions.push('is_active = 1');
+    conditions.push('exclude_retirement_candidate = 0');
+    conditions.push("(enrollment_status = '長欠' OR (retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date < ?))");
+    navParams.push(todayStr);
+  } else {
+    if (filterActive === '1') conditions.push('is_active = 1');
+    if (filterRetirement === 'soon') {
+      conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date >= ? AND retirement_date <= ?");
+      navParams.push(todayStr, in30Days);
+    } else if (filterRetirement === 'has') {
+      conditions.push("retirement_date IS NOT NULL AND retirement_date != ''");
+    }
+  }
+  if (filterDiv !== 'all') { conditions.push('division = ?'); navParams.push(parseInt(filterDiv)); }
+  const VALID_ENROLLMENT_FILTER = ['通常', '育休', '病欠', '傷病', '長欠'];
+  if (filterStatus !== 'all' && VALID_ENROLLMENT_FILTER.includes(filterStatus)) {
+    conditions.push('enrollment_status = ?'); navParams.push(filterStatus);
+  }
+  if (q) {
+    const pattern = `%${q}%`;
+    conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
+    navParams.push(pattern, pattern, pattern);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const idStmt = c.env.DB.prepare(`SELECT id, name FROM employees ${where} ORDER BY division, team, seq_no, id`);
+
+  const [emp, idRows] = await Promise.all([
+    c.env.DB.prepare('SELECT * FROM employees WHERE id = ?').bind(id).first<StaffRow>(),
+    (navParams.length ? idStmt.bind(...navParams) : idStmt).all<{ id: number; name: string }>(),
+  ]);
   if (!emp) return c.text('社員が見つかりません', 404);
-  return c.html(layout(`${emp.name} — 社員情報`, staffForm(emp), 'staff'));
+
+  const ids = idRows.results ?? [];
+  const pos = ids.findIndex(r => r.id === id);
+  const nav: StaffNav = {
+    prevId: pos > 0 ? ids[pos - 1].id : null,
+    prevName: pos > 0 ? ids[pos - 1].name : null,
+    nextId: pos < ids.length - 1 ? ids[pos + 1].id : null,
+    nextName: pos < ids.length - 1 ? ids[pos + 1].name : null,
+  };
+
+  const qsObj = new URLSearchParams();
+  if (q) qsObj.set('q', q);
+  if (filterDiv !== 'all') qsObj.set('div', filterDiv);
+  if (filterStatus !== 'all') qsObj.set('enrollment', filterStatus);
+  if (filterActive !== '1') qsObj.set('active', filterActive);
+  if (filterRetirement) qsObj.set('retire', filterRetirement);
+  const qsStr = qsObj.toString();
+
+  return c.html(layout(`${emp.name} — 社員情報`, staffForm(emp, nav, qsStr), 'staff'));
 });
 
 // ===== フォームHTML生成 =====
-function staffForm(emp: StaffRow | null): string {
+function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string {
   const isNew = !emp;
   const v = (key: keyof StaffRow) => (emp ? String(emp[key] ?? '') : '');
   const checked = (key: keyof StaffRow) => emp && emp[key] ? 'checked' : '';
@@ -887,11 +1052,23 @@ function staffForm(emp: StaffRow | null): string {
 
   const START_TIMES_JSON = JSON.stringify(START_TIMES);
 
+  const listHref = `${ADMIN_PATH}/staff${qsStr ? '?' + qsStr : ''}`;
+  const navBar = nav && !isNew ? `
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;">
+  ${nav.prevId
+    ? `<a href="${ADMIN_PATH}/staff/${nav.prevId}${qsStr ? '?' + qsStr : ''}" style="display:flex;align-items:center;gap:5px;padding:7px 14px;background:#f1f5f9;color:#374151;border:1px solid #d1d5db;border-radius:8px;text-decoration:none;font-size:12px;font-weight:600;max-width:44%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">← ${escHtml(nav.prevName ?? '前の社員')}</a>`
+    : `<span></span>`}
+  ${nav.nextId
+    ? `<a href="${ADMIN_PATH}/staff/${nav.nextId}${qsStr ? '?' + qsStr : ''}" style="display:flex;align-items:center;gap:5px;padding:7px 14px;background:#f1f5f9;color:#374151;border:1px solid #d1d5db;border-radius:8px;text-decoration:none;font-size:12px;font-weight:600;max-width:44%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;">${escHtml(nav.nextName ?? '次の社員')} →</a>`
+    : `<span></span>`}
+</div>` : '';
+
   return `
 <div style="max-width:720px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+  ${navBar}
   <!-- ヘッダー -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-    <a href="${ADMIN_PATH}/staff" style="color:#2563eb;font-size:13px;text-decoration:none;">← 社員一覧に戻る</a>
+    <a href="${listHref}" style="color:#2563eb;font-size:13px;text-decoration:none;">← 社員一覧に戻る</a>
     ${!isNew ? `
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
       ${emp!.is_active && isNewcomer
@@ -899,9 +1076,17 @@ function staffForm(emp: StaffRow | null): string {
         : emp!.is_active
         ? `<button onclick="toggleNewcomer(${emp!.id},false,'${escHtml(emp!.name)}')" style="padding:5px 14px;background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">新人として登録</button>`
         : ''}
+      <button onclick="toggleHanchyo(${emp!.id},${emp!.is_hanchyo ? 1 : 0},'${escHtml(emp!.name)}')"
+        style="padding:5px 14px;background:${emp!.is_hanchyo ? '#fef3c7' : '#f9fafb'};color:${emp!.is_hanchyo ? '#92400e' : '#374151'};border:1px solid ${emp!.is_hanchyo ? '#fde68a' : '#d1d5db'};border-radius:6px;font-size:12px;cursor:pointer;">
+        ${emp!.is_hanchyo ? '班長解除' : '班長として登録'}
+      </button>
       ${emp!.is_active
         ? `<button onclick="retireStaff(${emp!.id},'${escHtml(emp!.name)}')" style="padding:5px 14px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;font-size:12px;cursor:pointer;">退職処理</button>`
         : `<button onclick="reinstateStaff(${emp!.id},'${escHtml(emp!.name)}')" style="padding:5px 14px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;cursor:pointer;">在籍に戻す</button>`}
+      <button onclick="toggleExcludeRetirement(${emp!.id},${emp!.exclude_retirement_candidate ? 1 : 0},'${escHtml(emp!.name)}')"
+        style="padding:5px 14px;background:${emp!.exclude_retirement_candidate ? '#fff7ed' : '#f3f4f6'};color:${emp!.exclude_retirement_candidate ? '#9a3412' : '#6b7280'};border:1px solid ${emp!.exclude_retirement_candidate ? '#fed7aa' : '#d1d5db'};border-radius:6px;font-size:12px;cursor:pointer;">
+        ${emp!.exclude_retirement_candidate ? '退職候補に戻す' : '退職候補から除外'}
+      </button>
       <button onclick="purgeStaff(${emp!.id},'${escHtml(emp!.name)}')" style="padding:5px 12px;background:#1f2937;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;">完全削除</button>
     </div>` : ''}
   </div>
@@ -1134,16 +1319,42 @@ async function saveStaff() {
   if (!data) return;
   const url = IS_NEW ? '/api/employees' : '/api/employees/' + STAFF_ID;
   const method = IS_NEW ? 'POST' : 'PUT';
-  const res = await fetch(url, {
-    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
-  });
-  const json = await res.json().catch(() => ({}));
-  if (res.ok) {
-    const id = IS_NEW ? json.id : STAFF_ID;
-    window.location.href = ADMIN_PATH + '/staff/' + id;
-  } else {
-    alert('保存に失敗しました: ' + (json.error ?? '不明なエラー'));
+  try {
+    const res = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    });
+    const ct = res.headers.get('Content-Type') || '';
+    if (!ct.includes('application/json')) {
+      alert('セッションが切れています。ページを再読み込みしてください。');
+      location.reload();
+      return;
+    }
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      if (IS_NEW) {
+        window.location.href = ADMIN_PATH + '/staff/' + json.id;
+      } else {
+        showToast('✓ 保存しました', '#166534');
+        setTimeout(() => location.reload(), 800);
+      }
+    } else {
+      alert('保存に失敗しました: ' + (json.error ?? '不明なエラー'));
+    }
+  } catch(e) {
+    alert('通信エラー: ' + (e instanceof Error ? e.message : String(e)));
   }
+}
+
+function showToast(msg, color) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-10px);background:' + (color || '#166534') + ';color:white;padding:13px 28px;border-radius:10px;font-size:14px;font-weight:700;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.25);opacity:0;transition:opacity 0.2s,transform 0.2s;pointer-events:none;white-space:nowrap;';
+  document.body.appendChild(t);
+  requestAnimationFrame(() => {
+    t.style.opacity = '1';
+    t.style.transform = 'translateX(-50%) translateY(0)';
+  });
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2000);
 }
 
 async function appendNote() {
@@ -1206,6 +1417,30 @@ async function toggleNewcomer(id, currentlyNewcomer, name) {
     });
     if (res.ok) location.reload(); else alert('更新に失敗しました');
   }
+}
+
+async function toggleHanchyo(id, currentVal, name) {
+  const toSet = currentVal ? 0 : 1;
+  const msg = toSet ? name + ' を班長として登録しますか？' : name + ' の班長登録を解除しますか？';
+  if (!confirm(msg)) return;
+  const res = await fetch('/api/employees/' + id, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ is_hanchyo: toSet })
+  });
+  if (res.ok) location.reload(); else alert('更新に失敗しました');
+}
+
+async function toggleExcludeRetirement(id, currentVal, name) {
+  const toSet = currentVal ? 0 : 1;
+  const msg = toSet
+    ? name + ' を退職候補リストから除外しますか？\\n（除外後も長欠・退職日は変わりません）'
+    : name + ' を退職候補リストに戻しますか？';
+  if (!confirm(msg)) return;
+  const res = await fetch('/api/employees/' + id, {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ exclude_retirement_candidate: toSet })
+  });
+  if (res.ok) location.reload(); else alert('更新に失敗しました');
 }
 
 // 初期化時に時間選択肢を更新

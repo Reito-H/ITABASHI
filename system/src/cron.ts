@@ -10,13 +10,14 @@ async function pushToInstructors(env: Env, messages: object[]): Promise<void> {
     'SELECT line_uid FROM instructors WHERE line_uid IS NOT NULL AND is_active = 1'
   ).all<{ line_uid: string }>();
 
-  for (const row of (rows.results ?? [])) {
-    await fetch('https://api.line.me/v2/bot/message/push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${at}` },
-      body: JSON.stringify({ to: row.line_uid, messages })
-    });
-  }
+  const uids = (rows.results ?? []).map(r => r.line_uid);
+  if (uids.length === 0) return;
+  // Multicast API: 1リクエストで最大500人に一括送信
+  await fetch('https://api.line.me/v2/bot/message/multicast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${at}` },
+    body: JSON.stringify({ to: uids, messages }),
+  });
 }
 
 // 朝の出勤レポート

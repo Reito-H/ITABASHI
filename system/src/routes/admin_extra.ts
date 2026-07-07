@@ -1148,7 +1148,8 @@ app.get('/vehicles', async (c) => {
     id: number; radio_no: number | null; plate_no: string | null; plate_num: string | null;
     car_type: string | null; fuel: string | null; grade: string | null;
     company: string | null; office: string | null; capacity: number | null;
-    luggage: string | null; office2: string | null; radio_no2: number | null; division: string | null;
+    luggage: string | null; office2: string | null; radio_no2: number | null;
+    division: string | null; team: string | null;
     office_phone: string | null;
   };
 
@@ -1177,14 +1178,15 @@ app.get('/vehicles', async (c) => {
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(v.car_type ?? '-')}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(v.office ?? '-')}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(v.division ?? '-')}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${v.team ? escHtml(v.team) + '班' : '-'}</td>
     </tr>`).join('');
 
   const emptyMsg = searched
-    ? `<tr><td colspan="5" style="padding:24px;text-align:center;color:#9ca3af;">「${escHtml(q)}」の検索結果はありません</td></tr>`
-    : `<tr><td colspan="5" style="padding:24px;text-align:center;color:#9ca3af;">上の検索ボックスに番号を入力してください</td></tr>`;
+    ? `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">「${escHtml(q)}」の検索結果はありません</td></tr>`
+    : `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">上の検索ボックスに番号を入力してください</td></tr>`;
 
   const content = `
-    <form method="get" style="display:flex;gap:8px;margin-bottom:20px;">
+    <form method="get" style="display:flex;gap:8px;margin-bottom:16px;">
       <input name="q" value="${escHtml(q)}" placeholder="無線番号 or ナンバー（例: 6677）"
         style="flex:1;padding:10px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:15px;"
         autofocus autocomplete="off">
@@ -1192,10 +1194,25 @@ app.get('/vehicles', async (c) => {
       ${q ? `<a href="${ADMIN_PATH}/vehicles" style="padding:10px 16px;background:#e5e7eb;color:#374151;border-radius:8px;font-size:14px;text-decoration:none;display:flex;align-items:center;">クリア</a>` : ''}
     </form>
 
+    <!-- Excelインポート -->
+    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:16px 20px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span style="font-size:13px;font-weight:700;color:#1e293b;">車両データ Excelインポート</span>
+        <span style="font-size:11px;color:#9ca3af;">☆車両検索.xlsx の最新版をアップロード</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <input type="file" id="xlsx-file" accept=".xlsx" style="font-size:13px;">
+        <button onclick="previewXlsx()" style="padding:7px 16px;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">変更点を確認</button>
+        <button id="btn-xlsx-import" onclick="importXlsx()" disabled
+          style="padding:7px 16px;background:#166534;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;opacity:0.5;">インポート実行</button>
+      </div>
+      <div id="xlsx-preview" style="margin-top:12px;"></div>
+    </div>
+
     ${searched ? `<div style="font-size:13px;color:#6b7280;margin-bottom:8px;">${results.length}件ヒット${results.length >= 50 ? '（上位50件表示）' : ''}</div>` : ''}
 
     <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);overflow:auto;">
-      <table style="width:100%;border-collapse:collapse;min-width:700px;">
+      <table style="width:100%;border-collapse:collapse;min-width:800px;">
         <thead style="background:#f9fafb;">
           <tr>
             <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">無線番号</th>
@@ -1203,13 +1220,196 @@ app.get('/vehicles', async (c) => {
             <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">車種</th>
             <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">営業所</th>
             <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">課</th>
+            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">班</th>
           </tr>
         </thead>
         <tbody>${rows || emptyMsg}</tbody>
       </table>
     </div>
+
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script>
+  var _diffRows = null;
+
+  // ExcelをSheetJSでパースし差分をサーバーに確認させる
+  async function previewXlsx() {
+    var file = document.getElementById('xlsx-file').files[0];
+    if (!file) { alert('ファイルを選択してください'); return; }
+    var prev = document.getElementById('xlsx-preview');
+    prev.innerHTML = '<div style="color:#6b7280;font-size:13px;">読み込み中...</div>';
+    try {
+      var buf = await file.arrayBuffer();
+      var wb = XLSX.read(buf, { type: 'array' });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+      // ヘッダー行(0行目)の列インデックスを特定
+      var header = raw[0];
+      var colIdx = {};
+      for (var i = 0; i < header.length; i++) {
+        var h = header[i];
+        if (h === '営業所')   colIdx.office2 = i;   // 49列目相当
+        if (h === '無線番号' && i > 40) colIdx.radio_no = i; // 50列目相当
+        if (h === '課')      colIdx.division = i;  // 51列目相当
+        if (h === '班')      colIdx.team = i;      // 班列（将来追加）
+        if (h === '車両番号' && i > 20) colIdx.plate_no = i;
+        if (h === '車種名')  colIdx.car_type = i;
+        if (h === '営業所' && i < 40) colIdx.office = i;
+      }
+      // データ行を整形（radio_noがある行のみ）
+      var rows = [];
+      for (var ri = 1; ri < raw.length; ri++) {
+        var r = raw[ri];
+        var rn = r[colIdx.radio_no];
+        if (!rn || isNaN(Number(rn))) continue;
+        rows.push({
+          radio_no: Number(rn),
+          plate_no: r[colIdx.plate_no] ? String(r[colIdx.plate_no]) : null,
+          car_type: r[colIdx.car_type] ? String(r[colIdx.car_type]) : null,
+          office:   r[colIdx.office]   ? String(r[colIdx.office])   : null,
+          office2:  r[colIdx.office2]  ? String(r[colIdx.office2])  : null,
+          division: r[colIdx.division] ? String(r[colIdx.division]) : null,
+          team:     colIdx.team != null && r[colIdx.team] ? String(r[colIdx.team]) : null,
+        });
+      }
+      // サーバーに差分確認を依頼
+      var res = await fetch('${ADMIN_PATH}/vehicles/xlsx-diff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: rows }),
+      });
+      if (!res.ok) { prev.innerHTML = '<div style="color:#dc2626;font-size:13px;">エラー: ' + (await res.text()) + '</div>'; return; }
+      var data = await res.json();
+      _diffRows = data.rows;
+      var btn = document.getElementById('btn-xlsx-import');
+      if (!_diffRows || _diffRows.length === 0) {
+        prev.innerHTML = '<div style="color:#6b7280;font-size:13px;">変更点はありません（最新の状態です）</div>';
+        btn.disabled = true; btn.style.opacity = '0.5'; return;
+      }
+      btn.disabled = false; btn.style.opacity = '1';
+      var html = '<div style="font-size:13px;font-weight:600;color:#1e293b;margin-bottom:8px;">変更点: ' + _diffRows.length + '件</div>';
+      html += '<div style="overflow:auto;max-height:200px;border:1px solid #e5e7eb;border-radius:6px;">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+      html += '<thead style="background:#f9fafb;"><tr><th style="padding:4px 8px;border-bottom:1px solid #e5e7eb;text-align:left;">無線番号</th><th style="padding:4px 8px;border-bottom:1px solid #e5e7eb;text-align:left;">項目</th><th style="padding:4px 8px;border-bottom:1px solid #e5e7eb;text-align:left;">変更前</th><th style="padding:4px 8px;border-bottom:1px solid #e5e7eb;text-align:left;">変更後</th></tr></thead>';
+      html += '<tbody>' + _diffRows.map(function(r) {
+        return r.changes.map(function(ch) {
+          return '<tr><td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;">' + r.radio_no + '</td>'
+            + '<td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;">' + ch.field + '</td>'
+            + '<td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;color:#dc2626;">' + (ch.old ?? '-') + '</td>'
+            + '<td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;color:#16a34a;">' + (ch.new ?? '-') + '</td></tr>';
+        }).join('');
+      }).join('') + '</tbody></table></div>';
+      prev.innerHTML = html;
+    } catch(e) {
+      prev.innerHTML = '<div style="color:#dc2626;font-size:13px;">ファイルの読み込みに失敗しました: ' + e.message + '</div>';
+    }
+  }
+
+  async function importXlsx() {
+    if (!_diffRows || _diffRows.length === 0) return;
+    if (!confirm(_diffRows.length + '件の変更を適用しますか？')) return;
+    var btn = document.getElementById('btn-xlsx-import');
+    btn.disabled = true; btn.textContent = '適用中...';
+    var res = await fetch('${ADMIN_PATH}/vehicles/xlsx-import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: _diffRows }),
+    });
+    if (!res.ok) { alert('エラー: ' + (await res.text())); btn.disabled = false; btn.textContent = 'インポート実行'; return; }
+    var data = await res.json();
+    alert(data.updated + '件を更新しました。');
+    location.reload();
+  }
+  </script>
   `;
   return c.html(layout('車両検索', content, 'vehicles'));
+});
+
+// =====================
+// 車両データ Excelプレビュー用：フロントがパースしたデータをDBと比較して差分を返す
+// =====================
+app.post('/vehicles/xlsx-diff', async (c) => {
+  const body = await c.req.json<{
+    rows: Array<{ radio_no: number; plate_no: string; car_type: string; office: string; office2: string; division: string; team: string | null }>
+  }>();
+  const incoming = body.rows ?? [];
+  if (incoming.length === 0) return c.json({ rows: [] });
+
+  // DBの現在データを取得
+  type DbRow = { id: number; radio_no: number | null; plate_no: string | null; car_type: string | null; office: string | null; office2: string | null; division: string | null; team: string | null };
+  const dbRows = await c.env.DB.prepare(
+    'SELECT id, radio_no, plate_no, car_type, office, office2, division, team FROM vehicles'
+  ).all<DbRow>();
+  const dbMap = new Map<number, DbRow>();
+  for (const r of (dbRows.results ?? [])) if (r.radio_no != null) dbMap.set(r.radio_no, r);
+
+  type Change = { field: string; old: string | null; new: string | null };
+  type DiffRow = { radio_no: number; id: number; changes: Change[] };
+  const diffs: DiffRow[] = [];
+
+  const FIELDS: Array<{ key: keyof DbRow; label: string }> = [
+    { key: 'plate_no', label: '車両番号' },
+    { key: 'car_type', label: '車種' },
+    { key: 'office',   label: '営業所' },
+    { key: 'office2',  label: '詳細営業所' },
+    { key: 'division', label: '課' },
+    { key: 'team',     label: '班' },
+  ];
+
+  for (const row of incoming) {
+    const db = dbMap.get(row.radio_no);
+    if (!db) continue; // 新規追加は対象外（既存のみ更新）
+    const changes: Change[] = [];
+    for (const { key, label } of FIELDS) {
+      const oldVal = db[key] as string | null;
+      const newVal = (row as Record<string, unknown>)[key] as string | null;
+      if ((oldVal ?? '') !== (newVal ?? '')) {
+        changes.push({ field: label, old: oldVal, new: newVal });
+      }
+    }
+    if (changes.length > 0) diffs.push({ radio_no: row.radio_no, id: db.id, changes });
+  }
+
+  return c.json({ rows: diffs });
+});
+
+// =====================
+// 車両データ Excelインポート実行（差分をDBに適用）
+// =====================
+app.post('/vehicles/xlsx-import', async (c) => {
+  const body = await c.req.json<{
+    rows: Array<{ radio_no: number; id: number; changes: Array<{ field: string; old: string | null; new: string | null }> }>
+  }>();
+  const diffs = body.rows ?? [];
+  if (diffs.length === 0) return c.json({ updated: 0 });
+
+  const FIELD_TO_COL: Record<string, string> = {
+    '車両番号': 'plate_no',
+    '車種':     'car_type',
+    '営業所':   'office',
+    '詳細営業所': 'office2',
+    '課':       'division',
+    '班':       'team',
+  };
+
+  let updated = 0;
+  for (const diff of diffs) {
+    const sets: string[] = [];
+    const vals: (string | null)[] = [];
+    for (const ch of diff.changes) {
+      const col = FIELD_TO_COL[ch.field];
+      if (!col) continue;
+      sets.push(`${col} = ?`);
+      vals.push(ch.new);
+    }
+    if (sets.length === 0) continue;
+    vals.push(String(diff.id));
+    await c.env.DB.prepare(
+      `UPDATE vehicles SET ${sets.join(', ')} WHERE id = ?`
+    ).bind(...vals).run();
+    updated++;
+  }
+
+  return c.json({ updated });
 });
 
 // =====================

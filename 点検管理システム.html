@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>定期点検管理システム</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Meiryo', 'Yu Gothic', 'MS Gothic', sans-serif; background: #f0f2f5; color: #222; font-size: 14px; }
+
+.header { background: #1a4a8a; color: white; padding: 14px 24px; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+.header h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.05em; }
+.header-note { font-size: 11px; opacity: 0.75; margin-left: auto; }
+
+.tabs { background: #163d73; display: flex; padding: 0 20px; }
+.tab-btn { background: none; border: none; color: rgba(255,255,255,0.65); padding: 11px 22px; cursor: pointer; font-size: 13px; font-family: inherit; border-bottom: 3px solid transparent; transition: 0.15s; }
+.tab-btn:hover { color: rgba(255,255,255,0.9); }
+.tab-btn.active { color: white; border-bottom-color: #5b9ef4; font-weight: 600; }
+
+.main { padding: 18px 20px; max-width: 1100px; }
+
+/* Controls */
+.controls { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; background: white; padding: 12px 16px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.controls label { font-size: 12px; color: #555; font-weight: 600; }
+.controls select { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; font-family: inherit; background: white; cursor: pointer; }
+.controls select:focus { outline: none; border-color: #5b9ef4; }
+.dept-tabs { display: flex; gap: 4px; }
+.dept-btn { padding: 5px 16px; border: 1px solid #c5d5e8; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit; background: white; color: #1a4a8a; transition: 0.15s; }
+.dept-btn:hover { background: #e8f0fa; }
+.dept-btn.active { background: #1a4a8a; color: white; border-color: #1a4a8a; font-weight: 600; }
+#save-status { font-size: 12px; color: #28a745; margin-left: auto; }
+
+.dept-title { font-size: 15px; font-weight: 700; color: #1a4a8a; margin-bottom: 10px; padding-left: 2px; }
+
+/* Schedule table */
+.table-wrapper { overflow-x: auto; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+.schedule-table { border-collapse: collapse; width: 100%; background: white; }
+.schedule-table th { background: #d4e4f7; padding: 9px 6px; font-size: 13px; text-align: center; border: 1px solid #b0c8e4; font-weight: 700; color: #1a3a6a; }
+.schedule-table .han-th { width: 44%; }
+.schedule-table .date-th { width: 12%; }
+.schedule-table td { border: 1px solid #d4dde8; vertical-align: top; padding: 0; }
+.date-cell { text-align: center; font-size: 14px; font-weight: 700; padding: 6px 4px; background: #fafbfc; color: #333; }
+.date-cell.saturday { background: #ddeeff; color: #004488; }
+.date-cell.sunday { background: #ffdddd; color: #880000; }
+.date-cell.holiday { background: #ffe0f0; color: #880044; }
+.han-cell { min-height: 34px; position: relative; padding: 4px 28px 4px 4px; }
+.han-cell:hover { background: #f8faff; }
+
+/* Vehicle tags */
+.vehicle-tags { display: flex; flex-wrap: wrap; gap: 3px; min-height: 24px; }
+.vehicle-tag { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 3px; font-size: 13px; font-weight: 700; cursor: pointer; line-height: 1.3; transition: opacity 0.1s; }
+.vehicle-tag:hover { opacity: 0.75; }
+.type-inspect { color: #000; background: #f4f4f4; border: 1px solid #bbb; }
+.type-shaken  { color: #c00; background: #fff0f0; border: 1px solid #c00; }
+.type-bomb    { color: #0055bb; background: #eef3ff; border: 1px solid #0055bb; }
+.type-sub     { color: #007700; background: #efffef; border: 1px solid #007700; }
+.type-recall  { color: #000; background: #fff; border: 2px solid #333; }
+.vehicle-time { font-size: 10px; color: #777; font-weight: 400; }
+
+/* Add button */
+.add-btn { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); background: #3366aa; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; font-size: 14px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.1s; flex-shrink: 0; }
+.add-btn:hover { opacity: 1; }
+
+/* Legend */
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 14px; background: white; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.07); font-size: 12px; align-items: center; }
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.legend-dot { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
+.leg-inspect { background: #f4f4f4; border: 1px solid #bbb; }
+.leg-shaken  { background: #fff0f0; border: 1px solid #c00; }
+.leg-bomb    { background: #eef3ff; border: 1px solid #0055bb; }
+.leg-sub     { background: #efffef; border: 1px solid #007700; }
+.leg-recall  { background: #fff; border: 2px solid #333; }
+
+/* Modal */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 200; }
+.modal-box { background: white; border-radius: 10px; padding: 24px; width: 380px; max-width: 95vw; box-shadow: 0 8px 30px rgba(0,0,0,0.2); }
+.modal-title { font-size: 15px; font-weight: 700; margin-bottom: 18px; color: #1a3a6a; border-bottom: 1px solid #e0e8f4; padding-bottom: 10px; }
+.modal-field { margin-bottom: 14px; }
+.modal-field label { display: block; font-size: 12px; color: #555; font-weight: 600; margin-bottom: 6px; }
+.modal-field input { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 15px; font-family: inherit; }
+.modal-field input:focus { outline: none; border-color: #5b9ef4; box-shadow: 0 0 0 2px rgba(91,158,244,0.2); }
+.type-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.type-select-btn { padding: 6px 11px; border: 2px solid #ddd; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 700; font-family: inherit; background: white; transition: 0.1s; }
+.type-select-btn.selected { box-shadow: 0 0 0 3px rgba(60,120,220,0.3); }
+.t-inspect { color: #000; border-color: #aaa; }
+.t-inspect.selected { background: #f4f4f4; border-color: #666; }
+.t-shaken  { color: #c00; border-color: #c00; }
+.t-shaken.selected  { background: #fff0f0; }
+.t-bomb    { color: #0055bb; border-color: #0055bb; }
+.t-bomb.selected    { background: #eef3ff; }
+.t-sub     { color: #007700; border-color: #007700; }
+.t-sub.selected     { background: #efffef; }
+.t-recall  { color: #000; border-color: #333; border-width: 2px; }
+.t-recall.selected  { background: #f8f8f8; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; border-top: 1px solid #eee; padding-top: 14px; }
+.btn-primary   { padding: 7px 18px; background: #1a4a8a; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit; font-weight: 600; }
+.btn-primary:hover { background: #2255a0; }
+.btn-secondary { padding: 7px 18px; background: #eee; color: #444; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit; }
+.btn-secondary:hover { background: #ddd; }
+.btn-danger    { padding: 7px 18px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-family: inherit; }
+.btn-danger:hover { background: #c82333; }
+
+/* Output tab */
+.output-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; background: white; padding: 12px 16px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.btn-export { padding: 9px 22px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-family: inherit; font-weight: 700; transition: 0.15s; }
+.btn-export:hover { background: #218838; }
+.preview-wrap { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.preview-title { font-size: 14px; font-weight: 700; color: #1a3a6a; margin-bottom: 14px; border-bottom: 2px solid #e0e8f4; padding-bottom: 8px; }
+.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 600px) { .preview-grid { grid-template-columns: 1fr; } }
+.preview-dept { border: 1px solid #dde8f4; border-radius: 6px; padding: 12px; }
+.preview-dept h4 { font-size: 13px; font-weight: 700; color: #1a4a8a; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+.preview-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+.preview-label { font-size: 11px; color: #777; min-width: 60px; padding-top: 2px; font-weight: 600; }
+.preview-vehicles { display: flex; flex-wrap: wrap; gap: 3px; }
+.no-data { color: #bbb; font-size: 12px; padding: 4px 0; }
+
+/* Data tools */
+.data-tools { margin-top: 16px; background: white; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.data-tools label { font-size: 12px; color: #666; font-weight: 600; }
+.btn-tool { padding: 5px 13px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px; font-family: inherit; background: #f8f8f8; color: #444; transition: 0.1s; }
+.btn-tool:hover { background: #eee; }
+.btn-tool.red { border-color: #dc3545; color: #dc3545; }
+.btn-tool.red:hover { background: #fff0f0; }
+
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>定期点検管理システム</h1>
+  <span class="header-note">赤字=車検　青=ボンベ交換　緑=代替　白枠=リコール</span>
+</div>
+
+<div class="tabs">
+  <button class="tab-btn active" id="tab-input"  onclick="showTab('input')">月次入力（定期点検表）</button>
+  <button class="tab-btn"        id="tab-output" onclick="showTab('output')">日次出力（点検車検確認表）</button>
+</div>
+
+<div class="main">
+
+  <!-- ===== 月次入力 ===== -->
+  <div id="panel-input">
+    <div class="controls">
+      <label>年月：</label>
+      <select id="year-in" onchange="onYearMonthChange()"></select>年
+      <select id="month-in" onchange="onYearMonthChange()"></select>月
+      <span style="color:#bbb">｜</span>
+      <label>課：</label>
+      <div class="dept-tabs">
+        <button class="dept-btn active" onclick="selectDept(1)" id="dept-1">1課</button>
+        <button class="dept-btn"        onclick="selectDept(2)" id="dept-2">2課</button>
+        <button class="dept-btn"        onclick="selectDept(3)" id="dept-3">3課</button>
+        <button class="dept-btn"        onclick="selectDept(4)" id="dept-4">4課</button>
+      </div>
+      <span id="save-status"></span>
+    </div>
+
+    <div class="legend">
+      <strong style="font-size:12px;color:#444;">凡例：</strong>
+      <div class="legend-item"><div class="legend-dot leg-inspect"></div>点検（黒）</div>
+      <div class="legend-item"><div class="legend-dot leg-shaken"></div>車検（赤）</div>
+      <div class="legend-item"><div class="legend-dot leg-bomb"></div>ボンベ交換（青）</div>
+      <div class="legend-item"><div class="legend-dot leg-sub"></div>代替（緑）</div>
+      <div class="legend-item"><div class="legend-dot leg-recall"></div>リコール（白枠）</div>
+      <span style="font-size:11px;color:#999;margin-left:6px;">※ 車番をクリックで編集・削除、＋で追加</span>
+    </div>
+
+    <div class="dept-title" id="dept-title"></div>
+    <div class="table-wrapper">
+      <div id="table-container"></div>
+    </div>
+
+    <div class="data-tools">
+      <label>データ管理：</label>
+      <button class="btn-tool" onclick="exportData()">📤 データ書き出し（JSON）</button>
+      <button class="btn-tool" onclick="importData()">📥 データ読み込み（JSON）</button>
+      <input type="file" id="import-file" accept=".json" class="hidden" onchange="doImport(this)">
+      <button class="btn-tool red" onclick="clearMonthData()">🗑 この月のデータ削除</button>
+    </div>
+  </div>
+
+  <!-- ===== 日次出力 ===== -->
+  <div id="panel-output" class="hidden">
+    <div class="output-controls">
+      <label>出力日：</label>
+      <select id="year-out" onchange="updateDays(); renderPreview()"></select>年
+      <select id="month-out" onchange="updateDays(); renderPreview()"></select>月
+      <select id="day-out" onchange="renderPreview()"></select>日
+      <button class="btn-export" onclick="generateExcel()">📥 Excel生成（点検車検確認表）</button>
+    </div>
+
+    <div class="preview-wrap">
+      <div class="preview-title" id="preview-title">点検車検確認表　プレビュー</div>
+      <div class="preview-grid" id="output-preview"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal -->
+<div id="modal-overlay" class="modal-overlay hidden" onclick="onOverlayClick(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title" id="modal-title">車両追加</div>
+    <div class="modal-field">
+      <label>車番</label>
+      <input type="text" id="vehicle-num-input" placeholder="例: 5064" maxlength="10"
+             onkeydown="if(event.key==='Enter')saveVehicle()">
+    </div>
+    <div class="modal-field">
+      <label>種別</label>
+      <div class="type-buttons">
+        <button class="type-select-btn t-inspect selected" onclick="selectType('inspect')">点検（黒）</button>
+        <button class="type-select-btn t-shaken"           onclick="selectType('shaken')">車検（赤）</button>
+        <button class="type-select-btn t-bomb"             onclick="selectType('bomb')">ボンベ（青）</button>
+        <button class="type-select-btn t-sub"              onclick="selectType('sub')">代替（緑）</button>
+        <button class="type-select-btn t-recall"           onclick="selectType('recall')">リコール</button>
+      </div>
+    </div>
+    <div class="modal-field">
+      <label>出庫時間（任意）</label>
+      <input type="text" id="vehicle-time-input" placeholder="例: 8:00　ナイト　15:00　休車" maxlength="10">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-danger hidden" id="btn-delete" onclick="deleteVehicle()">削除</button>
+      <button class="btn-secondary" onclick="closeModal()">キャンセル</button>
+      <button class="btn-primary"   onclick="saveVehicle()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// テンプレートBase64（テンプレートシートのみの点検車検確認表）
+// ============================================================
+const TEMPLATE_B64 = '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';
+
+// ============================================================
+// セルマッピング
+// ============================================================
+const CELLS = {
+  inspect: { 1:{v:'F6',t:'T6'}, 2:{v:'AC6',t:'AQ6'}, 3:{v:'AZ6',t:'BN6'}, 4:{v:'BW6',t:'CK6'} },
+  shaken:  { 1:{v:'F63',t:'U63'}, 2:{v:'AC63',t:'AR63'}, 3:{v:'AZ63',t:'BO63'}, 4:{v:'BW63',t:'CL63'} },
+  bomb:    { 1:{v:'F81',t:'U81'}, 2:{v:'AC81',t:'AR81'}, 3:{v:'AZ81',t:'BO81'}, 4:{v:'BW81',t:'CL81'} }
+};
+
+const TYPE_LABELS = { inspect:'点検', shaken:'車検', bomb:'ボンベ交換', sub:'代替', recall:'リコール' };
+
+// ============================================================
+// 状態
+// ============================================================
+const S = {
+  year: new Date().getFullYear(),
+  month: new Date().getMonth() + 1,
+  dept: 1,
+  data: JSON.parse(localStorage.getItem('tenken_schedules') || '{}'),
+  modal: { day:null, han:null, idx:null }
+};
+
+let selectedType = 'inspect';
+
+// ============================================================
+// 初期化
+// ============================================================
+function init() {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth()+1, d = now.getDate();
+
+  const fillYears = (id) => {
+    const el = document.getElementById(id);
+    for (let i = y-1; i <= y+2; i++) el.add(new Option(i+'年', i));
+    el.value = y;
+  };
+  fillYears('year-in'); fillYears('year-out');
+
+  const fillMonths = (id) => {
+    const el = document.getElementById(id);
+    for (let i = 1; i <= 12; i++) el.add(new Option(i+'月', i));
+    el.value = m;
+  };
+  fillMonths('month-in'); fillMonths('month-out');
+
+  updateDays();
+  const dayEl = document.getElementById('day-out');
+  dayEl.value = Math.min(d, parseInt(dayEl.options[dayEl.options.length-1].value));
+
+  S.year = y; S.month = m;
+  refreshTable();
+}
+
+function getDaysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
+
+function updateDays() {
+  const y = +document.getElementById('year-out').value;
+  const m = +document.getElementById('month-out').value;
+  const days = getDaysInMonth(y, m);
+  const el = document.getElementById('day-out');
+  const cur = +el.value || 1;
+  el.innerHTML = '';
+  for (let d = 1; d <= days; d++) el.add(new Option(d+'日', d));
+  el.value = Math.min(cur, days);
+}
+
+// ============================================================
+// タブ切替
+// ============================================================
+function showTab(tab) {
+  ['input','output'].forEach(t => {
+    document.getElementById('panel-'+t).classList.toggle('hidden', t !== tab);
+    document.getElementById('tab-'+t).classList.toggle('active', t === tab);
+  });
+  if (tab === 'output') renderPreview();
+}
+
+// ============================================================
+// 課選択
+// ============================================================
+function selectDept(dept) {
+  S.dept = dept;
+  for (let d=1;d<=4;d++) document.getElementById('dept-'+d).classList.toggle('active', d===dept);
+  refreshTable();
+}
+
+// ============================================================
+// データ操作
+// ============================================================
+function getKey() {
+  const y = +document.getElementById('year-in').value;
+  const m = +document.getElementById('month-in').value;
+  return `${y}${String(m).padStart(2,'0')}`;
+}
+
+function getDayData(day) {
+  return S.data[getKey()]?.[S.dept]?.[day] || {'1':[],'2':[]};
+}
+
+function saveData() {
+  localStorage.setItem('tenken_schedules', JSON.stringify(S.data));
+  const el = document.getElementById('save-status');
+  el.textContent = '✓ 保存済み';
+  setTimeout(()=>{ el.textContent=''; }, 1800);
+}
+
+// ============================================================
+// テーブル描画
+// ============================================================
+function onYearMonthChange() {
+  S.year = +document.getElementById('year-in').value;
+  S.month = +document.getElementById('month-in').value;
+  document.getElementById('dept-title').textContent = `${S.dept}課　定期点検表（${S.month}月）`;
+  refreshTable();
+}
+
+function refreshTable() {
+  document.getElementById('dept-title').textContent = `${S.dept}課　定期点検表（${S.month}月）`;
+  const days = getDaysInMonth(S.year, S.month);
+  let html = `<table class="schedule-table">
+    <colgroup><col style="width:44%"><col style="width:12%"><col style="width:44%"></colgroup>
+    <thead><tr><th class="han-th">《1班》</th><th class="date-th">日付</th><th class="han-th">《2班》</th></tr></thead>
+    <tbody>`;
+
+  for (let day = 1; day <= days; day++) {
+    const dow = new Date(S.year, S.month-1, day).getDay();
+    const dc = dow===0?'sunday':dow===6?'saturday':'';
+    const d = getDayData(day);
+    html += `<tr>
+      <td class="han-cell">
+        <div class="vehicle-tags" id="tags-${day}-1">${renderTags(d['1']||[], day, 1)}</div>
+        <button class="add-btn" onclick="openModal(${day},1)">＋</button>
+      </td>
+      <td class="date-cell ${dc}">${day}</td>
+      <td class="han-cell">
+        <div class="vehicle-tags" id="tags-${day}-2">${renderTags(d['2']||[], day, 2)}</div>
+        <button class="add-btn" onclick="openModal(${day},2)">＋</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+function renderTags(vehicles, day, han) {
+  return vehicles.map((v,i)=>
+    `<span class="vehicle-tag type-${v.type}" onclick="openModal(${day},${han},${i})" title="${TYPE_LABELS[v.type]||v.type}">
+      ${v.num}${v.time?`<span class="vehicle-time">${v.time}</span>`:''}
+    </span>`
+  ).join('');
+}
+
+// ============================================================
+// モーダル
+// ============================================================
+function openModal(day, han, idx=null) {
+  S.modal = {day, han, idx};
+  const isEdit = idx !== null;
+  document.getElementById('modal-title').textContent = isEdit
+    ? `${day}日 ${han}班 - 車両編集`
+    : `${day}日 ${han}班 - 車両追加`;
+
+  let num='', type='inspect', time='';
+  if (isEdit) {
+    const v = (getDayData(day)[String(han)]||[])[idx];
+    if (v) { num=v.num; type=v.type; time=v.time||''; }
+  }
+  document.getElementById('vehicle-num-input').value = num;
+  document.getElementById('vehicle-time-input').value = time;
+  document.getElementById('btn-delete').classList.toggle('hidden', !isEdit);
+  selectType(type);
+  document.getElementById('modal-overlay').classList.remove('hidden');
+  setTimeout(()=>document.getElementById('vehicle-num-input').focus(), 50);
+}
+
+function onOverlayClick(e) { if (e.target===e.currentTarget) closeModal(); }
+function closeModal() { document.getElementById('modal-overlay').classList.add('hidden'); }
+
+function selectType(type) {
+  selectedType = type;
+  document.querySelectorAll('.type-select-btn').forEach(b=>b.classList.remove('selected'));
+  const map = {inspect:'t-inspect',shaken:'t-shaken',bomb:'t-bomb',sub:'t-sub',recall:'t-recall'};
+  const btn = document.querySelector('.'+map[type]);
+  if (btn) btn.classList.add('selected');
+}
+
+function saveVehicle() {
+  const num = document.getElementById('vehicle-num-input').value.trim();
+  const time = document.getElementById('vehicle-time-input').value.trim();
+  if (!num) { alert('車番を入力してください'); return; }
+
+  const {day, han, idx} = S.modal;
+  const key = getKey();
+  if (!S.data[key]) S.data[key] = {};
+  if (!S.data[key][S.dept]) S.data[key][S.dept] = {};
+  if (!S.data[key][S.dept][day]) S.data[key][S.dept][day] = {'1':[],'2':[]};
+  const hanArr = S.data[key][S.dept][day];
+  if (!hanArr[String(han)]) hanArr[String(han)] = [];
+
+  const vehicle = {num, type:selectedType, ...(time?{time}:{})};
+  if (idx !== null) hanArr[String(han)][idx] = vehicle;
+  else hanArr[String(han)].push(vehicle);
+
+  saveData();
+  const el = document.getElementById(`tags-${day}-${han}`);
+  if (el) el.innerHTML = renderTags(hanArr[String(han)], day, han);
+  closeModal();
+}
+
+function deleteVehicle() {
+  const {day, han, idx} = S.modal;
+  if (idx === null) return;
+  const key = getKey();
+  S.data[key]?.[S.dept]?.[day]?.[String(han)]?.splice(idx, 1);
+  saveData();
+  const d = getDayData(day);
+  const el = document.getElementById(`tags-${day}-${han}`);
+  if (el) el.innerHTML = renderTags(d[String(han)]||[], day, han);
+  closeModal();
+}
+
+// ============================================================
+// 日次出力プレビュー
+// ============================================================
+function renderPreview() {
+  const y = +document.getElementById('year-out').value;
+  const m = +document.getElementById('month-out').value;
+  const day = +document.getElementById('day-out').value;
+  const key = `${y}${String(m).padStart(2,'0')}`;
+  document.getElementById('preview-title').textContent = `${m}月${day}日　点検車検確認表　プレビュー`;
+
+  let html = '';
+  for (let dept=1; dept<=4; dept++) {
+    const dd = S.data[key]?.[dept]?.[day];
+    const all = [...(dd?.['1']||[]), ...(dd?.['2']||[])];
+    const inspect = all.filter(v=>['inspect','sub','recall'].includes(v.type));
+    const shaken  = all.filter(v=>v.type==='shaken');
+    const bomb    = all.filter(v=>v.type==='bomb');
+
+    html += `<div class="preview-dept"><h4>${dept}課</h4>`;
+    if (!all.length) {
+      html += '<div class="no-data">データなし</div>';
+    } else {
+      if (inspect.length) html += previewRow('点検実施', inspect);
+      if (shaken.length)  html += previewRow('車検', shaken);
+      if (bomb.length)    html += previewRow('ボンベ交換', bomb);
+    }
+    html += '</div>';
+  }
+  document.getElementById('output-preview').innerHTML = html;
+}
+
+function previewRow(label, vehicles) {
+  return `<div class="preview-row">
+    <span class="preview-label">${label}:</span>
+    <div class="preview-vehicles">
+      ${vehicles.map(v=>`<span class="vehicle-tag type-${v.type}">${v.num}</span>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// Excel生成（点検車検確認表）
+// ============================================================
+function generateExcel() {
+  const y = +document.getElementById('year-out').value;
+  const m = +document.getElementById('month-out').value;
+  const day = +document.getElementById('day-out').value;
+  const key = `${y}${String(m).padStart(2,'0')}`;
+  const dateStr = `${m}月${day}日`;
+
+  // テンプレート読み込み
+  const wb = XLSX.read(TEMPLATE_B64, {type:'base64', cellStyles:true});
+  const oldName = wb.SheetNames[0];
+  const ws = wb.Sheets[oldName];
+
+  // シート名変更
+  wb.SheetNames[0] = dateStr;
+  wb.Sheets[dateStr] = ws;
+  delete wb.Sheets[oldName];
+
+  // 各課のデータを入力
+  for (let dept=1; dept<=4; dept++) {
+    const dd = S.data[key]?.[dept]?.[day];
+    const all = [...(dd?.['1']||[]), ...(dd?.['2']||[])];
+
+    // 種別別に分類
+    const inspect = all.filter(v=>['inspect','sub','recall'].includes(v.type));
+    const shaken  = all.filter(v=>v.type==='shaken');
+    const bomb    = all.filter(v=>v.type==='bomb');
+
+    // 点検実施車両セクション
+    setCell(ws, CELLS.inspect[dept].v, inspect.map(v=>v.num).join('\n'));
+    setCell(ws, CELLS.inspect[dept].t, inspect.map(v=>v.time||'').join('\n').replace(/(\n)+$/,''));
+
+    // 車検セクション
+    setCell(ws, CELLS.shaken[dept].v, shaken.map(v=>v.num).join('\n'));
+    setCell(ws, CELLS.shaken[dept].t, shaken.map(v=>v.time||'').join('\n').replace(/(\n)+$/,''));
+
+    // ボンベ交換セクション
+    setCell(ws, CELLS.bomb[dept].v, bomb.map(v=>v.num).join('\n'));
+    setCell(ws, CELLS.bomb[dept].t, bomb.map(v=>v.time||'').join('\n').replace(/(\n)+$/,''));
+  }
+
+  // 横向き印刷設定を明示的に適用
+  if (!ws['!pageSetup']) ws['!pageSetup'] = {};
+  ws['!pageSetup'].orientation = 'landscape';
+  ws['!pageSetup'].paperSize = 9; // A4
+
+  XLSX.writeFile(wb, `点検車検確認表_${dateStr}.xlsx`);
+}
+
+function setCell(ws, ref, value) {
+  if (!value) return;
+  const existing = ws[ref] || {};
+  ws[ref] = { ...existing, t:'s', v:value };
+}
+
+// ============================================================
+// データ管理
+// ============================================================
+function exportData() {
+  const json = JSON.stringify(S.data, null, 2);
+  const blob = new Blob([json], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `点検データ_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+
+function importData() { document.getElementById('import-file').click(); }
+function doImport(input) {
+  if (!input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      S.data = {...S.data, ...parsed};
+      saveData();
+      refreshTable();
+      alert('データを読み込みました');
+    } catch {
+      alert('ファイルの形式が正しくありません');
+    }
+    input.value = '';
+  };
+  reader.readAsText(input.files[0]);
+}
+
+function clearMonthData() {
+  const key = getKey();
+  if (!confirm(`${S.year}年${S.month}月 ${S.dept}課のデータを全て削除しますか？`)) return;
+  if (S.data[key]?.[S.dept]) {
+    delete S.data[key][S.dept];
+    saveData();
+    refreshTable();
+  }
+}
+
+// ============================================================
+// キーボードショートカット
+// ============================================================
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ============================================================
+// 開始
+// ============================================================
+init();
+</script>
+</body>
+</html>
