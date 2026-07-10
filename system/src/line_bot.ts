@@ -222,17 +222,8 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
 
   // ===== 革命AI（リッチメニューから起動）=====
   if (inputText === '革命AI') {
-    await reply(replyToken, at, [textWithQuickReply(
-      '📖 革命AI\n\nマニュアルから知りたいことを選んでください。\nまたは「? 質問内容」と入力して直接質問もできます。',
-      [
-        { label: 'S.RIDE・配車', text: '? S.RIDEの操作方法を教えて' },
-        { label: '決済・精算', text: '? 決済の方法を教えて' },
-        { label: 'ナビ操作', text: '? ナビの使い方を教えて' },
-        { label: 'エラー対応', text: '? エラーが出たときの対応を教えて' },
-        { label: 'チケット・券種', text: '? チケットの使い方を教えて' },
-        { label: 'メーター操作', text: '? メーターの操作方法を教えて' },
-        { label: '出庫・入庫', text: '? 出庫入庫の手順を教えて' },
-      ]
+    await reply(replyToken, at, [text(
+      '🤖 革命AI\n\nただいま準備中です。\n近日公開予定ですので、もうしばらくお待ちください！'
     )]);
     return;
   }
@@ -446,6 +437,18 @@ async function handleOperationsUser(
     const url = liffId ? `https://liff.line.me/${liffId}` : '';
     if (url) {
       await reply(replyToken, at, [text(`🚨 事故報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
+    }
+    return;
+  }
+
+  // 社員照会＋（課選択→絞り込み検索）→ LIFF URLを送信
+  if (inputText === '社員照会＋' || inputText === '社員照会プラス') {
+    const liffId = env.LIFF_ID_STAFF_LOOKUP_PLUS ?? '';
+    const url = liffId ? `https://liff.line.me/${liffId}` : '';
+    if (url) {
+      await reply(replyToken, at, [text(`👥 社員照会＋（課別検索）\n\n下をタップして開いてください:\n${url}`)]);
+    } else {
+      await reply(replyToken, at, [text('👥 社員照会＋\n\nただいま準備中です。もうしばらくお待ちください！')]);
     }
     return;
   }
