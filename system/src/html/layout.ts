@@ -18,6 +18,7 @@ export function layout(title: string, content: string, activePage: string = ''):
     { href: `${ADMIN_PATH}/events`,       label: '報告一覧',        id: 'events' },
     { href: `${ADMIN_PATH}/vehicles`,     label: '車両検索',        id: 'vehicles' },
     { href: `${ADMIN_PATH}/inspection`,   label: '点検管理',        id: 'inspection' },
+    { href: `${ADMIN_PATH}/manual-chat`,  label: 'マニュアルBot',   id: 'manual-chat' },
     { href: `${ADMIN_PATH}/settings`,     label: '設定',            id: 'settings' },
   ];
 

@@ -23,6 +23,8 @@ import liffRoutes from './routes/liff';
 import adminLiffRoutes from './routes/admin_liff';
 import adminInspectionRoutes from './routes/admin_inspection';
 import inspectionApi from './routes/api/inspection';
+import adminManualRoutes from './routes/admin_manual';
+import manualChatApi from './routes/api/manual_chat';
 import type { Env } from './auth';
 import { ADMIN_PATH, SECRET } from './config';
 
@@ -97,6 +99,7 @@ app.route(`/${SECRET}/admin`, adminExtraRoutes);
 app.route(`/${SECRET}/admin`, adminStaffRoutes);
 app.route(`/${SECRET}/admin`, adminLiffRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
+app.route(`/${SECRET}/admin`, adminManualRoutes);
 
 // =====================
 // API（認証必須）
@@ -106,6 +109,7 @@ app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path === '/api/line/webhook') return next(); // Webhook は署名検証
   if (path.startsWith('/api/liff/')) return next(); // LIFF API は LINE UID検証
+  if (path === '/api/manual-chat') return next(); // LINEからも呼ぶため認証スキップ（内部APIキー等で保護）
   return requireAuth(c, next);
 });
 
@@ -124,6 +128,7 @@ app.route('/api/period-settings', periodSettingsApi);
 app.route('/api/notifications', notificationsApi);
 app.route('/api/instructor-invite', instructorInviteApi);
 app.route('/api/inspection', inspectionApi);
+app.route('/api', manualChatApi);
 
 // =====================
 // LINE Webhook（署名検証あり・認証不要）

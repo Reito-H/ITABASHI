@@ -5,6 +5,7 @@
 import { getPeriod, getPeriodRange } from './auth';
 import type { Env } from './auth';
 import { getRichMenuForRole } from './routes/admin_liff';
+import { queryManual } from './utils/manual_search';
 
 // ===================================================
 // 型定義
@@ -216,6 +217,33 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   // ===== 未登録ユーザーの処理 =====
   if (!liffUser) {
     await handleUnregisteredUser(env, lineUid, replyToken, at, inputText, state, data);
+    return;
+  }
+
+  // ===== 革命AI（リッチメニューから起動）=====
+  if (inputText === '革命AI') {
+    await reply(replyToken, at, [textWithQuickReply(
+      '📖 革命AI\n\nマニュアルから知りたいことを選んでください。\nまたは「? 質問内容」と入力して直接質問もできます。',
+      [
+        { label: 'S.RIDE・配車', text: '? S.RIDEの操作方法を教えて' },
+        { label: '決済・精算', text: '? 決済の方法を教えて' },
+        { label: 'ナビ操作', text: '? ナビの使い方を教えて' },
+        { label: 'エラー対応', text: '? エラーが出たときの対応を教えて' },
+        { label: 'チケット・券種', text: '? チケットの使い方を教えて' },
+        { label: 'メーター操作', text: '? メーターの操作方法を教えて' },
+        { label: '出庫・入庫', text: '? 出庫入庫の手順を教えて' },
+      ]
+    )]);
+    return;
+  }
+
+  // ===== マニュアル検索（全登録ユーザー共通）=====
+  // 「？ 質問」または「?質問」で始まるメッセージはマニュアルBotへ
+  const manualMatch = inputText.match(/^[?？]\s*(.+)/s);
+  if (manualMatch && (env as any).GROQ_API_KEY) {
+    const question = manualMatch[1].trim();
+    const answer = await queryManual(env.DB, (env as any).GROQ_API_KEY, question, 'line', lineUid);
+    await reply(replyToken, at, [text(`📖 革命AI\n\n${answer}`)]);
     return;
   }
 
