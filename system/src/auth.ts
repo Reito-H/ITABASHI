@@ -14,6 +14,7 @@ export type Env = {
   LIFF_ID_ACCIDENT?: string;
   LIFF_ID_STAFF_LOOKUP?: string;
   LIFF_ID_STAFF_LOOKUP_PLUS?: string;
+  LIFF_ID_OTHER_FEATURES?: string;
   // 登録パスワード（wrangler secret put で設定）
   LINE_REG_PWD_VEHICLE?: string;    // 車番管理者
   LINE_REG_PWD_OPERATIONS?: string; // 運行管理者

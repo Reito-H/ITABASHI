@@ -1535,8 +1535,47 @@ app.get('/settings/offices', async (c) => {
         <span id="save-msg" style="font-size:13px;color:#16a34a;display:none;">保存しました</span>
       </div>
     </div>
+
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:20px;max-width:800px;margin-top:16px;">
+      <h3 style="font-size:14px;font-weight:700;color:#1e3a5f;margin:0 0 12px;">連絡先を追加</h3>
+      <p style="font-size:12px;color:#6b7280;margin:0 0 12px;">本社・配車センターなど、営業所以外の連絡先もここに追加できます。「その他機能」LIFFの電話番号一覧にも反映されます。</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div>
+          <label style="display:block;font-size:12px;color:#374151;margin-bottom:4px;">名称</label>
+          <input type="text" id="new-name" placeholder="例: 本社" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:160px;">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:#374151;margin-bottom:4px;">電話番号</label>
+          <input type="tel" id="new-phone" placeholder="03-XXXX-XXXX" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;width:140px;">
+        </div>
+        <button onclick="addOffice()" id="add-btn"
+          style="padding:8px 20px;background:#16a34a;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+          追加
+        </button>
+      </div>
+    </div>
+
     <script>
       var IDS = ${JSON.stringify(ids)};
+      async function addOffice() {
+        var name = document.getElementById('new-name').value.trim();
+        var phone = document.getElementById('new-phone').value.trim();
+        if (!name) { alert('名称を入力してください'); return; }
+        var btn = document.getElementById('add-btn');
+        btn.disabled = true; btn.textContent = '追加中...';
+        var res = await fetch('${ADMIN_PATH}/api/offices/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, phone: phone })
+        });
+        btn.disabled = false; btn.textContent = '追加';
+        if (res.ok) {
+          location.reload();
+        } else {
+          var data = await res.json().catch(function() { return {}; });
+          alert('追加に失敗しました: ' + (data.error || '不明なエラー'));
+        }
+      }
       async function saveAll() {
         var btn = document.getElementById('save-btn');
         btn.disabled = true; btn.textContent = '保存中...';
@@ -1578,6 +1617,24 @@ app.post('/api/offices', async (c) => {
   );
   await c.env.DB.batch(stmts);
   return c.text('OK');
+});
+
+app.post('/api/offices/add', async (c) => {
+  const body = await c.req.json<{ name: string; phone?: string }>();
+  const name = (body.name ?? '').trim();
+  if (!name) return c.json({ error: '名称は必須です' }, 400);
+
+  const existing = await c.env.DB.prepare('SELECT id FROM offices WHERE name = ?').bind(name).first();
+  if (existing) return c.json({ error: 'この名称はすでに登録されています' }, 409);
+
+  const maxSort = await c.env.DB.prepare('SELECT MAX(sort_order) AS m FROM offices').first<{ m: number | null }>();
+  const nextSort = (maxSort?.m ?? 0) + 1;
+
+  await c.env.DB.prepare(
+    'INSERT INTO offices (name, short_name, phone, sort_order) VALUES (?, ?, ?, ?)'
+  ).bind(name, name, (body.phone ?? '').trim() || null, nextSort).run();
+
+  return c.json({ ok: true });
 });
 
 export default app;

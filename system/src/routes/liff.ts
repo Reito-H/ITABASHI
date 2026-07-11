@@ -62,6 +62,13 @@ app.get('/liff/staff-lookup-plus', (c) => {
   return c.html(html);
 });
 
+// ===== LIFF: その他機能（示達事項＋各種便利機能へのアクセス）=====
+app.get('/liff/other-features', (c) => {
+  const liffId = c.env.LIFF_ID_OTHER_FEATURES ?? '';
+  const html = liffOtherFeaturesPage(liffId);
+  return c.html(html);
+});
+
 // ===== LIFF API: 社員検索 =====
 app.get('/api/liff/employees', async (c) => {
   const uid = await uidFromRequest(c.req.raw);
@@ -314,6 +321,26 @@ app.post('/api/liff/staff-add', async (c) => {
   ).run();
 
   return c.json({ ok: true });
+});
+
+// ===== LIFF API: 会社の主要連絡先一覧（その他機能の電話番号一覧）=====
+app.get('/api/liff/offices', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const liffUser = await c.env.DB.prepare(
+    'SELECT role FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string }>();
+  if (!liffUser) return c.json({ error: 'forbidden' }, 403);
+
+  const rows = await c.env.DB.prepare(`
+    SELECT short_name, phone
+    FROM offices
+    WHERE phone IS NOT NULL AND phone != ''
+    ORDER BY sort_order, id
+  `).all<{ short_name: string; phone: string }>();
+
+  return c.json(rows.results ?? []);
 });
 
 // ===== LIFF API: 忘れ物報告 送信 =====
@@ -2108,6 +2135,157 @@ function liffStaffLookupPlusPage(liffId: string): string {
 
   function ini(n){ return n?n.charAt(0):'?'; }
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  </script>
+</body>
+</html>`;
+}
+
+// 曜日ごとの示達事項（getDay(): 0=日 … 6=土）
+const WEEKLY_NOTICES: { day: string; items: string[] }[] = [
+  { day: '日', items: ['他県ナンバー注意　ゆずりあい運転を', '忘れ物防止　降車時は一声かけて一目見る'] },
+  { day: '月', items: ['目視で確認　急な動作をしない', '乗車拒否と苦情の絶無'] },
+  { day: '火', items: ['適切な休憩をとる', '無線をとって了解率向上'] },
+  { day: '水', items: ['車間距離は十分に　スピードは控えめに', '正しい回送表示'] },
+  { day: '木', items: ['後車に対する思いやり　静かに停止', '料金メーターは正しく　操作再度の確認'] },
+  { day: '金', items: ['交差点に注意　近づいたらアクセルからブレーキに', '乗禁ルールの徹底'] },
+  { day: '土', items: ['だろう運転をしない　かもしれない運転を', '大きな声で明るい挨拶　行先コースの確認'] },
+];
+
+function liffOtherFeaturesPage(liffId: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>その他機能</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
+    .page { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
+    .header { background: #0f766e; color: white; padding: 14px 16px; border-radius: 12px; margin-bottom: 16px; }
+    .header h1 { margin: 0; font-size: 17px; font-weight: 700; }
+    .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card-title { font-size: 13px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+    .notice-day { display: inline-block; font-size: 13px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 6px; padding: 2px 10px; margin-bottom: 8px; }
+    .notice-item { font-size: 14.5px; color: #111827; line-height: 1.6; margin-bottom: 4px; }
+    .notice-item:last-child { margin-bottom: 0; }
+    .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .feature-btn { background: white; border: none; border-radius: 12px; padding: 20px 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08); cursor: pointer; }
+    .feature-btn .icon { font-size: 26px; margin-bottom: 8px; }
+    .feature-btn .label { font-size: 13px; font-weight: 700; color: #1f2937; }
+    .sub-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+    .btn-back { background: none; border: none; color: #0f766e; font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px 0; }
+    .office-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px; border-bottom: 1px solid #f3f4f6; }
+    .office-row:last-child { border-bottom: none; }
+    .office-name { font-size: 14.5px; color: #111827; font-weight: 600; }
+    .office-call { color: #0f766e; font-size: 14px; font-weight: 700; text-decoration: none; }
+    .empty-note { color: #6b7280; font-size: 13px; text-align: center; padding: 24px 8px; }
+    .soon-note { color: #6b7280; font-size: 14px; text-align: center; padding: 32px 8px; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <div id="loading">読み込み中...</div>
+  <div id="app" style="display:none;">
+
+    <!-- メイン画面 -->
+    <div class="page" id="view-main">
+      <div class="header"><h1>その他機能</h1></div>
+
+      <div class="card">
+        <div class="card-title">本日の示達事項</div>
+        <div class="notice-day" id="notice-day"></div>
+        <div id="notice-items"></div>
+      </div>
+
+      <div class="btn-grid">
+        <button class="feature-btn" onclick="showOffices()">
+          <div class="icon">📞</div>
+          <div class="label">電話番号一覧</div>
+        </button>
+        <button class="feature-btn" onclick="showTimeCalc()">
+          <div class="icon">⏱️</div>
+          <div class="label">時間計算</div>
+        </button>
+      </div>
+    </div>
+
+    <!-- 電話番号一覧 -->
+    <div class="page" id="view-offices" style="display:none;">
+      <div class="sub-header">
+        <button class="btn-back" onclick="showMain()">← 戻る</button>
+      </div>
+      <div class="card">
+        <div class="card-title">電話番号一覧</div>
+        <div id="office-list"></div>
+      </div>
+    </div>
+
+    <!-- 時間計算（準備中） -->
+    <div class="page" id="view-timecalc" style="display:none;">
+      <div class="sub-header">
+        <button class="btn-back" onclick="showMain()">← 戻る</button>
+      </div>
+      <div class="card">
+        <div class="card-title">時間計算</div>
+        <div class="soon-note">ただいま準備中です。<br>もうしばらくお待ちください！</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  var LIFF_ACCESS_TOKEN = '';
+  var WEEKLY_NOTICES = ${JSON.stringify(WEEKLY_NOTICES)};
+
+  liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
+    .then(function() {
+      LIFF_ACCESS_TOKEN = liff.getAccessToken() || '';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      renderNotice();
+    })
+    .catch(function(err) {
+      document.getElementById('loading').textContent = 'エラー: ' + err.message;
+    });
+
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function renderNotice() {
+    var notice = WEEKLY_NOTICES[new Date().getDay()];
+    document.getElementById('notice-day').textContent = notice.day + '曜日';
+    document.getElementById('notice-items').innerHTML = notice.items.map(function(t, i) {
+      return '<div class="notice-item">' + (i + 1) + '. ' + esc(t) + '</div>';
+    }).join('');
+  }
+
+  function showMain() {
+    document.getElementById('view-main').style.display = 'block';
+    document.getElementById('view-offices').style.display = 'none';
+    document.getElementById('view-timecalc').style.display = 'none';
+  }
+
+  function showTimeCalc() {
+    document.getElementById('view-main').style.display = 'none';
+    document.getElementById('view-timecalc').style.display = 'block';
+  }
+
+  function showOffices() {
+    document.getElementById('view-main').style.display = 'none';
+    document.getElementById('view-offices').style.display = 'block';
+    var list = document.getElementById('office-list');
+    list.innerHTML = '<div class="empty-note">読み込み中...</div>';
+    fetch('/api/liff/offices', { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || data.length === 0) { list.innerHTML = '<div class="empty-note">登録されている連絡先がありません</div>'; return; }
+        list.innerHTML = data.map(function(o) {
+          return '<div class="office-row"><div class="office-name">' + esc(o.short_name) + '</div>'
+            + '<a class="office-call" href="tel:' + esc(o.phone) + '">' + esc(o.phone) + '</a></div>';
+        }).join('');
+      })
+      .catch(function() { list.innerHTML = '<div class="empty-note">読み込みに失敗しました</div>'; });
+  }
   </script>
 </body>
 </html>`;
