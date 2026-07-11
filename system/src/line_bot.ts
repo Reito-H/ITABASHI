@@ -220,10 +220,10 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
     return;
   }
 
-  // ===== 革命AI（リッチメニューから起動）=====
-  if (inputText === '革命AI') {
+  // ===== AI（リッチメニューから起動）=====
+  if (inputText === 'AI') {
     await reply(replyToken, at, [text(
-      '🤖 革命AI\n\nただいま準備中です。\n近日公開予定ですので、もうしばらくお待ちください！'
+      '🤖 AI\n\nただいま準備中です。\n近日公開予定ですので、もうしばらくお待ちください！'
     )]);
     return;
   }

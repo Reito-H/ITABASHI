@@ -1609,6 +1609,8 @@ function liffStaffLookupPlusPage(liffId: string): string {
     .div-card-num { font-size: 26px; font-weight: 800; color: #4c1d95; }
     .div-card-label { font-size: 12px; color: #6b7280; margin-top: 2px; }
     .div-card-cnt { font-size: 11px; color: #9ca3af; margin-top: 6px; }
+    .div-all-btn { display: block; width: 100%; margin-top: 16px; background: white; border: 1.5px dashed #a5b4fc; color: #4c1d95; font-size: 14px; font-weight: 700; border-radius: 14px; padding: 16px; cursor: pointer; }
+    .div-all-btn:active { background: #ede9fe; }
 
     /* 検索ビュー用ヘッダー */
     .div-badge-btn { background: rgba(255,255,255,0.15); border: none; color: white; font-size: 13px; font-weight: 700; border-radius: 99px; padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -1723,6 +1725,7 @@ function liffStaffLookupPlusPage(liffId: string): string {
     <div class="div-scroll">
       <div class="div-lead">まず課を選んでください</div>
       <div class="div-grid" id="div-grid"></div>
+      <button class="div-all-btn" onclick="selectAllDivisions()">🔍 全課から検索する</button>
     </div>
   </div>
 
@@ -1731,7 +1734,7 @@ function liffStaffLookupPlusPage(liffId: string): string {
     <div class="header">
       <button class="btn-back" onclick="showDivision()">‹</button>
       <h1 id="search-title">社員照会＋</h1>
-      <button class="div-badge-btn" onclick="showDivision()">課を変更</button>
+      <button class="div-badge-btn" id="div-badge-btn" onclick="showDivision()">課を変更</button>
     </div>
     <div class="search-area">
       <div class="search-box">
@@ -1742,6 +1745,7 @@ function liffStaffLookupPlusPage(liffId: string): string {
     </div>
     <div class="team-chips" id="team-chips"></div>
     <div id="results-area">
+      <div class="hint" id="hint" style="display:none;">課をまたいで氏名・ふりがな・社員番号で検索できます</div>
       <div class="result-count" id="result-count" style="display:none;"></div>
       <div id="results-list"></div>
     </div>
@@ -1868,6 +1872,7 @@ function liffStaffLookupPlusPage(liffId: string): string {
   var _division = null;
   var _team = null;
   var _divCounts = {};
+  var _allMode = false;
 
   // iOS: キーボード表示時にビジュアルビューポートがずれてページが左に流れたまま戻らなくなる対策
   if (window.visualViewport) {
@@ -1914,12 +1919,29 @@ function liffStaffLookupPlusPage(liffId: string): string {
   function selectDivision(n) {
     _division = n;
     _team = null;
+    _allMode = false;
     document.getElementById('search-title').textContent = n+'課の社員照会＋';
+    document.getElementById('div-badge-btn').textContent = '課を変更';
     document.getElementById('view-division').classList.add('slide-out');
     document.getElementById('view-search').classList.add('slide-in');
     document.getElementById('search-input').value = '';
     document.getElementById('clear-btn').style.display = 'none';
     renderTeamChips();
+    doSearch('');
+    setTimeout(function(){ document.getElementById('search-input').focus(); }, 300);
+  }
+  function selectAllDivisions() {
+    _division = null;
+    _team = null;
+    _allMode = true;
+    document.getElementById('search-title').textContent = '全課の社員照会＋';
+    document.getElementById('div-badge-btn').textContent = '課で絞り込む';
+    document.getElementById('view-division').classList.add('slide-out');
+    document.getElementById('view-search').classList.add('slide-in');
+    document.getElementById('search-input').value = '';
+    document.getElementById('clear-btn').style.display = 'none';
+    document.getElementById('team-chips').innerHTML = '';
+    document.getElementById('team-chips').style.display = 'none';
     doSearch('');
     setTimeout(function(){ document.getElementById('search-input').focus(); }, 300);
   }
@@ -1979,13 +2001,24 @@ function liffStaffLookupPlusPage(liffId: string): string {
     doSearch('');
   }
   function doSearch(q) {
-    if (!_division) return;
-    var url = '/api/liff/staff-lookup?division='+_division+(_team?'&team='+_team:'')+(q?'&q='+encodeURIComponent(q):'');
+    if (!_division && !_allMode) return;
+    // 全課モードはキーワードなしだと対象が広すぎるため、絞り込み前はヒントを出すだけにする
+    if (_allMode && !q) {
+      document.getElementById('hint').style.display = 'block';
+      document.getElementById('result-count').style.display = 'none';
+      document.getElementById('results-list').innerHTML = '';
+      _list = [];
+      return;
+    }
+    document.getElementById('hint').style.display = 'none';
+    var url = _division
+      ? '/api/liff/staff-lookup?division='+_division+(_team?'&team='+_team:'')+(q?'&q='+encodeURIComponent(q):'')
+      : '/api/liff/staff-lookup?q='+encodeURIComponent(q);
     fetch(url, { headers: { Authorization: 'Bearer '+AT } })
     .then(function(r){ return r.json(); }).then(function(d){
       _list=d||[];
-      // 班チップは絞り込み前の課全体のリストから作りたいので、班未指定・キーワードなしの時だけ再構築
-      if (!_team && !q) renderTeamChips();
+      // 班チップは絞り込み前の課全体のリストから作りたいので、課選択時・班未指定・キーワードなしの時だけ再構築
+      if (_division && !_team && !q) renderTeamChips();
       renderList(_list);
     })
     .catch(function(){ document.getElementById('results-list').innerHTML='<div class="no-results">通信エラー</div>'; });
