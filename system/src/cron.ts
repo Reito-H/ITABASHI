@@ -1,5 +1,6 @@
 import type { Env } from './auth';
 import { getPeriodSettings, getPeriodRange, getPeriod } from './auth';
+import { sendBentenDaily } from './benten';
 
 // LINE 連携済みの班長・指導者全員にプッシュ通知
 async function pushToInstructors(env: Env, messages: object[]): Promise<void> {
@@ -97,6 +98,8 @@ export async function runNotification(env: Env, type: string): Promise<void> {
     await sendMorningReport(env, todayStr);
   } else if (type === 'bad_event_alert') {
     await sendBadEventAlert(env, todayStr);
+  } else if (type === 'benten_shift_daily') {
+    await sendBentenDaily(env);
   }
 }
 

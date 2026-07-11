@@ -19,13 +19,29 @@ LIFF_ID_ACCIDENT = "2010598812-PaLPe9HP"
 LIFF_ID_STAFF_LOOKUP = "2010598812-vWkyVtxt"
 LIFF_ID_STAFF_LOOKUP_PLUS = "2010598812-8spA8woR"
 LIFF_ID_OTHER_FEATURES = "2010598812-C477DCKE"
+# ベンテンクラブ シフト（LINE Developers で LIFF作成後に設定）
+LIFF_ID_BENTEN_SHIFT = "2010598812-yt0r1ZAW"
+# ベンテン会員・シフトマスター用リッチメニュー（未作成なら空のまま=メニューなし）
+RICHMENU_ID_BENTEN = ""
+# シフト表PDF用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）
+# R2を使う場合は下の [[r2_buckets]] を有効化してフォントをアップロードする（R2が優先）
+BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/master/fonts/NotoSansCJKjp-Regular.ttf"
 # シークレット値は wrangler secret put で登録すること（このファイルには記載しない）
 # npx wrangler secret put SETUP_KEY
 # npx wrangler secret put LINE_CHANNEL_SECRET
 # npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
-# npx wrangler secret put LINE_REG_PWD_VEHICLE    ← 車番管理者 登録パスワード
-# npx wrangler secret put LINE_REG_PWD_OPERATIONS ← 運行管理者 登録パスワード
-# npx wrangler secret put LINE_REG_PWD_GENERAL    ← 統括管理者 登録パスワード
+# npx wrangler secret put LINE_REG_PWD_VEHICLE       ← 車番管理者 登録パスワード
+# npx wrangler secret put LINE_REG_PWD_OPERATIONS    ← 運行管理者 登録パスワード
+# npx wrangler secret put LINE_REG_PWD_GENERAL       ← 統括管理者 登録パスワード
+# npx wrangler secret put LINE_REG_PWD_BENTEN        ← ベンテンクラブ会員 登録パスワード
+# npx wrangler secret put LINE_REG_PWD_BENTEN_MASTER ← ベンテンシフトマスター 登録パスワード
+
+# ベンテンPDFフォント用R2（使う場合はコメントを外し、バケット作成後にフォントを置く）
+# npx wrangler r2 bucket create benten-fonts
+# npx wrangler r2 object put benten-fonts/NotoSansJP-Regular.ttf --file=NotoSansJP-Regular.ttf --remote
+# [[r2_buckets]]
+# binding = "BENTEN_FONTS"
+# bucket_name = "benten-fonts"
 
 [[routes]]
 pattern = "bentenclub.com/s7db8q6wys*"

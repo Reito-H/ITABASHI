@@ -19,6 +19,14 @@ export type Env = {
   LINE_REG_PWD_VEHICLE?: string;    // 車番管理者
   LINE_REG_PWD_OPERATIONS?: string; // 運行管理者
   LINE_REG_PWD_GENERAL?: string;    // 統括管理者
+  LINE_REG_PWD_BENTEN?: string;         // ベンテンクラブ会員
+  LINE_REG_PWD_BENTEN_MASTER?: string;  // ベンテンクラブシフトマスター
+  // ベンテンクラブ シフト
+  LIFF_ID_BENTEN_SHIFT?: string;
+  RICHMENU_ID_BENTEN?: string;
+  BENTEN_LINE_GROUP_ID?: string;    // 日次送信先LINEグループ（benten_configが優先）
+  BENTEN_FONT_URL?: string;         // PDF用 日本語TTFフォントのURL（R2未使用時）
+  BENTEN_FONTS?: R2Bucket;          // PDF用フォント置き場（NotoSansJP-Regular.ttf）
 };
 
 const PBKDF2_ITERATIONS = 600000;

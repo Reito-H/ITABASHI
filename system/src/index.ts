@@ -20,7 +20,9 @@ import instructorInviteApi from './routes/api/instructor_invite';
 import { handleLineEvent } from './line_bot';
 import { handleCron } from './cron';
 import liffRoutes from './routes/liff';
+import liffBentenRoutes from './routes/liff_benten';
 import adminLiffRoutes from './routes/admin_liff';
+import adminBentenRoutes from './routes/admin_benten';
 import adminInspectionRoutes from './routes/admin_inspection';
 import inspectionApi from './routes/api/inspection';
 import adminManualRoutes from './routes/admin_manual';
@@ -98,6 +100,7 @@ app.route(`/${SECRET}/admin`, adminRoutes);
 app.route(`/${SECRET}/admin`, adminExtraRoutes);
 app.route(`/${SECRET}/admin`, adminStaffRoutes);
 app.route(`/${SECRET}/admin`, adminLiffRoutes);
+app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminManualRoutes);
 
@@ -162,6 +165,7 @@ app.post('/api/line/webhook', async (c) => {
 
 // LIFF ページ（認証不要・公開）
 app.route('', liffRoutes);
+app.route('', liffBentenRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

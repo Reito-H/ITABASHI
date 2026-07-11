@@ -654,6 +654,7 @@ app.get('/settings', (c) => {
     { href: `${ADMIN}/settings/liff`,                 title: 'LINEリフ権限管理', desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
     { href: `${ADMIN}/settings/lost-items`,           title: '忘れ物報告一覧',   desc: '社員報告・客問い合わせの履歴と状態管理', highlight: true },
     { href: `${ADMIN}/settings/accidents`,            title: '事故報告一覧',     desc: '事故報告の履歴・進捗管理', highlight: true },
+    { href: `${ADMIN}/settings/benten`,               title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理', highlight: true },
     { href: `${ADMIN}/announcements`,                 title: 'お知らせ配信',     desc: 'LINEで一斉送信・配信履歴の確認' },
     { href: `${ADMIN}/line`,                          title: 'LINE管理',         desc: '新人招待コード発行・紐付け状況' },
     { href: `${ADMIN}/settings/schedule-types`,       title: 'シフト区分',       desc: 'プリセットボタンの区分名・色・目標回数' },

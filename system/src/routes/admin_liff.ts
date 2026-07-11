@@ -9,19 +9,23 @@ import type { Env } from '../auth';
 const app = new Hono<{ Bindings: Env }>();
 
 const ROLE_LABELS: Record<string, string> = {
-  general_manager:    '統括管理者',
-  operations_manager: '運行管理者',
-  vehicle_manager:    '車番管理者',
-  newcomer:           '新人',
-  unknown:            '権限不明者',
+  general_manager:     '統括管理者',
+  operations_manager:  '運行管理者',
+  vehicle_manager:     '車番管理者',
+  newcomer:            '新人',
+  benten_shift_master: 'ベンテンシフトマスター',
+  benten_member:       'ベンテンクラブ会員',
+  unknown:             '権限不明者',
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  general_manager:    '#1e3a5f',
-  operations_manager: '#065f46',
-  vehicle_manager:    '#7c3aed',
-  newcomer:           '#1d4ed8',
-  unknown:            '#9ca3af',
+  general_manager:     '#1e3a5f',
+  operations_manager:  '#065f46',
+  vehicle_manager:     '#7c3aed',
+  newcomer:            '#1d4ed8',
+  benten_shift_master: '#b45309',
+  benten_member:       '#0891b2',
+  unknown:             '#9ca3af',
 };
 
 function subHeader(title: string): string {
@@ -46,7 +50,9 @@ app.get('/settings/liff', async (c) => {
         WHEN 'operations_manager' THEN 2
         WHEN 'vehicle_manager' THEN 3
         WHEN 'newcomer' THEN 4
-        ELSE 5
+        WHEN 'benten_shift_master' THEN 5
+        WHEN 'benten_member' THEN 6
+        ELSE 7
       END, u.created_at DESC
   `).all<{
     id: number; line_uid: string; name: string; role: string;
@@ -111,7 +117,7 @@ app.get('/settings/liff', async (c) => {
     ${subHeader('LINEリフ 権限管理')}
 
     <!-- 統計カード -->
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:20px;">
       ${statCards}
     </div>
 
@@ -122,6 +128,8 @@ app.get('/settings/liff', async (c) => {
         <div><strong>「統括管理者登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
         <div><strong>「運行管理者登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
         <div><strong>「車番連携」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
+        <div><strong>「ベンテン会員登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
+        <div><strong>「シフトマスター登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
       </div>
       <div style="margin-top:8px;font-size:11px;color:#6b7280;">※各パスワードは <code>wrangler secret put</code> で設定してください</div>
     </div>
@@ -419,7 +427,7 @@ app.get('/settings/accidents', async (c) => {
 app.put('/api/liff-users/:id/role', async (c) => {
   const id = parseInt(c.req.param('id'));
   const { role } = await c.req.json<{ role: string }>();
-  const validRoles = ['general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'unknown'];
+  const validRoles = ['general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'benten_shift_master', 'benten_member', 'unknown'];
   if (!validRoles.includes(role)) return c.json({ error: 'invalid role' }, 400);
 
   await c.env.DB.prepare(
@@ -517,10 +525,12 @@ async function reassignRichMenu(lineUid: string, role: string, env: Env): Promis
 
 export function getRichMenuForRole(role: string, env: Env): string {
   switch (role) {
-    case 'newcomer':           return env.RICHMENU_ID_PATTERN1 ?? '';
-    case 'operations_manager': return env.RICHMENU_ID_PATTERN2 ?? '';
-    case 'general_manager':    return env.RICHMENU_ID_PATTERN3 ?? '';
-    default:                   return '';
+    case 'newcomer':            return env.RICHMENU_ID_PATTERN1 ?? '';
+    case 'operations_manager':  return env.RICHMENU_ID_PATTERN2 ?? '';
+    case 'general_manager':     return env.RICHMENU_ID_PATTERN3 ?? '';
+    case 'benten_member':
+    case 'benten_shift_master': return env.RICHMENU_ID_BENTEN ?? '';
+    default:                    return '';
   }
 }
 
