@@ -2183,6 +2183,28 @@ function liffOtherFeaturesPage(liffId: string): string {
     .office-call { color: #0f766e; font-size: 14px; font-weight: 700; text-decoration: none; }
     .empty-note { color: #6b7280; font-size: 13px; text-align: center; padding: 24px 8px; }
     .soon-note { color: #6b7280; font-size: 14px; text-align: center; padding: 32px 8px; line-height: 1.7; }
+
+    .segment { display: flex; background: #e5e7eb; border-radius: 10px; padding: 3px; margin-bottom: 16px; }
+    .segment button { flex: 1; border: none; background: transparent; padding: 10px 0; border-radius: 8px; font-size: 14px; font-weight: 700; color: #6b7280; cursor: pointer; }
+    .segment button.active { background: white; color: #111827; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+    .btn-icon { background: none; border: none; font-size: 20px; color: #0f766e; cursor: pointer; padding: 4px 8px; margin-left: auto; }
+    .picker-wrap { display: flex; align-items: center; justify-content: center; gap: 6px; position: relative; height: 180px; margin-bottom: 14px; }
+    .picker-highlight { position: absolute; left: 8px; right: 8px; top: 72px; height: 36px; background: rgba(15,118,110,0.08); border-top: 1px solid #d1d5db; border-bottom: 1px solid #d1d5db; pointer-events: none; border-radius: 6px; }
+    .picker-col { width: 70px; height: 180px; overflow-y: scroll; scroll-snap-type: y mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .picker-col::-webkit-scrollbar { display: none; }
+    .picker-item { height: 36px; line-height: 36px; text-align: center; font-size: 18px; color: #9ca3af; scroll-snap-align: center; font-variant-numeric: tabular-nums; }
+    .picker-item.selected { color: #111827; font-weight: 700; font-size: 20px; }
+    .picker-sep { font-size: 20px; font-weight: 700; color: #111827; }
+    .btn-now { display: block; width: 100%; background: #0f766e; color: white; border: none; border-radius: 8px; padding: 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
+    .result-card { border-radius: 12px; padding: 16px; margin-bottom: 12px; color: white; }
+    .result-card .result-label { font-size: 12.5px; font-weight: 700; opacity: 0.9; margin-bottom: 4px; }
+    .result-card .result-value { font-size: 30px; font-weight: 800; letter-spacing: 0.02em; }
+    .result-card .result-note { font-size: 12px; opacity: 0.9; margin-top: 6px; line-height: 1.5; }
+    .result-teal { background: linear-gradient(135deg,#0f766e,#14b8a6); }
+    .result-indigo { background: linear-gradient(135deg,#4338ca,#6366f1); }
+    .result-orange { background: linear-gradient(135deg,#c2410c,#f97316); }
+    .result-pink { background: linear-gradient(135deg,#be185d,#ec4899); }
+    .hint-text { font-size: 12px; color: #6b7280; text-align: center; line-height: 1.6; margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -2222,21 +2244,54 @@ function liffOtherFeaturesPage(liffId: string): string {
       </div>
     </div>
 
-    <!-- 時間計算（準備中） -->
+    <!-- 時間計算 -->
     <div class="page" id="view-timecalc" style="display:none;">
       <div class="sub-header">
         <button class="btn-back" onclick="showMain()">← 戻る</button>
+        <button class="btn-icon" onclick="tcResetToNow()" title="現在時刻にリセット">↻</button>
       </div>
       <div class="card">
-        <div class="card-title">時間計算</div>
-        <div class="soon-note">ただいま準備中です。<br>もうしばらくお待ちください！</div>
+        <div class="segment" id="tc-segment">
+          <button class="active" data-type="day" onclick="tcSelectType('day')">日勤</button>
+          <button data-type="sequential" onclick="tcSelectType('sequential')">隔日勤務</button>
+        </div>
+
+        <div class="picker-wrap">
+          <div class="picker-highlight"></div>
+          <div class="picker-col" id="tc-hour"></div>
+          <div class="picker-sep">:</div>
+          <div class="picker-col" id="tc-minute"></div>
+        </div>
+
+        <button class="btn-now" onclick="tcResetToNow()">現在時刻</button>
       </div>
+
+      <div class="result-card result-teal" id="tc-card-teiji">
+        <div class="result-label">定時帰庫時間</div>
+        <div class="result-value" id="tc-teiji">--:--</div>
+      </div>
+      <div class="result-card result-orange">
+        <div class="result-label">アルコール検査リミット</div>
+        <div class="result-value" id="tc-alcohol">--:--</div>
+        <div class="result-note">この時間までにアルコール検査を実施してください</div>
+      </div>
+      <div class="result-card result-pink">
+        <div class="result-label">最大帰庫時間（MAX）</div>
+        <div class="result-value" id="tc-max">--:--</div>
+      </div>
+
+      <div class="hint-text">日付をまたぐ場合は先頭に「翌」を表示します</div>
     </div>
   </div>
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
   var WEEKLY_NOTICES = ${JSON.stringify(WEEKLY_NOTICES)};
+  var TC_ITEM_H = 36;
+  var tcInitialized = false;
+  var tcHour = 0, tcMinute = 0;
+  var tcWorkType = 'day';
+  var tcScrollTimers = {};
 
   liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
     .then(function() {
@@ -2268,6 +2323,95 @@ function liffOtherFeaturesPage(liffId: string): string {
   function showTimeCalc() {
     document.getElementById('view-main').style.display = 'none';
     document.getElementById('view-timecalc').style.display = 'block';
+    if (!tcInitialized) { tcInitialized = true; tcInit(); }
+  }
+
+  function tcBuildPicker(id, count) {
+    var el = document.getElementById(id);
+    var html = '<div style="height:' + (TC_ITEM_H * 2) + 'px;"></div>';
+    for (var i = 0; i < count; i++) {
+      html += '<div class="picker-item" data-val="' + i + '">' + (i < 10 ? '0' + i : i) + '</div>';
+    }
+    html += '<div style="height:' + (TC_ITEM_H * 2) + 'px;"></div>';
+    el.innerHTML = html;
+    el.addEventListener('scroll', function() {
+      clearTimeout(tcScrollTimers[id]);
+      tcScrollTimers[id] = setTimeout(function() { tcOnScrollSettle(id, count); }, 120);
+    });
+  }
+
+  function tcOnScrollSettle(id, count) {
+    var el = document.getElementById(id);
+    var idx = Math.round(el.scrollTop / TC_ITEM_H);
+    if (idx < 0) idx = 0;
+    if (idx > count - 1) idx = count - 1;
+    el.scrollTo({ top: idx * TC_ITEM_H, behavior: 'auto' });
+    if (id === 'tc-hour') tcHour = idx; else tcMinute = idx;
+    tcRenderSelected(id, idx);
+    tcCompute();
+  }
+
+  function tcRenderSelected(id, idx) {
+    var el = document.getElementById(id);
+    var items = el.querySelectorAll('.picker-item');
+    for (var i = 0; i < items.length; i++) { items[i].classList.remove('selected'); }
+    if (items[idx]) items[idx].classList.add('selected');
+  }
+
+  function tcScrollTo(id, idx, smooth) {
+    var el = document.getElementById(id);
+    el.scrollTo({ top: idx * TC_ITEM_H, behavior: smooth ? 'smooth' : 'auto' });
+    tcRenderSelected(id, idx);
+  }
+
+  function tcSelectType(type) {
+    tcWorkType = type;
+    var buttons = document.querySelectorAll('#tc-segment button');
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].classList.toggle('active', buttons[i].getAttribute('data-type') === type);
+    }
+    document.getElementById('tc-card-teiji').className = 'result-card ' + (type === 'day' ? 'result-teal' : 'result-indigo');
+    tcCompute();
+  }
+
+  function tcResetToNow() {
+    var now = new Date();
+    tcHour = now.getHours();
+    tcMinute = now.getMinutes();
+    tcScrollTo('tc-hour', tcHour, true);
+    tcScrollTo('tc-minute', tcMinute, true);
+    tcCompute();
+  }
+
+  function tcFmt(totalMinutes) {
+    var dayOffset = Math.floor(totalMinutes / 1440);
+    var m = ((totalMinutes % 1440) + 1440) % 1440;
+    var h = Math.floor(m / 60);
+    var mm = m % 60;
+    var hh = (h < 10 ? '0' + h : h) + ':' + (mm < 10 ? '0' + mm : mm);
+    return (dayOffset >= 1 ? '翌 ' : '') + hh;
+  }
+
+  function tcCompute() {
+    var base = tcHour * 60 + tcMinute;
+    var conf = tcWorkType === 'day' ? { teiji: 525, max: 750 } : { teiji: 1050, max: 1200 };
+    var teiji = base + conf.teiji;
+    var max = base + conf.max;
+    var alcohol = max - 5;
+    document.getElementById('tc-teiji').textContent = tcFmt(teiji);
+    document.getElementById('tc-max').textContent = tcFmt(max);
+    document.getElementById('tc-alcohol').textContent = tcFmt(alcohol);
+  }
+
+  function tcInit() {
+    tcBuildPicker('tc-hour', 24);
+    tcBuildPicker('tc-minute', 60);
+    var now = new Date();
+    tcHour = now.getHours();
+    tcMinute = now.getMinutes();
+    tcScrollTo('tc-hour', tcHour, false);
+    tcScrollTo('tc-minute', tcMinute, false);
+    tcCompute();
   }
 
   function showOffices() {
