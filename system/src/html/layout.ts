@@ -121,7 +121,7 @@ export function layout(title: string, content: string, activePage: string = ''):
     </div>
     <nav style="flex:1;overflow-y:auto;padding:6px 0;">
       ${navItems.map(item => `
-        <a href="${item.href}" class="nav-item${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
+        <a href="${item.href}" data-nav-id="${item.id}" class="nav-item${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
           ${escHtml(item.label)}
         </a>
       `).join('')}

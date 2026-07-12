@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { requireAuth, requireJapan } from './middleware/auth';
+import { getAdminPermissions, isPathAllowed, filterHtmlByPermissions } from './permissions';
 import adminRoutes from './routes/admin';
 import adminExtraRoutes from './routes/admin_extra';
 import adminStaffRoutes from './routes/admin_staff';
@@ -94,6 +95,31 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   const re = new RegExp(`^\\/${SECRET}\\/admin\\/(login|logout|setup)`);
   if (re.test(path)) return next();
   return requireAuth(c, next);
+});
+
+// アカウント別ページ権限（admins.permissions が NULL のアカウントは全ページ可）
+app.use(`/${SECRET}/admin/*`, async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  const re = new RegExp(`^\\/${SECRET}\\/admin\\/(login|logout|setup)`);
+  if (re.test(path)) return next();
+
+  const adminId = c.get('adminId');
+  const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
+  if (!perms) return next(); // 全権限アカウント
+
+  const subPath = path.replace(`/${SECRET}/admin`, '') || '/';
+  if (!isPathAllowed(perms, subPath)) {
+    return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>アクセス権限がありません</title>
+    <style>body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center}h1{font-size:1.05rem;margin:0 0 .5rem}p{font-size:.85rem;color:#6b7280;margin:0 0 1rem}a{display:inline-block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem 1.25rem;font-size:.85rem;text-decoration:none}</style></head>
+    <body><div class="box"><h1>アクセス権限がありません</h1><p>このページを表示する権限がこのアカウントにはありません。</p><a href="${ADMIN_PATH}">ホームに戻る</a></div></body></html>`, 403);
+  }
+
+  await next();
+  // メニュー・設定カードから権限のない項目を除去
+  const contentType = c.res.headers.get('Content-Type') ?? '';
+  if (contentType.includes('text/html')) {
+    c.res = filterHtmlByPermissions(c.res, perms);
+  }
 });
 
 // 管理者画面（秘密パス配下にマウント）

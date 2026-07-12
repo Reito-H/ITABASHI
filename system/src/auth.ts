@@ -35,7 +35,9 @@ export type Env = {
   RICHMENU_ID_UNKNOWN?: string;
 };
 
-const PBKDF2_ITERATIONS = 600000;
+// Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回
+// （超えると NotSupportedError で500になる）
+const PBKDF2_ITERATIONS = 100000;
 
 // PBKDF2でパスワードをハッシュ化（v2プレフィックスでイテレーション数を記録）
 export async function hashPassword(password: string): Promise<string> {

@@ -651,29 +651,29 @@ app.get('/shift/print/:empId', async (c) => {
 app.get('/settings', (c) => {
   const ADMIN = ADMIN_PATH;
   const cards = [
-    { href: `${ADMIN}/settings/liff`,                 title: 'LINEリフ権限管理', desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
-    { href: `${ADMIN}/settings/lost-items`,           title: '忘れ物報告一覧',   desc: '社員報告・客問い合わせの履歴と状態管理', highlight: true },
-    { href: `${ADMIN}/settings/accidents`,            title: '事故報告一覧',     desc: '事故報告の履歴・進捗管理', highlight: true },
-    { href: `${ADMIN}/settings/benten`,               title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理', highlight: true },
-    { href: `${ADMIN}/announcements`,                 title: 'お知らせ配信',     desc: 'LINEで一斉送信・配信履歴の確認' },
-    { href: `${ADMIN}/line`,                          title: 'LINE管理',         desc: '新人招待コード発行・紐付け状況' },
-    { href: `${ADMIN}/settings/schedule-types`,       title: 'シフト区分',       desc: 'プリセットボタンの区分名・色・目標回数' },
-    { href: `${ADMIN}/settings/coaches`,              title: '研修担当',         desc: 'シフト表の研修担当者（コーチ）一覧' },
-    { href: `${ADMIN}/settings/instructors`,          title: '班長・指導者',     desc: 'シフト表下部の班長・指導者一覧' },
-    { href: `${ADMIN}/settings/periods`,              title: '月度設定',         desc: '各月度の開始日・締め日の設定' },
-    { href: `${ADMIN}/settings/notifications`,        title: 'LINE通知設定',     desc: '班長向け定時通知の送信時刻・有効/無効設定' },
-    { href: `${ADMIN}/settings/offices`,              title: '営業所',           desc: '各営業所の電話番号・住所の管理' },
-    { href: `${ADMIN}/settings/vehicle-search-guide`, title: '車番検索ガイド',   desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
-    { href: `${ADMIN}/settings/tutorial`,             title: 'チュートリアル',   desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
-    { href: `${ADMIN}/settings/status`,               title: 'システムステータス', desc: 'サーバー・DB・API・通信状態の確認・アクセスQRコード' },
+    { href: `${ADMIN}/settings/liff`,                 perm: 'settings.liff',           title: 'LINEリフ権限管理', desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
+    { href: `${ADMIN}/settings/lost-items`,           perm: 'settings.lost-items',     title: '忘れ物報告一覧',   desc: '社員報告・客問い合わせの履歴と状態管理', highlight: true },
+    { href: `${ADMIN}/settings/accidents`,            perm: 'settings.accidents',      title: '事故報告一覧',     desc: '事故報告の履歴・進捗管理', highlight: true },
+    { href: `${ADMIN}/settings/benten`,               perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理', highlight: true },
+    { href: `${ADMIN}/announcements`,                 perm: 'announcements',           title: 'お知らせ配信',     desc: 'LINEで一斉送信・配信履歴の確認' },
+    { href: `${ADMIN}/line`,                          perm: 'line',                    title: 'LINE管理',         desc: '新人招待コード発行・紐付け状況' },
+    { href: `${ADMIN}/settings/schedule-types`,       perm: 'settings.schedule-types', title: 'シフト区分',       desc: 'プリセットボタンの区分名・色・目標回数' },
+    { href: `${ADMIN}/settings/coaches`,              perm: 'settings.coaches',        title: '研修担当',         desc: 'シフト表の研修担当者（コーチ）一覧' },
+    { href: `${ADMIN}/settings/instructors`,          perm: 'settings.instructors',    title: '班長・指導者',     desc: 'シフト表下部の班長・指導者一覧' },
+    { href: `${ADMIN}/settings/periods`,              perm: 'settings.periods',        title: '月度設定',         desc: '各月度の開始日・締め日の設定' },
+    { href: `${ADMIN}/settings/notifications`,        perm: 'settings.notifications',  title: 'LINE通知設定',     desc: '班長向け定時通知の送信時刻・有効/無効設定' },
+    { href: `${ADMIN}/settings/offices`,              perm: 'settings.offices',        title: '営業所',           desc: '各営業所の電話番号・住所の管理' },
+    { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド', desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
+    { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',       title: 'チュートリアル',   desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
+    { href: `${ADMIN}/settings/status`,               perm: 'settings.status',         title: 'システムステータス', desc: 'サーバー・DB・API・通信状態の確認・アクセスQRコード' },
   ];
   const html = `
     <div style="max-width:560px;">
       <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
 
       <div style="display:flex;flex-direction:column;gap:12px;">
-        ${cards.map((card: { href: string; title: string; desc: string; highlight?: boolean }) => `
-          <a href="${card.href}" style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
+        ${cards.map((card: { href: string; perm: string; title: string; desc: string; highlight?: boolean }) => `
+          <a href="${card.href}" data-perm-key="${card.perm}" style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
             onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
             <div>
               <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};margin-bottom:3px;">${card.title}</div>
