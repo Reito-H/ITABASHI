@@ -136,7 +136,6 @@ app.get('/api/liff/sales/summary', async (c) => {
     totalCount: s.totalCount,
     workingDays: s.workingDays,
     avgAmount: s.avgAmount,
-    totalDistance: s.totalDistance,
     daily: s.rows.map(r => ({ date: r.date, amount: r.amount, rideCount: r.ride_count, dutyLabel: dutyLabel(r.duty_code) })),
   });
 });
@@ -174,7 +173,6 @@ app.get('/api/liff/sales/pdf', async (c) => {
   const summaryLines = [
     `税込合計: ${s.totalAmount.toLocaleString('ja-JP')}円　　税抜合計: ${s.totalAmountExcl.toLocaleString('ja-JP')}円`,
     `実働カウント: ${s.totalCount}　　乗務日数: ${s.workingDays}日　　平均日商: ${s.avgAmount.toLocaleString('ja-JP')}円`,
-    `走行距離（ODO集計）: ${s.totalDistance.toLocaleString('ja-JP')}km`,
   ];
   for (const line of summaryLines) {
     page.drawText(line, { x: M, y, size: 11, font, color: black });
@@ -337,7 +335,6 @@ function salesPageHtml(liffId: string): string {
         <div class="card"><div class="label">実働カウント</div><div class="val" id="v-count"></div></div>
         <div class="card"><div class="label">平均日商</div><div class="val" id="v-avg"></div></div>
         <div class="card"><div class="label">乗務日数</div><div class="val" id="v-days"></div></div>
-        <div class="card"><div class="label">走行距離(ODO)</div><div class="val" id="v-distance"></div></div>
       </div>
       <div class="chart-wrap"><canvas id="chart" height="160"></canvas></div>
       <button class="pdf-btn" onclick="downloadPdf()">PDFをダウンロード</button>
@@ -480,7 +477,6 @@ function salesPageHtml(liffId: string): string {
       document.getElementById('v-count').textContent = s.totalCount;
       document.getElementById('v-avg').textContent = s.avgAmount.toLocaleString('ja-JP') + '円';
       document.getElementById('v-days').textContent = s.workingDays + '日';
-      document.getElementById('v-distance').textContent = s.totalDistance.toLocaleString('ja-JP') + 'km';
       drawChart(s.daily);
     });
   }

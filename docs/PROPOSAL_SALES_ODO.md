@@ -100,30 +100,26 @@ CREATE INDEX IF NOT EXISTS idx_odo_open ON odo_records(emp_id, odo_end);
 
 ## 3. 機能仕様 その1: 売上管理ツール
 
-### 3-1. 記録フロー（LINE Bot会話・リッチメニュー起点）
+### 3-1. 記録フロー（2026-07-13改版: LIFFフォーム方式に変更）
 
-既存 `handleNewcomer()` の売上記録フローを **共通関数化**し、`crew_member` / `newcomer` / `benten_member` / `benten_shift_master`
-から呼べるようにする（`general_manager` はコマンド文字列「売上記録」を直接送信することで同じ関数を呼ぶ。リッチメニューには置かない）。
+~~LINE Bot会話フロー（区分→金額→乗車回数→確認の4ステップ）~~ → **廃止**。運行管理者の「忘れ物対応」「事故報告」と同じ
+「ボタン押下→LIFFフォームのリンクを送信→フォームで一括入力」方式に統一（ユーザー指示）。
 
-会話ステップ（**走行距離の手入力ステップは廃止し、ODOに一本化**——決定事項）：
+- 「売上記録」タップ → `https://liff.line.me/{LIFF_ID_SALES}?tab=input` を送信（LIFF未設定時は「準備中」フォールバック、
+  忘れ物対応・事故報告と同じ既存パターン）
+- `/liff/sales` の「記録」タブ（デフォルト表示）で入力：日付（デフォルト当日）・区分（ボタン選択 a/b/B/D/H）・
+  売上金額（必須）・乗車回数（**任意**。事故報告フォームの「必須項目なし」の思想に寄せた）
+- 日付を選ぶと`GET /api/liff/sales/entry?date=`でその日の既存記録を自動取得・プリフィル（上書き注意を表示）
+- `POST /api/liff/sales/entry` で登録（サーバー側で`emp_id`をBearerトークンから解決、`duty_code`・金額・乗車回数を検証してUPSERT）
+- 対象ロール：`crew_member` / `newcomer` / `benten_member` / `benten_shift_master` / `general_manager`（コマンド送信のみ、メニューには出さない）
 
-1. 「売上記録」タップ → 当日既記録なら上書き確認（既存ロジック流用）
-2. **区分選択**（新規追加・クイックリプライ5択、表示ラベルと内部コードの対応）：
-   `昼日勤(a)` / `夜日勤(b)` / `隔日B` / `隔日D` / `隔日H`
-3. 売上金額入力（円・税込・6桁まで、既存の `999999` 上限チェックをそのまま流用）
-4. 乗車回数入力（既存通り）
-5. 確認画面（税抜金額も表示：`○○円（税抜 ○○円、ROUND(amount/1.1)）`）→ 登録
+### 3-2. 月次サマリー閲覧（`/liff/sales`の「サマリー」タブ）
 
-- `sales_records.distance_km` への新規入力は行わない（既存レコードの過去値は読み取り専用で残す）。
-  月次サマリーの走行距離は `odo_records`（4章）から期間集計して表示する。
-
-### 3-2. 月次サマリー閲覧（新規 LIFF ページ `/liff/sales`）
-
-- 対象ロール：`crew_member` / `newcomer` / `benten_member` / `benten_shift_master` / `general_manager`
 - 月度は `getPeriodSettings()` / `getPeriod()` / `getPeriodRange()`（`src/auth.ts`）を再利用し、
   タクシー会社独自の締め日設定（既定17日締め18日開始）に自動追従
 - 表示内容：
-  - 月度合計（税込・税抜）／実働カウント（隔日=1・日勤=0.5換算の合計）／平均日商／月度合計走行距離（`odo_records`集計）
+  - 月度合計（税込・税抜）／実働カウント（隔日=1・日勤=0.5換算の合計）／平均日商／乗務日数
+  - ~~月度合計走行距離~~ → **廃止**（4-2参照。ODOレコードは都度削除する設計のため集計不可）
   - 日別売上推移グラフ（Chart.js。管理画面 `/sales/detail` の実装（`src/html/sales.ts`）と同じCDN・描画方式を踏襲）
   - PDF出力ボタン（**LIFF内で都度生成・ダウンロードのみ**。自動LINE push（Cron）は今回のスコープ外——決定事項。
     生成方式はベンテンクラブPDF実装（pdf-lib + TTFフォントsubset:false）をそのまま流用）
@@ -137,31 +133,38 @@ CREATE INDEX IF NOT EXISTS idx_odo_open ON odo_records(emp_id, odo_end);
 
 ---
 
-## 4. 機能仕様 その2: ODOメーター記録機能
+## 4. 機能仕様 その2: ODOメーター記録機能（2026-07-13 確定版）
 
 ### 4-1. LINE Bot 会話フロー
 
-「ODO」リッチメニューボタン押下時の処理（新規関数 `handleOdoButton()`、状態機械は不要・都度DBを見て判定）：
+「ODO」リッチメニューボタン押下時の処理（`handleSalesOdoFlow()`内、状態機械は不要・都度DBを見て判定）：
 
 1. `SELECT id, odo_start FROM odo_records WHERE emp_id = ? AND odo_end IS NULL ORDER BY id DESC LIMIT 1`
 2. **該当なし（1回目の押下）** → 数値入力待ち状態（`line_conv_states` に `odo_awaiting_start` をセット）
-   → 数値（0〜999999）を受信 → `INSERT INTO odo_records (emp_id, odo_start)` → 「ODO始: ○○○○○○ を記録しました」
+   → 数値（6桁以内。5桁等も可）を受信 → `INSERT INTO odo_records (emp_id, odo_start)` → 「ODO始: ○○○○○ を記録しました」
 3. **該当あり（2回目の押下）** → 数値入力待ち状態（`odo_awaiting_end`、対象レコードIDを保持）
    → 数値受信 → **`odo_end >= odo_start` を検証**（下回る場合は「ODO終がODO始より小さいです。入力し直してください」で再入力させる）
-   → `UPDATE odo_records SET odo_end=?, distance_km=(odo_end-odo_start), ended_at=datetime('now','localtime')`
    → 自動返信：
      ```
      🚕 ODO記録が完了しました
-     ODO始: 123456
-     ODO終: 123601
-     走行距離: 145km
+     ODO始: 12345
+     ODO終: 12501
+     走行距離: 156km
      ```
+   → **返信後、そのレコードはDELETEして削除する**（ユーザー確認済み・集計に使わないその場限りの記録のため）
 
-### 4-2. 売上サマリーとの連携（走行距離の一本化）
+**「ODO始」送信後、他機能を使っても保持される仕組み**：
+「未確定(odo_end IS NULL)レコードの有無」をDBで判定する設計のため、`line_conv_states`（会話の状態）が`idle`に
+戻っていても保留中のODO開始記録はDBに残り続ける。ODO入力待ち状態（`odo_awaiting_start`/`odo_awaiting_end`）の間に
+**数字以外の入力**（＝他機能のボタン等）が来た場合は、入力待ちを静かに解除して`false`を返し、
+そのメッセージを本来の役割別ハンドラーに渡す（他機能を誤ってブロックしない）。前回のODO終の値を次回の
+ODO始に引き継ぐような継続性は持たせない（車両が変わるため不要、との確認済み）。
 
-- 3-1の決定により、走行距離は売上記録では入力しない。月度サマリー（3-2）の走行距離は
-  `SELECT SUM(distance_km) FROM odo_records WHERE emp_id=? AND odo_end IS NOT NULL AND date(started_at) BETWEEN ? AND ?`
-  で `odo_records` から直接集計する（`sales_records` との突合キーは持たせない。日付ベースの緩い集計で十分）。
+### 4-2. 売上サマリーとの連携（廃止）
+
+~~走行距離を月度サマリーでODOから集計する~~ → **廃止**。ODOレコードは返信後に削除するため、月次の走行距離集計機能は
+実装しない（`/liff/sales`のサマリータブから「走行距離(ODO)」カードは削除済み）。ODOはあくまで乗務員がその場で
+距離を計算するための単発ツールという位置づけ。
 
 ### 4-3. 既知の制約（設計上のトレードオフとして明記）
 
