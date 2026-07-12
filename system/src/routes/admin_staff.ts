@@ -1075,16 +1075,11 @@ app.get('/staff/search', async (c) => {
     staffRows = result.results ?? [];
   }
 
-  const chk = (arr: string[], val: string) => arr.includes(val) ? 'checked' : '';
-  const radio = (cur: string, val: string) => cur === val ? 'checked' : '';
-
-  const LABEL = 'font-size:12px;color:#374151;cursor:pointer;display:flex;align-items:center;gap:5px;';
-  const CB_GROUP = 'display:flex;flex-wrap:wrap;gap:6px 14px;';
-  const SEC = 'margin-bottom:18px;';
-  const SEC_LABEL = 'font-size:10px;font-weight:700;color:#9ca3af;display:block;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1px solid #f3f4f6;padding-bottom:4px;';
-
-  const TH = 'padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap;';
-  const TD = 'padding:8px 10px;border-bottom:1px solid #f3f4f6;vertical-align:middle;font-size:12px;';
+  const chip = (name: string, value: string, label: string, checked: boolean) =>
+    `<label class="ss-chip"><input type="checkbox" name="${name}" value="${escHtml(value)}"${checked ? ' checked' : ''}><span>${escHtml(label)}</span></label>`;
+  const seg = (name: string, opts: [string, string][], cur: string) =>
+    `<div class="ss-seg">${opts.map(([v, l]) =>
+      `<label><input type="radio" name="${name}" value="${v}"${cur === v ? ' checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
 
   const resultRows = submitted ? staffRows.map(e => {
     const enStatus = e.enrollment_status ?? '通常';
@@ -1093,252 +1088,357 @@ app.get('/staff/search', async (c) => {
     const age = calcAge(e.birth_date);
     const isNewcomerFlag = e.status === 'training' || (e.status !== 'completed' && !e.status);
     return `
-    <tr style="cursor:pointer;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''" onclick="location.href='${ADMIN_PATH}/staff/${e.id}'">
-      <td style="${TD}font-family:monospace;color:#9ca3af;">${escHtml(e.emp_no)}</td>
-      <td style="${TD}">
-        <div style="font-weight:600;color:#1f2937;">${escHtml(e.name)}</div>
-        ${e.name_kana ? `<div style="font-size:11px;color:#9ca3af;">${escHtml(e.name_kana)}</div>` : ''}
-        <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
-          ${e.is_hanchyo ? '<span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">班長</span>' : ''}
-          ${isNewcomerFlag ? '<span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">新人</span>' : ''}
-        </div>
+    <tr class="ss-row" onclick="location.href='${ADMIN_PATH}/staff/${e.id}'">
+      <td class="ss-td ss-mono">${escHtml(e.emp_no)}</td>
+      <td class="ss-td">
+        <div class="ss-name">${escHtml(e.name)}</div>
+        ${e.name_kana ? `<div class="ss-kana">${escHtml(e.name_kana)}</div>` : ''}
+        ${e.is_hanchyo || isNewcomerFlag ? `<div class="ss-tags">
+          ${e.is_hanchyo ? '<span class="ss-tag ss-tag-h">班長</span>' : ''}
+          ${isNewcomerFlag ? '<span class="ss-tag ss-tag-n">新人</span>' : ''}
+        </div>` : ''}
       </td>
-      <td style="${TD}color:#6b7280;white-space:nowrap;">${e.division ? e.division+'課' : ''}${e.team ? ' '+e.team+'班' : ''}${!e.division&&!e.team?'—':''}</td>
-      <td style="${TD}white-space:nowrap;text-align:center;">${e.work_schedule ?? '—'}</td>
-      <td style="${TD}white-space:nowrap;text-align:center;">${e.start_time ?? '—'}</td>
-      <td style="${TD}white-space:nowrap;text-align:center;">${e.work_hours_type ?? '—'}</td>
-      <td style="${TD}white-space:nowrap;"><span style="background:${bg};color:${tc};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;">${escHtml(enStatus)}</span></td>
-      <td style="${TD}white-space:nowrap;color:#6b7280;">${e.hire_date ? escHtml(e.hire_date) : '—'}</td>
-      <td style="${TD}text-align:center;white-space:nowrap;">${age !== null ? age+'歳' : '—'}</td>
-      <td style="${TD}white-space:nowrap;text-align:center;">${e.car_no ? `<span style="font-family:monospace;">${escHtml(e.car_no)}</span>` : '—'}</td>
-      <td style="${TD}text-align:center;">${e.is_caution ? '<span style="background:#fecaca;color:#991b1b;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;">注意</span>' : '—'}</td>
-      <td style="${TD}text-align:center;">${e.is_sales_followup ? '<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;">要</span>' : '—'}</td>
+      <td class="ss-td ss-sub ss-nowrap">${e.division ? e.division+'課' : ''}${e.team ? ' '+e.team+'班' : ''}${!e.division&&!e.team?'—':''}</td>
+      <td class="ss-td ss-c ss-nowrap">${e.work_schedule ?? '—'}</td>
+      <td class="ss-td ss-c ss-nowrap">${e.start_time ?? '—'}</td>
+      <td class="ss-td ss-c ss-nowrap">${e.work_hours_type ?? '—'}</td>
+      <td class="ss-td ss-nowrap"><span class="ss-en" style="background:${bg};color:${tc};">${escHtml(enStatus)}</span></td>
+      <td class="ss-td ss-sub ss-nowrap">${e.hire_date ? escHtml(e.hire_date) : '—'}</td>
+      <td class="ss-td ss-c ss-nowrap">${age !== null ? age+'歳' : '—'}</td>
+      <td class="ss-td ss-c ss-nowrap">${e.car_no ? `<span class="ss-mono2">${escHtml(e.car_no)}</span>` : '—'}</td>
+      <td class="ss-td ss-c">${e.is_caution ? '<span class="ss-tag ss-tag-c">注意</span>' : '<span class="ss-dim">—</span>'}</td>
+      <td class="ss-td ss-c">${e.is_sales_followup ? '<span class="ss-tag ss-tag-h">要</span>' : '<span class="ss-dim">—</span>'}</td>
     </tr>`;
   }).join('') : '';
 
   const activeCount = conditions.length;
 
+  const advAge  = (ami || ama) ? ' open' : '';
+  const advHire = (hf || ht) ? ' open' : '';
+  const advRet  = (rf || rt) ? ' open' : '';
+
   const content = `
-<div style="font-family:'Hiragino Sans','Meiryo',sans-serif;">
+<style>
+  .ss-page{font-family:'Hiragino Sans','Meiryo',sans-serif;}
+  .ss-head{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+  .ss-title{font-size:17px;font-weight:700;color:#1a3a5c;margin:0 0 3px;letter-spacing:0.02em;}
+  .ss-title-sub{font-size:12px;color:#8494a7;}
+  .ss-back{font-size:12px;color:#2d6a9f;text-decoration:none;padding:6px 10px;border-radius:6px;transition:background .15s;}
+  .ss-back:hover{background:#e8eef5;}
+  .ss-wrap{display:flex;gap:18px;align-items:flex-start;}
+  /* ---- 絞り込みパネル ---- */
+  .ss-panel{width:280px;flex-shrink:0;position:sticky;top:70px;}
+  .ss-card{background:#fff;border-radius:12px;box-shadow:0 1px 2px rgba(16,42,67,.06),0 4px 16px rgba(16,42,67,.07);display:flex;flex-direction:column;max-height:calc(100vh - 90px);overflow:hidden;}
+  .ss-card-accent{height:3px;background:linear-gradient(90deg,#1a3a5c,#2d6a9f 55%,#7cb3d8);flex-shrink:0;}
+  .ss-card-head{display:flex;justify-content:space-between;align-items:center;padding:13px 16px 11px;border-bottom:1px solid #eef1f5;flex-shrink:0;}
+  .ss-card-head b{font-size:13px;color:#1a3a5c;letter-spacing:.03em;}
+  .ss-reset{font-size:11px;color:#94a3b8;text-decoration:none;}
+  .ss-reset:hover{color:#dc2626;text-decoration:underline;}
+  .ss-body{padding:14px 16px 4px;overflow-y:auto;flex:1;}
+  .ss-sec{margin-bottom:17px;}
+  .ss-sec-label{font-size:10px;font-weight:700;color:#8494a7;display:block;margin-bottom:7px;letter-spacing:.09em;}
+  .ss-input,.ss-num,.ss-date{border:1px solid #d5dbe3;border-radius:7px;padding:7px 10px;font-size:12px;color:#1e293b;background:#f8fafc;outline:none;transition:border-color .15s,box-shadow .15s,background .15s;font-family:inherit;box-sizing:border-box;}
+  .ss-input:focus,.ss-num:focus,.ss-date:focus{border-color:#2d6a9f;box-shadow:0 0 0 3px rgba(45,106,159,.12);background:#fff;}
+  .ss-input{width:100%;}
+  .ss-num{width:64px;}
+  .ss-date{flex:1;min-width:0;}
+  .ss-range{display:flex;align-items:center;gap:6px;}
+  .ss-range-sep{font-size:11px;color:#94a3b8;flex-shrink:0;}
+  /* チップ（複数選択） */
+  .ss-chips{display:flex;flex-wrap:wrap;gap:6px;}
+  .ss-chip{position:relative;cursor:pointer;}
+  .ss-chip input{position:absolute;opacity:0;pointer-events:none;}
+  .ss-chip span{display:inline-flex;align-items:center;padding:5px 12px;border:1px solid #d5dbe3;border-radius:999px;font-size:12px;color:#4b5563;background:#fff;transition:all .13s;user-select:none;line-height:1.4;}
+  .ss-chip:hover span{border-color:#2d6a9f;color:#1a3a5c;}
+  .ss-chip input:checked+span{background:#1a3a5c;border-color:#1a3a5c;color:#fff;font-weight:600;box-shadow:0 1px 4px rgba(26,58,92,.3);}
+  .ss-chip input:focus-visible+span{box-shadow:0 0 0 3px rgba(45,106,159,.3);}
+  /* セグメント切替（単一選択） */
+  .ss-seg{display:flex;background:#eef1f5;border-radius:8px;padding:3px;}
+  .ss-seg label{flex:1;position:relative;cursor:pointer;}
+  .ss-seg input{position:absolute;opacity:0;pointer-events:none;}
+  .ss-seg span{display:block;text-align:center;font-size:11.5px;padding:6px 2px;border-radius:6px;color:#64748b;transition:all .13s;user-select:none;white-space:nowrap;}
+  .ss-seg label:hover span{color:#1a3a5c;}
+  .ss-seg input:checked+span{background:#fff;color:#1a3a5c;font-weight:700;box-shadow:0 1px 3px rgba(16,42,67,.18);}
+  .ss-sub-label{font-size:10px;color:#94a3b8;margin-bottom:4px;}
+  .ss-hint{font-size:10px;color:#b6c0cc;margin-top:5px;}
+  /* 折りたたみ詳細条件 */
+  .ss-adv{border-top:1px solid #eef1f5;margin:0 -16px;padding:0 16px;}
+  .ss-adv summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:11px 0;font-size:12px;font-weight:600;color:#4b5563;user-select:none;}
+  .ss-adv summary::-webkit-details-marker{display:none;}
+  .ss-adv summary::after{content:'';width:7px;height:7px;border-right:1.5px solid #94a3b8;border-bottom:1.5px solid #94a3b8;transform:rotate(45deg);transition:transform .15s;margin-right:2px;}
+  .ss-adv[open] summary::after{transform:rotate(-135deg);}
+  .ss-adv-body{padding-bottom:14px;}
+  /* 検索ボタン */
+  .ss-actions{padding:12px 16px;border-top:1px solid #eef1f5;background:#fff;flex-shrink:0;}
+  .ss-submit{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;background:#1a3a5c;color:#fff;border:none;border-radius:8px;font-size:13.5px;font-weight:700;letter-spacing:.06em;cursor:pointer;transition:background .15s,transform .05s;font-family:inherit;}
+  .ss-submit:hover{background:#2d6a9f;}
+  .ss-submit:active{transform:scale(.98);}
+  .ss-cnt{display:none;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;background:rgba(255,255,255,.22);border-radius:999px;font-size:11px;font-weight:700;}
+  /* ---- 検索結果 ---- */
+  .ss-result{flex:1;min-width:0;}
+  .ss-empty{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(16,42,67,.07);padding:70px 24px;text-align:center;}
+  .ss-empty-title{font-size:14px;font-weight:700;color:#374151;margin:14px 0 6px;}
+  .ss-empty-sub{font-size:12px;color:#94a3b8;line-height:1.7;max-width:340px;margin:0 auto;}
+  .ss-result-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding:0 2px;}
+  .ss-count{font-size:24px;font-weight:800;color:#1a3a5c;}
+  .ss-count-unit{font-size:13px;color:#4b5563;margin-left:3px;font-weight:600;}
+  .ss-count-sub{font-size:12px;color:#94a3b8;margin-left:8px;}
+  .ss-cond-note{font-size:11px;color:#94a3b8;}
+  .ss-tablewrap{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(16,42,67,.07);overflow-x:auto;margin-bottom:40px;}
+  .ss-table{width:100%;border-collapse:collapse;min-width:920px;}
+  .ss-th{padding:10px 12px;text-align:left;font-size:10.5px;font-weight:700;color:#8494a7;letter-spacing:.06em;border-bottom:2px solid #e8edf3;white-space:nowrap;background:#f8fafc;}
+  .ss-td{padding:9px 12px;border-bottom:1px solid #f1f4f8;vertical-align:middle;font-size:12.5px;color:#374151;}
+  .ss-c{text-align:center;}
+  .ss-nowrap{white-space:nowrap;}
+  .ss-row{cursor:pointer;transition:background .1s;}
+  .ss-row:nth-child(even){background:#fbfcfe;}
+  .ss-row:hover{background:#edf4fb;}
+  .ss-row:hover .ss-name{color:#2d6a9f;}
+  .ss-mono{font-family:ui-monospace,monospace;color:#94a3b8;font-size:11.5px;}
+  .ss-mono2{font-family:ui-monospace,monospace;}
+  .ss-name{font-weight:600;color:#1f2937;transition:color .1s;}
+  .ss-kana{font-size:10.5px;color:#9ca3af;margin-top:1px;}
+  .ss-tags{display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;}
+  .ss-tag{padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap;}
+  .ss-tag-h{background:#fef3c7;color:#92400e;}
+  .ss-tag-n{background:#dbeafe;color:#1e40af;}
+  .ss-tag-c{background:#fecaca;color:#991b1b;}
+  .ss-en{padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600;white-space:nowrap;}
+  .ss-sub{color:#6b7280;}
+  .ss-dim{color:#d1d5db;}
+  .ss-noresult{padding:60px 24px;text-align:center;}
+  .ss-noresult-title{font-size:13px;font-weight:600;color:#4b5563;margin-bottom:6px;}
+  .ss-noresult-sub{font-size:11.5px;color:#94a3b8;}
+  @media (max-width:900px){
+    .ss-wrap{flex-direction:column;}
+    .ss-panel{width:100%;position:static;}
+    .ss-card{max-height:none;}
+    .ss-body{overflow-y:visible;}
+  }
+</style>
+<div class="ss-page">
   <!-- ページヘッダー -->
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+  <div class="ss-head">
     <div>
-      <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0 0 2px;">社員絞り込み検索</h2>
-      <div style="font-size:12px;color:#9ca3af;">複数条件を組み合わせて社員を絞り込みます</div>
+      <h2 class="ss-title">社員絞り込み検索</h2>
+      <div class="ss-title-sub">複数条件を組み合わせて社員を絞り込みます</div>
     </div>
-    <a href="${ADMIN_PATH}/staff" style="font-size:12px;color:#2563eb;text-decoration:none;">← 社員名簿に戻る</a>
+    <a href="${ADMIN_PATH}/staff" class="ss-back">← 社員名簿に戻る</a>
   </div>
 
-  <div style="display:flex;gap:16px;align-items:flex-start;">
+  <div class="ss-wrap">
 
     <!-- 検索フォーム（左パネル） -->
-    <div style="width:260px;flex-shrink:0;position:sticky;top:80px;max-height:calc(100vh - 100px);overflow-y:auto;">
+    <div class="ss-panel">
       <form method="get" action="${ADMIN_PATH}/staff/search" id="search-form">
         <input type="hidden" name="s" value="1">
-
-        <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:16px;">
-
-          <!-- キーワード -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">キーワード</label>
-            <input type="text" name="q" value="${escHtml(q)}" placeholder="氏名・フリガナ・社員番号"
-              style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:12px;box-sizing:border-box;">
+        <div class="ss-card">
+          <div class="ss-card-accent"></div>
+          <div class="ss-card-head">
+            <b>絞り込み条件</b>
+            <a href="${ADMIN_PATH}/staff/search" class="ss-reset">リセット</a>
           </div>
+          <div class="ss-body">
 
-          <!-- 在籍区分 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">在籍区分</label>
-            <div style="${CB_GROUP}">
-              <label style="${LABEL}"><input type="radio" name="act" value="all" ${radio(act,'all')}> 全員</label>
-              <label style="${LABEL}"><input type="radio" name="act" value="1" ${radio(act,'1')}> 在籍中</label>
-              <label style="${LABEL}"><input type="radio" name="act" value="0" ${radio(act,'0')}> 退職済</label>
+            <!-- キーワード -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">キーワード</label>
+              <input type="text" name="q" value="${escHtml(q)}" placeholder="氏名・フリガナ・社員番号" class="ss-input">
             </div>
+
+            <!-- 在籍区分 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">在籍区分</label>
+              ${seg('act', [['all','全員'],['1','在籍中'],['0','退職済']], act)}
+            </div>
+
+            <!-- 課 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">課</label>
+              <div class="ss-chips">
+                ${[1,2,3,4].map(n => chip('div', String(n), n + '課', divArr.includes(String(n)))).join('')}
+              </div>
+            </div>
+
+            <!-- 班番号 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">班番号</label>
+              <div class="ss-range">
+                <input type="number" name="tmin" value="${escHtml(tmin)}" min="1" max="99" placeholder="最小" class="ss-num">
+                <span class="ss-range-sep">〜</span>
+                <input type="number" name="tmax" value="${escHtml(tmax)}" min="1" max="99" placeholder="最大" class="ss-num">
+              </div>
+            </div>
+
+            <!-- 勤務体系 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">勤務体系</label>
+              <div class="ss-chips">
+                ${['a','b','B','D','H'].map(w => chip('ws', w, w, wsArr.includes(w))).join('')}
+              </div>
+              <div class="ss-hint">a/B:早番 ・ b:夜番 ・ D:日勤 ・ H:半夜</div>
+            </div>
+
+            <!-- 出勤時間 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">出勤時間</label>
+              <div class="ss-chips">
+                ${ALL_TIMES.map(t => chip('st', t, t, stArr.includes(t))).join('')}
+              </div>
+            </div>
+
+            <!-- 在籍状態 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">在籍状態</label>
+              <div class="ss-chips">
+                ${['通常','育休','病欠','傷病','長欠'].map(e => chip('en', e, e, enArr.includes(e))).join('')}
+              </div>
+            </div>
+
+            <!-- 労働時間区分 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">労働時間区分</label>
+              <div class="ss-chips">
+                ${chip('wht', '労フル', '労フル', whtArr.includes('労フル'))}
+                ${chip('wht', '労短', '労短', whtArr.includes('労短'))}
+              </div>
+            </div>
+
+            <!-- 新人・班長 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">社員属性</label>
+              <div class="ss-sub-label">新人</div>
+              <div style="margin-bottom:8px;">
+                ${seg('nw', [['all','問わない'],['1','新人のみ'],['0','一般社員']], nw)}
+              </div>
+              <div class="ss-sub-label">班長</div>
+              ${seg('hc', [['all','問わない'],['1','班長のみ'],['0','班長以外']], hc)}
+            </div>
+
+            <!-- フラグ -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">フラグ</label>
+              <div class="ss-chips">
+                ${chip('ca', '1', '要注意のみ', ca === '1')}
+                ${chip('sfu', '1', '売上要後追いのみ', sfu === '1')}
+              </div>
+            </div>
+
+            <!-- 担当車番 -->
+            <div class="ss-sec">
+              <label class="ss-sec-label">担当車番</label>
+              ${seg('car', [['all','問わない'],['1','あり'],['0','なし']], car)}
+            </div>
+
+            <!-- 詳細条件（折りたたみ） -->
+            <details class="ss-adv"${advAge}>
+              <summary>年齢で絞り込む</summary>
+              <div class="ss-adv-body">
+                <div class="ss-range">
+                  <input type="number" name="ami" value="${escHtml(ami)}" min="18" max="99" placeholder="最小" class="ss-num">
+                  <span class="ss-range-sep">〜</span>
+                  <input type="number" name="ama" value="${escHtml(ama)}" min="18" max="99" placeholder="最大" class="ss-num">
+                  <span class="ss-range-sep">歳</span>
+                </div>
+              </div>
+            </details>
+
+            <details class="ss-adv"${advHire}>
+              <summary>入社日で絞り込む</summary>
+              <div class="ss-adv-body">
+                <div class="ss-range">
+                  <input type="date" name="hf" value="${escHtml(hf)}" class="ss-date">
+                  <span class="ss-range-sep">〜</span>
+                  <input type="date" name="ht" value="${escHtml(ht)}" class="ss-date">
+                </div>
+              </div>
+            </details>
+
+            <details class="ss-adv"${advRet}>
+              <summary>退職日で絞り込む</summary>
+              <div class="ss-adv-body">
+                <div class="ss-range">
+                  <input type="date" name="rf" value="${escHtml(rf)}" class="ss-date">
+                  <span class="ss-range-sep">〜</span>
+                  <input type="date" name="rt" value="${escHtml(rt)}" class="ss-date">
+                </div>
+              </div>
+            </details>
+
           </div>
-
-          <!-- 課 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">課</label>
-            <div style="${CB_GROUP}">
-              ${[1,2,3,4].map(n => `<label style="${LABEL}"><input type="checkbox" name="div" value="${n}" ${chk(divArr,String(n))}> ${n}課</label>`).join('')}
-            </div>
+          <div class="ss-actions">
+            <button type="submit" class="ss-submit">検索<span class="ss-cnt" id="ss-cnt"></span></button>
           </div>
-
-          <!-- 班番号 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">班番号</label>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input type="number" name="tmin" value="${escHtml(tmin)}" min="1" max="99" placeholder="最小"
-                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
-              <span style="font-size:12px;color:#9ca3af;">〜</span>
-              <input type="number" name="tmax" value="${escHtml(tmax)}" min="1" max="99" placeholder="最大"
-                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
-            </div>
-          </div>
-
-          <!-- 勤務体系 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">勤務体系</label>
-            <div style="${CB_GROUP}">
-              ${['a','b','B','D','H'].map(w => `<label style="${LABEL}"><input type="checkbox" name="ws" value="${w}" ${chk(wsArr,w)}> ${w}</label>`).join('')}
-            </div>
-            <div style="font-size:10px;color:#bbb;margin-top:4px;">a/B:早番 &nbsp;b:夜番 &nbsp;D:日勤 &nbsp;H:半夜</div>
-          </div>
-
-          <!-- 出勤時間 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">出勤時間</label>
-            <div style="${CB_GROUP}">
-              ${ALL_TIMES.map(t => `<label style="${LABEL}"><input type="checkbox" name="st" value="${t}" ${chk(stArr,t)}> ${t}</label>`).join('')}
-            </div>
-          </div>
-
-          <!-- 在籍状態 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">在籍状態</label>
-            <div style="${CB_GROUP}">
-              ${['通常','育休','病欠','傷病','長欠'].map(e => `<label style="${LABEL}"><input type="checkbox" name="en" value="${e}" ${chk(enArr,e)}> ${e}</label>`).join('')}
-            </div>
-          </div>
-
-          <!-- 労働時間区分 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">労働時間区分</label>
-            <div style="${CB_GROUP}">
-              <label style="${LABEL}"><input type="checkbox" name="wht" value="労フル" ${chk(whtArr,'労フル')}> 労フル</label>
-              <label style="${LABEL}"><input type="checkbox" name="wht" value="労短" ${chk(whtArr,'労短')}> 労短</label>
-            </div>
-          </div>
-
-          <!-- 新人・班長 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">社員属性</label>
-            <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">新人</div>
-            <div style="${CB_GROUP} margin-bottom:8px;">
-              <label style="${LABEL}"><input type="radio" name="nw" value="all" ${radio(nw,'all')}> 問わない</label>
-              <label style="${LABEL}"><input type="radio" name="nw" value="1" ${radio(nw,'1')}> 新人のみ</label>
-              <label style="${LABEL}"><input type="radio" name="nw" value="0" ${radio(nw,'0')}> 一般社員</label>
-            </div>
-            <div style="font-size:10px;color:#9ca3af;margin-bottom:4px;">班長</div>
-            <div style="${CB_GROUP}">
-              <label style="${LABEL}"><input type="radio" name="hc" value="all" ${radio(hc,'all')}> 問わない</label>
-              <label style="${LABEL}"><input type="radio" name="hc" value="1" ${radio(hc,'1')}> 班長のみ</label>
-              <label style="${LABEL}"><input type="radio" name="hc" value="0" ${radio(hc,'0')}> 班長以外</label>
-            </div>
-          </div>
-
-          <!-- フラグ -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">フラグ</label>
-            <div style="display:flex;flex-direction:column;gap:6px;">
-              <label style="${LABEL}"><input type="checkbox" name="ca" value="1" ${ca==='1'?'checked':''}> 要注意のみ表示</label>
-              <label style="${LABEL}"><input type="checkbox" name="sfu" value="1" ${sfu==='1'?'checked':''}> 売上要後追いのみ</label>
-            </div>
-          </div>
-
-          <!-- 担当車番 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">担当車番</label>
-            <div style="${CB_GROUP}">
-              <label style="${LABEL}"><input type="radio" name="car" value="all" ${radio(car,'all')}> 問わない</label>
-              <label style="${LABEL}"><input type="radio" name="car" value="1" ${radio(car,'1')}> あり</label>
-              <label style="${LABEL}"><input type="radio" name="car" value="0" ${radio(car,'0')}> なし</label>
-            </div>
-          </div>
-
-          <!-- 年齢 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">年齢</label>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input type="number" name="ami" value="${escHtml(ami)}" min="18" max="99" placeholder="最小"
-                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
-              <span style="font-size:12px;color:#9ca3af;">〜</span>
-              <input type="number" name="ama" value="${escHtml(ama)}" min="18" max="99" placeholder="最大"
-                style="width:68px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
-              <span style="font-size:12px;color:#9ca3af;">歳</span>
-            </div>
-          </div>
-
-          <!-- 入社日 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">入社日</label>
-            <div style="display:flex;flex-direction:column;gap:4px;">
-              <input type="date" name="hf" value="${escHtml(hf)}"
-                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
-              <div style="font-size:11px;color:#9ca3af;text-align:center;">〜</div>
-              <input type="date" name="ht" value="${escHtml(ht)}"
-                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
-            </div>
-          </div>
-
-          <!-- 退職日 -->
-          <div style="${SEC}">
-            <label style="${SEC_LABEL}">退職日</label>
-            <div style="display:flex;flex-direction:column;gap:4px;">
-              <input type="date" name="rf" value="${escHtml(rf)}"
-                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
-              <div style="font-size:11px;color:#9ca3af;text-align:center;">〜</div>
-              <input type="date" name="rt" value="${escHtml(rt)}"
-                style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;box-sizing:border-box;">
-            </div>
-          </div>
-
-        </div>
-
-        <div style="display:flex;gap:8px;margin-top:10px;">
-          <button type="submit"
-            style="flex:1;padding:10px;background:#1a3a5c;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">
-            検索${activeCount > 0 ? ` <span style="background:rgba(255,255,255,0.25);padding:1px 6px;border-radius:10px;font-size:11px;">${activeCount}</span>` : ''}
-          </button>
-          <a href="${ADMIN_PATH}/staff/search"
-            style="padding:10px 14px;background:#f3f4f6;color:#374151;border-radius:7px;font-size:13px;text-decoration:none;display:flex;align-items:center;">
-            リセット
-          </a>
         </div>
       </form>
     </div>
 
     <!-- 検索結果（右パネル） -->
-    <div style="flex:1;min-width:0;">
+    <div class="ss-result">
       ${!submitted ? `
-      <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:60px;text-align:center;">
-        <div style="font-size:40px;margin-bottom:16px;color:#d1d5db;">◎</div>
-        <div style="font-size:14px;color:#374151;font-weight:600;margin-bottom:8px;">条件を設定して検索してください</div>
-        <div style="font-size:12px;color:#9ca3af;">左パネルで絞り込み条件を選択し、「検索」ボタンを押してください</div>
+      <div class="ss-empty">
+        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#c3d0de" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+        <div class="ss-empty-title">条件を設定して検索</div>
+        <div class="ss-empty-sub">左のパネルで絞り込み条件を選び、「検索」ボタンを押すと該当する社員が一覧表示されます</div>
       </div>
       ` : `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <div style="font-size:13px;color:#6b7280;font-weight:600;">${staffRows.length}名 見つかりました</div>
-        ${activeCount > 0 ? `<div style="font-size:11px;color:#9ca3af;">${activeCount}件の条件で絞り込み中</div>` : ''}
+      <div class="ss-result-head">
+        <div><span class="ss-count">${staffRows.length}</span><span class="ss-count-unit">名</span><span class="ss-count-sub">が該当しました</span></div>
+        ${activeCount > 0 ? `<span class="ss-cond-note">${activeCount}件の条件で絞り込み中</span>` : ''}
       </div>
-      <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow-x:auto;margin-bottom:40px;">
+      <div class="ss-tablewrap">
         ${staffRows.length > 0 ? `
-        <table style="width:100%;border-collapse:collapse;min-width:900px;">
-          <thead style="background:#f9fafb;">
+        <table class="ss-table">
+          <thead>
             <tr>
-              <th style="${TH}">社員番号</th>
-              <th style="${TH}">氏名</th>
-              <th style="${TH}">課・班</th>
-              <th style="${TH}text-align:center;">体系</th>
-              <th style="${TH}text-align:center;">出勤時間</th>
-              <th style="${TH}text-align:center;">労働区分</th>
-              <th style="${TH}">在籍状態</th>
-              <th style="${TH}">入社日</th>
-              <th style="${TH}text-align:center;">年齢</th>
-              <th style="${TH}text-align:center;">車番</th>
-              <th style="${TH}text-align:center;">要注意</th>
-              <th style="${TH}text-align:center;">後追い</th>
+              <th class="ss-th">社員番号</th>
+              <th class="ss-th">氏名</th>
+              <th class="ss-th">課・班</th>
+              <th class="ss-th ss-c">体系</th>
+              <th class="ss-th ss-c">出勤時間</th>
+              <th class="ss-th ss-c">労働区分</th>
+              <th class="ss-th">在籍状態</th>
+              <th class="ss-th">入社日</th>
+              <th class="ss-th ss-c">年齢</th>
+              <th class="ss-th ss-c">車番</th>
+              <th class="ss-th ss-c">要注意</th>
+              <th class="ss-th ss-c">後追い</th>
             </tr>
           </thead>
           <tbody>${resultRows}</tbody>
         </table>
         ` : `
-        <div style="padding:50px;text-align:center;color:#9ca3af;font-size:13px;">条件に一致する社員が見つかりませんでした</div>
+        <div class="ss-noresult">
+          <div class="ss-noresult-title">条件に一致する社員が見つかりませんでした</div>
+          <div class="ss-noresult-sub">条件を減らすか、キーワードを変えて再検索してください</div>
+        </div>
         `}
       </div>
       `}
     </div>
   </div>
-</div>`;
+</div>
+<script>
+(function(){
+  var f = document.getElementById('search-form');
+  var c = document.getElementById('ss-cnt');
+  if (!f || !c) return;
+  function calc(){
+    var n = 0;
+    f.querySelectorAll('input').forEach(function(i){
+      if (i.type === 'hidden') return;
+      if (i.type === 'checkbox') { if (i.checked) n++; }
+      else if (i.type === 'radio') { if (i.checked && i.value !== 'all') n++; }
+      else if (i.value && i.value.trim()) n++;
+    });
+    c.textContent = n;
+    c.style.display = n > 0 ? 'inline-flex' : 'none';
+  }
+  f.addEventListener('input', calc);
+  f.addEventListener('change', calc);
+  calc();
+})();
+</script>`;
 
   return c.html(layout('社員絞り込み検索', content, 'staff-search'));
 });

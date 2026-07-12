@@ -249,11 +249,13 @@ app.get('/settings/lost-items', async (c) => {
         <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
         ${resolvedInfo}
       </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
         <button onclick="toggleStatus(${r.id},'${r.status}')"
           style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
           ${r.status === 'resolved' ? '再開' : '解決済にする'}
         </button>
+        <button onclick="deleteLostItem(${r.id},'${escHtml((r.item_description ?? '').slice(0, 20))}')"
+          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
       </td>
     </tr>`;
   }).join('');
@@ -316,6 +318,12 @@ app.get('/settings/lost-items', async (c) => {
       if (res.ok) { location.reload(); }
       else { alert('更新に失敗しました'); }
     }
+    async function deleteLostItem(id, desc) {
+      if (!confirm('この忘れ物報告を削除しますか？\\n「' + desc + '」\\n※削除すると元に戻せません')) return;
+      const res = await fetch(ADMIN_PATH + '/api/liff/lost-items/' + id, { method: 'DELETE' });
+      if (res.ok) { location.reload(); }
+      else { alert('削除に失敗しました'); }
+    }
     </script>
   `;
 
@@ -368,11 +376,13 @@ app.get('/settings/accidents', async (c) => {
         <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
         ${resolvedInfo}
       </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
         <button onclick="toggleAccidentStatus(${r.id},'${r.status}')"
           style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
           ${r.status === 'resolved' ? '再開' : '解決済にする'}
         </button>
+        <button onclick="deleteAccident(${r.id},'${escHtml(r.vehicle_no ?? '')}','${escHtml(r.accident_type ?? '')}')"
+          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
       </td>
     </tr>`;
   }).join('');
@@ -416,6 +426,13 @@ app.get('/settings/accidents', async (c) => {
       });
       if (res.ok) { location.reload(); }
       else { alert('更新に失敗しました'); }
+    }
+    async function deleteAccident(id, vehicleNo, type) {
+      const label = (vehicleNo || '車番不明') + (type ? ' / ' + type : '');
+      if (!confirm('この事故報告を削除しますか？\\n「' + label + '」\\n※削除すると元に戻せません')) return;
+      const res = await fetch(ADMIN_PATH + '/api/liff/accident-reports/' + id, { method: 'DELETE' });
+      if (res.ok) { location.reload(); }
+      else { alert('削除に失敗しました'); }
     }
     </script>
   `;
@@ -485,6 +502,16 @@ app.put('/api/liff/lost-items/:id/status', async (c) => {
 });
 
 // ===================================================
+// API: 忘れ物報告削除
+// ===================================================
+app.delete('/api/liff/lost-items/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  await c.env.DB.prepare('DELETE FROM lost_item_reports WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
+// ===================================================
 // API: 事故報告ステータス更新
 // ===================================================
 app.put('/api/liff/accident-reports/:id/status', async (c) => {
@@ -500,6 +527,16 @@ app.put('/api/liff/accident-reports/:id/status', async (c) => {
       `UPDATE accident_reports SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
     ).bind(status, id).run();
   }
+  return c.json({ ok: true });
+});
+
+// ===================================================
+// API: 事故報告削除
+// ===================================================
+app.delete('/api/liff/accident-reports/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  await c.env.DB.prepare('DELETE FROM accident_reports WHERE id = ?').bind(id).run();
   return c.json({ ok: true });
 });
 

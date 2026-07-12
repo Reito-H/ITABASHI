@@ -52,18 +52,14 @@ async function loadSummary(env: Env, empId: number, year: number, month: number)
   ).bind(empId, start, end).all<DailyRow>();
   const rows = rowsRes.results ?? [];
 
-  const distRes = await env.DB.prepare(
-    "SELECT COALESCE(SUM(distance_km), 0) AS total FROM odo_records WHERE emp_id = ? AND odo_end IS NOT NULL AND date(started_at) BETWEEN ? AND ?"
-  ).bind(empId, start, end).first<{ total: number }>();
-
   const totalAmount = rows.reduce((s, r) => s + r.amount, 0);
   const totalAmountExcl = Math.round(totalAmount / 1.1);
   const totalCount = rows.reduce((s, r) => s + dutyWeight(r.duty_code), 0);
   const workingDays = rows.length;
   const avgAmount = workingDays > 0 ? Math.round(totalAmount / workingDays) : 0;
-  const totalDistance = distRes?.total ?? 0;
 
-  return { start, end, rows, totalAmount, totalAmountExcl, totalCount, workingDays, avgAmount, totalDistance };
+  // 走行距離はODOのその場記録のみ（LINE返信後にレコードを削除する設計のため月次集計は行わない）
+  return { start, end, rows, totalAmount, totalAmountExcl, totalCount, workingDays, avgAmount };
 }
 
 // ===================================================

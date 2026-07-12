@@ -756,10 +756,6 @@ async function handleVehicleManager(
 // 売上記録・ODO記録（対象ロール共通: crew_member / newcomer / benten_member / benten_shift_master / general_manager）
 // ===================================================
 
-const ODO_STATES = ['odo_awaiting_start', 'odo_awaiting_end'];
-// ODOフロー中に他の役割別コマンドが来た場合、そちらへ割り込ませる
-const FOREIGN_CMDS = ['嫌なこと報告', '報告', 'シフト確認', 'マイカレ', '準備中', 'シフト', 'シフト表', 'ベンテンシフト', 'ベンテン'];
-
 // 売上記録（LIFFフォーム誘導）・ODO記録（会話フロー）を一括処理する。
 // 戻り値 true: このメッセージを処理した（呼び出し元はこれ以上処理しない）
 // 戻り値 false: 対象外のメッセージなので呼び出し元（役割別ハンドラー）に処理を委ねる
@@ -769,57 +765,41 @@ async function handleSalesOdoFlow(
   liffUser: LiffUser,
 ): Promise<boolean> {
   const empId = liffUser.emp_id;
-  const inOdoFlow = ODO_STATES.includes(state);
-
-  // 他フローへの割り込み
-  if (inOdoFlow && FOREIGN_CMDS.includes(inputText)) {
-    await setState(env.DB, lineUid, 'idle');
-    return false;
-  }
-
-  // キャンセル
-  if (inOdoFlow && (inputText === 'キャンセル' || inputText === 'cancel')) {
-    await setState(env.DB, lineUid, 'idle');
-    await reply(replyToken, at, [text('キャンセルしました。')]);
-    return true;
-  }
 
   // ===== ODOフロー継続 =====
-  if (state === 'odo_awaiting_start') {
-    const odoStart = parseInt(inputText.replace(/[^0-9]/g, ''));
-    if (isNaN(odoStart) || odoStart < 0 || odoStart > 999999) {
-      await reply(replyToken, at, [text('ODO値を数字（6桁まで）で入力してください。\n例）123456')]);
-      return true;
-    }
-    if (!empId) {
+  // 数字以外（＝他の機能のボタン・キャンセル等）が来たら入力待ちを静かに解除し、
+  // そのメッセージは本来の役割別ハンドラーに渡す（保留中のODO開始記録はDBにそのまま残るので消えない）
+  if (state === 'odo_awaiting_start' || state === 'odo_awaiting_end') {
+    if (!/^\d{1,6}$/.test(inputText.trim())) {
       await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text('社員情報が見つかりません。')]);
-      return true;
+      return false;
     }
-    await env.DB.prepare('INSERT INTO odo_records (emp_id, odo_start) VALUES (?, ?)').bind(empId, odoStart).run();
-    await setState(env.DB, lineUid, 'idle');
-    await reply(replyToken, at, [text(`🚕 ODO始: ${odoStart} を記録しました`)]);
-    return true;
-  }
+    const value = parseInt(inputText.trim(), 10);
 
-  if (state === 'odo_awaiting_end') {
-    const odoEnd = parseInt(inputText.replace(/[^0-9]/g, ''));
-    if (isNaN(odoEnd) || odoEnd < 0 || odoEnd > 999999) {
-      await reply(replyToken, at, [text('ODO値を数字（6桁まで）で入力してください。\n例）123601')]);
+    if (state === 'odo_awaiting_start') {
+      if (!empId) {
+        await setState(env.DB, lineUid, 'idle');
+        await reply(replyToken, at, [text('社員情報が見つかりません。')]);
+        return true;
+      }
+      await env.DB.prepare('INSERT INTO odo_records (emp_id, odo_start) VALUES (?, ?)').bind(empId, value).run();
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text(`🚕 ODO始: ${value} を記録しました`)]);
       return true;
     }
+
+    // odo_awaiting_end
     const recordId = data.record_id as number;
     const odoStart = data.odo_start as number;
-    if (odoEnd < odoStart) {
-      await reply(replyToken, at, [text(`ODO終(${odoEnd})がODO始(${odoStart})より小さいです。入力し直してください。`)]);
+    if (value < odoStart) {
+      await reply(replyToken, at, [text(`ODO終(${value})がODO始(${odoStart})より小さいです。入力し直してください。`)]);
       return true;
     }
-    const distance = odoEnd - odoStart;
-    await env.DB.prepare(
-      "UPDATE odo_records SET odo_end = ?, distance_km = ?, ended_at = datetime('now', 'localtime') WHERE id = ?"
-    ).bind(odoEnd, distance, recordId).run();
+    const distance = value - odoStart;
+    // 返信したらレコードは残さず削除する（集計等には使わない・その場限りの記録）
+    await env.DB.prepare('DELETE FROM odo_records WHERE id = ?').bind(recordId).run();
     await setState(env.DB, lineUid, 'idle');
-    await reply(replyToken, at, [text(`🚕 ODO記録が完了しました\nODO始: ${odoStart}\nODO終: ${odoEnd}\n走行距離: ${distance}km`)]);
+    await reply(replyToken, at, [text(`🚕 ODO記録が完了しました\nODO始: ${odoStart}\nODO終: ${value}\n走行距離: ${distance}km`)]);
     return true;
   }
 
@@ -844,10 +824,10 @@ async function handleSalesOdoFlow(
     ).bind(empId).first<{ id: number; odo_start: number }>();
     if (!open) {
       await setState(env.DB, lineUid, 'odo_awaiting_start');
-      await reply(replyToken, at, [text('ODO始の数値を入力してください。\n（6桁まで。例: 123456）')]);
+      await reply(replyToken, at, [text('ODO始の数値を入力してください。\n（6桁以内の数字。例: 12345）')]);
     } else {
       await setState(env.DB, lineUid, 'odo_awaiting_end', { record_id: open.id, odo_start: open.odo_start });
-      await reply(replyToken, at, [text(`ODO終の数値を入力してください。\n（ODO始: ${open.odo_start}／6桁まで）`)]);
+      await reply(replyToken, at, [text(`ODO終の数値を入力してください。\n（ODO始: ${open.odo_start}／6桁以内の数字）`)]);
     }
     return true;
   }
