@@ -96,6 +96,9 @@ function inspectionPage(adminPath: string): string {
       <button class="dept-btn" onclick="insSelDept(3)" id="ins-dept-3">3課</button>
       <button class="dept-btn" onclick="insSelDept(4)" id="ins-dept-4">4課</button>
     </div>
+    <span style="color:#bbb">｜</span>
+    <button class="btn-p" onclick="insPhotoPick()">📷 写真からAI取込</button>
+    <input type="file" id="ins-photo-file" accept="image/*" style="display:none" onchange="insPhotoSelected(this)">
     <span id="ins-save-badge" class="ins-save-badge"></span>
   </div>
 
@@ -127,7 +130,8 @@ function inspectionPage(adminPath: string): string {
     <select id="ins-year-out" onchange="insUpdateDays();insRenderCanvas()"></select>年
     <select id="ins-month-out" onchange="insUpdateDays();insRenderCanvas()"></select>月
     <select id="ins-day-out" onchange="insRenderCanvas()"></select>日
-    <button class="btn-xl" onclick="insCopyImage()">📋 クリップボードにコピー</button>
+    <button class="btn-xl" onclick="insPrintImage()">🖨 印刷</button>
+    <button class="btn-p" onclick="insCopyImage()">📋 クリップボードにコピー</button>
     <button class="btn-p" onclick="insDownloadImage()">💾 画像保存</button>
     <span id="ins-copy-badge" class="ins-save-badge"></span>
   </div>
@@ -163,6 +167,14 @@ function inspectionPage(adminPath: string): string {
       <button class="btn-s" onclick="insCloseModal()">キャンセル</button>
       <button class="btn-p" onclick="insSaveVehicle()">保存</button>
     </div>
+  </div>
+</div>
+
+<!-- AI取込モーダル -->
+<div id="ins-ai-modal" class="ins-modal-overlay" style="display:none" onclick="if(event.target===this&&!insAiBusy)insAiClose()">
+  <div class="ins-modal-box" style="width:600px;max-height:88vh;overflow-y:auto">
+    <div class="ins-modal-title">📷 写真からAI取込</div>
+    <div id="ins-ai-body"></div>
   </div>
 </div>
 
@@ -475,6 +487,26 @@ async function insCopyImage(){
   });
 }
 
+async function insPrintImage(){
+  await insRenderCanvas();
+  const canvas=document.getElementById('ins-canvas');
+  const dataUrl=canvas.toDataURL('image/png');
+  const m=document.getElementById('ins-month-out').value;
+  const d=document.getElementById('ins-day-out').value;
+  document.getElementById('ins-print-frame')?.remove();
+  const f=document.createElement('iframe');
+  f.id='ins-print-frame';
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(f);
+  const doc=f.contentDocument;
+  doc.open();
+  doc.write('<!DOCTYPE html><html><head><title>点検車検確認表_'+m+'月'+d+'日</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0}img{width:100%;display:block}</style></head><body><img src="'+dataUrl+'"></body></html>');
+  doc.close();
+  const img=doc.querySelector('img');
+  const doPrint=()=>{f.contentWindow.focus();f.contentWindow.print();};
+  if(img.complete) doPrint(); else img.onload=doPrint;
+}
+
 function insDownloadImage(){
   const canvas=document.getElementById('ins-canvas');
   const m=document.getElementById('ins-month-out').value;
@@ -484,7 +516,125 @@ function insDownloadImage(){
   a.href=canvas.toDataURL('image/png');
   a.click();
 }
-document.addEventListener('keydown',e=>{if(e.key==='Escape')insCloseModal();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){insCloseModal();if(!insAiBusy)insAiClose();}});
+
+// ===== 写真AI取込 =====
+let insAiEntries=[];
+let insAiBusy=false;
+const INS_TYPE_JP={inspect:'点検',shaken:'車検',bomb:'ボンベ',sub:'代替',recall:'リコール'};
+
+function insPhotoPick(){document.getElementById('ins-photo-file').click();}
+
+function insLoadImage(file){
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(file);
+    const img=new Image();
+    img.onload=()=>{
+      const max=1800;
+      let w=img.naturalWidth,h=img.naturalHeight;
+      const sc=Math.min(1,max/Math.max(w,h));
+      w=Math.round(w*sc);h=Math.round(h*sc);
+      const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+      cv.getContext('2d').drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(url);
+      resolve(cv.toDataURL('image/jpeg',0.85));
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('decode'));};
+    img.src=url;
+  });
+}
+
+function insAiShow(html){
+  document.getElementById('ins-ai-body').innerHTML=html;
+  document.getElementById('ins-ai-modal').style.display='flex';
+}
+function insAiClose(){document.getElementById('ins-ai-modal').style.display='none';}
+
+async function insPhotoSelected(input){
+  const file=input.files[0];
+  input.value='';
+  if(!file) return;
+  insAiBusy=true;
+  insAiShow('<div style="text-align:center;padding:30px;color:#555;font-size:14px">🔍 AIが写真を解析しています…<br><span style="font-size:12px;color:#999">（10〜30秒ほどかかります）</span></div>');
+  let dataUrl;
+  try{
+    dataUrl=await insLoadImage(file);
+  }catch(e){
+    insAiBusy=false;
+    insAiShow('<div style="color:#c00;font-size:13px;padding:10px 0">画像を読み込めませんでした。HEIC形式はブラウザによって開けない場合があります。iPhoneの「写真」から選択するか、JPEG/PNGに変換してお試しください。</div><div class="ins-actions"><button class="btn-s" onclick="insAiClose()">閉じる</button></div>');
+    return;
+  }
+  try{
+    const res=await fetch(INS_PATH+'/api/inspection/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:dataUrl,ym:insGetYM()})});
+    const j=await res.json();
+    insAiBusy=false;
+    if(!res.ok||j.error){
+      insAiShow('<div style="color:#c00;font-size:13px;padding:10px 0">'+insEsc(j.error||'解析に失敗しました')+'</div><div class="ins-actions"><button class="btn-s" onclick="insAiClose()">閉じる</button></div>');
+      return;
+    }
+    insAiEntries=j.entries.map((e,i)=>({...e,_idx:i,_excluded:false}));
+    insAiRenderPreview(j.detected_ka,j.detected_month);
+  }catch(e){
+    insAiBusy=false;
+    insAiShow('<div style="color:#c00;font-size:13px;padding:10px 0">通信エラーが発生しました。もう一度お試しください。</div><div class="ins-actions"><button class="btn-s" onclick="insAiClose()">閉じる</button></div>');
+  }
+}
+
+function insAiRenderPreview(detectedKa,detectedMonth){
+  let warn='';
+  if(detectedKa&&detectedKa!==IS.dept) warn+='<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:5px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#856404">⚠️ 写真は <strong>'+detectedKa+'課</strong> の表のようですが、画面では <strong>'+IS.dept+'課</strong> が選択されています。登録先は画面の選択（'+IS.dept+'課）になります。</div>';
+  if(detectedMonth&&detectedMonth!==IS.month) warn+='<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:5px;padding:8px 12px;font-size:12px;margin-bottom:10px;color:#856404">⚠️ 写真は <strong>'+detectedMonth+'月</strong> の表のようですが、画面では <strong>'+IS.month+'月</strong> が選択されています。登録先は画面の選択（'+IS.year+'年'+IS.month+'月）になります。</div>';
+
+  const byDay={};
+  insAiEntries.forEach(e=>{(byDay[e.day]=byDay[e.day]||[]).push(e);});
+  let rows='';
+  Object.keys(byDay).map(Number).sort((a,b)=>a-b).forEach(day=>{
+    const h1=byDay[day].filter(e=>e.han===1),h2=byDay[day].filter(e=>e.han===2);
+    const tag=e=>'<span class="vtag vt-'+e.type+'" style="'+(e._excluded?'opacity:.3;text-decoration:line-through;':'')+'" onclick="insAiToggle('+e._idx+')" title="クリックで除外/戻す">'+insEsc(e.vehicle_num)+'<span class="vt-time">'+INS_TYPE_JP[e.type]+'</span></span>';
+    rows+='<tr><td style="padding:4px"><div class="vtags">'+h1.map(tag).join('')+'</div></td><td class="ins-date-cell">'+day+'</td><td style="padding:4px"><div class="vtags">'+h2.map(tag).join('')+'</div></td></tr>';
+  });
+
+  insAiShow(
+    warn+
+    '<div style="font-size:13px;color:#333;margin-bottom:10px"><strong>'+insAiEntries.length+'件</strong> の車両を検出しました。内容を確認してください（車番クリックで除外できます）。登録後の修正は表の車番クリックでできます。</div>'+
+    '<div class="ins-table-wrap" style="margin-bottom:12px"><table class="ins-table"><colgroup><col style="width:44%"><col style="width:12%"><col style="width:44%"></colgroup><thead><tr><th>《1班側》</th><th>日付</th><th>《2班側》</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<label style="font-size:13px;display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer"><input type="checkbox" id="ins-ai-replace" checked> '+IS.year+'年'+IS.month+'月 '+IS.dept+'課の既存データを置き換える（外すと追加のみ）</label>'+
+    '<div class="ins-actions"><button class="btn-s" onclick="insAiClose()">キャンセル</button><button class="btn-p" id="ins-ai-reg-btn" onclick="insAiRegister()">✓ '+IS.year+'年'+IS.month+'月 '+IS.dept+'課に登録</button></div>'
+  );
+}
+
+function insAiToggle(idx){
+  const e=insAiEntries.find(x=>x._idx===idx);
+  if(e){e._excluded=!e._excluded;insAiRenderPreview(null,null);}
+}
+
+async function insAiRegister(){
+  const entries=insAiEntries.filter(e=>!e._excluded).map(e=>({day:e.day,han:e.han,vehicle_num:e.vehicle_num,type:e.type}));
+  if(entries.length===0){alert('登録する車両がありません');return;}
+  const replace=document.getElementById('ins-ai-replace').checked;
+  const ym=insGetYM();
+  const btn=document.getElementById('ins-ai-reg-btn');
+  btn.disabled=true;btn.textContent='登録中…';
+  insAiBusy=true;
+  try{
+    const res=await fetch(INS_PATH+'/api/inspection/schedule/bulk',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym,ka:IS.dept,replace,entries})});
+    const j=await res.json();
+    insAiBusy=false;
+    if(!res.ok||j.error){
+      alert(j.error||'登録に失敗しました');
+      btn.disabled=false;btn.textContent='✓ 登録';
+      return;
+    }
+    delete IS.cache[ym+'_'+IS.dept];
+    insAiClose();
+    await insRefreshTable();
+    insShowBadge();
+  }catch(e){
+    insAiBusy=false;
+    alert('通信エラーが発生しました');
+    btn.disabled=false;btn.textContent='✓ 登録';
+  }
+}
 </script>`;
 }
 
