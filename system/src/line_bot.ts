@@ -756,26 +756,11 @@ async function handleVehicleManager(
 // 売上記録・ODO記録（対象ロール共通: crew_member / newcomer / benten_member / benten_shift_master / general_manager）
 // ===================================================
 
-const DUTY_LABELS: Record<string, string> = {
-  '昼日勤': 'a',
-  '夜日勤': 'b',
-  '隔日B': 'B',
-  '隔日D': 'D',
-  '隔日H': 'H',
-};
-const DUTY_QUICK_REPLY = [
-  { label: '昼日勤', text: '昼日勤' },
-  { label: '夜日勤', text: '夜日勤' },
-  { label: '隔日B', text: '隔日B' },
-  { label: '隔日D', text: '隔日D' },
-  { label: '隔日H', text: '隔日H' },
-];
-const SALES_STATES = ['sales_confirm_overwrite', 'sales_duty', 'sales_amount', 'sales_rides', 'sales_confirm'];
 const ODO_STATES = ['odo_awaiting_start', 'odo_awaiting_end'];
-// 売上/ODOフロー中に他の役割別コマンドが来た場合、そちらへ割り込ませる
+// ODOフロー中に他の役割別コマンドが来た場合、そちらへ割り込ませる
 const FOREIGN_CMDS = ['嫌なこと報告', '報告', 'シフト確認', 'マイカレ', '準備中', 'シフト', 'シフト表', 'ベンテンシフト', 'ベンテン'];
 
-// 売上記録・ODO記録の会話フローを一括処理する。
+// 売上記録（LIFFフォーム誘導）・ODO記録（会話フロー）を一括処理する。
 // 戻り値 true: このメッセージを処理した（呼び出し元はこれ以上処理しない）
 // 戻り値 false: 対象外のメッセージなので呼び出し元（役割別ハンドラー）に処理を委ねる
 async function handleSalesOdoFlow(
@@ -784,89 +769,18 @@ async function handleSalesOdoFlow(
   liffUser: LiffUser,
 ): Promise<boolean> {
   const empId = liffUser.emp_id;
-  const inSalesOdoFlow = SALES_STATES.includes(state) || ODO_STATES.includes(state);
+  const inOdoFlow = ODO_STATES.includes(state);
 
   // 他フローへの割り込み
-  if (inSalesOdoFlow && FOREIGN_CMDS.includes(inputText)) {
+  if (inOdoFlow && FOREIGN_CMDS.includes(inputText)) {
     await setState(env.DB, lineUid, 'idle');
     return false;
   }
 
   // キャンセル
-  if (inSalesOdoFlow && (inputText === 'キャンセル' || inputText === 'cancel')) {
+  if (inOdoFlow && (inputText === 'キャンセル' || inputText === 'cancel')) {
     await setState(env.DB, lineUid, 'idle');
     await reply(replyToken, at, [text('キャンセルしました。')]);
-    return true;
-  }
-
-  // ===== 売上記録フロー継続 =====
-  if (state === 'sales_confirm_overwrite') {
-    if (inputText === '上書き') {
-      await setState(env.DB, lineUid, 'sales_duty', { date: data.date as string });
-      await reply(replyToken, at, [textWithQuickReply('区分を選んでください。', DUTY_QUICK_REPLY)]);
-    } else {
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text('キャンセルしました。')]);
-    }
-    return true;
-  }
-
-  if (state === 'sales_duty') {
-    const dutyCode = DUTY_LABELS[inputText];
-    if (!dutyCode) {
-      await reply(replyToken, at, [textWithQuickReply('区分をボタンから選んでください。', DUTY_QUICK_REPLY)]);
-      return true;
-    }
-    await setState(env.DB, lineUid, 'sales_amount', { ...data, duty_code: dutyCode, duty_label: inputText });
-    await reply(replyToken, at, [text('売上金額を入力してください。\n（円。税込。例: 18500）')]);
-    return true;
-  }
-
-  if (state === 'sales_amount') {
-    const amount = parseInt(inputText.replace(/[^0-9]/g, ''));
-    if (isNaN(amount) || amount < 0 || amount > 999999) {
-      await reply(replyToken, at, [text('金額を正しく入力してください。\n（例: 18500）')]);
-      return true;
-    }
-    await setState(env.DB, lineUid, 'sales_rides', { ...data, amount });
-    await reply(replyToken, at, [text('乗車回数を入力してください。\n（例: 8）')]);
-    return true;
-  }
-
-  if (state === 'sales_rides') {
-    const rides = parseInt(inputText.replace(/[^0-9]/g, ''));
-    if (isNaN(rides) || rides < 0 || rides > 999) {
-      await reply(replyToken, at, [text('乗車回数を正しく入力してください。\n（例: 8）')]);
-      return true;
-    }
-    const newData = { ...data, ride_count: rides };
-    await setState(env.DB, lineUid, 'sales_confirm', newData);
-    const amount = data.amount as number;
-    const amountExcl = Math.round(amount / 1.1);
-    await reply(replyToken, at, [textWithQuickReply(
-      `✅ 内容確認\n\n📅 日付: ${data.date}\n📋 区分: ${data.duty_label}\n💰 売上: ${amount.toLocaleString('ja-JP')}円（税抜 ${amountExcl.toLocaleString('ja-JP')}円）\n🚕 乗車: ${rides}回\n\n登録しますか？`,
-      [{ label: '✅ 登録する', text: '登録' }, { label: '❌ キャンセル', text: 'キャンセル' }]
-    )]);
-    return true;
-  }
-
-  if (state === 'sales_confirm') {
-    if (inputText === '登録') {
-      if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return true; }
-      const { year, month } = getPeriod(data.date as string);
-      await env.DB.prepare(`
-        INSERT INTO sales_records (emp_id, date, amount, ride_count, duty_code, period_year, period_month, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-        ON CONFLICT(emp_id, date) DO UPDATE SET
-          amount = excluded.amount, ride_count = excluded.ride_count, duty_code = excluded.duty_code,
-          period_year = excluded.period_year, period_month = excluded.period_month, updated_at = datetime('now', 'localtime')
-      `).bind(empId, data.date, data.amount, data.ride_count ?? null, data.duty_code ?? null, year, month).run();
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text(`✅ 登録しました！\n${data.date}\n売上: ${(data.amount as number).toLocaleString('ja-JP')}円`)]);
-    } else {
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text('キャンセルしました。')]);
-    }
     return true;
   }
 
@@ -910,21 +824,15 @@ async function handleSalesOdoFlow(
   }
 
   // ===== 新規トリガー =====
+  // 売上記録 → LIFFフォームを送信（運行管理者の忘れ物対応・事故報告と同じ「ボタン→フォーム」方式）
   if (inputText === '売上記録' || inputText === '売上を記録') {
     if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return true; }
-    const today = todayJST();
-    const existing = await env.DB.prepare(
-      'SELECT amount FROM sales_records WHERE emp_id = ? AND date = ?'
-    ).bind(empId, today).first<{ amount: number }>();
-    if (existing) {
-      await setState(env.DB, lineUid, 'sales_confirm_overwrite', { date: today, prev: existing.amount });
-      await reply(replyToken, at, [textWithQuickReply(
-        `今日(${today})はすでに ${existing.amount.toLocaleString('ja-JP')}円 が記録されています。\n上書きしますか？`,
-        [{ label: '上書きする', text: '上書き' }, { label: 'キャンセル', text: 'キャンセル' }]
-      )]);
+    const liffId = env.LIFF_ID_SALES ?? '';
+    const url = liffId ? `https://liff.line.me/${liffId}?tab=input` : '';
+    if (url) {
+      await reply(replyToken, at, [text(`💰 売上記録フォーム\n\n下をタップして開いてください:\n${url}`)]);
     } else {
-      await setState(env.DB, lineUid, 'sales_duty', { date: today });
-      await reply(replyToken, at, [textWithQuickReply('区分を選んでください。', DUTY_QUICK_REPLY)]);
+      await reply(replyToken, at, [text('💰 売上記録\n\nただいま準備中です。もうしばらくお待ちください！')]);
     }
     return true;
   }
