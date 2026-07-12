@@ -663,7 +663,6 @@ app.get('/settings', (c) => {
     { href: `${ADMIN}/settings/periods`,              title: '月度設定',         desc: '各月度の開始日・締め日の設定' },
     { href: `${ADMIN}/settings/notifications`,        title: 'LINE通知設定',     desc: '班長向け定時通知の送信時刻・有効/無効設定' },
     { href: `${ADMIN}/settings/offices`,              title: '営業所',           desc: '各営業所の電話番号・住所の管理' },
-    { href: `${ADMIN}/settings/vehicle-admins`,       title: '車番検索管理者一覧', desc: 'LINE車番連携済みユーザーの確認・強制解除' },
     { href: `${ADMIN}/settings/vehicle-search-guide`, title: '車番検索ガイド',   desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
     { href: `${ADMIN}/settings/tutorial`,             title: 'チュートリアル',   desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
     { href: `${ADMIN}/settings/status`,               title: 'システムステータス', desc: 'サーバー・DB・API・通信状態の確認・アクセスQRコード' },
