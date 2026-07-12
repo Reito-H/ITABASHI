@@ -157,7 +157,7 @@ export function bentenPdfAvailable(env: Env): boolean {
   return !!(env.BENTEN_FONTS || env.BENTEN_FONT_URL);
 }
 
-async function loadBentenFont(env: Env): Promise<ArrayBuffer | null> {
+export async function loadBentenFont(env: Env): Promise<ArrayBuffer | null> {
   if (env.BENTEN_FONTS) {
     const obj = await env.BENTEN_FONTS.get('NotoSansJP-Regular.ttf');
     if (obj) return obj.arrayBuffer();

@@ -192,7 +192,7 @@ app.post('/:id/reinstate', async (c) => {
 // CSV一括インポート（emp_no ベースで新規挿入 or 更新）
 // D1 batch API を使い、リクエスト数を最小化（1 SELECT + N/100 batch calls）
 app.post('/csv-import', async (c) => {
-  const data = await c.req.json<{
+  let data: {
     employees: Array<{
       emp_no: string;
       name: string;
@@ -205,7 +205,12 @@ app.post('/csv-import', async (c) => {
       used_cars?: string | null;
       isLongAbsent?: boolean;
     }>;
-  }>();
+  };
+  try {
+    data = await c.req.json();
+  } catch {
+    return c.json({ error: 'データがありません' }, 400);
+  }
 
   if (!Array.isArray(data?.employees) || data.employees.length === 0) {
     return c.json({ error: 'データがありません' }, 400);

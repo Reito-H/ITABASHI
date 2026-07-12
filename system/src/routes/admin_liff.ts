@@ -15,6 +15,7 @@ const ROLE_LABELS: Record<string, string> = {
   newcomer:            '新人',
   benten_shift_master: 'ベンテンシフトマスター',
   benten_member:       'ベンテンクラブ会員',
+  crew_member:         '乗務社員',
   unknown:             '権限不明者',
 };
 
@@ -25,6 +26,7 @@ const ROLE_COLORS: Record<string, string> = {
   newcomer:            '#1d4ed8',
   benten_shift_master: '#b45309',
   benten_member:       '#0891b2',
+  crew_member:         '#d97706',
   unknown:             '#9ca3af',
 };
 
@@ -427,7 +429,7 @@ app.get('/settings/accidents', async (c) => {
 app.put('/api/liff-users/:id/role', async (c) => {
   const id = parseInt(c.req.param('id'));
   const { role } = await c.req.json<{ role: string }>();
-  const validRoles = ['general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'benten_shift_master', 'benten_member', 'unknown'];
+  const validRoles = ['general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'benten_shift_master', 'benten_member', 'crew_member', 'unknown'];
   if (!validRoles.includes(role)) return c.json({ error: 'invalid role' }, 400);
 
   await c.env.DB.prepare(
@@ -530,6 +532,8 @@ export function getRichMenuForRole(role: string, env: Env): string {
     case 'general_manager':     return env.RICHMENU_ID_PATTERN3 ?? '';
     case 'benten_member':
     case 'benten_shift_master': return env.RICHMENU_ID_BENTEN ?? '';
+    case 'crew_member':         return env.RICHMENU_ID_CREW_MEMBER ?? '';
+    case 'unknown':             return env.RICHMENU_ID_UNKNOWN ?? '';
     default:                    return '';
   }
 }

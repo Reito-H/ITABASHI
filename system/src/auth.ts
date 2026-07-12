@@ -27,6 +27,12 @@ export type Env = {
   BENTEN_LINE_GROUP_ID?: string;    // 日次送信先LINEグループ（benten_configが優先）
   BENTEN_FONT_URL?: string;         // PDF用 日本語TTFフォントのURL（R2未使用時）
   BENTEN_FONTS?: R2Bucket;          // PDF用フォント置き場（NotoSansJP-Regular.ttf）
+  // 乗務社員 + 売上管理拡張 + ODOメーター記録
+  RICHMENU_ID_CREW_MEMBER?: string;
+  LINE_REG_PWD_CREW_MEMBER?: string; // 乗務社員・新人（LINE連携メニュー経由）共通の登録パスワード
+  LIFF_ID_SALES?: string;
+  // 権限不明者（友達追加直後・未登録）用リッチメニュー。「LINE連携」ボタンでステータス選択を起動
+  RICHMENU_ID_UNKNOWN?: string;
 };
 
 const PBKDF2_ITERATIONS = 600000;

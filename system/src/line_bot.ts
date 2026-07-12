@@ -174,6 +174,16 @@ async function registerLiffUser(
   }
 }
 
+// 社員名の完全一致で employees.id を line_liff_users.emp_id に紐付ける（売上・ODO機能に必要）
+async function linkEmployeeByName(db: D1Database, lineUid: string, name: string): Promise<void> {
+  const emp = await db.prepare(
+    'SELECT id FROM employees WHERE name = ? AND is_active = 1 LIMIT 1'
+  ).bind(name).first<{ id: number }>();
+  if (emp) {
+    await db.prepare('UPDATE line_liff_users SET emp_id = ? WHERE line_uid = ?').bind(emp.id, lineUid).run();
+  }
+}
+
 // ===================================================
 // メインハンドラー
 // ===================================================
@@ -183,6 +193,38 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   if (!lineUid) return;
   const replyToken = event.replyToken as string;
   const at = env.LINE_CHANNEL_ACCESS_TOKEN!;
+
+  // ===== 友達追加（follow）=====
+  // 権限不明者用リッチメニュー（RICHMENU_ID_UNKNOWN）を割り当てる。
+  // 「友達追加・LINE連携はこちら」ボタンを押すとステータス選択メニューが起動する（handleUnregisteredUser参照）。
+  if (event.type === 'follow') {
+    const existing = await env.DB.prepare(
+      'SELECT role FROM line_liff_users WHERE line_uid = ?'
+    ).bind(lineUid).first<{ role: string }>();
+
+    if (existing) {
+      // 既存ユーザーの再フォロー（ブロック解除等）: 現在のロールのリッチメニューを再割り当て
+      const menuId = getRichMenuForRole(existing.role, env);
+      if (menuId) await assignRichMenu(lineUid, menuId, at);
+      else await removeRichMenu(lineUid, at);
+      if (replyToken) await reply(replyToken, at, [text('おかえりなさい！')]);
+    } else {
+      // 新規フォロー: 権限不明者として登録し、案内リッチメニューを割り当て
+      await env.DB.prepare(`
+        INSERT INTO line_liff_users (line_uid, name, role, created_at, updated_at)
+        VALUES (?, '', 'unknown', datetime('now', 'localtime'), datetime('now', 'localtime'))
+        ON CONFLICT(line_uid) DO NOTHING
+      `).bind(lineUid).run();
+      const menuId = getRichMenuForRole('unknown', env);
+      if (menuId) await assignRichMenu(lineUid, menuId, at);
+      if (replyToken) {
+        await reply(replyToken, at, [text(
+          '友だち追加ありがとうございます！\n\nリッチメニューの「LINE連携」から、あなたのステータスを選択して登録を進めてください。'
+        )]);
+      }
+    }
+    return;
+  }
 
   // テキスト入力を取得
   let inputText = '';
@@ -271,6 +313,13 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   // ===== 役割別処理 =====
   const role = liffUser.role;
 
+  // ===== 売上記録・ODO記録（対象ロール共通）=====
+  const SALES_ODO_ROLES = ['crew_member', 'newcomer', 'benten_member', 'benten_shift_master', 'general_manager'];
+  if (SALES_ODO_ROLES.includes(role)) {
+    const handled = await handleSalesOdoFlow(env, lineUid, replyToken, at, inputText, state, data, liffUser);
+    if (handled) return;
+  }
+
   switch (role) {
     case 'general_manager':
     case 'operations_manager':
@@ -280,14 +329,15 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
       await handleVehicleManager(env, lineUid, replyToken, at, inputText);
       break;
     case 'newcomer':
+    case 'crew_member':
       await handleNewcomer(env, lineUid, replyToken, at, inputText, state, data, liffUser);
       break;
     case 'benten_member':
     case 'benten_shift_master':
       await handleBentenUser(env, replyToken, at, inputText);
       break;
-    default: // unknown
-      await handleUnknownRole(replyToken, at, liffUser.name);
+    default: // unknown（友達追加直後を含む・未登録と同じ「LINE連携」フローに合流させる）
+      await handleUnregisteredUser(env, lineUid, replyToken, at, inputText, state, data);
       break;
   }
 }
@@ -295,6 +345,24 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
 // ===================================================
 // 登録フロー（コマンド + パスワード認証）
 // ===================================================
+
+// 「LINE連携」ステータス選択メニュー経由の登録で使うロール→パスワードの対応
+// （newcomer と crew_member は同じパスワードを共有する運用）
+function menuRolePassword(role: string, env: Env): string {
+  switch (role) {
+    case 'newcomer':
+    case 'crew_member':     return env.LINE_REG_PWD_CREW_MEMBER ?? '';
+    case 'benten_member':   return env.LINE_REG_PWD_BENTEN ?? '';
+    case 'vehicle_manager': return env.LINE_REG_PWD_VEHICLE ?? '';
+    default:                return '';
+  }
+}
+const MENU_ROLE_LABELS: Record<string, string> = {
+  newcomer: '新人',
+  crew_member: '乗務社員',
+  benten_member: '弁天倶楽部会員',
+  vehicle_manager: '車番管理者',
+};
 
 async function handleRegistrationFlow(
   env: Env, lineUid: string, replyToken: string, at: string,
@@ -314,6 +382,7 @@ async function handleRegistrationFlow(
     reg_vehicle_name:       'reg_vehicle_password',
     reg_benten_name:        'reg_benten_password',
     reg_benten_master_name: 'reg_benten_master_password',
+    reg_crew_member_name:   'reg_crew_member_password',
   };
   if (nameStates[state]) {
     await setState(env.DB, lineUid, nameStates[state], { name: inputText });
@@ -369,6 +438,7 @@ async function handleRegistrationFlow(
     } else {
       await registerLiffUser(env.DB, lineUid, String(data.name), 'benten_member', null, env);
       await linkBentenMember(env.DB, lineUid, String(data.name));
+      await linkEmployeeByName(env.DB, lineUid, String(data.name));
       await setState(env.DB, lineUid, 'idle');
       const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
       const url = liffId ? `\n\n📱 シフト入力・確認はこちら:\nhttps://liff.line.me/${liffId}` : '';
@@ -385,10 +455,91 @@ async function handleRegistrationFlow(
     } else {
       await registerLiffUser(env.DB, lineUid, String(data.name), 'benten_shift_master', null, env);
       await linkBentenMember(env.DB, lineUid, String(data.name));
+      await linkEmployeeByName(env.DB, lineUid, String(data.name));
       await setState(env.DB, lineUid, 'idle');
       const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
       const url = liffId ? `\n\n📱 シフト入力・確認はこちら:\nhttps://liff.line.me/${liffId}` : '';
       await reply(replyToken, at, [text(`あなたは ベンテンクラブシフトマスター で登録されました。\n\n全会員のシフトを編集できます。\n「シフト」と送信するとシフト入力・シフト表を開けます。${url}`)]);
+    }
+    return true;
+  }
+
+  if (state === 'reg_crew_member_password') {
+    const pwd = env.LINE_REG_PWD_CREW_MEMBER ?? '';
+    if (!pwd || inputText !== pwd) {
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text('パスワードが正しくありません。最初からやり直してください。')]);
+    } else {
+      await registerLiffUser(env.DB, lineUid, String(data.name), 'crew_member', null, env);
+      await linkEmployeeByName(env.DB, lineUid, String(data.name));
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text('あなたは 乗務社員 で登録されました。\n\n「売上記録」「ODO」のボタンからご利用いただけます。')]);
+    }
+    return true;
+  }
+
+  // ===== ステータス選択メニュー経由の登録フロー（新人/乗務社員/弁天倶楽部会員/車番管理者）=====
+  if (state === 'reg_menu_password') {
+    const role = String(data.role);
+    const pwd = menuRolePassword(role, env);
+    if (!pwd || inputText !== pwd) {
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text('パスワードが正しくありません。もう一度「LINE連携」からやり直してください。')]);
+      return true;
+    }
+    if (role === 'newcomer' || role === 'crew_member') {
+      await setState(env.DB, lineUid, 'reg_menu_empno', { role });
+      await reply(replyToken, at, [text('社員番号（数字8桁）を入力してください。')]);
+    } else {
+      await setState(env.DB, lineUid, 'reg_menu_name', { role });
+      await reply(replyToken, at, [text('あなたの名前を漢字フルネームで入力してください。')]);
+    }
+    return true;
+  }
+
+  if (state === 'reg_menu_empno') {
+    const empNo = inputText.trim();
+    if (!/^\d{8}$/.test(empNo)) {
+      await reply(replyToken, at, [text('社員番号は数字8桁で入力してください。\n例）20230001')]);
+      return true;
+    }
+    const emp = await env.DB.prepare('SELECT id FROM employees WHERE emp_no = ? AND is_active = 1').bind(empNo).first<{ id: number }>();
+    if (!emp) {
+      await reply(replyToken, at, [text('この社員番号は見つかりませんでした。もう一度入力してください。')]);
+      return true;
+    }
+    await setState(env.DB, lineUid, 'reg_menu_name', { role: String(data.role), emp_id: emp.id });
+    await reply(replyToken, at, [text('あなたの名前を漢字フルネームで入力してください。')]);
+    return true;
+  }
+
+  if (state === 'reg_menu_name') {
+    const role = String(data.role);
+    const name = inputText;
+    if (role === 'newcomer' || role === 'crew_member') {
+      const empId = data.emp_id as number;
+      await registerLiffUser(env.DB, lineUid, name, role, empId, env);
+      await setState(env.DB, lineUid, 'idle');
+      if (role === 'newcomer') {
+        await reply(replyToken, at, [text(`あなたは 新人 で登録されました。\n\n🎉 ${name}さん、ITABASHIへようこそ！\n\n困ったこと・嫌なことがあれば\nいつでも気軽に報告してください。\nあなたのことをしっかりサポートします💪`)]);
+      } else {
+        await reply(replyToken, at, [text(`あなたは 乗務社員 で登録されました。\n\n「売上記録」「ODO」のボタンからご利用いただけます。`)]);
+      }
+    } else if (role === 'benten_member') {
+      await registerLiffUser(env.DB, lineUid, name, 'benten_member', null, env);
+      await linkBentenMember(env.DB, lineUid, name);
+      await linkEmployeeByName(env.DB, lineUid, name);
+      await setState(env.DB, lineUid, 'idle');
+      const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
+      const url = liffId ? `\n\n📱 シフト入力・確認はこちら:\nhttps://liff.line.me/${liffId}` : '';
+      await reply(replyToken, at, [text(`あなたは ベンテンクラブ会員 で登録されました。\n\n「シフト」と送信するとシフト入力・シフト表を開けます。${url}`)]);
+    } else if (role === 'vehicle_manager') {
+      await registerLiffUser(env.DB, lineUid, name, 'vehicle_manager', null, env);
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text(`あなたは 車番管理者 で登録されました。\n\n数字を送信すると車両情報を検索できます。\n例）「6677」`)]);
+    } else {
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text('登録に失敗しました。もう一度「LINE連携」からやり直してください。')]);
     }
     return true;
   }
@@ -430,6 +581,38 @@ async function handleUnregisteredUser(
     await reply(replyToken, at, [text('ベンテンクラブシフトマスターとして登録します。\nあなたの名前を漢字フルネームで入力してください。')]);
     return;
   }
+  if (inputText === '乗務社員登録') {
+    await setState(env.DB, lineUid, 'reg_crew_member_name');
+    await reply(replyToken, at, [text('乗務社員として登録します。\nあなたの名前を漢字フルネームで入力してください。\n（社員名簿の表記と同じにしてください）')]);
+    return;
+  }
+
+  // ===== LINE連携（ステータス選択メニュー。友達追加時のリッチメニューから起動）=====
+  if (inputText === 'LINE連携' || inputText === '友達追加' || inputText === '連携') {
+    await setState(env.DB, lineUid, 'idle');
+    await reply(replyToken, at, [textWithQuickReply(
+      'あなたのステータスを選択してください。',
+      [
+        { label: '新人', text: '新人' },
+        { label: '乗務社員', text: '乗務社員' },
+        { label: '弁天倶楽部会員', text: '弁天倶楽部会員' },
+        { label: '車番管理者', text: '車番管理者' },
+        { label: 'キャンセル', text: 'キャンセル' },
+      ]
+    )]);
+    return;
+  }
+  if (['新人', '乗務社員', '弁天倶楽部会員', '車番管理者'].includes(inputText)) {
+    const role = Object.keys(MENU_ROLE_LABELS).find(r => MENU_ROLE_LABELS[r] === inputText)!;
+    await setState(env.DB, lineUid, 'reg_menu_password', { role });
+    await reply(replyToken, at, [text(`${inputText}として登録します。\nパスワードを入力してください。`)]);
+    return;
+  }
+  if (inputText === 'キャンセル' || inputText === 'cancel') {
+    await setState(env.DB, lineUid, 'idle');
+    await reply(replyToken, at, [text('キャンセルしました。\n\n「LINE連携」と送信するとステータス選択からやり直せます。')]);
+    return;
+  }
 
   // 招待コード（新人登録）
   const inputCode = inputText.toUpperCase();
@@ -462,7 +645,7 @@ async function handleUnregisteredUser(
 
   // 未認識
   await reply(replyToken, at, [text(
-    '登録されていません。\n\n招待コードをお持ちの方はコードを送信してください。\n\n管理者から登録コマンドを受け取った方は、そのコマンドを送信してください。\n\n（UID確認: 「uid」と送信）'
+    '登録されていません。\n\n「LINE連携」と送信するとステータス選択から登録できます。\n\n招待コードをお持ちの方はコードを送信してください。\n\n（UID確認: 「uid」と送信）'
   )]);
 }
 
@@ -570,7 +753,202 @@ async function handleVehicleManager(
 }
 
 // ===================================================
-// 新人
+// 売上記録・ODO記録（対象ロール共通: crew_member / newcomer / benten_member / benten_shift_master / general_manager）
+// ===================================================
+
+const DUTY_LABELS: Record<string, string> = {
+  '昼日勤': 'a',
+  '夜日勤': 'b',
+  '隔日B': 'B',
+  '隔日D': 'D',
+  '隔日H': 'H',
+};
+const DUTY_QUICK_REPLY = [
+  { label: '昼日勤', text: '昼日勤' },
+  { label: '夜日勤', text: '夜日勤' },
+  { label: '隔日B', text: '隔日B' },
+  { label: '隔日D', text: '隔日D' },
+  { label: '隔日H', text: '隔日H' },
+];
+const SALES_STATES = ['sales_confirm_overwrite', 'sales_duty', 'sales_amount', 'sales_rides', 'sales_confirm'];
+const ODO_STATES = ['odo_awaiting_start', 'odo_awaiting_end'];
+// 売上/ODOフロー中に他の役割別コマンドが来た場合、そちらへ割り込ませる
+const FOREIGN_CMDS = ['嫌なこと報告', '報告', 'シフト確認', 'マイカレ', '準備中', 'シフト', 'シフト表', 'ベンテンシフト', 'ベンテン'];
+
+// 売上記録・ODO記録の会話フローを一括処理する。
+// 戻り値 true: このメッセージを処理した（呼び出し元はこれ以上処理しない）
+// 戻り値 false: 対象外のメッセージなので呼び出し元（役割別ハンドラー）に処理を委ねる
+async function handleSalesOdoFlow(
+  env: Env, lineUid: string, replyToken: string, at: string,
+  inputText: string, state: string, data: Record<string, string | number>,
+  liffUser: LiffUser,
+): Promise<boolean> {
+  const empId = liffUser.emp_id;
+  const inSalesOdoFlow = SALES_STATES.includes(state) || ODO_STATES.includes(state);
+
+  // 他フローへの割り込み
+  if (inSalesOdoFlow && FOREIGN_CMDS.includes(inputText)) {
+    await setState(env.DB, lineUid, 'idle');
+    return false;
+  }
+
+  // キャンセル
+  if (inSalesOdoFlow && (inputText === 'キャンセル' || inputText === 'cancel')) {
+    await setState(env.DB, lineUid, 'idle');
+    await reply(replyToken, at, [text('キャンセルしました。')]);
+    return true;
+  }
+
+  // ===== 売上記録フロー継続 =====
+  if (state === 'sales_confirm_overwrite') {
+    if (inputText === '上書き') {
+      await setState(env.DB, lineUid, 'sales_duty', { date: data.date as string });
+      await reply(replyToken, at, [textWithQuickReply('区分を選んでください。', DUTY_QUICK_REPLY)]);
+    } else {
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text('キャンセルしました。')]);
+    }
+    return true;
+  }
+
+  if (state === 'sales_duty') {
+    const dutyCode = DUTY_LABELS[inputText];
+    if (!dutyCode) {
+      await reply(replyToken, at, [textWithQuickReply('区分をボタンから選んでください。', DUTY_QUICK_REPLY)]);
+      return true;
+    }
+    await setState(env.DB, lineUid, 'sales_amount', { ...data, duty_code: dutyCode, duty_label: inputText });
+    await reply(replyToken, at, [text('売上金額を入力してください。\n（円。税込。例: 18500）')]);
+    return true;
+  }
+
+  if (state === 'sales_amount') {
+    const amount = parseInt(inputText.replace(/[^0-9]/g, ''));
+    if (isNaN(amount) || amount < 0 || amount > 999999) {
+      await reply(replyToken, at, [text('金額を正しく入力してください。\n（例: 18500）')]);
+      return true;
+    }
+    await setState(env.DB, lineUid, 'sales_rides', { ...data, amount });
+    await reply(replyToken, at, [text('乗車回数を入力してください。\n（例: 8）')]);
+    return true;
+  }
+
+  if (state === 'sales_rides') {
+    const rides = parseInt(inputText.replace(/[^0-9]/g, ''));
+    if (isNaN(rides) || rides < 0 || rides > 999) {
+      await reply(replyToken, at, [text('乗車回数を正しく入力してください。\n（例: 8）')]);
+      return true;
+    }
+    const newData = { ...data, ride_count: rides };
+    await setState(env.DB, lineUid, 'sales_confirm', newData);
+    const amount = data.amount as number;
+    const amountExcl = Math.round(amount / 1.1);
+    await reply(replyToken, at, [textWithQuickReply(
+      `✅ 内容確認\n\n📅 日付: ${data.date}\n📋 区分: ${data.duty_label}\n💰 売上: ${amount.toLocaleString('ja-JP')}円（税抜 ${amountExcl.toLocaleString('ja-JP')}円）\n🚕 乗車: ${rides}回\n\n登録しますか？`,
+      [{ label: '✅ 登録する', text: '登録' }, { label: '❌ キャンセル', text: 'キャンセル' }]
+    )]);
+    return true;
+  }
+
+  if (state === 'sales_confirm') {
+    if (inputText === '登録') {
+      if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return true; }
+      const { year, month } = getPeriod(data.date as string);
+      await env.DB.prepare(`
+        INSERT INTO sales_records (emp_id, date, amount, ride_count, duty_code, period_year, period_month, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+        ON CONFLICT(emp_id, date) DO UPDATE SET
+          amount = excluded.amount, ride_count = excluded.ride_count, duty_code = excluded.duty_code,
+          period_year = excluded.period_year, period_month = excluded.period_month, updated_at = datetime('now', 'localtime')
+      `).bind(empId, data.date, data.amount, data.ride_count ?? null, data.duty_code ?? null, year, month).run();
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text(`✅ 登録しました！\n${data.date}\n売上: ${(data.amount as number).toLocaleString('ja-JP')}円`)]);
+    } else {
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text('キャンセルしました。')]);
+    }
+    return true;
+  }
+
+  // ===== ODOフロー継続 =====
+  if (state === 'odo_awaiting_start') {
+    const odoStart = parseInt(inputText.replace(/[^0-9]/g, ''));
+    if (isNaN(odoStart) || odoStart < 0 || odoStart > 999999) {
+      await reply(replyToken, at, [text('ODO値を数字（6桁まで）で入力してください。\n例）123456')]);
+      return true;
+    }
+    if (!empId) {
+      await setState(env.DB, lineUid, 'idle');
+      await reply(replyToken, at, [text('社員情報が見つかりません。')]);
+      return true;
+    }
+    await env.DB.prepare('INSERT INTO odo_records (emp_id, odo_start) VALUES (?, ?)').bind(empId, odoStart).run();
+    await setState(env.DB, lineUid, 'idle');
+    await reply(replyToken, at, [text(`🚕 ODO始: ${odoStart} を記録しました`)]);
+    return true;
+  }
+
+  if (state === 'odo_awaiting_end') {
+    const odoEnd = parseInt(inputText.replace(/[^0-9]/g, ''));
+    if (isNaN(odoEnd) || odoEnd < 0 || odoEnd > 999999) {
+      await reply(replyToken, at, [text('ODO値を数字（6桁まで）で入力してください。\n例）123601')]);
+      return true;
+    }
+    const recordId = data.record_id as number;
+    const odoStart = data.odo_start as number;
+    if (odoEnd < odoStart) {
+      await reply(replyToken, at, [text(`ODO終(${odoEnd})がODO始(${odoStart})より小さいです。入力し直してください。`)]);
+      return true;
+    }
+    const distance = odoEnd - odoStart;
+    await env.DB.prepare(
+      "UPDATE odo_records SET odo_end = ?, distance_km = ?, ended_at = datetime('now', 'localtime') WHERE id = ?"
+    ).bind(odoEnd, distance, recordId).run();
+    await setState(env.DB, lineUid, 'idle');
+    await reply(replyToken, at, [text(`🚕 ODO記録が完了しました\nODO始: ${odoStart}\nODO終: ${odoEnd}\n走行距離: ${distance}km`)]);
+    return true;
+  }
+
+  // ===== 新規トリガー =====
+  if (inputText === '売上記録' || inputText === '売上を記録') {
+    if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return true; }
+    const today = todayJST();
+    const existing = await env.DB.prepare(
+      'SELECT amount FROM sales_records WHERE emp_id = ? AND date = ?'
+    ).bind(empId, today).first<{ amount: number }>();
+    if (existing) {
+      await setState(env.DB, lineUid, 'sales_confirm_overwrite', { date: today, prev: existing.amount });
+      await reply(replyToken, at, [textWithQuickReply(
+        `今日(${today})はすでに ${existing.amount.toLocaleString('ja-JP')}円 が記録されています。\n上書きしますか？`,
+        [{ label: '上書きする', text: '上書き' }, { label: 'キャンセル', text: 'キャンセル' }]
+      )]);
+    } else {
+      await setState(env.DB, lineUid, 'sales_duty', { date: today });
+      await reply(replyToken, at, [textWithQuickReply('区分を選んでください。', DUTY_QUICK_REPLY)]);
+    }
+    return true;
+  }
+
+  if (inputText === 'ODO') {
+    if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return true; }
+    const open = await env.DB.prepare(
+      'SELECT id, odo_start FROM odo_records WHERE emp_id = ? AND odo_end IS NULL ORDER BY id DESC LIMIT 1'
+    ).bind(empId).first<{ id: number; odo_start: number }>();
+    if (!open) {
+      await setState(env.DB, lineUid, 'odo_awaiting_start');
+      await reply(replyToken, at, [text('ODO始の数値を入力してください。\n（6桁まで。例: 123456）')]);
+    } else {
+      await setState(env.DB, lineUid, 'odo_awaiting_end', { record_id: open.id, odo_start: open.odo_start });
+      await reply(replyToken, at, [text(`ODO終の数値を入力してください。\n（ODO始: ${open.odo_start}／6桁まで）`)]);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+// ===================================================
+// 新人・乗務社員（共通: 嫌なこと報告・シフト確認・マイカレ）
 // ===================================================
 
 async function handleNewcomer(
@@ -588,7 +966,7 @@ async function handleNewcomer(
   }
 
   // メニューコマンドによるフロー割り込み
-  const MENU_CMDS = ['売上記録', '売上を記録', '嫌なこと報告', '報告', 'シフト確認'];
+  const MENU_CMDS = ['嫌なこと報告', '報告', 'シフト確認', 'マイカレ', '準備中'];
   if (state !== 'idle' && MENU_CMDS.includes(inputText)) {
     await setState(env.DB, lineUid, 'idle');
   }
@@ -597,25 +975,6 @@ async function handleNewcomer(
 
   // ===== idle =====
   if (curState === 'idle') {
-    if (inputText === '売上記録' || inputText === '売上を記録') {
-      if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return; }
-      const today = todayJST();
-      const existing = await env.DB.prepare(
-        'SELECT amount FROM sales_records WHERE emp_id = ? AND date = ?'
-      ).bind(empId, today).first<{ amount: number }>();
-      if (existing) {
-        await setState(env.DB, lineUid, 'sales_confirm_overwrite', { date: today, prev: existing.amount });
-        await reply(replyToken, at, [textWithQuickReply(
-          `今日(${today})はすでに ${existing.amount.toLocaleString('ja-JP')}円 が記録されています。\n上書きしますか？`,
-          [{ label: '上書きする', text: '上書き' }, { label: 'キャンセル', text: 'キャンセル' }]
-        )]);
-      } else {
-        await setState(env.DB, lineUid, 'sales_amount', { date: today });
-        await reply(replyToken, at, [text(`今日(${today})の売上金額を入力してください。\n（円。例: 18500）`)]);
-      }
-      return;
-    }
-
     if (inputText === '嫌なこと報告' || inputText === '報告') {
       await setState(env.DB, lineUid, 'event_category');
       await reply(replyToken, at, [textWithQuickReply(
@@ -659,80 +1018,27 @@ async function handleNewcomer(
       return;
     }
 
+    if (inputText === 'マイカレ') {
+      await reply(replyToken, at, [text('📅 マイカレ\n\nただいま準備中です。もうしばらくお待ちください！')]);
+      return;
+    }
+
+    // リッチメニュー6マス目の予備ボタン（機能未定・プレースホルダー）
+    if (inputText === '準備中') {
+      await reply(replyToken, at, [text('ただいま準備中です。もうしばらくお待ちください！')]);
+      return;
+    }
+
     await reply(replyToken, at, [textWithQuickReply(
       'リッチメニューからご利用ください。',
       [
         { label: '売上記録', text: '売上記録' },
+        { label: 'ODO', text: 'ODO' },
         { label: '嫌なこと報告', text: '嫌なこと報告' },
         { label: 'シフト確認', text: 'シフト確認' },
+        { label: 'マイカレ', text: 'マイカレ' },
       ]
     )]);
-    return;
-  }
-
-  // ===== 売上記録フロー =====
-  if (curState === 'sales_confirm_overwrite') {
-    if (inputText === '上書き') {
-      await setState(env.DB, lineUid, 'sales_amount', { date: curData.date as string });
-      await reply(replyToken, at, [text('売上金額を入力してください。\n（円。例: 18500）')]);
-    } else {
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text('キャンセルしました。')]);
-    }
-    return;
-  }
-
-  if (curState === 'sales_amount') {
-    const amount = parseInt(inputText.replace(/[^0-9]/g, ''));
-    if (isNaN(amount) || amount < 0 || amount > 999999) {
-      await reply(replyToken, at, [text('金額を正しく入力してください。\n（例: 18500）')]); return;
-    }
-    await setState(env.DB, lineUid, 'sales_rides', { ...curData, amount });
-    await reply(replyToken, at, [text('乗車回数を入力してください。\n（例: 8）')]);
-    return;
-  }
-
-  if (curState === 'sales_rides') {
-    const rides = parseInt(inputText.replace(/[^0-9]/g, ''));
-    if (isNaN(rides) || rides < 0 || rides > 999) {
-      await reply(replyToken, at, [text('乗車回数を正しく入力してください。\n（例: 8）')]); return;
-    }
-    await setState(env.DB, lineUid, 'sales_distance', { ...curData, ride_count: rides });
-    await reply(replyToken, at, [text('走行距離を入力してください。\n（km。例: 120）')]);
-    return;
-  }
-
-  if (curState === 'sales_distance') {
-    const dist = parseInt(inputText.replace(/[^0-9]/g, ''));
-    if (isNaN(dist) || dist < 0 || dist > 9999) {
-      await reply(replyToken, at, [text('走行距離を正しく入力してください。\n（例: 120）')]); return;
-    }
-    const newData = { ...curData, distance_km: dist };
-    await setState(env.DB, lineUid, 'sales_confirm', newData);
-    await reply(replyToken, at, [textWithQuickReply(
-      `✅ 内容確認\n\n📅 日付: ${curData.date}\n💰 売上: ${(curData.amount as number).toLocaleString('ja-JP')}円\n🚕 乗車: ${curData.ride_count}回\n🗺️ 距離: ${dist}km\n\n登録しますか？`,
-      [{ label: '✅ 登録する', text: '登録' }, { label: '❌ キャンセル', text: 'キャンセル' }]
-    )]);
-    return;
-  }
-
-  if (curState === 'sales_confirm') {
-    if (inputText === '登録') {
-      if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return; }
-      const { year, month } = getPeriod(curData.date as string);
-      await env.DB.prepare(`
-        INSERT INTO sales_records (emp_id, date, amount, ride_count, distance_km, period_year, period_month, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
-        ON CONFLICT(emp_id, date) DO UPDATE SET
-          amount = excluded.amount, ride_count = excluded.ride_count,
-          distance_km = excluded.distance_km, updated_at = datetime('now', 'localtime')
-      `).bind(empId, curData.date, curData.amount, curData.ride_count ?? null, curData.distance_km ?? null, year, month).run();
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text(`✅ 登録しました！\n${curData.date}\n売上: ${(curData.amount as number).toLocaleString('ja-JP')}円`)]);
-    } else {
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text('キャンセルしました。')]);
-    }
     return;
   }
 
@@ -799,12 +1105,3 @@ async function handleBentenUser(
   )]);
 }
 
-// ===================================================
-// 権限不明者
-// ===================================================
-
-async function handleUnknownRole(replyToken: string, at: string, name: string): Promise<void> {
-  await reply(replyToken, at, [text(
-    `${name ? name + 'さん、' : ''}現在 権限不明者 として登録されています。\n\n統括管理者に連絡して、権限の割り当てを依頼してください。`
-  )]);
-}

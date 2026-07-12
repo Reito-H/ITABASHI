@@ -23,6 +23,12 @@ LIFF_ID_OTHER_FEATURES = "2010598812-C477DCKE"
 LIFF_ID_BENTEN_SHIFT = "2010598812-yt0r1ZAW"
 # ベンテン会員・シフトマスター用リッチメニュー（未作成なら空のまま=メニューなし）
 RICHMENU_ID_BENTEN = ""
+# 乗務社員用リッチメニュー（未作成なら空のまま=メニューなし）
+RICHMENU_ID_CREW_MEMBER = "richmenu-1d8eaed8df2c9c29ca0f712ef01cf82d"
+# 売上サマリー LIFF（LINE Developers で LIFF作成後に設定）
+LIFF_ID_SALES = "2010598812-deTtkaIz"
+# 権限不明者（友達追加直後）用リッチメニュー。「LINE連携」ボタン→ステータス選択の入口（未作成なら空のまま=メニューなし）
+RICHMENU_ID_UNKNOWN = "richmenu-0b1281b87a1f1bf195ec5b3d4910fa3a"
 # シフト表PDF用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）
 # R2を使う場合は下の [[r2_buckets]] を有効化してフォントをアップロードする（R2が優先）
 BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/master/fonts/NotoSansCJKjp-Regular.ttf"
@@ -35,6 +41,7 @@ BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/
 # npx wrangler secret put LINE_REG_PWD_GENERAL       ← 統括管理者 登録パスワード
 # npx wrangler secret put LINE_REG_PWD_BENTEN        ← ベンテンクラブ会員 登録パスワード
 # npx wrangler secret put LINE_REG_PWD_BENTEN_MASTER ← ベンテンシフトマスター 登録パスワード
+# npx wrangler secret put LINE_REG_PWD_CREW_MEMBER   ← 乗務社員 登録パスワード
 
 # ベンテンPDFフォント用R2（使う場合はコメントを外し、バケット作成後にフォントを置く）
 # npx wrangler r2 bucket create benten-fonts

@@ -2986,12 +2986,12 @@ app.get('/settings/status', async (c) => {
     <script>
       var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
       var API_TARGETS = [
-        { label: '社員一覧 API', url: ADMIN_PATH + '/api/employees' },
-        { label: '社員CSVインポート API', url: ADMIN_PATH + '/api/employees/csv-import', method: 'POST', body: '', expect: [400, 405, 200] },
+        { label: '社員一覧 API', url: '/api/employees' },
+        { label: '社員CSVインポート API', url: '/api/employees/csv-import', method: 'POST', body: '', expect: [400, 405, 200] },
         { label: 'シフト区分 API', url: '/api/schedule-types' },
         { label: 'コーチ API', url: '/api/coaches' },
         { label: 'LINE通知設定 API', url: '/api/notifications' },
-        { label: 'LIFF LINEユーザー API', url: ADMIN_PATH + '/api/liff-users' },
+        { label: 'LIFF LINEユーザー管理画面', url: ADMIN_PATH + '/settings/liff' },
       ];
       var logs = [];
 

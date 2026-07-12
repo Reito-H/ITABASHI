@@ -21,6 +21,7 @@ import { handleLineEvent } from './line_bot';
 import { handleCron } from './cron';
 import liffRoutes from './routes/liff';
 import liffBentenRoutes from './routes/liff_benten';
+import liffSalesRoutes from './routes/liff_sales';
 import adminLiffRoutes from './routes/admin_liff';
 import adminBentenRoutes from './routes/admin_benten';
 import adminInspectionRoutes from './routes/admin_inspection';
@@ -166,6 +167,7 @@ app.post('/api/line/webhook', async (c) => {
 // LIFF ページ（認証不要・公開）
 app.route('', liffRoutes);
 app.route('', liffBentenRoutes);
+app.route('', liffSalesRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

@@ -12,6 +12,7 @@ app.post('/', async (c) => {
     amount: number;
     ride_count?: number;
     distance_km?: number;
+    duty_code?: string;
   }>();
 
   if (!data.emp_id || !data.date || data.amount === undefined) {
@@ -27,18 +28,19 @@ app.post('/', async (c) => {
   const { year, month } = getPeriod(data.date);
 
   await c.env.DB.prepare(`
-    INSERT INTO sales_records (emp_id, date, amount, ride_count, distance_km, period_year, period_month, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+    INSERT INTO sales_records (emp_id, date, amount, ride_count, distance_km, duty_code, period_year, period_month, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
     ON CONFLICT(emp_id, date) DO UPDATE SET
       amount = excluded.amount,
       ride_count = excluded.ride_count,
       distance_km = excluded.distance_km,
+      duty_code = excluded.duty_code,
       period_year = excluded.period_year,
       period_month = excluded.period_month,
       updated_at = datetime('now', 'localtime')
   `).bind(
     data.emp_id, data.date, data.amount,
-    data.ride_count ?? null, data.distance_km ?? null,
+    data.ride_count ?? null, data.distance_km ?? null, data.duty_code ?? null,
     year, month
   ).run();
 
