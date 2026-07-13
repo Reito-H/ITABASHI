@@ -6,6 +6,7 @@ import { getPeriod, getPeriodRange } from './auth';
 import type { Env } from './auth';
 import { getRichMenuForRole } from './routes/admin_liff';
 import { queryManual } from './utils/manual_search';
+import { isTicketQuestion, queryTicket } from './utils/ticket_bot';
 import { setBentenConfig, linkBentenMember, BENTEN_MASTER_ROLES } from './benten';
 
 // ===================================================
@@ -294,6 +295,12 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   const manualMatch = inputText.match(/^[?？]\s*(.+)/s);
   if (manualMatch && (env as any).GROQ_API_KEY) {
     const question = manualMatch[1].trim();
+    // チケット関連の質問は専用Bot（知識ベース全量埋め込み）で回答
+    if (isTicketQuestion(question)) {
+      const answer = await queryTicket(env.DB, (env as any).GROQ_API_KEY, question, 'line', lineUid);
+      await reply(replyToken, at, [text(`🎫 革命AI\n\n${answer}`)]);
+      return;
+    }
     const answer = await queryManual(env.DB, (env as any).GROQ_API_KEY, question, 'line', lineUid);
     await reply(replyToken, at, [text(`📖 革命AI\n\n${answer}`)]);
     return;

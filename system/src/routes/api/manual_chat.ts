@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../auth';
 import { queryManual } from '../../utils/manual_search';
+import { isTicketQuestion, queryTicket } from '../../utils/ticket_bot';
 
 const app = new Hono<{ Bindings: Env & { GROQ_API_KEY: string } }>();
 
@@ -12,7 +13,8 @@ app.post('/manual-chat', async (c) => {
   if (!question) return c.json({ error: '質問を入力してください' }, 400);
   if (!c.env.GROQ_API_KEY) return c.json({ error: 'GROQ_API_KEYが設定されていません' }, 500);
 
-  const answer = await queryManual(
+  const query = isTicketQuestion(question) ? queryTicket : queryManual;
+  const answer = await query(
     c.env.DB,
     c.env.GROQ_API_KEY,
     question,
