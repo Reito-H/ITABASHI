@@ -11,14 +11,16 @@ database_id = "b50865b1-be1d-411c-bf71-fc9a7da3c5e0"
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
 RICHMENU_ID_PATTERN1 = "richmenu-7ddc3e80e06b72a49103d5237a89a4ee"
-RICHMENU_ID_PATTERN2 = "richmenu-432fd6db29f0ae8be0391c4111ca0bca"
-RICHMENU_ID_PATTERN3 = "richmenu-432fd6db29f0ae8be0391c4111ca0bca"
+RICHMENU_ID_PATTERN2 = "richmenu-a3ccbfff948a0148662ad397e39101b2"
+RICHMENU_ID_PATTERN3 = "richmenu-a3ccbfff948a0148662ad397e39101b2"
 # LIFFアプリID（LINE Developers で作成後に設定）
 LIFF_ID_LOST_ITEM = "2010598812-y7oZBhGe"
 LIFF_ID_ACCIDENT = "2010598812-PaLPe9HP"
 LIFF_ID_STAFF_LOOKUP = "2010598812-vWkyVtxt"
 LIFF_ID_STAFF_LOOKUP_PLUS = "2010598812-8spA8woR"
 LIFF_ID_OTHER_FEATURES = "2010598812-C477DCKE"
+# 違反報告 LIFF（エンドポイントURL: https://bentenclub.com/liff/violation）
+LIFF_ID_VIOLATION = "2010598812-GNdHG7J6"
 # ベンテンクラブ シフト（LINE Developers で LIFF作成後に設定）
 LIFF_ID_BENTEN_SHIFT = "2010598812-yt0r1ZAW"
 # ベンテン会員・シフトマスター用リッチメニュー（未作成なら空のまま=メニューなし）

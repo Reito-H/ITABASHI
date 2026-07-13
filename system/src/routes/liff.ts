@@ -48,6 +48,13 @@ app.get('/liff/accident', (c) => {
   return c.html(html);
 });
 
+// ===== LIFF: 違反報告フォーム =====
+app.get('/liff/violation', (c) => {
+  const liffId = c.env.LIFF_ID_VIOLATION ?? '';
+  const html = liffViolationPage(liffId);
+  return c.html(html);
+});
+
 // ===== LIFF: 社員照会 =====
 app.get('/liff/staff-lookup', (c) => {
   const liffId = c.env.LIFF_ID_STAFF_LOOKUP ?? '';
@@ -467,6 +474,101 @@ app.post('/api/liff/accident', async (c) => {
   return c.json({ ok: true, summary });
 });
 
+// ===== LIFF API: 違反種類マスタ（点数・反則金付き）=====
+app.get('/api/liff/violation-types', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const liffUser = await c.env.DB.prepare(
+    'SELECT role FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string }>();
+  if (!liffUser || !['general_manager', 'operations_manager'].includes(liffUser.role)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const rows = await c.env.DB.prepare(`
+    SELECT id, name, points, fine_amount
+    FROM violation_types
+    WHERE is_active = 1
+    ORDER BY sort_order, id
+  `).all<{ id: number; name: string; points: number; fine_amount: number }>();
+
+  return c.json(rows.results ?? []);
+});
+
+// ===== LIFF API: 違反報告 送信 =====
+app.post('/api/liff/violation', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const liffUser = await c.env.DB.prepare(
+    'SELECT role FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string }>();
+  if (!liffUser || !['general_manager', 'operations_manager'].includes(liffUser.role)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const body = await c.req.json<{
+    received_at?: string;
+    vehicle_no?: string;
+    violation_at?: string;
+    employee_name?: string;
+    employee_emp_no?: string;
+    employee_division?: number | null;
+    employee_team?: number | null;
+    violation_type_id?: number | null;
+    notes?: string;
+  }>();
+
+  // クライアント値は信用せず、選択されたIDからサーバー側で点数・反則金を引き直してスナップショットする
+  let violationTypeName: string | null = null;
+  let violationPoints: number | null = null;
+  let violationFineAmount: number | null = null;
+  if (body.violation_type_id) {
+    const vt = await c.env.DB.prepare(
+      'SELECT name, points, fine_amount FROM violation_types WHERE id = ?'
+    ).bind(body.violation_type_id).first<{ name: string; points: number; fine_amount: number }>();
+    if (vt) {
+      violationTypeName = vt.name;
+      violationPoints = vt.points;
+      violationFineAmount = vt.fine_amount;
+    }
+  }
+
+  await c.env.DB.prepare(`
+    INSERT INTO violation_reports
+      (received_at, vehicle_no, violation_at, employee_name, employee_emp_no,
+       employee_division, employee_team, violation_type_id, violation_type_name,
+       violation_points, violation_fine_amount, notes, reported_by_uid)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).bind(
+    body.received_at ?? null,
+    body.vehicle_no ?? null,
+    body.violation_at ?? null,
+    body.employee_name ?? null,
+    body.employee_emp_no ?? null,
+    body.employee_division ?? null,
+    body.employee_team ?? null,
+    body.violation_type_id ?? null,
+    violationTypeName,
+    violationPoints,
+    violationFineAmount,
+    body.notes ?? null,
+    uid,
+  ).run();
+
+  const summary = buildViolationSummary({
+    ...body,
+    violation_type_name: violationTypeName,
+    violation_points: violationPoints,
+    violation_fine_amount: violationFineAmount,
+  });
+  const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
+  if (at) await pushMessage(uid, at, summary);
+
+  return c.json({ ok: true, summary });
+});
+
 // ===================================================
 // テキスト生成ユーティリティ
 // ===================================================
@@ -515,6 +617,25 @@ function buildAccidentSummary(body: Record<string, unknown>): string {
   }
   lines.push(`警察対応: ${body.police_notified ? '指示済み' : '未指示'}`);
   if (body.additional_info) lines.push(`\n${body.additional_info}`);
+  return lines.join('\n');
+}
+
+function buildViolationSummary(body: Record<string, unknown>): string {
+  const lines: string[] = ['【違反報告】'];
+  if (body.received_at)    lines.push(`受電: ${body.received_at}`);
+  if (body.vehicle_no)     lines.push(`車番: ${body.vehicle_no}`);
+  if (body.violation_at)   lines.push(`違反発生日時: ${body.violation_at}`);
+  if (body.employee_name) {
+    const div = body.employee_division ? `${body.employee_division}課` : '';
+    const team = body.employee_team ? `${body.employee_team}班` : '';
+    lines.push(`乗務員: ${div}${team} ${body.employee_name}${body.employee_emp_no ? `（${body.employee_emp_no}）` : ''}`);
+  }
+  if (body.violation_type_name) {
+    const pts = typeof body.violation_points === 'number' ? `${body.violation_points}点` : '';
+    const fine = typeof body.violation_fine_amount === 'number' ? `反則金${body.violation_fine_amount.toLocaleString()}円` : '';
+    lines.push(`違反種類: ${body.violation_type_name}（${[pts, fine].filter(Boolean).join(' / ')}）`);
+  }
+  if (body.notes) lines.push(`備考: ${body.notes}`);
   return lines.join('\n');
 }
 
@@ -1109,6 +1230,290 @@ function liffAccidentPage(liffId: string): string {
     .catch(function() {
       btn.disabled = false;
       btn.textContent = '報告書を作成・送信';
+      alert('通信エラーが発生しました');
+    });
+  }
+  </script>
+</body>
+</html>`;
+}
+
+function liffViolationPage(liffId: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>違反報告</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
+    .page { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
+    .header { background: #7c2d12; color: white; padding: 14px 16px; border-radius: 12px; margin-bottom: 16px; }
+    .header h1 { margin: 0; font-size: 17px; font-weight: 700; }
+    .header p { margin: 4px 0 0; font-size: 12px; opacity: 0.8; }
+    .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card-title { font-size: 13px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    .field { margin-bottom: 12px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 13px; color: #374151; margin-bottom: 5px; font-weight: 500; }
+    input[type=text], input[type=tel], input[type=time], input[type=date], textarea, select {
+      width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px;
+      font-size: 15px; font-family: inherit; background: #f9fafb; color: #111827;
+      -webkit-appearance: none; appearance: none; outline: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #2563eb; background: white; }
+    textarea { resize: vertical; min-height: 72px; }
+    .emp-wrap { position: relative; }
+    .emp-suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-radius: 8px; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.12); max-height: 200px; overflow-y: auto; margin-top: 2px; display: none; }
+    .emp-item { padding: 10px 12px; font-size: 14px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+    .emp-item:last-child { border-bottom: none; }
+    .emp-item:hover { background: #eff6ff; }
+    .emp-meta { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .emp-selected { font-size: 13px; color: #059669; margin-top: 4px; font-weight: 600; }
+    .violation-info { display: none; margin-top: 8px; padding: 10px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-size: 14px; color: #991b1b; font-weight: 600; }
+    .violation-info.visible { display: block; }
+    .btn-submit { width: 100%; background: #7c2d12; color: white; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: background 0.15s; }
+    .btn-submit:active { background: #5c2109; }
+    .btn-submit:disabled { background: #9ca3af; cursor: default; }
+    .success { text-align: center; padding: 32px 16px; }
+    .success-icon { font-size: 48px; margin-bottom: 16px; }
+    .success-title { font-size: 20px; font-weight: 700; color: #7c2d12; margin-bottom: 8px; }
+    .success-summary { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; text-align: left; font-size: 13px; color: #374151; white-space: pre-line; margin: 16px 0; line-height: 1.7; }
+    .btn-close { background: #f3f4f6; color: #374151; border: none; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="loading">読み込み中...</div>
+  <div id="app" style="display:none;">
+    <div class="page" id="form-page">
+      <div class="header">
+        <h1>違反報告</h1>
+        <p>必須項目はありません。わかる範囲で入力してください</p>
+      </div>
+
+      <!-- 基本情報 -->
+      <div class="card">
+        <div class="card-title">基本情報</div>
+        <div class="field">
+          <label>受電時刻</label>
+          <input type="time" id="received_at">
+        </div>
+        <div class="field">
+          <label>車番</label>
+          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="field" style="margin-bottom:0;">
+            <label>違反発生日</label>
+            <input type="date" id="violation_date">
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>違反発生時刻</label>
+            <input type="time" id="violation_time">
+          </div>
+        </div>
+      </div>
+
+      <!-- 乗務員情報 -->
+      <div class="card">
+        <div class="card-title">乗務員</div>
+        <div class="field">
+          <div class="emp-wrap">
+            <input type="text" id="emp-search" placeholder="氏名・社員番号で検索" autocomplete="off"
+              oninput="empSearchDebounce()">
+            <div class="emp-suggestions" id="emp-suggestions"></div>
+          </div>
+          <div class="emp-selected" id="emp-selected" style="display:none;"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="emp-detail-row">
+          <div class="field" style="margin-bottom:0;">
+            <label>課</label>
+            <input type="text" id="employee_division" placeholder="3" readonly style="background:#f3f4f6;color:#6b7280;">
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>班</label>
+            <input type="text" id="employee_team" placeholder="6" readonly style="background:#f3f4f6;color:#6b7280;">
+          </div>
+        </div>
+      </div>
+
+      <!-- 違反情報 -->
+      <div class="card">
+        <div class="card-title">違反情報</div>
+        <div class="field">
+          <label>違反の種類</label>
+          <select id="violation_type_id" onchange="onViolationTypeChange()">
+            <option value="">選択してください</option>
+          </select>
+          <div class="violation-info" id="violation-info"></div>
+        </div>
+      </div>
+
+      <!-- 備考 -->
+      <div class="card">
+        <div class="card-title">備考</div>
+        <div class="field">
+          <textarea id="notes" placeholder="その他、特記事項があれば"></textarea>
+        </div>
+      </div>
+
+      <button class="btn-submit" id="btn-submit" onclick="submitForm()">送信する</button>
+    </div>
+
+    <!-- 送信完了画面 -->
+    <div class="page success" id="success-page" style="display:none;">
+      <div class="success-icon">✅</div>
+      <div class="success-title">送信しました</div>
+      <p style="color:#6b7280;font-size:14px;">LINEにも同じ内容を送信しました。<br>コピーして転送にご利用ください。</p>
+      <div class="success-summary" id="summary-text"></div>
+      <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();">閉じる</button>
+    </div>
+  </div>
+
+  <script>
+  var LIFF_ACCESS_TOKEN = '';
+  var selectedEmp = null;
+  var empSearchTimer = null;
+  var violationTypes = [];
+
+  liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
+    .then(function() {
+      LIFF_ACCESS_TOKEN = liff.getAccessToken() || '';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      var now = new Date();
+      var hh = String(now.getHours()).padStart(2, '0');
+      var mm = String(now.getMinutes()).padStart(2, '0');
+      document.getElementById('received_at').value = hh + ':' + mm;
+      var yyyy = now.getFullYear();
+      var mo = String(now.getMonth() + 1).padStart(2, '0');
+      var dd = String(now.getDate()).padStart(2, '0');
+      document.getElementById('violation_date').value = yyyy + '-' + mo + '-' + dd;
+      document.getElementById('violation_time').value = hh + ':' + mm;
+      loadViolationTypes();
+    })
+    .catch(function(err) {
+      document.getElementById('loading').textContent = 'エラー: ' + err.message;
+    });
+
+  function loadViolationTypes() {
+    fetch('/api/liff/violation-types', {
+      headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      violationTypes = data || [];
+      var sel = document.getElementById('violation_type_id');
+      violationTypes.forEach(function(vt) {
+        var opt = document.createElement('option');
+        opt.value = vt.id;
+        opt.textContent = vt.name;
+        sel.appendChild(opt);
+      });
+    });
+  }
+
+  function onViolationTypeChange() {
+    var id = document.getElementById('violation_type_id').value;
+    var info = document.getElementById('violation-info');
+    var vt = violationTypes.find(function(v) { return String(v.id) === String(id); });
+    if (!vt) { info.className = 'violation-info'; return; }
+    info.textContent = '違反点数: ' + vt.points + '点 / 反則金: ' + vt.fine_amount.toLocaleString() + '円';
+    info.className = 'violation-info visible';
+  }
+
+  function empSearchDebounce() {
+    clearTimeout(empSearchTimer);
+    empSearchTimer = setTimeout(doEmpSearch, 300);
+  }
+
+  function doEmpSearch() {
+    var q = document.getElementById('emp-search').value.trim();
+    var sug = document.getElementById('emp-suggestions');
+    if (q.length < 1) { sug.style.display = 'none'; return; }
+    fetch('/api/liff/employees?q=' + encodeURIComponent(q), {
+      headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data || data.length === 0) { sug.style.display = 'none'; return; }
+      sug.innerHTML = data.map(function(e) {
+        var div = e.division ? e.division + '課' : '';
+        var team = e.team ? e.team + '班' : '';
+        return '<div class="emp-item" onclick="selectEmp(' + JSON.stringify(e).replace(/</g,'\\u003c').replace(/"/g,'&quot;') + ')">'
+          + '<div>' + e.name + '</div>'
+          + '<div class="emp-meta">' + div + team + ' / ' + e.emp_no + '</div>'
+          + '</div>';
+      }).join('');
+      sug.style.display = 'block';
+    })
+    .catch(function() { sug.style.display = 'none'; });
+  }
+
+  function selectEmp(e) {
+    selectedEmp = e;
+    document.getElementById('emp-search').value = '';
+    document.getElementById('emp-suggestions').style.display = 'none';
+    var div = e.division ? e.division + '課' : '';
+    var team = e.team ? e.team + '班' : '';
+    document.getElementById('emp-selected').style.display = 'block';
+    document.getElementById('emp-selected').textContent = '✓ ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
+    document.getElementById('employee_division').value = e.division || '';
+    document.getElementById('employee_team').value = e.team || '';
+  }
+
+  document.addEventListener('click', function(e) {
+    var sug = document.getElementById('emp-suggestions');
+    if (!document.getElementById('emp-search').contains(e.target) && !sug.contains(e.target)) {
+      sug.style.display = 'none';
+    }
+  });
+
+  function submitForm() {
+    var btn = document.getElementById('btn-submit');
+    btn.disabled = true;
+    btn.textContent = '送信中...';
+
+    var vDate = document.getElementById('violation_date').value;
+    var vTime = document.getElementById('violation_time').value;
+    var violationAt = vDate ? (vDate + (vTime ? ' ' + vTime : '')) : null;
+
+    var payload = {
+      received_at: document.getElementById('received_at').value || null,
+      vehicle_no: document.getElementById('vehicle_no').value.trim() || null,
+      violation_at: violationAt,
+      employee_name: selectedEmp ? selectedEmp.name : null,
+      employee_emp_no: selectedEmp ? selectedEmp.emp_no : null,
+      employee_division: selectedEmp ? selectedEmp.division : null,
+      employee_team: selectedEmp ? selectedEmp.team : null,
+      violation_type_id: document.getElementById('violation_type_id').value || null,
+      notes: document.getElementById('notes').value.trim() || null,
+    };
+
+    fetch('/api/liff/violation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN },
+      body: JSON.stringify(payload),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        document.getElementById('form-page').style.display = 'none';
+        document.getElementById('success-page').style.display = 'block';
+        document.getElementById('summary-text').textContent = data.summary;
+      } else {
+        btn.disabled = false;
+        btn.textContent = '送信する';
+        alert('送信に失敗しました: ' + (data.error || '不明なエラー'));
+      }
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.textContent = '送信する';
       alert('通信エラーが発生しました');
     });
   }

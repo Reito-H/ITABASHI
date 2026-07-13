@@ -123,6 +123,19 @@ const textWithQuickReply = (msg: string, items: { label: string; text: string }[
   }
 });
 
+// URIタップで直接LIFF/外部URLへ遷移するクイックリプライ（ブラウザ中継ページを挟まず、タップ1回でLIFFの
+// ネイティブ表示に入れる。忘れ物対応・事故報告の既存リッチメニューボタンと同じuriアクション方式）
+const textWithUriQuickReply = (msg: string, items: { label: string; uri: string }[]) => ({
+  type: 'text',
+  text: msg,
+  quickReply: {
+    items: items.map(i => ({
+      type: 'action',
+      action: { type: 'uri', label: i.label, uri: i.uri }
+    }))
+  }
+});
+
 async function assignRichMenu(userId: string, richMenuId: string, accessToken: string): Promise<void> {
   if (!richMenuId) return;
   const res = await fetch(`https://api.line.me/v2/bot/user/${userId}/richmenu/${richMenuId}`, {
@@ -699,6 +712,30 @@ async function handleOperationsUser(
     return;
   }
 
+  // 報告 → 忘れ物対応・事故報告・違反報告への直接リンクをクイックリプライで提示
+  // （中継ページを挟まずタップ1回でLIFFのネイティブ表示に入る）
+  if (inputText === '報告') {
+    const items: { label: string; uri: string }[] = [];
+    const lostItemLiffId = env.LIFF_ID_LOST_ITEM ?? '';
+    if (lostItemLiffId) items.push({ label: '📦 忘れ物対応', uri: `https://liff.line.me/${lostItemLiffId}` });
+    const accidentLiffId = env.LIFF_ID_ACCIDENT ?? '';
+    if (accidentLiffId) items.push({ label: '🚨 事故報告', uri: `https://liff.line.me/${accidentLiffId}` });
+    const violationLiffId = env.LIFF_ID_VIOLATION ?? '';
+    if (violationLiffId) items.push({ label: '⚠️ 違反報告', uri: `https://liff.line.me/${violationLiffId}` });
+    await reply(replyToken, at, [textWithUriQuickReply('報告する内容を選んでください。', items)]);
+    return;
+  }
+
+  // 違反報告 → LIFF URLを送信
+  if (inputText === '違反報告' || inputText === '違反') {
+    const liffId = env.LIFF_ID_VIOLATION ?? '';
+    const url = liffId ? `https://liff.line.me/${liffId}` : '';
+    if (url) {
+      await reply(replyToken, at, [text(`⚠️ 違反報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
+    }
+    return;
+  }
+
   // ベンテンクラブ シフト → LIFF URLを送信（統括管理者のみ。運行管理者はアクセス不可）
   if ((inputText === 'ベンテンシフト' || inputText === 'ベンテン') && liffUser.role === 'general_manager') {
     const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
@@ -732,8 +769,7 @@ async function handleOperationsUser(
   await reply(replyToken, at, [textWithQuickReply(
     'リッチメニューからご利用ください。\n数字を送信すると車番検索ができます。',
     [
-      { label: '忘れ物対応', text: '忘れ物対応' },
-      { label: '事故報告', text: '事故報告' },
+      { label: '報告', text: '報告' },
       { label: '車番検索', text: '車番検索' },
     ]
   )]);

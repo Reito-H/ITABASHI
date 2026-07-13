@@ -441,6 +441,185 @@ app.get('/settings/accidents', async (c) => {
 });
 
 // ===================================================
+// GET /settings/violations — 違反報告一覧ページ
+// ===================================================
+app.get('/settings/violations', async (c) => {
+  const cookie = c.req.header('Cookie') ?? null;
+  const sid = getSessionFromCookie(cookie);
+  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
+  const adminRow = adminId
+    ? await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(adminId).first<{ username: string }>()
+    : null;
+  const adminName = adminRow?.username ?? '管理者';
+
+  const reports = await c.env.DB.prepare(`
+    SELECT * FROM violation_reports ORDER BY created_at DESC LIMIT 200
+  `).all<{
+    id: number; received_at: string | null; vehicle_no: string | null; violation_at: string | null;
+    employee_name: string | null; employee_division: number | null; employee_team: number | null;
+    violation_type_name: string | null; violation_points: number | null; violation_fine_amount: number | null;
+    status: string; created_at: string;
+    resolved_by_name: string | null; resolved_at: string | null;
+  }>();
+
+  const all = reports.results ?? [];
+
+  const rows = all.map(r => {
+    const statusLabel = r.status === 'resolved' ? '対応済' : '対応中';
+    const statusColor = r.status === 'resolved' ? '#059669' : '#dc2626';
+    const empStr = r.employee_name
+      ? `${r.employee_division ? r.employee_division + '課' : ''}${r.employee_team ? r.employee_team + '班' : ''} ${r.employee_name}`
+      : '—';
+    const violationStr = r.violation_type_name
+      ? `${r.violation_type_name}${typeof r.violation_points === 'number' ? `（${r.violation_points}点/${(r.violation_fine_amount ?? 0).toLocaleString()}円）` : ''}`
+      : '—';
+    const resolvedInfo = r.status === 'resolved' && r.resolved_by_name
+      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">対応: ${escHtml(r.resolved_by_name)}${r.resolved_at ? ' ' + r.resolved_at.slice(5, 16) : ''}</div>`
+      : '';
+    return `<tr>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.violation_at ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(violationStr)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
+        ${resolvedInfo}
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
+        <button onclick="toggleViolationStatus(${r.id},'${r.status}')"
+          style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
+          ${r.status === 'resolved' ? '再開' : '対応済にする'}
+        </button>
+        <button onclick="deleteViolation(${r.id},'${escHtml(r.vehicle_no ?? '')}','${escHtml(r.violation_type_name ?? '')}')"
+          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const content = `
+    ${subHeader('違反報告一覧')}
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
+      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:800px;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">登録日時</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">受電</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">車番</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反発生日時</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反種類（点数/反則金）</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
+              <th style="padding:8px 12px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="8" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <script>
+    var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
+    var ADMIN_NAME = ${JSON.stringify(adminName)};
+    async function toggleViolationStatus(id, current) {
+      const next = current === 'resolved' ? 'open' : 'resolved';
+      const res = await fetch(ADMIN_PATH + '/api/liff/violation-reports/' + id + '/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next, resolvedBy: next === 'resolved' ? ADMIN_NAME : null }),
+      });
+      if (res.ok) { location.reload(); }
+      else { alert('更新に失敗しました'); }
+    }
+    async function deleteViolation(id, vehicleNo, type) {
+      const label = (vehicleNo || '車番不明') + (type ? ' / ' + type : '');
+      if (!confirm('この違反報告を削除しますか？\\n「' + label + '」\\n※削除すると元に戻せません')) return;
+      const res = await fetch(ADMIN_PATH + '/api/liff/violation-reports/' + id, { method: 'DELETE' });
+      if (res.ok) { location.reload(); }
+      else { alert('削除に失敗しました'); }
+    }
+    </script>
+  `;
+
+  return c.html(layout('違反報告一覧', content, 'settings'));
+});
+
+// ===================================================
+// GET /settings/violation-types — 違反種類・点数/反則金マスタ管理ページ
+// ===================================================
+app.get('/settings/violation-types', async (c) => {
+  const types = await c.env.DB.prepare(`
+    SELECT id, name, points, fine_amount, sort_order, is_active
+    FROM violation_types ORDER BY sort_order, id
+  `).all<{ id: number; name: string; points: number; fine_amount: number; sort_order: number; is_active: number }>();
+
+  const all = types.results ?? [];
+
+  const rows = all.map(t => `<tr data-id="${t.id}">
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+        <input type="text" value="${escHtml(t.name)}" data-field="name" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+        <input type="number" value="${t.points}" data-field="points" style="width:70px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+        <input type="number" value="${t.fine_amount}" data-field="fine_amount" style="width:100px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;text-align:center;">
+        <input type="checkbox" data-field="is_active" ${t.is_active ? 'checked' : ''}>
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
+        <button onclick="saveViolationType(${t.id})" style="padding:4px 10px;background:#1e3a5f;color:white;border:none;border-radius:4px;font-size:11px;cursor:pointer;">保存</button>
+      </td>
+    </tr>`).join('');
+
+  const content = `
+    ${subHeader('違反種類・点数/反則金')}
+    <p style="font-size:12px;color:#9ca3af;margin:-8px 0 16px;">点数・反則金は目安です。法改正等で数値が変わった場合はここで更新してください（既存の報告履歴には影響しません）。</p>
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:600px;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反の種類</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">点数</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">反則金(円)</th>
+              <th style="padding:8px 12px;text-align:center;font-size:12px;color:#6b7280;font-weight:600;">有効</th>
+              <th style="padding:8px 12px;"></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+    <script>
+    var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
+    async function saveViolationType(id) {
+      const tr = document.querySelector('tr[data-id="' + id + '"]');
+      const name = tr.querySelector('[data-field=name]').value.trim();
+      const points = parseInt(tr.querySelector('[data-field=points]').value, 10) || 0;
+      const fineAmount = parseInt(tr.querySelector('[data-field=fine_amount]').value, 10) || 0;
+      const isActive = tr.querySelector('[data-field=is_active]').checked;
+      const res = await fetch(ADMIN_PATH + '/api/violation-types/' + id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, points, fine_amount: fineAmount, is_active: isActive }),
+      });
+      if (res.ok) { alert('保存しました'); } else { alert('保存に失敗しました'); }
+    }
+    </script>
+  `;
+
+  return c.html(layout('違反種類・点数/反則金', content, 'settings'));
+});
+
+// ===================================================
 // API: 権限変更
 // ===================================================
 app.put('/api/liff-users/:id/role', async (c) => {
@@ -537,6 +716,50 @@ app.delete('/api/liff/accident-reports/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
   await c.env.DB.prepare('DELETE FROM accident_reports WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
+// ===================================================
+// API: 違反報告ステータス更新
+// ===================================================
+app.put('/api/liff/violation-reports/:id/status', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  const { status, resolvedBy } = await c.req.json<{ status: string; resolvedBy?: string | null }>();
+  if (status !== 'open' && status !== 'resolved') return c.json({ error: 'invalid' }, 400);
+  if (status === 'resolved') {
+    await c.env.DB.prepare(
+      `UPDATE violation_reports SET status = ?, resolved_by_name = ?, resolved_at = datetime('now','localtime') WHERE id = ?`
+    ).bind(status, resolvedBy ?? '管理者', id).run();
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE violation_reports SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
+    ).bind(status, id).run();
+  }
+  return c.json({ ok: true });
+});
+
+// ===================================================
+// API: 違反報告削除
+// ===================================================
+app.delete('/api/liff/violation-reports/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  await c.env.DB.prepare('DELETE FROM violation_reports WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
+// ===================================================
+// API: 違反種類マスタ更新
+// ===================================================
+app.put('/api/violation-types/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  const { name, points, fine_amount, is_active } = await c.req.json<{
+    name: string; points: number; fine_amount: number; is_active: boolean;
+  }>();
+  await c.env.DB.prepare(
+    'UPDATE violation_types SET name = ?, points = ?, fine_amount = ?, is_active = ? WHERE id = ?'
+  ).bind(name, points, fine_amount, is_active ? 1 : 0, id).run();
   return c.json({ ok: true });
 });
 

@@ -7,6 +7,7 @@
 //   サイドバー: home / shift / newcomers / staff / staff-search / events /
 //               vehicles / inspection / manual-chat / settings / announcements / line
 //   設定カード: settings.liff / settings.lost-items / settings.accidents /
+//               settings.violations / settings.violation-types /
 //               settings.benten / settings.schedule-types / settings.coaches /
 //               settings.instructors / settings.periods / settings.notifications /
 //               settings.offices / settings.vehicle-search-guide /
@@ -18,6 +19,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/liff/,                 'settings.liff'],
   [/^\/settings\/lost-items/,           'settings.lost-items'],
   [/^\/settings\/accidents/,            'settings.accidents'],
+  [/^\/settings\/violation-types/,      'settings.violation-types'],
+  [/^\/settings\/violations/,           'settings.violations'],
   [/^\/settings\/benten/,               'settings.benten'],
   [/^\/settings\/schedule-types/,       'settings.schedule-types'],
   [/^\/settings\/legacy/,               'settings.schedule-types'],
@@ -36,6 +39,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/liff-users/,                'settings.liff'],
   [/^\/api\/liff\/lost-items/,          'settings.lost-items'],
   [/^\/api\/liff\/accident-reports/,    'settings.accidents'],
+  [/^\/api\/liff\/violation-reports/,   'settings.violations'],
+  [/^\/api\/violation-types/,           'settings.violation-types'],
   // 各ページ
   [/^\/shift/,        'shift'],
   [/^\/newcomers/,    'newcomers'],
