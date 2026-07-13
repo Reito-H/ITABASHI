@@ -379,97 +379,93 @@ async function insRenderCanvas(){
   const ym=String(y)+String(m).padStart(2,'0');
   const res=await fetch(INS_PATH+'/api/inspection/day?ym='+ym+'&day='+day);
   const all=await res.json();
-  const W=2400,H=1404;
+  // A4横・余白8mm時の印刷可能領域と同比率（281:194）
+  const W=2400,H=1660;
   const canvas=document.getElementById('ins-canvas');
   canvas.width=W; canvas.height=H;
   const ctx=canvas.getContext('2d');
-  // 游ゴシック優先（元Excelと同じフォントファミリー）
   const FN='"游ゴシック","Yu Gothic","Hiragino Sans","Meiryo","Noto Sans JP",sans-serif';
-  // 列レイアウト（元Excel実測比率）
-  const LX=0,LW=100;
-  const KX=[100,525,950,1391];
-  const IVW=[261,279,279,279],ITW=[164,146,162,133]; // 点検実施
-  const SVW=[281,282,282,282],STW=[144,143,159,130]; // 車検・ボンベ
-  const NX=1803,NW=597;
-  // 行レイアウト
-  const HH=75;
-  const IY=75,IH=582,IR=39;
-  const PY=657,PH=269,PR=18;
-  const SY=926,SH=269,SR=18;
-  const BOY=1195,BH=209,BR=14;
-  const IRH=IH/IR,PRH=PH/PR,SRH=SH/SR,BRH=BH/BR;
-  // データ
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  // テーブル領域（右側に枠外の備考スペースを残す）
+  const TX=60,TY=155,TW=1650,TH=H-TY-55;
+  const LW=95;               // ラベル列
+  const CW=(TW-LW)/4;        // 各課列
+  const HH=90;               // ヘッダー行
+  const BODY=TH-HH;
+  const IH=Math.round(BODY*0.44),DH=Math.round(BODY*0.21),SH=Math.round(BODY*0.21);
+  const BH=BODY-IH-DH-SH;
+  const IY=TY+HH,DY=IY+IH,SY=DY+DH,BOY=SY+SH;
+  // データ（点検実施＝点検+リコール、代替は独立セクション）
   const Ka=Array.from({length:4},(_,i)=>{
     const r=all.filter(x=>x.ka===i+1);
-    return {ins:r.filter(x=>['inspect','sub','recall'].includes(x.type)),sha:r.filter(x=>x.type==='shaken'),bom:r.filter(x=>x.type==='bomb')};
+    return {ins:r.filter(x=>['inspect','recall'].includes(x.type)),dai:r.filter(x=>x.type==='sub'),sha:r.filter(x=>x.type==='shaken'),bom:r.filter(x=>x.type==='bomb')};
   });
-  // 白背景
-  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
-  // ラベル列：textRotation=255相当（文字を縦に積む）
+  // 日付（表の外・左上に大きく）
+  ctx.fillStyle='#000';ctx.textBaseline='middle';
+  ctx.font='bold 66px '+FN;ctx.textAlign='left';
+  ctx.fillText(m+'月'+day+'日',TX+5,80);
+  // 右上注記
+  ctx.font='bold 30px '+FN;ctx.textAlign='right';
+  ctx.fillText('15時に工場に確認',W-55,52);
+  ctx.fillText('工場内線：6428',W-55,98);
+  // ヘッダー（左端セルは空白）
+  const KN=['１課','２課','３課','４課'];
+  ctx.font='bold 44px '+FN;ctx.textAlign='center';
+  for(let i=0;i<4;i++) ctx.fillText(KN[i],TX+LW+CW*i+CW/2,TY+HH/2);
+  // ラベル列（縦書き風に文字を積む）
   function drawStackedText(text,secY,secH){
     const chars=[...text];
     const n=chars.length;
-    const fsz=Math.min(30,secH/(n*1.4));
-    const spacing=Math.min(secH/n,fsz*1.9);
+    const fsz=Math.min(36,secH/(n*1.35));
+    const spacing=Math.min(secH/(n+0.5),fsz*1.7);
     const totalH=spacing*(n-1)+fsz;
     const sy0=secY+(secH-totalH)/2+fsz/2;
-    ctx.font=fsz+'px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
-    for(let k=0;k<n;k++) ctx.fillText(chars[k],LX+LW/2,sy0+k*spacing);
+    ctx.font='bold '+fsz+'px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
+    for(let k=0;k<n;k++) ctx.fillText(chars[k],TX+LW/2,sy0+k*spacing);
   }
   drawStackedText('点検実施車両',IY,IH);
-  drawStackedText('AI.PCS',PY,PH);
+  drawStackedText('代替',DY,DH);
   drawStackedText('車検',SY,SH);
   drawStackedText('ボンベ交換',BOY,BH);
-  // ヘッダー（背景なし、テキストのみ）
-  ctx.font='18px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText(m+'月'+day+'日',LX+LW/2,HH/2);
-  const KN=['１課','２課','３課','４課'];
-  for(let i=0;i<4;i++){
-    const cx=KX[i],cw=IVW[i]+ITW[i];
-    ctx.font='40px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText(KN[i],cx+cw/2,HH/2);
-  }
-  ctx.font='26px '+FN;ctx.fillStyle='#000';ctx.textAlign='center';ctx.textBaseline='middle';
-  ctx.fillText('備考',NX+NW/2,HH/2);
-  // 車両番号：大セル内に縦並び・上下中央（元ExcelのverticalAlign=center）
-  function fillCell(secY,secH,vx,vw,tx,tw,vehicles){
+  // 車両（番号＋出庫時間を横並び、セクション内で上下中央）
+  function fillCell(secY,secH,col,vehicles){
     if(!vehicles.length) return;
-    const lh=43; // 1行の高さ（16pt×2.489≒40px + 余白）
+    const cx=TX+LW+CW*col;
+    const lh=Math.min(60,secH/vehicles.length);
     const totalH=vehicles.length*lh;
     const sy0=secY+(secH-totalH)/2+lh/2;
     for(let j=0;j<vehicles.length;j++){
       const v=vehicles[j],ly=sy0+j*lh;
-      ctx.font='40px '+FN;ctx.fillStyle=INS_COL[v.type]||'#000';
+      ctx.font='42px '+FN;ctx.fillStyle=INS_COL[v.type]||'#000';
       ctx.textAlign='center';ctx.textBaseline='middle';
-      ctx.fillText(v.vehicle_num,vx+vw/2,ly);
+      ctx.fillText(v.vehicle_num,cx+CW*0.32,ly);
       if(v.dep_time){
-        ctx.font='28px '+FN;ctx.fillStyle='#555';
-        ctx.fillText(v.dep_time,tx+tw/2,ly);
+        ctx.font='36px '+FN;
+        ctx.fillText(v.dep_time,cx+CW*0.73,ly);
       }
     }
   }
-  for(let i=0;i<4;i++) fillCell(IY,IH,KX[i],IVW[i],KX[i]+IVW[i],ITW[i],Ka[i].ins);
-  for(let i=0;i<4;i++) fillCell(SY,SH,KX[i],SVW[i],KX[i]+SVW[i],STW[i],Ka[i].sha);
-  for(let i=0;i<4;i++) fillCell(BOY,BH,KX[i],SVW[i],KX[i]+SVW[i],STW[i],Ka[i].bom);
-  // 備考テキスト（11pt相当、左揃え）
-  function nY(row){if(row<=44)return IY+(row-6)*IRH;if(row<=62)return PY+(row-45)*PRH;if(row<=80)return SY+(row-63)*SRH;return BOY+(row-81)*BRH;}
-  function nRH(row){if(row<=44)return IRH;if(row<=62)return PRH;if(row<=80)return SRH;return BRH;}
-  const NOTES=[[6,'・Ｈ勤以外は７時までに工場へ'],[10,'・６時、７時の出庫は不可'],[14,'　間違い出庫に要注意！'],[18,'・Ｈ勤は11時までに工場へ'],[30,'　間違い出庫に要注意！'],[45,'・全車両6時30までに工場へ'],[49,'・午前中に出庫はできません！'],[69,'・7時までにいれられるように'],[73,'・仮検受けないと使えなくなる'],[77,'・整備依頼書「LT27 交換」をつけて']];
-  ctx.font='26px '+FN;ctx.fillStyle='#000';ctx.textAlign='left';ctx.textBaseline='middle';
-  for(const [row,txt] of NOTES) ctx.fillText(txt,NX+10,nY(row)+nRH(row)*2);
-  // グリッド線（元Excelと同じthin=1px、背景色なし）
-  ctx.strokeStyle='#000';ctx.lineWidth=1;
-  ctx.strokeRect(0.5,0.5,W-1,H-1);
-  for(const sy of [HH,IY+IH,PY+PH,SY+SH]){ctx.beginPath();ctx.moveTo(0,sy);ctx.lineTo(W,sy);ctx.stroke();}
-  for(const vx of [LW,KX[1],KX[2],KX[3],NX]){ctx.beginPath();ctx.moveTo(vx,0);ctx.lineTo(vx,H);ctx.stroke();}
-  // 車両/時間サブ列区切り（セクションごとに位置が異なる、内部行線なし）
   for(let i=0;i<4;i++){
-    const iv=KX[i]+IVW[i];
-    ctx.beginPath();ctx.moveTo(iv,IY);ctx.lineTo(iv,IY+IH);ctx.stroke();
-    const sv=KX[i]+SVW[i];
-    ctx.beginPath();ctx.moveTo(sv,SY);ctx.lineTo(sv,SY+SH);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(sv,BOY);ctx.lineTo(sv,BOY+BH);ctx.stroke();
+    fillCell(IY,IH,i,Ka[i].ins);
+    fillCell(DY,DH,i,Ka[i].dai);
+    fillCell(SY,SH,i,Ka[i].sha);
+    fillCell(BOY,BH,i,Ka[i].bom);
   }
+  // 備考（表の外・右側、枠線なし）
+  const NX=TX+TW+42;
+  const NOTES=[
+    [IY+50,['・Ｈ勤以外は７時までに工場へ','・６時、７時の出庫は不可','　間違い出庫に要注意！','・Ｈ勤は１１時までに工場へ']],
+    [IY+IH*0.62,['　間違い出庫に要注意！']],
+    [DY+45,['・全車両６時３０までに工場へ','・午前中に出庫はできません！']],
+    [SY+SH*0.32,['・７時までにいれられるように','・仮検受けないと使えなくなる','・整備依頼書「ＬＴ２７交換」をつけて']],
+  ];
+  ctx.font='29px '+FN;ctx.fillStyle='#000';ctx.textAlign='left';ctx.textBaseline='middle';
+  for(const [ny,lines] of NOTES) lines.forEach((t,k)=>ctx.fillText(t,NX,ny+k*68));
+  // 罫線（外枠・セクション区切り・列区切りのみ。列内の区切り線なし）
+  ctx.strokeStyle='#000';ctx.lineWidth=2;
+  ctx.strokeRect(TX,TY,TW,TH);
+  for(const sy of [TY+HH,DY,SY,BOY]){ctx.beginPath();ctx.moveTo(TX,sy);ctx.lineTo(TX+TW,sy);ctx.stroke();}
+  for(let i=0;i<4;i++){const vx=TX+LW+CW*i;ctx.beginPath();ctx.moveTo(vx,TY);ctx.lineTo(vx,TY+TH);ctx.stroke();}
 }
 
 async function insCopyImage(){
@@ -500,7 +496,7 @@ async function insPrintImage(){
   document.body.appendChild(f);
   const doc=f.contentDocument;
   doc.open();
-  doc.write('<!DOCTYPE html><html><head><title>点検車検確認表_'+m+'月'+d+'日</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0}img{width:100%;display:block}</style></head><body><img src="'+dataUrl+'"></body></html>');
+  doc.write('<!DOCTYPE html><html><head><title>点検車検確認表_'+m+'月'+d+'日</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:278mm;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
   doc.close();
   const img=doc.querySelector('img');
   const doPrint=()=>{f.contentWindow.focus();f.contentWindow.print();};
