@@ -180,8 +180,7 @@ export function kanchoShiftPage(
     return `<td class="kc" data-member="${m.id}" data-date="${d}" data-name="${escHtml(m.name)}" data-sec="${secGroup}"
       data-code="${escHtml(s?.code ?? '')}" data-dg="${s?.dg ?? 0}" data-ws="${s?.ws ?? 0}" data-cl="${s?.cl ?? ''}"
       data-tc="${m.team_color ?? ''}" data-inp="${inPeriod ? 1 : 0}"${hasWish ? ' data-wish="1"' : ''}
-      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}"
-      ${canEdit ? 'onclick="openCell(this)"' : ''}>${escHtml(s?.code ?? '')}</td>`;
+      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}">${escHtml(s?.code ?? '')}</td>`;
   }
 
   function mainRows(): string {
@@ -304,9 +303,20 @@ export function kanchoShiftPage(
       <button onclick="batchSave()" id="batch-save-btn" disabled style="padding:8px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;opacity:0.5;">一括保存</button>
     </div>
   </div>
+  <div id="cp-mode-bar" style="display:none;background:#eff6ff;border:2px solid #60a5fa;border-radius:8px;padding:10px 14px;margin-bottom:8px;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span style="color:#1d4ed8;font-weight:700;font-size:13px;">コピペ編集モード</span>
+    <span id="cp-clip-label" style="color:#1e40af;font-size:13px;background:#dbeafe;padding:2px 10px;border-radius:4px;border:1px solid #93c5fd;">コピーするマスをタップしてください</span>
+    <span id="cp-pending-label" style="color:#92400e;font-size:13px;background:#fef3c7;padding:2px 8px;border-radius:4px;border:1px solid #fbbf24;">変更 0件</span>
+    <div style="margin-left:auto;display:flex;gap:8px;">
+      <button onclick="cpRepick()" style="padding:8px 14px;background:#dbeafe;border:1px solid #93c5fd;color:#1d4ed8;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;">別のマスをコピー</button>
+      <button onclick="cancelEdit()" style="padding:8px 16px;background:#fff;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;touch-action:manipulation;">キャンセル</button>
+      <button onclick="batchSave()" id="cp-save-btn" disabled style="padding:8px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;opacity:0.5;">一括保存</button>
+    </div>
+  </div>
   <div style="margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;" id="edit-start-wrap">
     <button onclick="startEdit()" id="edit-start-btn" style="padding:7px 16px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:13px;font-weight:600;color:#166534;cursor:pointer;touch-action:manipulation;">編集モードを開始</button>
-    <span style="font-size:11px;color:#9ca3af;">セルを編集するには先に編集モードを開始してください</span>
+    <button onclick="startCpMode()" style="padding:7px 16px;background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;font-size:13px;font-weight:600;color:#1d4ed8;cursor:pointer;touch-action:manipulation;">コピペ編集モード</button>
+    <span style="font-size:11px;color:#9ca3af;">通常編集はセルをタップして入力、コピペ編集はマスのコピー＆連続貼り付けができます</span>
   </div>` : `
   <div style="margin-bottom:8px;font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:6px 12px;display:inline-block;">閲覧専用（編集権限がありません）</div>`}
 
@@ -495,6 +505,7 @@ export function kanchoShiftPage(
   .btn-secondary { padding:6px 14px;background:#6b7280;color:white;border-radius:6px;text-decoration:none;font-size:13px; }
   .kc:active { opacity:0.6; }
   .kc[data-pending="true"] { outline:2px dashed #f59e0b !important; }
+  .kc[data-copysrc="1"] { outline:3px solid #2563eb !important; outline-offset:-3px; }
   .kc[data-wish="1"]::after { content:''; position:absolute; top:0; right:0; border-style:solid; border-width:0 7px 7px 0; border-color:transparent #dc2626 transparent transparent; }
   .kreq-ng { background:#fee2e2 !important; color:#dc2626; font-weight:700; }
   .kreq-ok { background:#f0fdf4 !important; color:#166534; }
@@ -521,6 +532,9 @@ _types.forEach(function(t) {
 });
 
 var _editMode = false;
+var _cpMode = false;     // コピペ編集モード
+var _cpPicking = false;  // コピー元選択待ち
+var _cpClip = null;      // コピー中のセル内容 {code, dg, ws, cl}
 var _pending = {};   // key: memberId_date -> entry
 var _cur = null;     // {memberId, date, name, sec}
 var _wishes = ${safeJson(wishes)};  // [{id, member_id, date, note}]
@@ -578,38 +592,61 @@ function recalcAll() {
 }
 recalcAll();
 
-// ===== 編集モード =====
+// ===== 編集モード / コピペ編集モード =====
 function startEdit() {
   _editMode = true;
   sel('#edit-start-wrap').style.display = 'none';
   sel('#edit-mode-bar').style.display = 'flex';
   window.addEventListener('beforeunload', _beforeUnload);
 }
+function startCpMode() {
+  _cpMode = true;
+  _cpPicking = true;
+  _cpClip = null;
+  sel('#edit-start-wrap').style.display = 'none';
+  sel('#cp-mode-bar').style.display = 'flex';
+  sel('#cp-clip-label').textContent = 'コピーするマスをタップしてください';
+  window.addEventListener('beforeunload', _beforeUnload);
+}
 function _beforeUnload(e) {
   if (Object.keys(_pending).length > 0) { e.preventDefault(); e.returnValue = ''; }
+}
+function _exitAllModes() {
+  _editMode = false;
+  _cpMode = false;
+  _cpClip = null;
+  window.removeEventListener('beforeunload', _beforeUnload);
+  sel('#edit-start-wrap').style.display = 'flex';
+  sel('#edit-mode-bar').style.display = 'none';
+  sel('#cp-mode-bar').style.display = 'none';
+  document.querySelectorAll('.kc[data-copysrc]').forEach(function(td) { delete td.dataset.copysrc; });
 }
 function cancelEdit() {
   var n = Object.keys(_pending).length;
   if (n > 0 && !confirm(n + '件の未保存変更を破棄しますか？')) return;
-  _editMode = false;
-  window.removeEventListener('beforeunload', _beforeUnload);
-  if (n > 0) { location.reload(); return; }
-  sel('#edit-start-wrap').style.display = 'flex';
-  sel('#edit-mode-bar').style.display = 'none';
+  _exitAllModes();
+  if (n > 0) location.reload();
 }
 function _updatePending() {
   var n = Object.keys(_pending).length;
-  sel('#pending-count-label').textContent = '変更 ' + n + '件';
-  var btn = sel('#batch-save-btn');
-  btn.disabled = n === 0;
-  btn.style.opacity = n === 0 ? '0.5' : '1';
+  var lbl1 = sel('#pending-count-label');
+  var lbl2 = sel('#cp-pending-label');
+  if (lbl1) lbl1.textContent = '変更 ' + n + '件';
+  if (lbl2) lbl2.textContent = '変更 ' + n + '件';
+  ['#batch-save-btn', '#cp-save-btn'].forEach(function(id) {
+    var btn = sel(id);
+    if (!btn) return;
+    btn.disabled = n === 0;
+    btn.style.opacity = n === 0 ? '0.5' : '1';
+  });
 }
 async function batchSave() {
   var entries = Object.values(_pending);
   if (entries.length === 0) return;
-  var btn = sel('#batch-save-btn');
-  btn.disabled = true; btn.textContent = '保存中...';
-  sel('#edit-error').style.display = 'none';
+  var btns = ['#batch-save-btn', '#cp-save-btn'].map(sel).filter(Boolean);
+  btns.forEach(function(b) { b.disabled = true; b.textContent = '保存中...'; });
+  var err = sel('#edit-error');
+  if (err) err.style.display = 'none';
   try {
     var res = await fetch(API + '/shifts/batch', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -621,19 +658,63 @@ async function batchSave() {
     }
     document.querySelectorAll('.kc[data-pending="true"]').forEach(function(td) { delete td.dataset.pending; });
     _pending = {};
-    _editMode = false;
-    window.removeEventListener('beforeunload', _beforeUnload);
-    sel('#edit-start-wrap').style.display = 'flex';
-    sel('#edit-mode-bar').style.display = 'none';
+    _exitAllModes();
     showToast('保存しました');
   } catch(e) {
-    sel('#edit-error').textContent = '保存に失敗しました: ' + (e.message || '');
-    sel('#edit-error').style.display = 'block';
+    if (err) { err.textContent = '保存に失敗しました: ' + (e.message || ''); err.style.display = 'block'; }
+    else alert('保存に失敗しました: ' + (e.message || ''));
   } finally {
-    btn.textContent = '一括保存';
+    btns.forEach(function(b) { b.textContent = '一括保存'; });
     _updatePending();
   }
 }
+
+// ===== コピペ編集 =====
+function cpRepick() {
+  _cpPicking = true;
+  document.querySelectorAll('.kc[data-copysrc]').forEach(function(td) { delete td.dataset.copysrc; });
+  sel('#cp-clip-label').textContent = 'コピーするマスをタップしてください';
+}
+function cpTap(td) {
+  if (_cpPicking || _cpClip === null) {
+    // コピー元を取得（記号＋斜め直＋赤文字＋セル色を丸ごとコピー）
+    _cpClip = {
+      code: td.dataset.code || '',
+      dg: td.dataset.dg === '1' ? 1 : 0,
+      ws: td.dataset.ws === '1' ? 1 : 0,
+      cl: td.dataset.cl || null
+    };
+    _cpPicking = false;
+    document.querySelectorAll('.kc[data-copysrc]').forEach(function(x) { delete x.dataset.copysrc; });
+    td.dataset.copysrc = '1';
+    var label = (_cpClip.code || '空白') + (_cpClip.dg ? '(斜め)' : '') + (_cpClip.ws ? '(赤字)' : '') + (_cpClip.cl ? '(色付)' : '');
+    sel('#cp-clip-label').innerHTML = 'コピー中「<b>' + escH(label) + '</b>」→ 貼り付けたいマスをタップ';
+    return;
+  }
+  if (td.dataset.copysrc === '1') return; // コピー元自身への貼り付けは無視
+  var key = td.dataset.member + '_' + td.dataset.date;
+  _pending[key] = {
+    member_id: parseInt(td.dataset.member), date: td.dataset.date,
+    code: _cpClip.code || null, is_diagonal: _cpClip.dg, is_wish: _cpClip.ws, cell_color: _cpClip.cl
+  };
+  td.dataset.code = _cpClip.code;
+  td.dataset.dg = String(_cpClip.dg);
+  td.dataset.ws = String(_cpClip.ws);
+  td.dataset.cl = _cpClip.cl || '';
+  td.dataset.pending = 'true';
+  paintCell(td);
+  _updatePending();
+  recalcAll();
+}
+
+// セルのタップはイベント委譲で一括処理（タップ検知の取りこぼし防止）
+document.addEventListener('click', function(e) {
+  var t = e.target;
+  var td = (t && t.closest) ? t.closest('.kc') : null;
+  if (!td || !CAN_EDIT) return;
+  if (_cpMode) { cpTap(td); return; }
+  openCell(td);
+});
 
 // ===== セル編集 =====
 function _presetsFor(sec) {
