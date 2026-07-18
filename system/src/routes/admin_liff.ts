@@ -8,7 +8,7 @@ import type { Env } from '../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
-const ROLE_LABELS: Record<string, string> = {
+export const ROLE_LABELS: Record<string, string> = {
   general_manager:     '統括管理者',
   operations_manager:  '運行管理者',
   vehicle_manager:     '車番管理者',
@@ -19,7 +19,7 @@ const ROLE_LABELS: Record<string, string> = {
   unknown:             '権限不明者',
 };
 
-const ROLE_COLORS: Record<string, string> = {
+export const ROLE_COLORS: Record<string, string> = {
   general_manager:     '#1e3a5f',
   operations_manager:  '#065f46',
   vehicle_manager:     '#7c3aed',

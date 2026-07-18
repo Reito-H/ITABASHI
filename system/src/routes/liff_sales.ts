@@ -12,6 +12,7 @@ import fontkit from '@pdf-lib/fontkit';
 import type { Env } from '../auth';
 import { getPeriod, getPeriodRange, getPeriodSettings } from '../auth';
 import { bentenUidFromRequest, loadBentenFont } from '../benten';
+import { logLineActivity } from '../utils/activity_log';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -113,6 +114,8 @@ app.post('/api/liff/sales/entry', async (c) => {
       period_year = excluded.period_year, period_month = excluded.period_month, updated_at = datetime('now', 'localtime')
   `).bind(auth.empId, data.date, amount, rideCount, data.dutyCode, year, month).run();
 
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', '売上記録', `${data.date} ${amount}円`);
+
   return c.json({ ok: true, amountExcl: Math.round(amount / 1.1) });
 });
 
@@ -126,6 +129,8 @@ app.get('/api/liff/sales/summary', async (c) => {
   const year = parseInt(c.req.query('year') ?? '0');
   const month = parseInt(c.req.query('month') ?? '0');
   if (!year || !month) return c.json({ error: 'パラメータ不足' }, 400);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', '売上サマリー閲覧', `${year}年${month}月度`);
 
   const s = await loadSummary(c.env, auth.empId, year, month);
   return c.json({
@@ -150,6 +155,8 @@ app.get('/api/liff/sales/pdf', async (c) => {
   const year = parseInt(c.req.query('year') ?? '0');
   const month = parseInt(c.req.query('month') ?? '0');
   if (!year || !month) return c.json({ error: 'パラメータ不足' }, 400);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', '売上PDF出力', `${year}年${month}月度`);
 
   const s = await loadSummary(c.env, auth.empId, year, month);
   const fontBytes = await loadBentenFont(c.env);

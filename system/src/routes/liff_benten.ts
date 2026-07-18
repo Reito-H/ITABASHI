@@ -15,6 +15,7 @@ import {
   addDays,
   type BentenGroup, type BentenShiftType, type BentenMember, type BentenShift,
 } from '../benten';
+import { logLineActivity } from '../utils/activity_log';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -65,6 +66,8 @@ app.get('/liff/benten-pdf', async (c) => {
 app.get('/api/liff/benten/bootstrap', async (c) => {
   const auth = await bentenAuth(c);
   if (!auth) return c.json({ error: 'forbidden' }, 403);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'ベンテンシフト閲覧', '画面表示');
 
   const db = c.env.DB;
   const [groups, types, members, range, me] = await Promise.all([
@@ -151,6 +154,9 @@ app.put('/api/liff/benten/shift', async (c) => {
       input_by_uid = excluded.input_by_uid, updated_at = excluded.updated_at
   `).bind(body.member_id, body.date, shiftTypeId, body.is_ake ? 1 : 0, auth.uid).run();
 
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'ベンテンシフト入力',
+    `${body.date} member:${body.member_id}${body.is_ake ? ' 明け' : ''}`);
+
   // 明け自動設定: 会員のauto_ake × 種別のtriggers_ake。翌日が未入力のときだけ設定
   if (!body.is_ake && triggersAke && member.auto_ake === 1) {
     const next = addDays(body.date, 1);
@@ -187,6 +193,7 @@ app.delete('/api/liff/benten/shift', async (c) => {
 
   await c.env.DB.prepare('DELETE FROM benten_shifts WHERE member_id = ? AND date = ?')
     .bind(memberId, date).run();
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'ベンテンシフト削除', `${date} member:${memberId}`);
   return c.json({ ok: true });
 });
 

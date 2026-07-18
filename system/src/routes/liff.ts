@@ -4,6 +4,7 @@
 
 import { Hono } from 'hono';
 import type { Env } from '../auth';
+import { logLineActivity } from '../utils/activity_log';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -91,6 +92,8 @@ app.get('/api/liff/employees', async (c) => {
   const q = (c.req.query('q') ?? '').trim();
   if (q.length < 1) return c.json([]);
 
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '社員照会', `検索: ${q}`);
+
   const like = `%${q}%`;
   const rows = await c.env.DB.prepare(`
     SELECT id, emp_no, name, division, team
@@ -145,6 +148,9 @@ app.get('/api/liff/staff-lookup', async (c) => {
 
   // キーワードなしでも課が指定されていればその課の一覧を返す（社員照会＋の課別一覧表示用）
   if (q.length < 1 && !division) return c.json([]);
+
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '社員照会',
+    `検索: ${[q, division ? `${division}課` : '', team ? `${team}班` : ''].filter(Boolean).join(' ')}`);
 
   const conditions = ['is_active = 1'];
   const params: (string | number)[] = [];
@@ -234,6 +240,8 @@ app.post('/api/liff/staff-edit', async (c) => {
     body.id,
   ).run();
 
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '社員情報編集', body.name);
+
   return c.json({ ok: true, updated: {
     name: body.name,
     name_kana: body.name_kana ?? null,
@@ -272,6 +280,7 @@ app.post('/api/liff/staff-retire', async (c) => {
   if ((result.meta.changes ?? 0) === 0) {
     return c.json({ error: '対象社員が見つからないか、すでに退職処理済みです' }, 404);
   }
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '退職処理', `社員ID: ${body.id} (${body.retirement_date})`);
   return c.json({ ok: true });
 });
 
@@ -327,6 +336,8 @@ app.post('/api/liff/staff-add', async (c) => {
     body.hire_date ?? null,
   ).run();
 
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '社員追加', `${body.name} (${body.emp_no})`);
+
   return c.json({ ok: true });
 });
 
@@ -339,6 +350,8 @@ app.get('/api/liff/offices', async (c) => {
     'SELECT role FROM line_liff_users WHERE line_uid = ?'
   ).bind(uid).first<{ role: string }>();
   if (!liffUser) return c.json({ error: 'forbidden' }, 403);
+
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', 'その他機能', '連絡先一覧表示');
 
   const rows = await c.env.DB.prepare(`
     SELECT short_name, phone
@@ -405,6 +418,9 @@ app.post('/api/liff/lost-item', async (c) => {
     uid,
   ).run();
 
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '忘れ物報告送信',
+    `${body.vehicle_no ?? ''} ${(body.item_description ?? '').slice(0, 50)}`.trim());
+
   // 報告まとめテキストを生成してLINEに送信
   const summary = buildLostItemSummary(body);
   const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
@@ -467,6 +483,9 @@ app.post('/api/liff/accident', async (c) => {
     summary,
     uid,
   ).run();
+
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '事故報告送信',
+    `${body.vehicle_no ?? ''} ${body.accident_type ?? ''}`.trim());
 
   const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
   if (at) await pushMessage(uid, at, summary);
@@ -556,6 +575,9 @@ app.post('/api/liff/violation', async (c) => {
     body.notes ?? null,
     uid,
   ).run();
+
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '違反報告送信',
+    `${body.vehicle_no ?? ''} ${violationTypeName ?? ''}`.trim());
 
   const summary = buildViolationSummary({
     ...body,

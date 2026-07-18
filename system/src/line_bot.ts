@@ -7,6 +7,7 @@ import type { Env } from './auth';
 import { getRichMenuForRole } from './routes/admin_liff';
 import { queryManual } from './utils/manual_search';
 import { isTicketQuestion, queryTicket } from './utils/ticket_bot';
+import { logLineActivity } from './utils/activity_log';
 import { setBentenConfig, linkBentenMember, BENTEN_MASTER_ROLES } from './benten';
 
 // ===================================================
@@ -199,6 +200,43 @@ async function linkEmployeeByName(db: D1Database, lineUid: string, name: string)
 }
 
 // ===================================================
+// 利用状況ログ: 入力テキスト・会話ステートから機能を分類（管理画面「LINE利用状況」の集計用）
+// ===================================================
+
+const REG_COMMANDS = [
+  '統括管理者登録', '運行管理者登録', '車番連携', 'ベンテン会員登録', 'ベンテンクラブ会員登録',
+  'シフトマスター登録', 'ベンテンシフトマスター登録', '乗務社員登録',
+  'LINE連携', '友達追加', '連携', '新人', '乗務社員', '弁天倶楽部会員', '車番管理者',
+];
+
+function classifyBotFeature(inputText: string, state: string): string {
+  if (state.startsWith('reg_')) return '登録・連携';
+  if (state.startsWith('odo_')) return 'ODO記録';
+  if (state.startsWith('event_')) return '嫌なこと報告';
+  if (inputText === 'uid' || inputText === 'UID') return 'UID確認';
+  if (/^\d{1,6}$/.test(inputText)) return '車番検索';
+  const qMatch = inputText.match(/^[?？]\s*(.+)/s);
+  if (qMatch) return isTicketQuestion(qMatch[1].trim()) ? 'チケットAI' : 'マニュアルAI';
+  if (inputText === '売上記録' || inputText === '売上を記録') return '売上記録';
+  if (inputText === 'ODO') return 'ODO記録';
+  if (inputText === '忘れ物対応' || inputText === '忘れ物') return '忘れ物対応';
+  if (inputText === '事故報告' || inputText === '事故') return '事故報告';
+  if (inputText === '違反報告' || inputText === '違反') return '違反報告';
+  if (inputText === '嫌なこと報告') return '嫌なこと報告';
+  if (inputText === '報告') return '報告メニュー';
+  if (inputText === 'シフト確認') return 'シフト確認';
+  if (['シフト', 'シフト表', 'ベンテンシフト', 'ベンテン'].includes(inputText)) return 'ベンテンシフト';
+  if (inputText === '社員照会＋' || inputText === '社員照会プラス') return '社員照会';
+  if (REG_COMMANDS.includes(inputText)) return '登録・連携';
+  if (inputText === 'れんけいかいじょ') return '連携解除';
+  if (inputText === '車番検索') return '車番検索';
+  if (inputText === 'マイカレ') return 'マイカレ';
+  if (inputText === 'AI') return 'AI';
+  if (inputText === 'キャンセル' || inputText === 'cancel') return 'キャンセル';
+  return 'その他';
+}
+
+// ===================================================
 // メインハンドラー
 // ===================================================
 
@@ -212,6 +250,7 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   // 権限不明者用リッチメニュー（RICHMENU_ID_UNKNOWN）を割り当てる。
   // 「友達追加・LINE連携はこちら」ボタンを押すとステータス選択メニューが起動する（handleUnregisteredUser参照）。
   if (event.type === 'follow') {
+    await logLineActivity(env.DB, lineUid, 'bot', 'follow', '友だち追加');
     const existing = await env.DB.prepare(
       'SELECT role FROM line_liff_users WHERE line_uid = ?'
     ).bind(lineUid).first<{ role: string }>();
@@ -248,6 +287,10 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   if (event.type === 'postback') {
     inputText = (event.postback as Record<string, string>)?.data ?? '';
   }
+  if (event.type === 'unfollow') {
+    await logLineActivity(env.DB, lineUid, 'bot', 'unfollow', 'ブロック/友だち解除');
+    return;
+  }
   if (event.type !== 'message' && event.type !== 'postback') return;
 
   // ===== グループ内メッセージ =====
@@ -268,6 +311,14 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
     return;
   }
 
+  // ===== 会話ステート取得 =====
+  const { state, data } = await getState(env.DB, lineUid);
+
+  // ===== 利用状況ログ（1:1トークのみ。記録失敗はBot動作に影響させない）=====
+  // 登録パスワード入力中の生テキストはログに残さない
+  const logDetail = state.includes('password') ? '（パスワード入力）' : inputText;
+  await logLineActivity(env.DB, lineUid, 'bot', String(event.type), classifyBotFeature(inputText, state), logDetail);
+
   // UID確認コマンド（全ユーザー共通）
   if (inputText === 'uid' || inputText === 'UID') {
     await reply(replyToken, at, [text(`あなたのLINE UID:\n${lineUid}`)]);
@@ -278,9 +329,6 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   const liffUser = await env.DB.prepare(
     'SELECT id, name, emp_id, role FROM line_liff_users WHERE line_uid = ?'
   ).bind(lineUid).first<LiffUser>();
-
-  // ===== 会話ステート取得 =====
-  const { state, data } = await getState(env.DB, lineUid);
 
   // ===== 登録フロー処理 =====
   // 登録中の状態がある場合、またはまだ未登録の場合に登録フローを処理
