@@ -9,6 +9,7 @@ import { generateInviteCode } from '../auth';
 import type { Env } from '../auth';
 import type { SalesSummary, DailySale } from '../html/sales';
 import type { InterviewRecord } from './api/interviews';
+import { ROLE_LABELS } from './admin_liff';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -922,6 +923,18 @@ app.get('/announcements', async (c) => {
     'SELECT * FROM announcements ORDER BY created_at DESC LIMIT 30'
   ).all<{ id: number; title: string; message: string; target_type: string; target_data: string; sent_count: number; created_at: string }>();
 
+  // LINE連携者（line_liff_users）一覧: ロール順（ROLE_LABELSの定義順）→名前順
+  const liffUsersRes = await c.env.DB.prepare(
+    `SELECT id, name, role FROM line_liff_users WHERE role != 'unknown'`
+  ).all<{ id: number; name: string | null; role: string }>();
+  const roleOrder = Object.keys(ROLE_LABELS);
+  const liffUsers = (liffUsersRes.results ?? []).sort((a, b) =>
+    (roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role)) ||
+    (a.name ?? '').localeCompare(b.name ?? '', 'ja')
+  );
+  const liffTotal = liffUsers.length;
+  const liffNameMap = new Map(liffUsers.map(u => [String(u.id), u.name ?? '(名前未設定)']));
+
   const linkedCount = (employees.results ?? []).filter(e => e.has_line).length;
 
   // 入社月リスト（hire_dateの年月を集計）
@@ -942,15 +955,24 @@ app.get('/announcements', async (c) => {
   ).join('');
 
   const TARGET_LABEL: Record<string, string> = {
-    all: '全員', entry_month: '入社月', individual: '個別指定'
+    all: '全員', entry_month: '入社月', individual: '個別指定', liff: 'LINE連携者'
   };
+
+  const liffUserOptions = liffUsers.map(u =>
+    `<option value="${u.id}">${escHtml(u.name ?? '(名前未設定)')}（${escHtml(ROLE_LABELS[u.role] ?? u.role)}）</option>`
+  ).join('');
+
+  const fmtTargetData = (type: string, data: string | null): string | null =>
+    type === 'liff' && data
+      ? data.split(',').map(x => liffNameMap.get(x.trim()) ?? x.trim()).join('・')
+      : data;
 
   const historyRows = (history.results ?? []).map(r => `
     <tr class="hover:bg-gray-50 cursor-pointer" onclick="showDetail(${r.id})">
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.title)}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;">
         <span style="background:#eff6ff;color:#1d4ed8;padding:2px 7px;border-radius:4px;">${escHtml(TARGET_LABEL[r.target_type] ?? r.target_type)}</span>
-        ${r.target_data ? `<span style="margin-left:4px;font-size:11px;color:#9ca3af;">${escHtml(r.target_data)}</span>` : ''}
+        ${r.target_data ? `<span style="margin-left:4px;font-size:11px;color:#9ca3af;">${escHtml(fmtTargetData(r.target_type, r.target_data) ?? '')}</span>` : ''}
       </td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;text-align:center;">
         <span style="font-weight:700;color:#1a3a5c;">${r.sent_count}</span><span style="font-size:11px;color:#6b7280;">名</span>
@@ -994,6 +1016,22 @@ app.get('/announcements', async (c) => {
           <input type="radio" name="target_type" value="individual" onchange="onTargetChange(this.value)">
           個別指定
         </label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:1.5px solid #d1d5db;border-radius:7px;font-size:13px;" id="lbl-liff">
+          <input type="radio" name="target_type" value="liff" onchange="onTargetChange(this.value)">
+          LINE連携者（${liffTotal}名）
+        </label>
+      </div>
+      <!-- LINE連携者選択 -->
+      <div id="liff-user-sel" style="display:none;margin-top:10px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
+          <span style="font-size:11px;color:#6b7280;">Ctrl / Cmd + クリックで複数選択（LINE Botに登録済みの連携者）</span>
+          <button type="button" onclick="toggleAllLiff(true)" style="font-size:11px;padding:2px 10px;border:1px solid #d1d5db;border-radius:5px;background:white;cursor:pointer;">全選択</button>
+          <button type="button" onclick="toggleAllLiff(false)" style="font-size:11px;padding:2px 10px;border:1px solid #d1d5db;border-radius:5px;background:white;cursor:pointer;">解除</button>
+        </div>
+        <select id="ann-liff-users" multiple size="8"
+          style="width:100%;border:1px solid #d1d5db;border-radius:7px;padding:6px;font-size:13px;">
+          ${liffUserOptions || '<option disabled>LINE連携者がいません</option>'}
+        </select>
       </div>
       <!-- 入社月選択 -->
       <div id="entry-month-sel" style="display:none;margin-top:10px;">
@@ -1060,9 +1098,16 @@ app.get('/announcements', async (c) => {
 <script>
 const annHistory = ${safeJson(history.results ?? [])};
 
+const LIFF_USER_NAMES = ${safeJson(Object.fromEntries(liffNameMap))};
+
 function onTargetChange(val) {
   document.getElementById('entry-month-sel').style.display = val === 'entry_month' ? 'block' : 'none';
   document.getElementById('individual-sel').style.display = val === 'individual' ? 'block' : 'none';
+  document.getElementById('liff-user-sel').style.display = val === 'liff' ? 'block' : 'none';
+}
+
+function toggleAllLiff(on) {
+  Array.from(document.getElementById('ann-liff-users').options).forEach(o => { if (!o.disabled) o.selected = on; });
 }
 
 function getTarget() {
@@ -1072,6 +1117,10 @@ function getTarget() {
     data = document.getElementById('ann-entry-month').value;
   } else if (type === 'individual') {
     const sel = document.getElementById('ann-employees');
+    const ids = Array.from(sel.selectedOptions).map(o => o.value).join(',');
+    data = ids || null;
+  } else if (type === 'liff') {
+    const sel = document.getElementById('ann-liff-users');
     const ids = Array.from(sel.selectedOptions).map(o => o.value).join(',');
     data = ids || null;
   }
@@ -1093,8 +1142,19 @@ async function sendAnnouncement() {
   if (!title || !message) { alert('タイトルと本文を入力してください'); return; }
 
   const { type, data } = getTarget();
+  if (type === 'liff' && !data) { alert('送信するLINE連携者を1名以上選択してください'); return; }
 
-  const targetLabel = type === 'all' ? '全員' : type === 'entry_month' ? (data + '入社') : '個別指定';
+  let liffLabel = '';
+  if (type === 'liff') {
+    const names = data.split(',').map(id => LIFF_USER_NAMES[id] ?? id);
+    liffLabel = names.length <= 5
+      ? names.join('・')
+      : names.slice(0, 3).join('・') + ' ほか' + (names.length - 3) + '名';
+  }
+  const targetLabel = type === 'all' ? '全員'
+    : type === 'entry_month' ? (data + '入社')
+    : type === 'liff' ? ('LINE連携者（' + liffLabel + '）')
+    : '個別指定';
   if (!confirm('「' + title + '」を ' + targetLabel + ' に配信しますか？\\n\\n' + message)) return;
 
   const res = await fetch('/api/line/announcements', {
@@ -1115,12 +1175,15 @@ async function sendAnnouncement() {
 function showDetail(id) {
   const r = annHistory.find(a => a.id === id);
   if (!r) return;
-  const TARGET_LABEL = { all: '全員', entry_month: '入社月', individual: '個別指定' };
+  const TARGET_LABEL = { all: '全員', entry_month: '入社月', individual: '個別指定', liff: 'LINE連携者' };
+  const targetData = r.target_type === 'liff' && r.target_data
+    ? r.target_data.split(',').map(x => LIFF_USER_NAMES[x.trim()] ?? x.trim()).join('・')
+    : r.target_data;
   document.getElementById('modal-title').textContent = r.title;
   document.getElementById('modal-body').textContent = r.message;
   document.getElementById('modal-meta').textContent =
     '対象: ' + (TARGET_LABEL[r.target_type] ?? r.target_type) +
-    (r.target_data ? ' (' + r.target_data + ')' : '') +
+    (targetData ? ' (' + targetData + ')' : '') +
     '　送信数: ' + r.sent_count + '名　' + r.created_at.slice(0, 16);
   const modal = document.getElementById('detail-modal');
   modal.style.display = 'flex';

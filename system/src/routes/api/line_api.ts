@@ -81,7 +81,19 @@ app.post('/announcements', async (c) => {
       ).bind(...empIds).all<{ line_uid: string }>();
       uids = (rows.results ?? []).map(r => r.line_uid);
     }
+  } else if (target_type === 'liff' && target_data) {
+    // LINE連携者（line_liff_users）: target_dataはカンマ区切りのline_liff_users.id
+    const liffIds = target_data.split(',').map(s => parseInt(s.trim())).filter(Boolean);
+    if (liffIds.length > 0) {
+      const placeholders = liffIds.map(() => '?').join(',');
+      const rows = await c.env.DB.prepare(
+        `SELECT line_uid FROM line_liff_users WHERE id IN (${placeholders}) AND role != 'unknown'`
+      ).bind(...liffIds).all<{ line_uid: string }>();
+      uids = (rows.results ?? []).map(r => r.line_uid);
+    }
   }
+
+  uids = [...new Set(uids)];
 
   if (uids.length === 0) {
     await c.env.DB.prepare(

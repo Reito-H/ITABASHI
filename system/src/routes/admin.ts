@@ -1535,6 +1535,7 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>全員</td><td>LINEを連携済みの全社員</td></tr>
       <tr><td>課指定</td><td>選択した課（1〜4課）の社員</td></tr>
       <tr><td>入社月指定</td><td>特定の月に入社した社員のみ</td></tr>
+      <tr><td>LINE連携者</td><td>LINE Botに登録済みの連携者（統括管理者・運行管理者・車番管理者など）から名前で選択</td></tr>
     </table>
     <div class="tut-note">LINEを未連携の社員には届きません。LINE管理ページで連携状況を確認できます。</div>
   </div>
