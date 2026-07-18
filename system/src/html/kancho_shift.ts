@@ -50,6 +50,13 @@ export type KanchoMemo = {
   sort_order: number;
 };
 
+export type KanchoWish = {
+  id: number;
+  member_id: number;
+  date: string;
+  note: string;
+};
+
 const WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
 const ROLE_ORDER = ['昼日勤班長', '終業班長', '教育班長', '研修課出向', '職員当直'];
 
@@ -124,9 +131,11 @@ export function kanchoShiftPage(
   month: number,
   periodStart: string,
   periodEnd: string,
-  canEdit: boolean
+  canEdit: boolean,
+  wishes: KanchoWish[] = []
 ): string {
   const members = allMembers.filter(m => m.is_active === 1);
+  const wishSet = new Set(wishes.map(w => `${w.member_id}_${w.date}`));
   const activeTypes = types.filter(t => t.is_active === 1);
   const colorMap: Record<string, string> = {};
   for (const t of activeTypes) if (!(t.code in colorMap)) colorMap[t.code] = t.color;
@@ -167,10 +176,11 @@ export function kanchoShiftPage(
     const s = shiftMap[`${m.id}_${d}`];
     const inPeriod = d >= periodStart && d <= periodEnd;
     const bg = cellBg(s, m, inPeriod, colorMap, teamColorCodes);
+    const hasWish = wishSet.has(`${m.id}_${d}`);
     return `<td class="kc" data-member="${m.id}" data-date="${d}" data-name="${escHtml(m.name)}" data-sec="${secGroup}"
       data-code="${escHtml(s?.code ?? '')}" data-dg="${s?.dg ?? 0}" data-ws="${s?.ws ?? 0}" data-cl="${s?.cl ?? ''}"
-      data-tc="${m.team_color ?? ''}" data-inp="${inPeriod ? 1 : 0}"
-      style="background:${bg};${cellFont(s)}min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}"
+      data-tc="${m.team_color ?? ''}" data-inp="${inPeriod ? 1 : 0}"${hasWish ? ' data-wish="1"' : ''}
+      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}"
       ${canEdit ? 'onclick="openCell(this)"' : ''}>${escHtml(s?.code ?? '')}</td>`;
   }
 
@@ -276,6 +286,8 @@ export function kanchoShiftPage(
       <a href="${ADMIN_PATH}/kancho-shift/print?year=${year}&month=${month}" target="_blank" class="btn-secondary">🖨️ 印刷</a>
       <button onclick="openHistory()" class="btn-secondary" style="border:none;cursor:pointer;">履歴</button>
       ${canEdit ? `
+      <button onclick="openWishes()" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">希望休</button>
+      <button onclick="openNotify()" class="btn-secondary" style="border:none;cursor:pointer;">通知設定</button>
       <button onclick="openMembers()" class="btn-secondary" style="border:none;cursor:pointer;">名簿管理</button>
       <button onclick="openTypes()" class="btn-secondary" style="border:none;cursor:pointer;">記号管理</button>` : ''}
     </div>
@@ -287,6 +299,7 @@ export function kanchoShiftPage(
     <span id="pending-count-label" style="color:#92400e;font-size:13px;background:#fef3c7;padding:2px 8px;border-radius:4px;border:1px solid #fbbf24;">変更 0件</span>
     <span id="edit-error" style="display:none;color:#dc2626;font-size:12px;"></span>
     <div style="margin-left:auto;display:flex;gap:8px;">
+      <button onclick="autoAssign()" style="padding:8px 16px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;">希望休を自動反映</button>
       <button onclick="cancelEdit()" style="padding:8px 16px;background:#fff;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;touch-action:manipulation;">キャンセル</button>
       <button onclick="batchSave()" id="batch-save-btn" disabled style="padding:8px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;opacity:0.5;">一括保存</button>
     </div>
@@ -438,6 +451,42 @@ export function kanchoShiftPage(
   </div>
 </div>
 
+<!-- 希望休モーダル -->
+<div id="wishes-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:680px;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">希望休入力（${year}年${month}月度）</h3>
+      <button onclick="sel('#wishes-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">
+      メンバーを選んで日付をタップすると希望休が登録/解除されます（即時保存）。表のセルに赤い▲が付きます。<br>
+      編集モード中の「希望休を自動反映」で、希望休の日に公休（赤文字）が自動入力されます。
+    </div>
+    <select id="wish-member" onchange="renderWishDates()" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:9px;font-size:14px;background:white;margin-bottom:10px;"></select>
+    <div id="wish-dates" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px;"></div>
+    <div style="font-size:13px;font-weight:700;color:#1e3a5f;border-top:1px solid #e5e7eb;padding-top:10px;margin-bottom:6px;">登録済みの希望休一覧</div>
+    <div id="wish-list" style="font-size:12px;"></div>
+  </div>
+</div>
+
+<!-- 通知設定モーダル -->
+<div id="notify-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:520px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">0時LINE通知設定</h3>
+      <button onclick="sel('#notify-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:12px;">
+      毎日深夜0時に「本日の出勤者」（日勤・当直・斜め直・遅番・終業班長）をLINEで送信します。<br>
+      送信されるのは統括管理者・運行管理者のうち、ここでオンにした人だけです。
+    </div>
+    <div id="notify-body" style="font-size:13px;color:#6b7280;">読み込み中...</div>
+    <div style="margin-top:14px;display:flex;justify-content:flex-end;">
+      <button onclick="notifyTest()" id="notify-test-btn" style="padding:8px 16px;background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">今すぐテスト送信</button>
+    </div>
+  </div>
+</div>
+
 <div id="save-toast" style="display:none;position:fixed;bottom:24px;right:24px;background:#166534;color:white;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.25);"></div>
 
 <style>
@@ -446,6 +495,7 @@ export function kanchoShiftPage(
   .btn-secondary { padding:6px 14px;background:#6b7280;color:white;border-radius:6px;text-decoration:none;font-size:13px; }
   .kc:active { opacity:0.6; }
   .kc[data-pending="true"] { outline:2px dashed #f59e0b !important; }
+  .kc[data-wish="1"]::after { content:''; position:absolute; top:0; right:0; border-style:solid; border-width:0 7px 7px 0; border-color:transparent #dc2626 transparent transparent; }
   .kreq-ng { background:#fee2e2 !important; color:#dc2626; font-weight:700; }
   .kreq-ok { background:#f0fdf4 !important; color:#166534; }
 </style>
@@ -473,6 +523,7 @@ _types.forEach(function(t) {
 var _editMode = false;
 var _pending = {};   // key: memberId_date -> entry
 var _cur = null;     // {memberId, date, name, sec}
+var _wishes = ${safeJson(wishes)};  // [{id, member_id, date, note}]
 
 function sel(s) { return document.querySelector(s); }
 function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -851,6 +902,186 @@ async function addType() {
   });
   if (res.ok) location.reload();
   else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '追加に失敗しました'); }
+}
+
+// ===== 希望休枠 =====
+function _wishOf(mid, date) {
+  return _wishes.find(function(w) { return w.member_id === mid && w.date === date; });
+}
+function _refreshWishMarks() {
+  document.querySelectorAll('.kc[data-sec="main"]').forEach(function(td) {
+    var has = _wishOf(parseInt(td.dataset.member), td.dataset.date);
+    if (has) td.dataset.wish = '1';
+    else delete td.dataset.wish;
+  });
+}
+function openWishes() {
+  var mains = _allMembers.filter(function(m) { return m.section === 'main' && m.is_active === 1 && m.is_indoor === 1; });
+  sel('#wish-member').innerHTML = mains.map(function(m) {
+    return '<option value="' + m.id + '">' + escH(m.name) + '（' + escH(m.role || '') + '）</option>';
+  }).join('');
+  renderWishDates();
+  renderWishList();
+  sel('#wishes-modal').style.display = 'flex';
+}
+function renderWishDates() {
+  var mid = parseInt(sel('#wish-member').value);
+  var wd = ['日','月','火','水','木','金','土'];
+  sel('#wish-dates').innerHTML = _dates.filter(function(d) { return d >= periodStart && d <= periodEnd; }).map(function(d) {
+    var has = _wishOf(mid, d);
+    var dt = new Date(d);
+    var dow = dt.getUTCDay();
+    return '<button data-date="' + d + '" onclick="toggleWish(this)" style="width:52px;padding:6px 0;border-radius:6px;font-size:12px;cursor:pointer;touch-action:manipulation;border:1px solid ' + (has ? '#dc2626' : '#d1d5db') + ';background:' + (has ? '#fee2e2' : 'white') + ';color:' + (dow === 0 ? '#ef4444' : dow === 6 ? '#3b82f6' : '#374151') + ';' + (has ? 'font-weight:700;' : '') + '">'
+      + (dt.getUTCMonth() + 1) + '/' + dt.getUTCDate() + '<br><span style="font-size:10px;">' + wd[dow] + '</span></button>';
+  }).join('');
+}
+function renderWishList() {
+  var inPeriod = _wishes.filter(function(w) { return w.date >= periodStart && w.date <= periodEnd; });
+  if (inPeriod.length === 0) { sel('#wish-list').innerHTML = '<div style="color:#9ca3af;">まだ登録がありません</div>'; return; }
+  var byMember = {};
+  inPeriod.forEach(function(w) {
+    var m = _allMembers.find(function(x) { return x.id === w.member_id; });
+    var nm = m ? m.name : '?';
+    (byMember[nm] = byMember[nm] || []).push(w);
+  });
+  sel('#wish-list').innerHTML = Object.keys(byMember).map(function(nm) {
+    return '<div style="margin-bottom:4px;"><b>' + escH(nm) + '</b>： '
+      + byMember[nm].map(function(w) {
+          var dt = new Date(w.date);
+          return (dt.getUTCMonth() + 1) + '/' + dt.getUTCDate() + (w.note ? '(' + escH(w.note) + ')' : '');
+        }).join('、')
+      + '</div>';
+  }).join('');
+}
+async function toggleWish(btn) {
+  var mid = parseInt(sel('#wish-member').value);
+  var date = btn.dataset.date;
+  var existing = _wishOf(mid, date);
+  btn.disabled = true;
+  try {
+    if (existing) {
+      var res = await fetch(API + '/wishes/' + existing.id, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      _wishes = _wishes.filter(function(w) { return w.id !== existing.id; });
+    } else {
+      var res2 = await fetch(API + '/wishes', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ member_id: mid, date: date })
+      });
+      var d = await res2.json().catch(function() { return {}; });
+      if (!res2.ok) throw new Error(d.error);
+      _wishes.push({ id: d.id, member_id: mid, date: date, note: '' });
+    }
+    renderWishDates();
+    renderWishList();
+    _refreshWishMarks();
+  } catch(e) {
+    alert(e.message || '保存に失敗しました');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 希望休の自動反映（編集モード中のみ / 保存前に内容を確認できる）
+function autoAssign() {
+  var wishesInPeriod = _wishes.filter(function(w) { return w.date >= periodStart && w.date <= periodEnd; });
+  var applied = 0, akeSet = 0;
+  var conflicts = [];
+
+  // 1) 希望休 → 公休(赤文字)。既に別の記号が入っている日は上書きせず競合として報告
+  wishesInPeriod.forEach(function(w) {
+    var td = sel('.kc[data-member="' + w.member_id + '"][data-date="' + w.date + '"]');
+    if (!td) return;
+    var code = td.dataset.code || '';
+    if (code === '' || code === '公') {
+      if (code === '公' && td.dataset.ws === '1') return; // 反映済み
+      _pending[w.member_id + '_' + w.date] = { member_id: w.member_id, date: w.date, code: '公', is_diagonal: 0, is_wish: 1, cell_color: td.dataset.cl || null };
+      td.dataset.code = '公'; td.dataset.dg = '0'; td.dataset.ws = '1';
+      td.dataset.pending = 'true';
+      paintCell(td);
+      applied++;
+    } else {
+      conflicts.push(td.dataset.name + ' ' + w.date.slice(5).replace('-', '/') + '（「' + code + '」入力済み）');
+    }
+  });
+
+  // 2) 当直(斜め直含む)の翌日が空白なら自動で非番に（斜め直の翌日は斜体の非）
+  document.querySelectorAll('.kc[data-sec="main"][data-code="直"]').forEach(function(td) {
+    var d = td.dataset.date;
+    var idx = _dates.indexOf(d);
+    if (idx < 0 || idx + 1 >= _dates.length) return;
+    var nd = _dates[idx + 1];
+    if (nd < periodStart || nd > periodEnd) return;
+    var next = sel('.kc[data-member="' + td.dataset.member + '"][data-date="' + nd + '"]');
+    if (!next || (next.dataset.code || '') !== '') return;
+    if (_wishOf(parseInt(td.dataset.member), nd)) return; // 翌日が希望休なら公優先（上のループで処理済み）
+    var dg = td.dataset.dg === '1' ? 1 : 0;
+    _pending[td.dataset.member + '_' + nd] = { member_id: parseInt(td.dataset.member), date: nd, code: '非', is_diagonal: dg, is_wish: 0, cell_color: next.dataset.cl || null };
+    next.dataset.code = '非'; next.dataset.dg = String(dg); next.dataset.ws = '0';
+    next.dataset.pending = 'true';
+    paintCell(next);
+    akeSet++;
+  });
+
+  _updatePending();
+  recalcAll();
+  var msg = '希望休 ' + applied + '件を公休（赤文字）として反映\\n当直翌日の非番 ' + akeSet + '件を自動設定';
+  if (conflicts.length) msg += '\\n\\n【競合・要確認 ' + conflicts.length + '件】\\n' + conflicts.join('\\n');
+  msg += '\\n\\n内容を確認して「一括保存」を押すと確定します。';
+  alert(msg);
+}
+
+// ===== 0時通知設定 =====
+var ROLE_LABEL = { general_manager: '統括管理者', operations_manager: '運行管理者' };
+async function openNotify() {
+  sel('#notify-modal').style.display = 'flex';
+  sel('#notify-body').textContent = '読み込み中...';
+  try {
+    var res = await fetch(API + '/notify');
+    var d = await res.json();
+    var rows = (d.recipients || []).map(function(u) {
+      return '<div style="display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid #f3f4f6;">'
+        + '<div style="flex:1;"><b>' + escH(u.name) + '</b> <span style="font-size:11px;color:#9ca3af;">' + (ROLE_LABEL[u.role] || escH(u.role)) + '</span></div>'
+        + '<button onclick="toggleNotify(\\'' + escH(u.line_uid) + '\\', ' + (u.optin ? 0 : 1) + ')" style="padding:5px 16px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid ' + (u.optin ? '#86efac' : '#d1d5db') + ';background:' + (u.optin ? '#f0fdf4' : '#f9fafb') + ';color:' + (u.optin ? '#166534' : '#9ca3af') + ';">' + (u.optin ? '通知オン' : 'オフ') + '</button>'
+        + '</div>';
+    }).join('');
+    sel('#notify-body').innerHTML =
+      '<div style="display:flex;align-items:center;gap:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:10px;">'
+      + '<div style="flex:1;font-weight:700;color:#1d4ed8;">0時の自動送信</div>'
+      + '<button onclick="toggleNotifyMaster(' + (d.enabled ? 0 : 1) + ')" style="padding:5px 16px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid ' + (d.enabled ? '#86efac' : '#fca5a5') + ';background:' + (d.enabled ? '#f0fdf4' : '#fef2f2') + ';color:' + (d.enabled ? '#166534' : '#dc2626') + ';">' + (d.enabled ? '有効' : '停止中') + '</button>'
+      + '</div>'
+      + (rows || '<div style="color:#9ca3af;">対象ユーザー（統括管理者・運行管理者）がいません。LINEリフ権限管理で登録してください。</div>');
+  } catch(e) {
+    sel('#notify-body').textContent = '設定の取得に失敗しました';
+  }
+}
+async function toggleNotifyMaster(on) {
+  var res = await fetch(API + '/notify', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ master: on })
+  });
+  if (res.ok) openNotify();
+  else alert('変更に失敗しました');
+}
+async function toggleNotify(uid, on) {
+  var res = await fetch(API + '/notify', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ line_uid: uid, optin: on })
+  });
+  if (res.ok) openNotify();
+  else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '変更に失敗しました'); }
+}
+async function notifyTest() {
+  if (!confirm('通知オンの人に今すぐ本日の出勤者を送信します。よろしいですか？')) return;
+  var btn = sel('#notify-test-btn');
+  btn.disabled = true; btn.textContent = '送信中...';
+  try {
+    var res = await fetch(API + '/notify/test', { method: 'POST' });
+    if (!res.ok) throw new Error();
+    showToast('テスト送信しました');
+  } catch(e) {
+    alert('送信に失敗しました');
+  } finally {
+    btn.disabled = false; btn.textContent = '今すぐテスト送信';
+  }
 }
 
 // ===== メモ =====

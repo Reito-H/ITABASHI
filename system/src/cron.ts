@@ -89,6 +89,69 @@ async function sendBadEventAlert(env: Env, todayStr: string): Promise<void> {
   await pushToInstructors(env, [{ type: 'text', text: msg }]);
 }
 
+// 班長シフト: 本日の出勤者通知（深夜0時 / 統括・運行管理者のうちオプトイン済みのみ）
+// 表示: 日勤(昼日勤班長の空白=出勤)・当直・斜め直・遅番・終業班長(空白=出勤)。明け・非番・休みは非表示
+export async function sendKanchoAttendance(env: Env, todayStr: string): Promise<void> {
+  const at = env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!at) return;
+
+  // 送信先: オプトイン済み かつ 現在も統括/運行管理者ロールの人だけ（送信時に再チェック）
+  const recipients = await env.DB.prepare(`
+    SELECT o.line_uid FROM kancho_notify_optin o
+    JOIN line_liff_users u ON u.line_uid = o.line_uid
+    WHERE u.role IN ('general_manager', 'operations_manager')
+  `).all<{ line_uid: string }>();
+  const uids = (recipients.results ?? []).map(r => r.line_uid);
+  if (uids.length === 0) return;
+
+  const members = await env.DB.prepare(
+    "SELECT id, name, role FROM kancho_members WHERE section = 'main' AND is_active = 1 AND is_indoor = 1 ORDER BY sort_order, id"
+  ).all<{ id: number; name: string; role: string | null }>();
+  const shifts = await env.DB.prepare(
+    'SELECT member_id, code, is_diagonal FROM kancho_shifts WHERE date = ?'
+  ).bind(todayStr).all<{ member_id: number; code: string; is_diagonal: number }>();
+
+  const shiftMap = new Map((shifts.results ?? []).map(s => [s.member_id, s]));
+
+  const nikkin: string[] = [];   // 昼日勤班長の空白 = 日勤出勤
+  const choku: string[] = [];    // 当直
+  const naname: string[] = [];   // 斜め直
+  const oso: string[] = [];      // 遅番
+  const shugyo: string[] = [];   // 終業班長の空白 = 出勤(3:00〜12:00)
+  let hasAnyShift = false;
+
+  for (const m of (members.results ?? [])) {
+    const s = shiftMap.get(m.id);
+    const code = s?.code ?? '';
+    if (code) hasAnyShift = true;
+    if (code === '直') { (s?.is_diagonal ? naname : choku).push(m.name); continue; }
+    if (code === '遅') { oso.push(m.name); continue; }
+    if (code === '') {
+      if (m.role === '昼日勤班長') nikkin.push(m.name);
+      else if (m.role === '終業班長') shugyo.push(m.name);
+    }
+  }
+
+  const d = new Date(todayStr);
+  const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getUTCDay()];
+  let msg = `【班長シフト】${d.getUTCMonth() + 1}/${d.getUTCDate()}（${wd}）本日の出勤者\n`;
+
+  if (!hasAnyShift) {
+    msg += '\n本日分のシフトが未入力です。管理画面をご確認ください。';
+  } else {
+    const line = (label: string, names: string[]) =>
+      names.length ? `\n■${label}：${names.join('、')}` : '';
+    msg += line('日勤', nikkin) + line('当直', choku) + line('斜め直', naname)
+         + line('遅番', oso) + line('終業班長', shugyo);
+  }
+
+  await fetch('https://api.line.me/v2/bot/message/multicast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${at}` },
+    body: JSON.stringify({ to: uids, messages: [{ type: 'text', text: msg.trim() }] }),
+  });
+}
+
 // 特定の通知タイプを実行（手動送信・cron 共用）
 export async function runNotification(env: Env, type: string): Promise<void> {
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -100,6 +163,8 @@ export async function runNotification(env: Env, type: string): Promise<void> {
     await sendBadEventAlert(env, todayStr);
   } else if (type === 'benten_shift_daily') {
     await sendBentenDaily(env);
+  } else if (type === 'kancho_attendance') {
+    await sendKanchoAttendance(env, todayStr);
   }
 }
 

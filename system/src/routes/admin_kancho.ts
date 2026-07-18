@@ -5,8 +5,9 @@ import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { getPeriodSettings, getPeriodRange, getShiftDisplayRange, getPeriod } from '../auth';
 import { layout } from '../html/layout';
-import { kanchoShiftPage, kanchoPrintPage, type KanchoMember, type KanchoShiftType, type KanchoMemo, type KanchoCell } from '../html/kancho_shift';
+import { kanchoShiftPage, kanchoPrintPage, type KanchoMember, type KanchoShiftType, type KanchoMemo, type KanchoCell, type KanchoWish } from '../html/kancho_shift';
 import { getAdminPermissions } from '../permissions';
+import { runNotification } from '../cron';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -37,7 +38,7 @@ app.get('/kancho-shift', async (c) => {
   const { start: periodStart, end: periodEnd } = getPeriodRange(year, month, periodCfg);
   const { start: dispStart, end: dispEnd, dates } = getShiftDisplayRange(year, month, periodCfg);
 
-  const [members, types, shifts, memos] = await Promise.all([
+  const [members, types, shifts, memos, wishes] = await Promise.all([
     // 無効メンバーも取得（名簿管理モーダルで再有効化できるように。表への表示は画面側で絞る）
     c.env.DB.prepare('SELECT * FROM kancho_members ORDER BY section, sort_order, id').all<KanchoMember>(),
     c.env.DB.prepare('SELECT * FROM kancho_shift_types ORDER BY sort_order, id').all<KanchoShiftType>(),
@@ -45,6 +46,8 @@ app.get('/kancho-shift', async (c) => {
       .bind(dispStart, dispEnd).all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null }>(),
     c.env.DB.prepare('SELECT * FROM kancho_memos WHERE year = ? AND month = ? ORDER BY kind, sort_order, id')
       .bind(year, month).all<KanchoMemo>(),
+    c.env.DB.prepare('SELECT id, member_id, date, note FROM kancho_wishes WHERE date BETWEEN ? AND ? ORDER BY date')
+      .bind(dispStart, dispEnd).all<KanchoWish>(),
   ]);
 
   const shiftMap: Record<string, KanchoCell> = {};
@@ -55,7 +58,7 @@ app.get('/kancho-shift', async (c) => {
   const editable = await canEdit(c);
   const html = kanchoShiftPage(
     members.results ?? [], types.results ?? [], shiftMap, memos.results ?? [],
-    dates, year, month, periodStart, periodEnd, editable
+    dates, year, month, periodStart, periodEnd, editable, wishes.results ?? []
   );
   return c.html(layout('班長シフト', html, 'kancho-shift'));
 });
@@ -242,6 +245,101 @@ app.put('/api/kancho/types/:id', async (c) => {
   await c.env.DB.prepare(
     'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?)'
   ).bind(adminId, name, 'type', code, `${old.code}/${old.label}/${old.color}`, `${code}/${b.label ?? old.label}/${b.color ?? old.color}`).run();
+  return c.json({ ok: true });
+});
+
+// ===== API: 希望休枠（構造化。従来のフリーテキストメモとは別）=====
+app.post('/api/kancho/wishes', async (c) => {
+  const b = await c.req.json<{ member_id?: number; date?: string; note?: string }>();
+  if (!b.member_id || !/^\d{4}-\d{2}-\d{2}$/.test(b.date ?? '')) {
+    return c.json({ error: 'member_id と date が必要です' }, 400);
+  }
+  const member = await c.env.DB.prepare('SELECT name FROM kancho_members WHERE id = ?').bind(b.member_id).first<{ name: string }>();
+  if (!member) return c.json({ error: 'メンバーが見つかりません' }, 404);
+  const { id: adminId, name } = await adminName(c);
+  await c.env.DB.prepare(
+    `INSERT INTO kancho_wishes (member_id, date, note) VALUES (?, ?, ?)
+     ON CONFLICT(member_id, date) DO UPDATE SET note = excluded.note`
+  ).bind(b.member_id, b.date, (b.note ?? '').trim()).run();
+  const row = await c.env.DB.prepare('SELECT id FROM kancho_wishes WHERE member_id = ? AND date = ?')
+    .bind(b.member_id, b.date).first<{ id: number }>();
+  await c.env.DB.prepare(
+    'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, date, new_value) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(adminId, name, 'wish', member.name, b.date, `希望休 追加${b.note ? `（${b.note.trim()}）` : ''}`).run();
+  return c.json({ ok: true, id: row?.id });
+});
+
+app.delete('/api/kancho/wishes/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  const old = await c.env.DB.prepare(
+    'SELECT w.date, m.name FROM kancho_wishes w JOIN kancho_members m ON m.id = w.member_id WHERE w.id = ?'
+  ).bind(id).first<{ date: string; name: string }>();
+  if (!old) return c.json({ error: '希望休が見つかりません' }, 404);
+  const { id: adminId, name } = await adminName(c);
+  await c.env.DB.prepare('DELETE FROM kancho_wishes WHERE id = ?').bind(id).run();
+  await c.env.DB.prepare(
+    'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, date, old_value) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(adminId, name, 'wish', old.name, old.date, '希望休 削除').run();
+  return c.json({ ok: true });
+});
+
+// ===== API: 0時LINE通知の設定 =====
+app.get('/api/kancho/notify', async (c) => {
+  const [setting, users] = await Promise.all([
+    c.env.DB.prepare("SELECT is_enabled FROM notification_settings WHERE type = 'kancho_attendance'")
+      .first<{ is_enabled: number }>(),
+    c.env.DB.prepare(`
+      SELECT u.line_uid, u.name, u.role, (o.line_uid IS NOT NULL) AS optin
+      FROM line_liff_users u
+      LEFT JOIN kancho_notify_optin o ON o.line_uid = u.line_uid
+      WHERE u.role IN ('general_manager', 'operations_manager')
+      ORDER BY u.role, u.name
+    `).all<{ line_uid: string; name: string; role: string; optin: number }>(),
+  ]);
+  return c.json({ enabled: setting?.is_enabled ?? 0, recipients: users.results ?? [] });
+});
+
+app.post('/api/kancho/notify', async (c) => {
+  const b = await c.req.json<{ master?: number; line_uid?: string; optin?: number }>();
+  const { id: adminId, name } = await adminName(c);
+
+  if (b.master !== undefined) {
+    await c.env.DB.prepare(
+      "UPDATE notification_settings SET is_enabled = ?, updated_at = datetime('now','localtime') WHERE type = 'kancho_attendance'"
+    ).bind(b.master ? 1 : 0).run();
+    await c.env.DB.prepare(
+      'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, new_value) VALUES (?, ?, ?, ?, ?)'
+    ).bind(adminId, name, 'notify', '0時通知', b.master ? '有効化' : '無効化').run();
+    return c.json({ ok: true });
+  }
+
+  if (b.line_uid) {
+    // 対象ロールのユーザーのみオプトイン可
+    const user = await c.env.DB.prepare(
+      "SELECT name FROM line_liff_users WHERE line_uid = ? AND role IN ('general_manager', 'operations_manager')"
+    ).bind(b.line_uid).first<{ name: string }>();
+    if (!user) return c.json({ error: '統括管理者・運行管理者のみ設定できます' }, 400);
+    if (b.optin) {
+      await c.env.DB.prepare('INSERT OR IGNORE INTO kancho_notify_optin (line_uid) VALUES (?)').bind(b.line_uid).run();
+    } else {
+      await c.env.DB.prepare('DELETE FROM kancho_notify_optin WHERE line_uid = ?').bind(b.line_uid).run();
+    }
+    await c.env.DB.prepare(
+      'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, new_value) VALUES (?, ?, ?, ?, ?)'
+    ).bind(adminId, name, 'notify', user.name, b.optin ? '通知オン' : '通知オフ').run();
+    return c.json({ ok: true });
+  }
+
+  return c.json({ error: 'master または line_uid を指定してください' }, 400);
+});
+
+// テスト送信（現在のオプトイン先に今すぐ送る）
+app.post('/api/kancho/notify/test', async (c) => {
+  await runNotification(c.env, 'kancho_attendance');
+  const { id: adminId, name } = await adminName(c);
+  await c.env.DB.prepare(
+    'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, new_value) VALUES (?, ?, ?, ?, ?)'
+  ).bind(adminId, name, 'notify', '0時通知', 'テスト送信').run();
   return c.json({ ok: true });
 });
 
