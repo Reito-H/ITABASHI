@@ -651,6 +651,7 @@ app.get('/shift/print/:empId', async (c) => {
 app.get('/settings', (c) => {
   const ADMIN = ADMIN_PATH;
   const cards = [
+    { href: `${ADMIN}/settings/accounts`,             perm: 'settings.accounts',       title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
     { href: `${ADMIN}/settings/liff`,                 perm: 'settings.liff',           title: 'LINEリフ権限管理', desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
     { href: `${ADMIN}/settings/lost-items`,           perm: 'settings.lost-items',     title: '忘れ物報告一覧',   desc: '社員報告・客問い合わせの履歴と状態管理', highlight: true },
     { href: `${ADMIN}/settings/accidents`,            perm: 'settings.accidents',      title: '事故報告一覧',     desc: '事故報告の履歴・進捗管理', highlight: true },

@@ -29,6 +29,8 @@ RICHMENU_ID_BENTEN = ""
 RICHMENU_ID_CREW_MEMBER = "richmenu-1d8eaed8df2c9c29ca0f712ef01cf82d"
 # 売上サマリー LIFF（LINE Developers で LIFF作成後に設定）
 LIFF_ID_SALES = "2010598812-deTtkaIz"
+# 班長シフト閲覧 LIFF（エンドポイントURL: https://bentenclub.com/liff/kancho-shift。LINE Developers で LIFF作成後に設定）
+LIFF_ID_KANCHO_SHIFT = ""
 # 権限不明者（友達追加直後）用リッチメニュー。「LINE連携」ボタン→ステータス選択の入口（未作成なら空のまま=メニューなし）
 RICHMENU_ID_UNKNOWN = "richmenu-0b1281b87a1f1bf195ec5b3d4910fa3a"
 # シフト表PDF用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）

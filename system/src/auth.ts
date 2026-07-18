@@ -22,6 +22,8 @@ export type Env = {
   LINE_REG_PWD_GENERAL?: string;    // 統括管理者
   LINE_REG_PWD_BENTEN?: string;         // ベンテンクラブ会員
   LINE_REG_PWD_BENTEN_MASTER?: string;  // ベンテンクラブシフトマスター
+  // 班長シフト（管理者公休予定表）
+  LIFF_ID_KANCHO_SHIFT?: string;
   // ベンテンクラブ シフト
   LIFF_ID_BENTEN_SHIFT?: string;
   RICHMENU_ID_BENTEN?: string;

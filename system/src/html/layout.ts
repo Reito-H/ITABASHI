@@ -12,6 +12,7 @@ export function layout(title: string, content: string, activePage: string = ''):
   const navItems = [
     { href: `${ADMIN_PATH}`,              label: 'ホーム',          id: 'home' },
     { href: `${ADMIN_PATH}/shift`,        label: '新人シフト管理',  id: 'shift' },
+    { href: `${ADMIN_PATH}/kancho-shift`, label: '班長シフト',      id: 'kancho-shift' },
     { href: `${ADMIN_PATH}/newcomers`,    label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,        label: '社員管理',        id: 'staff' },
     { href: `${ADMIN_PATH}/staff/search`, label: '社員絞り込み検索', id: 'staff-search' },

@@ -30,6 +30,9 @@ import adminInspectionRoutes from './routes/admin_inspection';
 import inspectionApi from './routes/api/inspection';
 import adminManualRoutes from './routes/admin_manual';
 import manualChatApi from './routes/api/manual_chat';
+import adminKanchoRoutes from './routes/admin_kancho';
+import adminAccountsRoutes from './routes/admin_accounts';
+import liffKanchoRoutes from './routes/liff_kancho';
 import type { Env } from './auth';
 import { ADMIN_PATH, SECRET } from './config';
 
@@ -109,7 +112,10 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   if (!perms) return next(); // 全権限アカウント
 
   const subPath = path.replace(`/${SECRET}/admin`, '') || '/';
-  if (!isPathAllowed(perms, subPath)) {
+  if (!isPathAllowed(perms, subPath, c.req.method)) {
+    if (subPath.startsWith('/api/')) {
+      return c.json({ error: 'この操作を行う権限がありません' }, 403);
+    }
     return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>アクセス権限がありません</title>
     <style>body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center}h1{font-size:1.05rem;margin:0 0 .5rem}p{font-size:.85rem;color:#6b7280;margin:0 0 1rem}a{display:inline-block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem 1.25rem;font-size:.85rem;text-decoration:none}</style></head>
     <body><div class="box"><h1>アクセス権限がありません</h1><p>このページを表示する権限がこのアカウントにはありません。</p><a href="${ADMIN_PATH}">ホームに戻る</a></div></body></html>`, 403);
@@ -132,6 +138,8 @@ app.route(`/${SECRET}/admin`, adminLineUsageRoutes);
 app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminManualRoutes);
+app.route(`/${SECRET}/admin`, adminKanchoRoutes);
+app.route(`/${SECRET}/admin`, adminAccountsRoutes);
 
 // =====================
 // API（認証必須）
@@ -196,6 +204,7 @@ app.post('/api/line/webhook', async (c) => {
 app.route('', liffRoutes);
 app.route('', liffBentenRoutes);
 app.route('', liffSalesRoutes);
+app.route('', liffKanchoRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));
