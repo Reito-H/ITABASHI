@@ -670,10 +670,9 @@ app.get('/settings', (c) => {
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[] }> = [
     { heading: '日々の運用', cards: [
-      { href: `${ADMIN}/settings/lost-items`,  perm: 'settings.lost-items', title: '忘れ物報告',   desc: '報告センター — 社員報告・客問い合わせの履歴と状態管理', highlight: true },
-      { href: `${ADMIN}/settings/accidents`,   perm: 'settings.accidents',  title: '事故報告',     desc: '報告センター — 事故報告の履歴・進捗管理', highlight: true },
-      { href: `${ADMIN}/settings/violations`,  perm: 'settings.violations', title: '違反報告',     desc: '報告センター — 乗務員の違反報告の履歴・進捗管理', highlight: true },
-      { href: `${ADMIN}/settings/general-reports`, perm: 'settings.general-reports', title: '一般報告', desc: '報告センター — 事故・違反に当てはまらない報告の履歴・進捗管理', highlight: true },
+      // 4種の報告ページはタブで行き来できるため、入口カードは1枚に集約。
+      // perm はスペース区切りで「いずれかの権限があれば表示」（filterHtmlByPermissions参照）
+      { href: `${ADMIN}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports', title: '報告センター', desc: '忘れ物・事故・違反・一般報告の履歴と対応状況をタブで管理', highlight: true },
     ]},
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
@@ -1648,7 +1647,7 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍日々の運用</p>
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
-      <tr><td>忘れ物報告 / 事故報告 / 違反報告 / 一般報告</td><td>報告センター。タブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
+      <tr><td>報告センター</td><td>忘れ物・事故・違反・一般報告をタブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍権限・アカウント</p>

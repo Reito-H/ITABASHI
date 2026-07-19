@@ -6,6 +6,7 @@ import { layout, escHtml, safeJson } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { getSessionFromCookie, validateSession } from '../auth';
 import type { Env } from '../auth';
+import { getAdminPermissions } from '../permissions';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -63,6 +64,26 @@ function reportTabs(active: 'lost' | 'accident' | 'violation' | 'general'): stri
       : 'color:#9ca3af;border-bottom:2px solid transparent;'}">${escHtml(t.label)}</a>`).join('')}
   </div>`;
 }
+
+// GET /settings/reports — 報告センターの入口。権限のある最初のタブへリダイレクト
+// （設定トップのカードを1枚に集約したため、アカウントごとに見えるタブが違っても入口は共通）
+app.get('/settings/reports', async (c) => {
+  const orderedPerms = ['settings.lost-items', 'settings.accidents', 'settings.violations', 'settings.general-reports'];
+  const hrefs: Record<string, string> = {
+    'settings.lost-items':      `${ADMIN_PATH}/settings/lost-items`,
+    'settings.accidents':       `${ADMIN_PATH}/settings/accidents`,
+    'settings.violations':      `${ADMIN_PATH}/settings/violations`,
+    'settings.general-reports': `${ADMIN_PATH}/settings/general-reports`,
+  };
+  const cookie = c.req.header('Cookie') ?? null;
+  const sid = getSessionFromCookie(cookie);
+  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
+  const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
+  // perms === null は全権限アカウント
+  const key = perms === null ? orderedPerms[0] : orderedPerms.find(k => perms.includes(k));
+  if (!key) return c.redirect(`${ADMIN_PATH}/settings`);
+  return c.redirect(hrefs[key]);
+});
 
 // 状態セルのHTML（resolvedLabel: 忘れ物・事故=解決済 / 違反=対応済）
 function statusCellHtml(resolved: boolean, resolvedLabel: string): string {

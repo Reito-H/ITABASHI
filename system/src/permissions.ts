@@ -179,11 +179,12 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
 
 // HTMLレスポンスから権限のないメニュー・設定カードを除去
 // layout.ts のナビ（data-nav-id）と設定トップのカード（data-perm-key）が対象
+// data-perm-key はスペース区切りで複数指定可（いずれか1つでも権限があれば表示）
 export function filterHtmlByPermissions(res: Response, perms: string[]): Response {
   const remover = (attr: string) => ({
     element(el: Element) {
-      const key = el.getAttribute(attr);
-      if (key && !perms.includes(key)) el.remove();
+      const keys = (el.getAttribute(attr) ?? '').split(/\s+/).filter(Boolean);
+      if (keys.length > 0 && !keys.some(k => perms.includes(k))) el.remove();
     }
   });
   return new HTMLRewriter()
