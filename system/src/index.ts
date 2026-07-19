@@ -34,6 +34,8 @@ import adminKanchoRoutes from './routes/admin_kancho';
 import adminAccountsRoutes from './routes/admin_accounts';
 import liffKanchoRoutes from './routes/liff_kancho';
 import type { Env } from './auth';
+import { getSessionFromCookie, validateSession } from './auth';
+import { getMaintenanceMode, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
 import { ADMIN_PATH, SECRET } from './config';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -85,6 +87,33 @@ app.use('*', async (c, next) => {
       "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; frame-ancestors 'none';"
     );
   }
+});
+
+// =====================
+// メンテナンスモード
+// ON中は admin アカウント以外の全アクセス（管理画面・API・LIFF・フォーム）に
+// メンテナンス画面を返す。ログイン関連はメンテ中も通す（解除不能になるのを防ぐ）。
+// LINE Webhook は署名検証後にメンテ中メッセージを返信する（下の専用ルート参照）。
+// cron（定時通知）はHTTPを通らないためメンテ中も通常稼働。
+// =====================
+app.use('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path === '/' || path === '/robots.txt' || path === '/api/line/webhook') return next();
+  if (new RegExp(`^\\/${SECRET}\\/admin\\/(login|logout|setup)`).test(path)) return next();
+
+  if (!(await getMaintenanceMode(c.env.DB))) return next();
+
+  // admin アカウントのセッションのみ通常利用可
+  const sessionId = getSessionFromCookie(c.req.header('Cookie') ?? null);
+  if (sessionId) {
+    const adminId = await validateSession(c.env.DB, sessionId);
+    if (adminId && (await isAdminAccount(c.env.DB, adminId))) return next();
+  }
+
+  if (path.startsWith('/api/') || /\/api\//.test(path)) {
+    return c.json({ error: 'ただいまメンテナンス中です。しばらくお待ちください。', maintenance: true }, 503);
+  }
+  return c.html(maintenancePage(), 503);
 });
 
 // robots.txt
@@ -208,6 +237,15 @@ app.post('/api/line/webhook', async (c) => {
   if (signature !== expectedSig) return c.text('Invalid signature', 401);
 
   const events: Record<string, unknown>[] = JSON.parse(body)?.events ?? [];
+
+  // メンテナンス中はBot処理を止め、メンテ中メッセージのみ返信する
+  if (await getMaintenanceMode(c.env.DB)) {
+    c.executionCtx.waitUntil(
+      Promise.all(events.map(event => replyMaintenanceToLineEvent(c.env, event)))
+    );
+    return c.text('OK');
+  }
+
   c.executionCtx.waitUntil(
     Promise.all(events.map(event => handleLineEvent(c.env, event)))
   );

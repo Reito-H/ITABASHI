@@ -13,6 +13,7 @@ import type {
 } from '../html/shift';
 import { ADMIN_PATH } from '../config';
 import qrcode from 'qrcode-generator';
+import { getMaintenanceMode, setMaintenanceMode, isAdminAccount } from '../utils/maintenance';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -2767,6 +2768,30 @@ app.get('/info/export', async (c) => {
 });
 
 // ===== システムステータス =====
+
+// メンテナンスモード状態（ステータスページ表示用）
+app.get('/settings/status/maintenance', async (c) => {
+  return c.json({ enabled: await getMaintenanceMode(c.env.DB) });
+});
+
+// メンテナンスモード切替（adminアカウントのみ）
+app.post('/settings/status/maintenance', async (c) => {
+  const adminId = c.get('adminId');
+  if (!adminId || !(await isAdminAccount(c.env.DB, adminId))) {
+    return c.json({ error: 'メンテナンスモードの切替はadminアカウントのみ実行できます' }, 403);
+  }
+  let enabled: boolean;
+  try {
+    const body = await c.req.json<{ enabled?: unknown }>();
+    if (typeof body.enabled !== 'boolean') throw new Error('invalid');
+    enabled = body.enabled;
+  } catch {
+    return c.json({ error: 'enabled は true / false で指定してください' }, 400);
+  }
+  await setMaintenanceMode(c.env.DB, enabled);
+  return c.json({ ok: true, enabled });
+});
+
 app.get('/settings/status', async (c) => {
   const adminLoginUrl = `https://bentenclub.com${ADMIN_PATH}/login`;
 
@@ -2788,67 +2813,172 @@ app.get('/settings/status', async (c) => {
     dbMsg = String(e?.message ?? e);
   }
 
-  const html = settingsSubHeader('システムステータス') + `
-    <div style="max-width:600px;">
-      <!-- アクセスQRコード -->
-      <div style="background:white;border-radius:10px;padding:20px 24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:16px;">
-        <div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">管理画面 アクセスQRコード</div>
-        <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">このQRコードをスキャンすると管理画面のログインページが開きます</div>
-        <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
-          <style>#qr-container svg{width:100%;height:100%;display:block;}</style>
-          <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;display:inline-block;line-height:0;">
-            <div id="qr-container" style="width:160px;height:160px;">${qrSvg}</div>
-          </div>
-          <div style="flex:1;min-width:160px;">
-            <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">アクセス先URL</div>
-            <div style="font-size:11px;color:#374151;word-break:break-all;background:#f3f4f6;padding:6px 8px;border-radius:4px;font-family:monospace;">${escHtml(adminLoginUrl)}</div>
-            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-              <button onclick="downloadQR()" style="padding:6px 14px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">保存</button>
-              <button onclick="copyUrl()" style="padding:6px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;" id="copy-btn-qr">URLコピー</button>
+  const adminId = c.get('adminId');
+  const isAdmin = adminId ? await isAdminAccount(c.env.DB, adminId) : false;
+  const maintenanceOn = await getMaintenanceMode(c.env.DB);
+
+  // メンテナンス制御カード（adminアカウントのみ表示）
+  const maintenanceCard = isAdmin ? `
+      <div class="sys-panel">
+        <div class="sys-ph"><span class="sys-pt mono">MAINTENANCE CONTROL</span><span class="sys-ps mono">ADMIN ONLY</span></div>
+        <div class="sys-pb">
+          <div class="sys-row" style="flex-wrap:wrap;">
+            <div style="flex:1;min-width:240px;">
+              <div style="font-size:14px;font-weight:700;color:#1e3a5f;">メンテナンスモード</div>
+              <div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.7;">
+                ONにすると admin 以外の全アクセス（管理画面・LIFF・フォーム・API）にメンテナンス画面を表示します。<br>
+                LINE Botはメンテナンス中メッセージを返信し、定時通知はそのまま送信されます。
+              </div>
             </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span id="maint-state" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.1em;color:${maintenanceOn ? '#d97706' : '#16a34a'};">${maintenanceOn ? 'MAINT ON' : 'NORMAL'}</span>
+              <label class="sw"><input type="checkbox" id="maint-toggle" ${maintenanceOn ? 'checked' : ''} onchange="toggleMaintenance(this)"><span class="tr"></span></label>
+            </div>
+          </div>
+          <div id="maint-msg" style="font-size:11px;color:#94a3b8;margin-top:8px;"></div>
+        </div>
+      </div>` : '';
+
+  const html = settingsSubHeader('システムステータス') + `
+    <style>
+      .sysc{max-width:880px;}
+      .sysc .mono{font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;}
+      .sys-panel{background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 1px 4px rgba(15,23,42,.06);margin-bottom:14px;overflow:hidden;}
+      .sys-ph{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 16px;border-bottom:1px solid #eef2f7;background:linear-gradient(180deg,#fbfdff,#f5f8fb);}
+      .sys-pt{font-size:11px;letter-spacing:.14em;font-weight:700;color:#334155;}
+      .sys-ps{font-size:10px;color:#94a3b8;letter-spacing:.08em;}
+      .sys-pb{padding:14px 16px;}
+      .grid-bg{background-image:linear-gradient(rgba(30,58,95,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(30,58,95,.05) 1px,transparent 1px);background-size:22px 22px;}
+      .led{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none;}
+      .led-g{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.15);animation:sysPulse 2.2s infinite;}
+      .led-a{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.2);animation:sysPulse 1.1s infinite;}
+      @keyframes sysPulse{0%,100%{opacity:1}50%{opacity:.4}}
+      .sys-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+      .sys-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;}
+      .b-ok{background:#dcfce7;color:#16a34a;}
+      .b-ng{background:#fee2e2;color:#dc2626;}
+      .code-stream{height:214px;overflow:hidden;background:#f8fafc;padding:10px 14px;font-size:11px;line-height:1.8;color:#475569;white-space:nowrap;}
+      .code-stream div{overflow:hidden;text-overflow:ellipsis;}
+      .cs-fn{color:#0369a1;}
+      .cs-hx{color:#7c3aed;}
+      .cs-ok{color:#16a34a;font-weight:700;}
+      .cs-wr{color:#d97706;font-weight:700;}
+      .cs-dim{color:#94a3b8;}
+      .hexline{font-size:10px;color:#94a3b8;padding:6px 14px;border-top:1px dashed #e2e8f0;background:#fbfdff;white-space:nowrap;overflow:hidden;}
+      .sw{position:relative;display:inline-block;width:54px;height:30px;flex:none;}
+      .sw input{opacity:0;width:0;height:0;}
+      .sw .tr{position:absolute;inset:0;background:#cbd5e1;border-radius:30px;transition:.25s;cursor:pointer;}
+      .sw .tr:before{content:'';position:absolute;width:24px;height:24px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 3px rgba(0,0,0,.25);}
+      .sw input:checked + .tr{background:#f59e0b;}
+      .sw input:checked + .tr:before{transform:translateX(24px);}
+    </style>
+    <div class="sysc">
+      <!-- コンソールヘッダー -->
+      <div class="sys-panel grid-bg">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;flex-wrap:wrap;">
+          <div>
+            <div class="mono" style="font-size:10px;letter-spacing:.22em;color:#64748b;">BENTEN CORE // SYSTEM MONITOR</div>
+            <div style="display:flex;align-items:center;gap:9px;margin-top:7px;">
+              <span class="led ${maintenanceOn ? 'led-a' : 'led-g'}" id="head-led"></span>
+              <span style="font-size:15px;font-weight:800;color:${maintenanceOn ? '#b45309' : '#1e3a5f'};letter-spacing:.02em;" id="head-state">${maintenanceOn ? 'MAINTENANCE MODE' : 'ALL SYSTEMS OPERATIONAL'}</span>
+            </div>
+          </div>
+          <div class="mono" style="text-align:right;font-size:11px;color:#64748b;line-height:1.9;">
+            <div id="sys-clock" style="font-size:13px;font-weight:700;color:#334155;">--:--:--</div>
+            <div style="color:#94a3b8;">NODE TYO-EDGE &middot; CF WORKERS &middot; D1</div>
           </div>
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <div style="font-size:12px;color:#9ca3af;" id="checked-at">確認中...</div>
-        <button onclick="runChecks()" style="padding:6px 14px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">再確認</button>
+      <!-- メンテナンス稼働中バナー -->
+      <div id="maint-banner" style="display:${maintenanceOn ? 'block' : 'none'};background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:10px;padding:10px 16px;font-size:12px;font-weight:600;margin-bottom:14px;">
+        &#9888; メンテナンスモード稼働中 &mdash; admin 以外のアクセスにはメンテナンス画面が表示されています
       </div>
+      ${maintenanceCard}
 
       <!-- サーバー・DB（サーバーサイド確認済み） -->
-      <div style="background:white;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:12px;">
-        <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px;">サーバー・データベース</div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="sys-panel">
+        <div class="sys-ph"><span class="sys-pt mono">CORE INFRASTRUCTURE</span><span class="sys-ps mono">SERVER / DATABASE</span></div>
+        <div class="sys-pb" style="display:flex;flex-direction:column;gap:9px;">
+          <div class="sys-row">
             <span style="font-size:13px;color:#374151;">Cloudflare Workersサーバー</span>
-            <span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#dcfce7;color:#16a34a;">正常</span>
+            <span class="sys-badge b-ok">正常</span>
           </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div class="sys-row">
             <span style="font-size:13px;color:#374151;">D1 データベース接続</span>
             ${dbOk
-              ? `<span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#dcfce7;color:#16a34a;">正常（社員 ${empCount}件）</span>`
-              : `<span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#fee2e2;color:#dc2626;" title="${escHtml(dbMsg)}">エラー</span>`
+              ? `<span class="sys-badge b-ok">正常（社員 ${empCount}件）</span>`
+              : `<span class="sys-badge b-ng" title="${escHtml(dbMsg)}">エラー</span>`
             }
           </div>
         </div>
       </div>
 
       <!-- APIエンドポイント（クライアントサイドチェック） -->
-      <div style="background:white;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:12px;">
-        <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px;">APIエンドポイント</div>
-        <div style="display:flex;flex-direction:column;gap:8px;" id="api-checks">
+      <div class="sys-panel">
+        <div class="sys-ph">
+          <span class="sys-pt mono">API ENDPOINT DIAGNOSTICS</span>
+          <span style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:11px;color:#9ca3af;" id="checked-at">確認中...</span>
+            <button onclick="runChecks()" style="padding:5px 13px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600;">再確認</button>
+          </span>
+        </div>
+        <div class="sys-pb" style="display:flex;flex-direction:column;gap:9px;" id="api-checks">
           <div style="font-size:12px;color:#9ca3af;">確認中...</div>
         </div>
       </div>
 
+      <!-- プロセストレース（演出） -->
+      <div class="sys-panel">
+        <div class="sys-ph">
+          <span class="sys-pt mono">PROCESS TRACE</span>
+          <span class="sys-ps mono" style="display:flex;align-items:center;gap:6px;"><span class="led led-g" style="width:6px;height:6px;"></span>LIVE</span>
+        </div>
+        <div class="code-stream mono" id="code-stream"></div>
+        <div class="hexline mono" id="hexline"></div>
+      </div>
+
       <!-- 通信ログ -->
-      <div style="background:white;border-radius:10px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;">
-        <div style="font-size:13px;font-weight:700;color:#374151;margin-bottom:12px;">最近の通信ログ</div>
-        <div id="net-log" style="font-size:11px;font-family:monospace;color:#6b7280;line-height:1.7;max-height:200px;overflow-y:auto;">確認中...</div>
+      <div class="sys-panel">
+        <div class="sys-ph"><span class="sys-pt mono">NETWORK LOG</span><span class="sys-ps mono">RECENT ACTIVITY</span></div>
+        <div class="sys-pb">
+          <div id="net-log" class="mono" style="font-size:11px;color:#6b7280;line-height:1.7;max-height:200px;overflow-y:auto;">確認中...</div>
+        </div>
+      </div>
+
+      <!-- アクセスQRコード -->
+      <div class="sys-panel">
+        <div class="sys-ph"><span class="sys-pt mono">ACCESS QR</span><span class="sys-ps mono">ADMIN LOGIN</span></div>
+        <div class="sys-pb">
+          <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">このQRコードをスキャンすると管理画面のログインページが開きます</div>
+          <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+            <style>#qr-container svg{width:100%;height:100%;display:block;}</style>
+            <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;display:inline-block;line-height:0;">
+              <div id="qr-container" style="width:160px;height:160px;">${qrSvg}</div>
+            </div>
+            <div style="flex:1;min-width:160px;">
+              <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">アクセス先URL</div>
+              <div class="mono" style="font-size:11px;color:#374151;word-break:break-all;background:#f3f4f6;padding:6px 8px;border-radius:4px;">${escHtml(adminLoginUrl)}</div>
+              <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                <button onclick="downloadQR()" style="padding:6px 14px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">保存</button>
+                <button onclick="copyUrl()" style="padding:6px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;" id="copy-btn-qr">URLコピー</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <script>
       var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
+
+      // ---- 時計 ----
+      function sysTick() {
+        var el = document.getElementById('sys-clock');
+        if (el) el.textContent = new Date().toLocaleTimeString('ja-JP', { hour12: false }) + ' JST';
+      }
+      setInterval(sysTick, 1000); sysTick();
+
+      // ---- APIエンドポイントチェック ----
       var API_TARGETS = [
         { label: '社員データベース API', url: '/api/employees/count' },
         { label: 'シフト区分 API', url: '/api/schedule-types' },
@@ -2860,11 +2990,9 @@ app.get('/settings/status', async (c) => {
 
       function statusBadge(ok, ms, note) {
         var label = note || (ok ? '正常' : 'エラー');
-        var style = ok
-          ? 'background:#dcfce7;color:#16a34a;'
-          : 'background:#fee2e2;color:#dc2626;';
+        var cls = ok ? 'b-ok' : 'b-ng';
         var msStr = ms != null ? ' (' + ms + 'ms)' : '';
-        return '<span style="font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;' + style + '">' + label + msStr + '</span>';
+        return '<span class="sys-badge ' + cls + '">' + label + msStr + '</span>';
       }
 
       async function checkEndpoint(t) {
@@ -2896,7 +3024,7 @@ app.get('/settings/status', async (c) => {
         var rows = API_TARGETS.map(function(t, i) {
           var r = results[i];
           var note = r.err ? 'ネットワークエラー' : (r.status != null ? ('HTTP ' + r.status) : null);
-          return '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+          return '<div class="sys-row">' +
             '<span style="font-size:13px;color:#374151;">' + t.label + '</span>' +
             statusBadge(r.ok, r.ms, r.ok ? null : note) +
             '</div>';
@@ -2910,6 +3038,85 @@ app.get('/settings/status', async (c) => {
 
       runChecks();
 
+      // ---- メンテナンスモード切替（adminのみカードが存在） ----
+      function toggleMaintenance(el) {
+        var on = el.checked;
+        if (on && !confirm('メンテナンスモードをONにします。\\nadmin以外の全ユーザーにメンテナンス画面が表示されます。よろしいですか？')) {
+          el.checked = false;
+          return;
+        }
+        el.disabled = true;
+        fetch(ADMIN_PATH + '/settings/status/maintenance', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: on })
+        }).then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          el.disabled = false;
+          if (!res.ok) { el.checked = !on; alert(res.j.error || '切替に失敗しました'); return; }
+          applyMaintState(res.j.enabled);
+        }).catch(function() {
+          el.disabled = false; el.checked = !on;
+          alert('通信エラーで切り替えできませんでした');
+        });
+      }
+      function applyMaintState(on) {
+        var st = document.getElementById('maint-state');
+        if (st) { st.textContent = on ? 'MAINT ON' : 'NORMAL'; st.style.color = on ? '#d97706' : '#16a34a'; }
+        var led = document.getElementById('head-led');
+        if (led) { led.className = 'led ' + (on ? 'led-a' : 'led-g'); }
+        var hs = document.getElementById('head-state');
+        if (hs) { hs.textContent = on ? 'MAINTENANCE MODE' : 'ALL SYSTEMS OPERATIONAL'; hs.style.color = on ? '#b45309' : '#1e3a5f'; }
+        var bn = document.getElementById('maint-banner');
+        if (bn) { bn.style.display = on ? 'block' : 'none'; }
+        var msg = document.getElementById('maint-msg');
+        if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
+      }
+
+      // ---- プロセストレース（意味のないコードが流れる演出） ----
+      var CS_FN = ['core.sync', 'auth.rotate', 'db.vacuum', 'net.trace', 'shift.calc', 'line.hook', 'cache.warm', 'sec.scan', 'io.flush', 'cron.tick', 'tls.handshake', 'kv.compact'];
+      var CS_OP = ['verify', 'link', 'hash', 'mount', 'probe', 'bind', 'sweep', 'patch', 'index', 'fork', 'commit', 'seal'];
+      var CS_OB = ['block', 'node', 'sector', 'route', 'token', 'frame', 'queue', 'shard', 'table', 'pool', 'lease', 'chunk'];
+      function csHex(n) { var s = ''; for (var i = 0; i < n; i++) { s += '0123456789ABCDEF'.charAt(Math.floor(Math.random() * 16)); } return s; }
+      function csPick(a) { return a[Math.floor(Math.random() * a.length)]; }
+      function csTime() {
+        var d = new Date();
+        function p(x) { return (x < 10 ? '0' : '') + x; }
+        return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + ('00' + d.getMilliseconds()).slice(-3);
+      }
+      function csLine() {
+        var r = Math.random();
+        if (r < 0.5) {
+          return '<span class="cs-dim">[' + csTime() + ']</span> <span class="cs-fn">' + csPick(CS_FN) + '</span> &#9656; ' + csPick(CS_OP) + ' ' + csPick(CS_OB) + ' <span class="cs-hx">0x' + csHex(4) + '</span> ... <span class="cs-ok">OK</span> <span class="cs-dim">(' + (2 + Math.floor(Math.random() * 38)) + 'ms)</span>';
+        } else if (r < 0.72) {
+          return '<span class="cs-dim">0x' + csHex(4) + '</span>&nbsp;&nbsp;' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + '&nbsp;&nbsp;<span class="cs-dim">crc=' + csHex(2) + '</span>';
+        } else if (r < 0.9) {
+          return 'if (<span class="cs-fn">' + csPick(CS_OB) + '</span>[' + Math.floor(Math.random() * 32) + '].load &gt; 0.' + (60 + Math.floor(Math.random() * 39)) + ') <span class="cs-fn">rebalance</span>(cluster_' + Math.floor(Math.random() * 4) + ');';
+        } else if (r < 0.96) {
+          return 'for (i = 0; i &lt; ' + (8 + Math.floor(Math.random() * 56)) + '; i++) <span class="cs-fn">checksum</span>(buf[i], <span class="cs-hx">0x' + csHex(2) + '</span>);';
+        } else {
+          return '<span class="cs-wr">WARN</span> <span class="cs-dim">latency spike ' + (80 + Math.floor(Math.random() * 200)) + 'ms on</span> ' + csPick(CS_FN) + ' <span class="cs-dim">- retry scheduled</span>';
+        }
+      }
+      var csBox = document.getElementById('code-stream');
+      function csPush() {
+        if (!csBox) return;
+        var div = document.createElement('div');
+        div.innerHTML = csLine();
+        csBox.appendChild(div);
+        while (csBox.children.length > 10) csBox.removeChild(csBox.firstChild);
+      }
+      for (var csI = 0; csI < 10; csI++) csPush();
+      setInterval(csPush, 340);
+      var hexEl = document.getElementById('hexline');
+      setInterval(function() {
+        if (!hexEl) return;
+        var s = 'BUS ';
+        for (var i = 0; i < 9; i++) { s += csHex(4) + ' '; }
+        hexEl.textContent = s + '// ' + csTime();
+      }, 600);
+
+      // ---- QRコード ----
       var QR_URL = ${JSON.stringify(adminLoginUrl)};
       function downloadQR() {
         var svg = document.querySelector('#qr-container svg');
