@@ -80,8 +80,9 @@ function sortMainMembers(members: KanchoMember[]): KanchoMember[] {
 }
 
 // セル背景色の決定（サーバー・印刷共通ロジック）
+// 白の空白セル=未入力。色付きの空白セル（cell_colorのみの行）=早日勤出勤 7:30〜16:30
 function cellBg(
-  cell: KanchoCell | undefined, member: KanchoMember, inPeriod: boolean,
+  cell: KanchoCell | undefined, member: KanchoMember, _inPeriod: boolean,
   colorMap: Record<string, string>, teamColorCodes: Set<string>
 ): string {
   if (cell?.cl) return cell.cl;
@@ -90,8 +91,6 @@ function cellBg(
     if (teamColorCodes.has(code) && member.team_color) return member.team_color;
     return colorMap[code] ?? '#fff7ed';
   }
-  // 空白 = 昼日勤出勤 → 班色（月度内のみ）
-  if (inPeriod && member.team_color && member.section === 'main') return member.team_color;
   return '#ffffff';
 }
 
@@ -112,7 +111,7 @@ function countsOf(
     if (d < periodStart || d > periodEnd) continue;
     const cell = shiftMap[`${m.id}_${d}`];
     const code = cell?.code ?? '';
-    if (code === '') { r.work++; continue; }      // 空白 = 昼日勤出勤
+    if (code === '') { if (cell?.cl) r.work++; continue; }  // 色マス（記号なし）= 早日勤出勤。白は未入力
     if (workCodes.has(code)) r.work++;
     if (offCodes.has(code)) r.off++;
     if (code === '直') r.choku++;                 // 斜め直も当直として合算
@@ -326,7 +325,7 @@ export function kanchoShiftPage(
     ).join('')}
   </div>
   <div style="font-size:11px;color:#6b7280;margin-bottom:10px;">
-    空白（班色）＝昼日勤 7:30〜16:30 ／ <i>斜体の直</i>＝斜め直 14:00〜翌8:00 ／ 終業班長 3:00〜12:00 ／ <span style="color:#dc2626;font-weight:700;">赤文字</span>＝希望休の反映
+    色マス（記号なし）＝早日勤 7:30〜16:30 ／ 白マス＝未入力 ／ <i>斜体の直</i>＝斜め直 14:00〜翌8:00 ／ 終業班長 3:00〜12:00 ／ <span style="color:#dc2626;font-weight:700;">赤文字</span>＝希望休の反映
   </div>
 
   <div style="overflow-x:auto;overflow-y:auto;max-height:70vh;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
@@ -356,6 +355,10 @@ export function kanchoShiftPage(
         <div id="modal-date-label" style="font-size:12px;color:#6b7280;margin-top:2px;"></div>
       </div>
       <button onclick="closeCellModal()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;padding:0 4px;line-height:1;">✕</button>
+    </div>
+    <div id="blank-work-wrap" style="margin-bottom:8px;">
+      <button id="blank-work-btn" onclick="setBlankWork()" style="width:100%;padding:10px;border:2px solid #16a34a;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;touch-action:manipulation;">早日勤で出勤（文字なしの色マス）</button>
+      <div style="font-size:10px;color:#9ca3af;margin-top:3px;">記号なしの色付きマス（早日勤 7:30〜16:30）になります。「クリア」は白（未入力）に戻します</div>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px;" id="preset-buttons"></div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;">
@@ -549,15 +552,15 @@ function showToast(msg) {
 }
 
 // セルの見た目をdata属性から再描画（Excelの色ルールを再現）
+// 白の空白=未入力 / 色付きの空白(cell_colorのみ)=早日勤出勤
 function paintCell(td) {
   var code = td.dataset.code || '';
   var cl = td.dataset.cl || '';
   var tc = td.dataset.tc || '';
-  var inp = td.dataset.inp === '1';
   var bg;
   if (cl) bg = cl;
   else if (code) bg = (teamColorCodes[code] && tc) ? tc : (colorMap[code] || '#fff7ed');
-  else bg = (inp && tc && td.dataset.sec === 'main') ? tc : '#ffffff';
+  else bg = '#ffffff';
   td.style.background = bg;
   td.style.fontStyle = td.dataset.dg === '1' ? 'italic' : 'normal';
   if (td.dataset.ws === '1') { td.style.color = '#dc2626'; td.style.fontWeight = '700'; }
@@ -573,7 +576,7 @@ function recalcAll() {
       var d = c.dataset.date;
       if (d < periodStart || d > periodEnd) return;
       var code = c.dataset.code || '';
-      if (kind === 'work')       { if (code === '' || workCodes[code]) n++; }
+      if (kind === 'work')       { if (code === '' ? c.dataset.cl : workCodes[code]) n++; }
       else if (kind === 'off')   { if (offCodes[code]) n++; }
       else if (kind === 'choku') { if (code === '直') n++; }  // 斜め直も当直として合算
       else if (kind === 'oso')   { if (code === '遅') n++; }
@@ -742,6 +745,10 @@ function openCell(td) {
   sel('#preset-buttons').innerHTML = _presetsFor(td.dataset.sec).map(function(t) {
     return '<button data-code="' + escH(t.code) + '" onclick="selectPreset(this.dataset.code)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;">' + escH(t.code) + '</button>';
   }).join('');
+  // 早日勤（空白＋班色）ボタン: メイン表のみ表示。本人の班色をボタン背景に
+  var bw = sel('#blank-work-wrap');
+  bw.style.display = td.dataset.sec === 'main' ? '' : 'none';
+  sel('#blank-work-btn').style.background = td.dataset.tc || '#f0fdf4';
   _loadCellToModal(td);
   _updateSeqBtns();
   sel('#cell-modal').style.display = 'flex';
@@ -755,12 +762,12 @@ function closeCellModal() {
   _cur = null;
   document.onkeydown = null;
 }
-function _applyToPending() {
+function _applyToPending(clOverride) {
   if (!_cur) return;
   var code = sel('#modal-code').value.trim();
   var dg = sel('#modal-dg').checked ? 1 : 0;
   var ws = sel('#modal-ws').checked ? 1 : 0;
-  var cl = sel('#modal-cl').value || null;
+  var cl = clOverride !== undefined ? clOverride : (sel('#modal-cl').value || null);
   var key = _cur.memberId + '_' + _cur.date;
   var td = _cellTd();
   _pending[key] = { member_id: parseInt(_cur.memberId), date: _cur.date, code: code || null, is_diagonal: dg, is_wish: ws, cell_color: cl };
@@ -785,6 +792,21 @@ function clearCell() {
   sel('#modal-ws').checked = false;
   sel('#modal-cl').value = '';
   applyCell(true);
+}
+// 早日勤出勤 = 記号なしの色付きマスとして明示保存（クリア=白=未入力とは別物）
+// セルの色を選んでいればその色、なければ本人の班色を使う
+function setBlankWork() {
+  var td = _cellTd();
+  var color = sel('#modal-cl').value || (td ? td.dataset.tc : '') || '';
+  if (!color) {
+    showToast('この人の班色が未設定です。名簿管理で班色を設定するか「セルの色」を選んでください');
+    return;
+  }
+  sel('#modal-code').value = '';
+  sel('#modal-dg').checked = false;
+  sel('#modal-ws').checked = false;
+  _applyToPending(color);
+  closeCellModal();
 }
 function _updateSeqBtns() {
   var idx = _dates.indexOf(_cur ? _cur.date : '');
@@ -1076,8 +1098,9 @@ function autoAssign() {
     var code = td.dataset.code || '';
     if (code === '' || code === '公') {
       if (code === '公' && td.dataset.ws === '1') return; // 反映済み
-      _pending[w.member_id + '_' + w.date] = { member_id: w.member_id, date: w.date, code: '公', is_diagonal: 0, is_wish: 1, cell_color: td.dataset.cl || null };
-      td.dataset.code = '公'; td.dataset.dg = '0'; td.dataset.ws = '1';
+      // 早日勤の色マスだった場合も公休(白)で上書き
+      _pending[w.member_id + '_' + w.date] = { member_id: w.member_id, date: w.date, code: '公', is_diagonal: 0, is_wish: 1, cell_color: null };
+      td.dataset.code = '公'; td.dataset.dg = '0'; td.dataset.ws = '1'; td.dataset.cl = '';
       td.dataset.pending = 'true';
       paintCell(td);
       applied++;
@@ -1095,6 +1118,7 @@ function autoAssign() {
     if (nd < periodStart || nd > periodEnd) return;
     var next = sel('.kc[data-member="' + td.dataset.member + '"][data-date="' + nd + '"]');
     if (!next || (next.dataset.code || '') !== '') return;
+    if (next.dataset.cl) return; // 早日勤の色マスには入れない（白＝未入力のみ）
     if (_wishOf(parseInt(td.dataset.member), nd)) return; // 翌日が希望休なら公優先（上のループで処理済み）
     var dg = td.dataset.dg === '1' ? 1 : 0;
     _pending[td.dataset.member + '_' + nd] = { member_id: parseInt(td.dataset.member), date: nd, code: '非', is_diagonal: dg, is_wish: 0, cell_color: next.dataset.cl || null };
@@ -1308,7 +1332,7 @@ export function kanchoPrintPage(
   </table>
   <div class="legend">
     ${activeTypes.map(t => `<span style="background:${t.color};">${escHtml(t.code)}${t.label ? ` ${escHtml(t.label)}` : ''}</span>`).join('')}
-    <span>空白(班色)=昼日勤 7:30〜16:30</span><span><i>斜体の直</i>=斜め直 14:00〜翌8:00</span><span>終業班長 3:00〜12:00</span><span style="color:#dc2626;font-weight:700;">赤文字=希望休</span>
+    <span>色マス(記号なし)=早日勤 7:30〜16:30</span><span><i>斜体の直</i>=斜め直 14:00〜翌8:00</span><span>終業班長 3:00〜12:00</span><span style="color:#dc2626;font-weight:700;">赤文字=希望休</span>
   </div>
   ${s1Members.length ? `<h2>① 表</h2><table><thead><tr><th>氏名</th>${dateHead}</tr></thead><tbody>${subRows(s1Members)}</tbody></table>` : ''}
   ${s2Members.length ? `<h2>② 表</h2><table><thead><tr><th>氏名</th>${dateHead}</tr></thead><tbody>${subRows(s2Members)}</tbody></table>` : ''}

@@ -204,10 +204,14 @@ def main():
                 fl = cell_fill(cell)
                 dg = 1 if (cell.font and cell.font.italic and code) else 0
                 wish = 1 if is_red_font(cell) else 0
-                # 本人の班色と違う塗りだけ個別色として保存（同じ塗りは自動表示に任せる）
-                cl = fl if (fl and fl != my_color) else None
+                if code:
+                    # 記号セル: 本人の班色と違う塗りだけ個別色として保存（同じ塗りは班色の自動表示）
+                    cl = fl if (fl and fl != my_color) else None
+                else:
+                    # 空白セル: 塗りがあれば「早日勤の色マス」として明示保存。無塗りの白=未入力でスキップ
+                    cl = fl
                 if not code and not cl:
-                    continue  # 完全な空白（班色 or 塗りなし）= 自動表示
+                    continue
                 cl_sql = f"'{cl}'" if cl else 'NULL'
                 sql.append(
                     f"INSERT OR REPLACE INTO kancho_shifts (member_id, date, code, is_diagonal, is_wish, cell_color, updated_by) "

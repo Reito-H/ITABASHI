@@ -108,25 +108,26 @@ export async function sendKanchoAttendance(env: Env, todayStr: string): Promise<
     "SELECT id, name, role FROM kancho_members WHERE section = 'main' AND is_active = 1 AND is_indoor = 1 ORDER BY sort_order, id"
   ).all<{ id: number; name: string; role: string | null }>();
   const shifts = await env.DB.prepare(
-    'SELECT member_id, code, is_diagonal FROM kancho_shifts WHERE date = ?'
-  ).bind(todayStr).all<{ member_id: number; code: string; is_diagonal: number }>();
+    'SELECT member_id, code, is_diagonal, cell_color FROM kancho_shifts WHERE date = ?'
+  ).bind(todayStr).all<{ member_id: number; code: string; is_diagonal: number; cell_color: string | null }>();
 
   const shiftMap = new Map((shifts.results ?? []).map(s => [s.member_id, s]));
 
-  const nikkin: string[] = [];   // 昼日勤班長の空白 = 日勤出勤
+  const nikkin: string[] = [];   // 昼日勤班長の色マス(記号なし) = 早日勤出勤
   const choku: string[] = [];    // 当直
   const naname: string[] = [];   // 斜め直
   const oso: string[] = [];      // 遅番
-  const shugyo: string[] = [];   // 終業班長の空白 = 出勤(3:00〜12:00)
+  const shugyo: string[] = [];   // 終業班長の色マス = 出勤(3:00〜12:00)
   let hasAnyShift = false;
 
   for (const m of (members.results ?? [])) {
     const s = shiftMap.get(m.id);
-    const code = s?.code ?? '';
-    if (code) hasAnyShift = true;
-    if (code === '直') { (s?.is_diagonal ? naname : choku).push(m.name); continue; }
+    if (!s) continue;            // 行なし = 未入力（白マス）
+    hasAnyShift = true;
+    const code = s.code ?? '';
+    if (code === '直') { (s.is_diagonal ? naname : choku).push(m.name); continue; }
     if (code === '遅') { oso.push(m.name); continue; }
-    if (code === '') {
+    if (code === '' && s.cell_color) {
       if (m.role === '昼日勤班長') nikkin.push(m.name);
       else if (m.role === '終業班長') shugyo.push(m.name);
     }

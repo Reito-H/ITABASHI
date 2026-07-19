@@ -154,7 +154,7 @@ function render(d) {
   });
   document.getElementById('legend').innerHTML = d.types.map(function(t) {
     return '<span style="background:' + t.color + ';">' + escH(t.code) + (t.label ? ' ' + escH(t.label) : '') + '</span>';
-  }).join('') + '<span>空白(班色)=昼日勤 7:30〜16:30</span><span><i>斜体の直</i>=斜め直 14:00〜翌8:00</span><span style="color:#dc2626;font-weight:700;">赤文字=希望休</span>';
+  }).join('') + '<span>色マス(記号なし)=早日勤 7:30〜16:30</span><span><i>斜体の直</i>=斜め直 14:00〜翌8:00</span><span style="color:#dc2626;font-weight:700;">赤文字=希望休</span>';
 
   var smap = {};
   d.shifts.forEach(function(s) { smap[s.member_id + '_' + s.date] = s; });
@@ -178,7 +178,7 @@ function render(d) {
         var bg;
         if (s && s.cell_color) bg = s.cell_color;
         else if (code) bg = (teamColorCodes[code] && m.team_color) ? m.team_color : (colorMap[code] || '#fff7ed');
-        else bg = (!out && m.team_color && m.section === 'main') ? m.team_color : '#fff';
+        else bg = '#fff';
         var fs = '';
         if (s && s.is_diagonal) fs += 'font-style:italic;';
         if (s && s.is_wish) fs += 'color:#dc2626;font-weight:700;';
