@@ -31,6 +31,7 @@ export type KanchoShiftType = {
   use_team_color: number;   // セル背景に班色を使う（直・遅・早）
   counts_as_work: number;   // 出勤数に含める
   counts_as_off: number;    // 公休数に含める
+  show_in_input: number;    // 入力モーダルのプリセットボタンに表示
 };
 
 export type KanchoCell = {
@@ -458,6 +459,7 @@ export function kanchoShiftPage(
         <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-teamcolor" type="checkbox">班色</label>
         <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-work" type="checkbox">出勤</label>
         <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-off" type="checkbox">公休</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:3px;" title="入力画面のボタンに表示"><input id="new-type-input" type="checkbox" checked>入力</label>
         <button onclick="addType()" style="padding:7px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">追加</button>
       </div>
     </div>
@@ -491,7 +493,8 @@ export function kanchoShiftPage(
     </div>
     <div style="font-size:11px;color:#9ca3af;margin-bottom:12px;">
       毎日深夜0時に「本日の出勤者」（日勤・当直・斜め直・遅番・終業班長）をLINEで送信します。<br>
-      送信されるのは統括管理者・運行管理者のうち、ここでオンにした人だけです。
+      送信されるのは統括管理者・運行管理者のうち、ここでオンにした人だけです。<br>
+      送信時刻の変更や全体のON/OFFは「設定 → LINE通知設定」の「班長出勤通知」からも行えます（同じ設定です）。
     </div>
     <div id="notify-body" style="font-size:13px;color:#6b7280;">読み込み中...</div>
     <div style="margin-top:14px;display:flex;justify-content:flex-end;">
@@ -520,8 +523,8 @@ var API = '${ADMIN_PATH}/api/kancho';
 var _year = ${year}, _month = ${month};
 var periodStart = '${periodStart}', periodEnd = '${periodEnd}';
 var _dates = ${safeJson(dates)};
-var _types = ${safeJson(activeTypes.map(t => ({ id: t.id, code: t.code, color: t.color, section: t.section, tc: t.use_team_color, wk: t.counts_as_work, off: t.counts_as_off })))};
-var _allTypes = ${safeJson(types.map(t => ({ id: t.id, code: t.code, label: t.label, color: t.color, section: t.section, daily_required: t.daily_required, sort_order: t.sort_order, is_active: t.is_active, use_team_color: t.use_team_color, counts_as_work: t.counts_as_work, counts_as_off: t.counts_as_off })))};
+var _types = ${safeJson(activeTypes.map(t => ({ id: t.id, code: t.code, color: t.color, section: t.section, tc: t.use_team_color, wk: t.counts_as_work, off: t.counts_as_off, inp: t.show_in_input })))};
+var _allTypes = ${safeJson(types.map(t => ({ id: t.id, code: t.code, label: t.label, color: t.color, section: t.section, daily_required: t.daily_required, sort_order: t.sort_order, is_active: t.is_active, use_team_color: t.use_team_color, counts_as_work: t.counts_as_work, counts_as_off: t.counts_as_off, show_in_input: t.show_in_input })))};
 var _allMembers = ${safeJson(allMembers.map(m => ({ id: m.id, name: m.name, role: m.role, section: m.section, sort_order: m.sort_order, is_active: m.is_active, team_color: m.team_color, is_indoor: m.is_indoor })))};
 var colorMap = {};
 var teamColorCodes = {};
@@ -706,6 +709,7 @@ function cpTap(td) {
   td.dataset.cl = _cpClip.cl || '';
   td.dataset.pending = 'true';
   paintCell(td);
+  if (_cpClip.code === '直') _autoAke(td.dataset.member, td.dataset.date, _cpClip.dg, td.dataset.sec);
   _updatePending();
   recalcAll();
 }
@@ -722,9 +726,27 @@ document.addEventListener('click', function(e) {
 // ===== セル編集 =====
 function _presetsFor(sec) {
   return _types.filter(function(t) {
+    if (!t.inp) return false;  // 入力ボタン表示オフの記号は出さない（記号管理で設定）
     return sec === 'main' ? (t.section === 'main' || t.section === 'all')
                           : (t.section === 'sub' || t.section === 'all');
   });
+}
+// 直の入力時: 翌日が白（未入力）なら非を自動セット（直＋非で2日ワンセット。斜め直の翌日は斜体の非）
+function _autoAke(memberId, date, dg, sec) {
+  if (sec !== 'main') return;
+  var idx = _dates.indexOf(date);
+  if (idx < 0 || idx + 1 >= _dates.length) return;
+  var nd = _dates[idx + 1];
+  var next = sel('.kc[data-member="' + memberId + '"][data-date="' + nd + '"]');
+  if (!next) return;
+  if ((next.dataset.code || '') !== '' || next.dataset.cl) return;
+  _pending[memberId + '_' + nd] = { member_id: parseInt(memberId), date: nd, code: '非', is_diagonal: dg, is_wish: 0, cell_color: null };
+  next.dataset.code = '非';
+  next.dataset.dg = String(dg);
+  next.dataset.ws = '0';
+  next.dataset.cl = '';
+  next.dataset.pending = 'true';
+  paintCell(next);
 }
 function _cellTd() {
   return sel('.kc[data-member="' + _cur.memberId + '"][data-date="' + _cur.date + '"]');
@@ -743,7 +765,12 @@ function openCell(td) {
   var dow = ['日','月','火','水','木','金','土'][new Date(td.dataset.date).getUTCDay()];
   sel('#modal-date-label').textContent = td.dataset.date + '（' + dow + '）';
   sel('#preset-buttons').innerHTML = _presetsFor(td.dataset.sec).map(function(t) {
-    return '<button data-code="' + escH(t.code) + '" onclick="selectPreset(this.dataset.code)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;">' + escH(t.code) + '</button>';
+    var btn = '<button data-code="' + escH(t.code) + '" onclick="selectPreset(this.dataset.code, 0)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;">' + escH(t.code) + '</button>';
+    // 直の隣に斜め直ボタンを並べる（記号は同じ「直」で斜体フラグ付き）
+    if (t.code === '直') {
+      btn += '<button onclick="selectPreset(\\'直\\', 1)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;font-style:italic;">斜め直</button>';
+    }
+    return btn;
   }).join('');
   // 早日勤（空白＋班色）ボタン: メイン表のみ表示。本人の班色をボタン背景に
   var bw = sel('#blank-work-wrap');
@@ -754,8 +781,9 @@ function openCell(td) {
   sel('#cell-modal').style.display = 'flex';
   document.onkeydown = function(e) { if (e.key === 'Escape') closeCellModal(); };
 }
-function selectPreset(code) {
+function selectPreset(code, dg) {
   sel('#modal-code').value = code;
+  sel('#modal-dg').checked = dg === 1;  // 斜め直ボタン=チェックON、他のボタン=OFF
 }
 function closeCellModal() {
   sel('#cell-modal').style.display = 'none';
@@ -779,6 +807,7 @@ function _applyToPending(clOverride) {
     td.dataset.pending = 'true';
     paintCell(td);
   }
+  if (code === '直') _autoAke(_cur.memberId, _cur.date, dg, _cur.sec);
   _updatePending();
   recalcAll();
 }
@@ -954,6 +983,7 @@ function openTypes() {
       + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;"><input type="checkbox" class="type-teamcolor"' + (t.use_team_color ? ' checked' : '') + '>班色</label>'
       + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;"><input type="checkbox" class="type-work"' + (t.counts_as_work ? ' checked' : '') + '>出勤</label>'
       + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;"><input type="checkbox" class="type-off"' + (t.counts_as_off ? ' checked' : '') + '>公休</label>'
+      + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;" title="入力画面のボタンに表示"><input type="checkbox" class="type-input"' + (t.show_in_input ? ' checked' : '') + '>入力</label>'
       + '<input type="number" class="type-sort" value="' + t.sort_order + '" title="並び順" style="width:48px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
       + '<button onclick="saveType(' + t.id + ', this)" style="padding:6px 12px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;">保存</button>'
       + '<button onclick="toggleType(' + t.id + ', ' + (t.is_active ? 0 : 1) + ')" style="padding:6px 10px;background:' + (t.is_active ? '#fef2f2' : '#f0fdf4') + ';border:1px solid ' + (t.is_active ? '#fca5a5' : '#86efac') + ';color:' + (t.is_active ? '#dc2626' : '#166534') + ';border-radius:6px;font-size:12px;cursor:pointer;">' + (t.is_active ? '無効' : '有効') + '</button>'
@@ -972,6 +1002,7 @@ async function saveType(id, btn) {
     use_team_color: row.querySelector('.type-teamcolor').checked ? 1 : 0,
     counts_as_work: row.querySelector('.type-work').checked ? 1 : 0,
     counts_as_off: row.querySelector('.type-off').checked ? 1 : 0,
+    show_in_input: row.querySelector('.type-input').checked ? 1 : 0,
     sort_order: parseInt(row.querySelector('.type-sort').value) || 0
   };
   var res = await fetch(API + '/types/' + id, {
@@ -997,6 +1028,7 @@ async function addType() {
     use_team_color: sel('#new-type-teamcolor').checked ? 1 : 0,
     counts_as_work: sel('#new-type-work').checked ? 1 : 0,
     counts_as_off: sel('#new-type-off').checked ? 1 : 0,
+    show_in_input: sel('#new-type-input').checked ? 1 : 0,
     sort_order: (_allTypes.length + 1) * 10
   };
   if (!body.code.trim()) { alert('記号を入力してください'); return; }

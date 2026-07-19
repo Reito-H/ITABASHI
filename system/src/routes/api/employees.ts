@@ -3,6 +3,13 @@ import type { Env } from '../../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// 在籍社員数（ステータス確認用の軽量エンドポイント）
+app.get('/count', async (c) => {
+  const row = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM employees WHERE is_active = 1')
+    .first<{ cnt: number }>();
+  return c.json({ count: row?.cnt ?? 0 });
+});
+
 // 社員一覧
 app.get('/', async (c) => {
   const rows = await c.env.DB.prepare(`

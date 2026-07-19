@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { requireAuth, requireJapan } from './middleware/auth';
-import { getAdminPermissions, isPathAllowed, filterHtmlByPermissions } from './permissions';
+import { getAdminPermissions, isPathAllowed, isRootApiWriteAllowed, filterHtmlByPermissions } from './permissions';
 import adminRoutes from './routes/admin';
 import adminExtraRoutes from './routes/admin_extra';
 import adminStaffRoutes from './routes/admin_staff';
@@ -151,6 +151,21 @@ app.use('/api/*', async (c, next) => {
   if (path.startsWith('/api/liff/')) return next(); // LIFF API は LINE UID検証
   if (path === '/api/manual-chat') return next(); // LINEからも呼ぶため認証スキップ（内部APIキー等で保護）
   return requireAuth(c, next);
+});
+
+// アカウント別権限: 制限付きアカウントのルートAPIへの書き込みにはページ権限（<key>.edit）が必要
+app.use('/api/*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path === '/api/line/webhook') return next();
+  if (path.startsWith('/api/liff/')) return next();
+  if (path === '/api/manual-chat') return next();
+
+  const adminId = c.get('adminId');
+  const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
+  if (perms && !isRootApiWriteAllowed(perms, path, c.req.method)) {
+    return c.json({ error: 'この操作を行う権限がありません' }, 403);
+  }
+  return next();
 });
 
 app.route('/api/shift', shiftApi);

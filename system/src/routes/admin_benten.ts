@@ -75,6 +75,7 @@ app.get('/settings/benten', async (c) => {
         ${notifyRes?.last_sent_date ? `<span style="font-size:11px;color:#9ca3af;">最終送信: ${escHtml(notifyRes.last_sent_date)}</span>` : ''}
       </div>
       <div style="font-size:12px;color:#6b7280;margin-top:6px;">毎日設定時刻に「本日出勤者」とシフト表リンクをグループへ自動送信します。</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px;">この通知は <a href="${ADMIN_PATH}/settings/notifications" style="color:#2563eb;">設定 → LINE通知設定</a> にも「ベンテンシフト通知」として表示されます（どちらで変更しても同じ設定です）。</div>
     </div>`);
 
   // ---- 会員 ----

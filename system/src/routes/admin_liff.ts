@@ -1,7 +1,8 @@
 // LINE LIFF 権限管理・報告一覧 の管理者ページ
 
 import { Hono } from 'hono';
-import { layout, escHtml } from '../html/layout';
+import type { Context } from 'hono';
+import { layout, escHtml, safeJson } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { getSessionFromCookie, validateSession } from '../auth';
 import type { Env } from '../auth';
@@ -34,6 +35,130 @@ function subHeader(title: string): string {
   return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
     <a href="${ADMIN_PATH}/settings" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 設定に戻る</a>
     <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;margin:0;">${escHtml(title)}</h2>
+  </div>`;
+}
+
+// ログイン中の管理者名を取得（報告の「対応者」記録用）
+async function getAdminName(c: { req: { header: (n: string) => string | undefined }; env: Env }): Promise<string> {
+  const cookie = c.req.header('Cookie') ?? null;
+  const sid = getSessionFromCookie(cookie);
+  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
+  const adminRow = adminId
+    ? await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(adminId).first<{ username: string }>()
+    : null;
+  return adminRow?.username ?? '管理者';
+}
+
+// 忘れ物・事故・違反 共通のタブナビ（権限のないタブは data-perm-key で自動的に非表示になる）
+function reportTabs(active: 'lost' | 'accident' | 'violation'): string {
+  const tabs = [
+    { key: 'lost',      href: `${ADMIN_PATH}/settings/lost-items`, perm: 'settings.lost-items', label: '忘れ物' },
+    { key: 'accident',  href: `${ADMIN_PATH}/settings/accidents`,  perm: 'settings.accidents',  label: '事故' },
+    { key: 'violation', href: `${ADMIN_PATH}/settings/violations`, perm: 'settings.violations', label: '違反' },
+  ];
+  return `<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e5e7eb;">
+    ${tabs.map(t => `<a href="${t.href}" data-perm-key="${t.perm}" style="padding:8px 20px;font-size:14px;text-decoration:none;font-weight:600;margin-bottom:-2px;${t.key === active
+      ? 'color:#1e3a5f;border-bottom:2px solid #1e3a5f;'
+      : 'color:#9ca3af;border-bottom:2px solid transparent;'}">${escHtml(t.label)}</a>`).join('')}
+  </div>`;
+}
+
+// 状態セルのHTML（resolvedLabel: 忘れ物・事故=解決済 / 違反=対応済）
+function statusCellHtml(resolved: boolean, resolvedLabel: string): string {
+  const label = resolved ? resolvedLabel : '対応中';
+  const color = resolved ? '#059669' : '#d97706';
+  return `<span style="color:${color};font-size:12px;font-weight:600;">${label}</span>`;
+}
+
+// 対応者セルのHTML（誰が・いつ対応したか）
+function resolverCellHtml(resolvedByName: string | null, resolvedAt: string | null): string {
+  if (!resolvedByName) return '<span style="color:#d1d5db;font-size:12px;">—</span>';
+  return `<span style="color:#059669;font-size:12px;font-weight:600;">${escHtml(resolvedByName)}</span>
+    ${resolvedAt ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${escHtml(resolvedAt.slice(5, 16))}</div>` : ''}`;
+}
+
+// 行内で状態切替・削除・履歴表示を行う共通スクリプト（ページ再読み込みなしで行だけ更新する）
+function reportRowScript(apiPath: string, deleteLabel: string, resolvedLabel: string): string {
+  return `
+    var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
+    async function toggleReportStatus(id, btn) {
+      var current = btn.dataset.status;
+      var next = current === 'resolved' ? 'open' : 'resolved';
+      var res = await fetch(ADMIN_PATH + '${apiPath}/' + id + '/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      });
+      if (!res.ok) { alert('更新に失敗しました'); return; }
+      var j = await res.json().catch(function(){ return {}; });
+      var name = j.adminName || '管理者';
+      btn.dataset.status = next;
+      btn.textContent = next === 'resolved' ? '再開' : '${resolvedLabel}にする';
+      var st = document.getElementById('st-' + id);
+      if (st) {
+        st.innerHTML = next === 'resolved'
+          ? '<span style="color:#059669;font-size:12px;font-weight:600;">${resolvedLabel}</span>'
+          : '<span style="color:#d97706;font-size:12px;font-weight:600;">対応中</span>';
+      }
+      var rc = document.getElementById('res-' + id);
+      if (rc) {
+        rc.innerHTML = '';
+        var span = document.createElement('span');
+        if (next === 'resolved') {
+          span.style.cssText = 'color:#059669;font-size:12px;font-weight:600;';
+          span.textContent = name;
+        } else {
+          span.style.cssText = 'color:#d1d5db;font-size:12px;';
+          span.textContent = '—';
+        }
+        rc.appendChild(span);
+      }
+    }
+    async function deleteReport(id, label) {
+      if (!confirm('この${deleteLabel}を削除しますか？\\n「' + label + '」\\n※削除しても「誰がいつ削除したか」は履歴に残ります')) return;
+      var res = await fetch(ADMIN_PATH + '${apiPath}/' + id, { method: 'DELETE' });
+      if (!res.ok) { alert('削除に失敗しました'); return; }
+      var row = document.getElementById('report-row-' + id);
+      if (row) row.remove();
+      var cnt = document.getElementById('report-count');
+      if (cnt) cnt.textContent = '報告 ' + Math.max(0, parseInt(cnt.textContent.replace(/[^0-9]/g, '') || '1') - 1) + '件';
+    }
+    function escLog(s) {
+      return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    async function showReportLogs(id) {
+      var res = await fetch(ADMIN_PATH + '${apiPath}/' + id + '/logs');
+      if (!res.ok) { alert('履歴の取得に失敗しました'); return; }
+      var j = await res.json();
+      var logs = j.logs || [];
+      var body = document.getElementById('report-log-body');
+      if (logs.length === 0) {
+        body.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:12px 0;">まだ履歴がありません（履歴の記録開始前の操作は残っていません）</div>';
+      } else {
+        body.innerHTML = logs.map(function(l) {
+          return '<div style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px;">'
+            + '<span style="color:#9ca3af;font-size:11px;">' + escLog(l.created_at) + '</span><br>'
+            + '<strong>' + escLog(l.admin_name) + '</strong> さんが ' + escLog(l.action_label)
+            + (l.summary ? '<div style="font-size:11px;color:#6b7280;margin-top:1px;">対象: ' + escLog(l.summary) + '</div>' : '')
+            + '</div>';
+        }).join('');
+      }
+      document.getElementById('report-log-modal').style.display = 'flex';
+    }
+    function closeReportLogs() { document.getElementById('report-log-modal').style.display = 'none'; }`;
+}
+
+// 履歴モーダル（各報告一覧ページ共通）
+function reportLogModalHtml(): string {
+  return `
+  <div id="report-log-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)closeReportLogs()">
+    <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0;">対応履歴</h3>
+        <button onclick="closeReportLogs()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
+      </div>
+      <div id="report-log-body"></div>
+    </div>
   </div>`;
 }
 
@@ -192,26 +317,20 @@ app.get('/settings/lost-items', async (c) => {
   const typeFilter = c.req.query('type') ?? '';
   const statusFilter = c.req.query('status') ?? '';
 
-  // 管理者名を取得
-  const cookie = c.req.header('Cookie') ?? null;
-  const sid = getSessionFromCookie(cookie);
-  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
-  const adminRow = adminId
-    ? await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(adminId).first<{ username: string }>()
-    : null;
-  const adminName = adminRow?.username ?? '管理者';
-
   let where = 'WHERE 1=1';
   const binds: string[] = [];
   if (typeFilter === 'staff' || typeFilter === 'customer') {
-    where += ' AND report_type = ?'; binds.push(typeFilter);
+    where += ' AND r.report_type = ?'; binds.push(typeFilter);
   }
   if (statusFilter === 'open' || statusFilter === 'resolved') {
-    where += ' AND status = ?'; binds.push(statusFilter);
+    where += ' AND r.status = ?'; binds.push(statusFilter);
   }
 
   const reports = await c.env.DB.prepare(
-    `SELECT * FROM lost_item_reports ${where} ORDER BY created_at DESC LIMIT 200`
+    `SELECT r.*, u.name AS reporter_name
+     FROM lost_item_reports r
+     LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
+     ${where} ORDER BY r.created_at DESC LIMIT 200`
   ).bind(...binds).all<{
     id: number; report_type: string; received_at: string | null;
     vehicle_no: string | null; employee_name: string | null;
@@ -220,6 +339,7 @@ app.get('/settings/lost-items', async (c) => {
     customer_name: string | null; customer_phone: string | null; return_method: string | null;
     notes: string | null; status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
+    reporter_name: string | null;
   }>();
 
   const all = reports.results ?? [];
@@ -228,15 +348,10 @@ app.get('/settings/lost-items', async (c) => {
     const isCustomer = r.report_type === 'customer';
     const typeLabel = isCustomer ? '客問い合わせ' : '社員報告';
     const typeColor = isCustomer ? '#7c3aed' : '#1d4ed8';
-    const statusLabel = r.status === 'resolved' ? '解決済' : '対応中';
-    const statusColor = r.status === 'resolved' ? '#059669' : '#d97706';
     const empStr = r.employee_name
       ? `${r.employee_division ? r.employee_division + '課' : ''}${r.employee_team ? r.employee_team + '班' : ''} ${r.employee_name}`
       : '—';
-    const resolvedInfo = r.status === 'resolved' && r.resolved_by_name
-      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">対応: ${escHtml(r.resolved_by_name)}${r.resolved_at ? ' ' + r.resolved_at.slice(5, 16) : ''}</div>`
-      : '';
-    return `<tr>
+    return `<tr id="report-row-${r.id}">
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
         <span style="background:${typeColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${escHtml(typeLabel)}</span>
@@ -245,16 +360,21 @@ app.get('/settings/lost-items', async (c) => {
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(r.item_description ?? '')}">${escHtml(r.item_description ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
-        ${resolvedInfo}
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(r.reporter_name ?? '—')}</td>
+      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${statusCellHtml(r.status === 'resolved', '解決済')}
+      </td>
+      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
       </td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <button onclick="toggleStatus(${r.id},'${r.status}')"
+        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
           style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
           ${r.status === 'resolved' ? '再開' : '解決済にする'}
         </button>
-        <button onclick="deleteLostItem(${r.id},'${escHtml((r.item_description ?? '').slice(0, 20))}')"
+        <button onclick="showReportLogs(${r.id})"
+          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
+        <button onclick="deleteReport(${r.id},'${escHtml((r.item_description ?? '').slice(0, 20))}')"
           style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
       </td>
     </tr>`;
@@ -270,7 +390,8 @@ app.get('/settings/lost-items', async (c) => {
   };
 
   const content = `
-    ${subHeader('忘れ物報告一覧')}
+    ${subHeader('報告センター')}
+    ${reportTabs('lost')}
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
       ${filterBtn('すべて', '', '')}
@@ -282,7 +403,7 @@ app.get('/settings/lost-items', async (c) => {
 
     <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
       <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
+        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
       </div>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;min-width:700px;">
@@ -294,36 +415,22 @@ app.get('/settings/lost-items', async (c) => {
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">車番</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">忘れ物</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
               <th style="padding:8px 12px;"></th>
             </tr>
           </thead>
           <tbody>
-            ${rows || '<tr><td colspan="8" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+            ${rows || '<tr><td colspan="10" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
           </tbody>
         </table>
       </div>
     </div>
 
+    ${reportLogModalHtml()}
     <script>
-    var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
-    var ADMIN_NAME = ${JSON.stringify(adminName)};
-    async function toggleStatus(id, current) {
-      const next = current === 'resolved' ? 'open' : 'resolved';
-      const res = await fetch(ADMIN_PATH + '/api/liff/lost-items/' + id + '/status', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next, resolvedBy: next === 'resolved' ? ADMIN_NAME : null }),
-      });
-      if (res.ok) { location.reload(); }
-      else { alert('更新に失敗しました'); }
-    }
-    async function deleteLostItem(id, desc) {
-      if (!confirm('この忘れ物報告を削除しますか？\\n「' + desc + '」\\n※削除すると元に戻せません')) return;
-      const res = await fetch(ADMIN_PATH + '/api/liff/lost-items/' + id, { method: 'DELETE' });
-      if (res.ok) { location.reload(); }
-      else { alert('削除に失敗しました'); }
-    }
+    ${reportRowScript('/api/liff/lost-items', '忘れ物報告', '解決済')}
     </script>
   `;
 
@@ -334,37 +441,35 @@ app.get('/settings/lost-items', async (c) => {
 // GET /settings/accidents — 事故報告一覧
 // ===================================================
 app.get('/settings/accidents', async (c) => {
-  // 管理者名を取得
-  const cookie = c.req.header('Cookie') ?? null;
-  const sid = getSessionFromCookie(cookie);
-  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
-  const adminRow = adminId
-    ? await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(adminId).first<{ username: string }>()
-    : null;
-  const adminName = adminRow?.username ?? '管理者';
+  const statusFilter = c.req.query('status') ?? '';
+
+  let where = '';
+  const binds: string[] = [];
+  if (statusFilter === 'open' || statusFilter === 'resolved') {
+    where = 'WHERE r.status = ?'; binds.push(statusFilter);
+  }
 
   const reports = await c.env.DB.prepare(`
-    SELECT * FROM accident_reports ORDER BY created_at DESC LIMIT 200
-  `).all<{
+    SELECT r.*, u.name AS reporter_name
+    FROM accident_reports r
+    LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
+    ${where} ORDER BY r.created_at DESC LIMIT 200
+  `).bind(...binds).all<{
     id: number; received_at: string | null; vehicle_no: string | null;
     employee_name: string | null; employee_division: number | null; employee_team: number | null;
     accident_type: string | null; location: string | null; car_status: string | null;
     summary_text: string | null; status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
+    reporter_name: string | null;
   }>();
 
   const all = reports.results ?? [];
 
   const rows = all.map(r => {
-    const statusLabel = r.status === 'resolved' ? '解決済' : '対応中';
-    const statusColor = r.status === 'resolved' ? '#059669' : '#dc2626';
     const empStr = r.employee_name
       ? `${r.employee_division ? r.employee_division + '課' : ''}${r.employee_team ? r.employee_team + '班' : ''} ${r.employee_name}`
       : '—';
-    const resolvedInfo = r.status === 'resolved' && r.resolved_by_name
-      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">対応: ${escHtml(r.resolved_by_name)}${r.resolved_at ? ' ' + r.resolved_at.slice(5, 16) : ''}</div>`
-      : '';
-    return `<tr>
+    return `<tr id="report-row-${r.id}">
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
@@ -372,26 +477,43 @@ app.get('/settings/accidents', async (c) => {
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.accident_type ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(r.location ?? '')}">${escHtml(r.location ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;">${escHtml(r.car_status ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
-        ${resolvedInfo}
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(r.reporter_name ?? '—')}</td>
+      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${statusCellHtml(r.status === 'resolved', '解決済')}
+      </td>
+      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
       </td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <button onclick="toggleAccidentStatus(${r.id},'${r.status}')"
+        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
           style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
           ${r.status === 'resolved' ? '再開' : '解決済にする'}
         </button>
-        <button onclick="deleteAccident(${r.id},'${escHtml(r.vehicle_no ?? '')}','${escHtml(r.accident_type ?? '')}')"
+        <button onclick="showReportLogs(${r.id})"
+          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
+        <button onclick="deleteReport(${r.id},'${escHtml((r.vehicle_no ?? '車番不明') + (r.accident_type ? ' / ' + r.accident_type : ''))}')"
           style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
       </td>
     </tr>`;
   }).join('');
 
+  const filterBtn = (label: string, s: string) => {
+    const active = statusFilter === s;
+    return `<a href="${ADMIN_PATH}/settings/accidents?status=${s}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
+      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
+  };
+
   const content = `
-    ${subHeader('事故報告一覧')}
+    ${subHeader('報告センター')}
+    ${reportTabs('accident')}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+      ${filterBtn('すべて', '')}
+      ${filterBtn('対応中', 'open')}
+      ${filterBtn('解決済', 'resolved')}
+    </div>
     <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
       <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
+        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
       </div>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;min-width:800px;">
@@ -404,36 +526,21 @@ app.get('/settings/accidents', async (c) => {
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">事故形態</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">場所</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
               <th style="padding:8px 12px;"></th>
             </tr>
           </thead>
           <tbody>
-            ${rows || '<tr><td colspan="9" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+            ${rows || '<tr><td colspan="11" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
           </tbody>
         </table>
       </div>
     </div>
+    ${reportLogModalHtml()}
     <script>
-    var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
-    var ADMIN_NAME = ${JSON.stringify(adminName)};
-    async function toggleAccidentStatus(id, current) {
-      const next = current === 'resolved' ? 'open' : 'resolved';
-      const res = await fetch(ADMIN_PATH + '/api/liff/accident-reports/' + id + '/status', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next, resolvedBy: next === 'resolved' ? ADMIN_NAME : null }),
-      });
-      if (res.ok) { location.reload(); }
-      else { alert('更新に失敗しました'); }
-    }
-    async function deleteAccident(id, vehicleNo, type) {
-      const label = (vehicleNo || '車番不明') + (type ? ' / ' + type : '');
-      if (!confirm('この事故報告を削除しますか？\\n「' + label + '」\\n※削除すると元に戻せません')) return;
-      const res = await fetch(ADMIN_PATH + '/api/liff/accident-reports/' + id, { method: 'DELETE' });
-      if (res.ok) { location.reload(); }
-      else { alert('削除に失敗しました'); }
-    }
+    ${reportRowScript('/api/liff/accident-reports', '事故報告', '解決済')}
     </script>
   `;
 
@@ -444,65 +551,81 @@ app.get('/settings/accidents', async (c) => {
 // GET /settings/violations — 違反報告一覧ページ
 // ===================================================
 app.get('/settings/violations', async (c) => {
-  const cookie = c.req.header('Cookie') ?? null;
-  const sid = getSessionFromCookie(cookie);
-  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
-  const adminRow = adminId
-    ? await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(adminId).first<{ username: string }>()
-    : null;
-  const adminName = adminRow?.username ?? '管理者';
+  const statusFilter = c.req.query('status') ?? '';
+
+  let where = '';
+  const binds: string[] = [];
+  if (statusFilter === 'open' || statusFilter === 'resolved') {
+    where = 'WHERE r.status = ?'; binds.push(statusFilter);
+  }
 
   const reports = await c.env.DB.prepare(`
-    SELECT * FROM violation_reports ORDER BY created_at DESC LIMIT 200
-  `).all<{
+    SELECT r.*, u.name AS reporter_name
+    FROM violation_reports r
+    LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
+    ${where} ORDER BY r.created_at DESC LIMIT 200
+  `).bind(...binds).all<{
     id: number; received_at: string | null; vehicle_no: string | null; violation_at: string | null;
     employee_name: string | null; employee_division: number | null; employee_team: number | null;
     violation_type_name: string | null; violation_points: number | null; violation_fine_amount: number | null;
     status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
+    reporter_name: string | null;
   }>();
 
   const all = reports.results ?? [];
 
   const rows = all.map(r => {
-    const statusLabel = r.status === 'resolved' ? '対応済' : '対応中';
-    const statusColor = r.status === 'resolved' ? '#059669' : '#dc2626';
     const empStr = r.employee_name
       ? `${r.employee_division ? r.employee_division + '課' : ''}${r.employee_team ? r.employee_team + '班' : ''} ${r.employee_name}`
       : '—';
     const violationStr = r.violation_type_name
       ? `${r.violation_type_name}${typeof r.violation_points === 'number' ? `（${r.violation_points}点/${(r.violation_fine_amount ?? 0).toLocaleString()}円）` : ''}`
       : '—';
-    const resolvedInfo = r.status === 'resolved' && r.resolved_by_name
-      ? `<div style="font-size:11px;color:#059669;margin-top:2px;">対応: ${escHtml(r.resolved_by_name)}${r.resolved_at ? ' ' + r.resolved_at.slice(5, 16) : ''}</div>`
-      : '';
-    return `<tr>
+    return `<tr id="report-row-${r.id}">
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.violation_at ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(violationStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        <span style="color:${statusColor};font-size:12px;font-weight:600;">${escHtml(statusLabel)}</span>
-        ${resolvedInfo}
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(r.reporter_name ?? '—')}</td>
+      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${statusCellHtml(r.status === 'resolved', '対応済')}
+      </td>
+      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
       </td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <button onclick="toggleViolationStatus(${r.id},'${r.status}')"
+        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
           style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
           ${r.status === 'resolved' ? '再開' : '対応済にする'}
         </button>
-        <button onclick="deleteViolation(${r.id},'${escHtml(r.vehicle_no ?? '')}','${escHtml(r.violation_type_name ?? '')}')"
+        <button onclick="showReportLogs(${r.id})"
+          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
+        <button onclick="deleteReport(${r.id},'${escHtml((r.vehicle_no ?? '車番不明') + (r.violation_type_name ? ' / ' + r.violation_type_name : ''))}')"
           style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
       </td>
     </tr>`;
   }).join('');
 
+  const filterBtn = (label: string, s: string) => {
+    const active = statusFilter === s;
+    return `<a href="${ADMIN_PATH}/settings/violations?status=${s}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
+      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
+  };
+
   const content = `
-    ${subHeader('違反報告一覧')}
+    ${subHeader('報告センター')}
+    ${reportTabs('violation')}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+      ${filterBtn('すべて', '')}
+      ${filterBtn('対応中', 'open')}
+      ${filterBtn('対応済', 'resolved')}
+    </div>
     <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
       <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
+        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
       </div>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;min-width:800px;">
@@ -514,36 +637,21 @@ app.get('/settings/violations', async (c) => {
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反発生日時</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反種類（点数/反則金）</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
               <th style="padding:8px 12px;"></th>
             </tr>
           </thead>
           <tbody>
-            ${rows || '<tr><td colspan="8" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+            ${rows || '<tr><td colspan="10" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
           </tbody>
         </table>
       </div>
     </div>
+    ${reportLogModalHtml()}
     <script>
-    var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
-    var ADMIN_NAME = ${JSON.stringify(adminName)};
-    async function toggleViolationStatus(id, current) {
-      const next = current === 'resolved' ? 'open' : 'resolved';
-      const res = await fetch(ADMIN_PATH + '/api/liff/violation-reports/' + id + '/status', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next, resolvedBy: next === 'resolved' ? ADMIN_NAME : null }),
-      });
-      if (res.ok) { location.reload(); }
-      else { alert('更新に失敗しました'); }
-    }
-    async function deleteViolation(id, vehicleNo, type) {
-      const label = (vehicleNo || '車番不明') + (type ? ' / ' + type : '');
-      if (!confirm('この違反報告を削除しますか？\\n「' + label + '」\\n※削除すると元に戻せません')) return;
-      const res = await fetch(ADMIN_PATH + '/api/liff/violation-reports/' + id, { method: 'DELETE' });
-      if (res.ok) { location.reload(); }
-      else { alert('削除に失敗しました'); }
-    }
+    ${reportRowScript('/api/liff/violation-reports', '違反報告', '対応済')}
     </script>
   `;
 
@@ -662,97 +770,100 @@ app.delete('/api/liff-users/:id', async (c) => {
 });
 
 // ===================================================
-// API: 忘れ物ステータス更新
+// API: 報告のステータス更新・削除・対応履歴（忘れ物/事故/違反 共通）
+//   対応者名はセッションから確定し、全操作を report_action_logs に記録する
 // ===================================================
-app.put('/api/liff/lost-items/:id/status', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  const { status, resolvedBy } = await c.req.json<{ status: string; resolvedBy?: string | null }>();
+
+// 各報告種別のテーブル情報と履歴用の概要スナップショット
+const REPORT_KINDS: Record<string, { table: string; summarySql: string }> = {
+  lost_item: { table: 'lost_item_reports', summarySql: "COALESCE(vehicle_no,'車番不明') || ' / ' || COALESCE(item_description,'—')" },
+  accident:  { table: 'accident_reports',  summarySql: "COALESCE(vehicle_no,'車番不明') || ' / ' || COALESCE(accident_type,'—')" },
+  violation: { table: 'violation_reports', summarySql: "COALESCE(vehicle_no,'車番不明') || ' / ' || COALESCE(violation_type_name,'—')" },
+};
+
+async function logReportAction(
+  db: D1Database, kind: string, reportId: number, action: string, adminName: string, summary: string | null
+): Promise<void> {
+  await db.prepare(
+    'INSERT INTO report_action_logs (report_kind, report_id, action, admin_name, summary) VALUES (?, ?, ?, ?, ?)'
+  ).bind(kind, reportId, action, adminName, summary).run();
+}
+
+async function handleReportStatus(c: Context<{ Bindings: Env }>, kind: string) {
+  const info = REPORT_KINDS[kind];
+  const id = parseInt(c.req.param('id') ?? '');
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  const { status } = await c.req.json() as { status: string };
   if (status !== 'open' && status !== 'resolved') return c.json({ error: 'invalid' }, 400);
+
+  // 対応者名はクライアント申告ではなくログインセッションから確定する
+  const adminName = await getAdminName(c);
+  const row = await c.env.DB.prepare(
+    `SELECT id, ${info.summarySql} AS summary FROM ${info.table} WHERE id = ?`
+  ).bind(id).first<{ id: number; summary: string }>();
+  if (!row) return c.json({ error: 'not found' }, 404);
+
   if (status === 'resolved') {
     await c.env.DB.prepare(
-      `UPDATE lost_item_reports SET status = ?, resolved_by_name = ?, resolved_at = datetime('now','localtime') WHERE id = ?`
-    ).bind(status, resolvedBy ?? '管理者', id).run();
+      `UPDATE ${info.table} SET status = ?, resolved_by_name = ?, resolved_at = datetime('now','localtime') WHERE id = ?`
+    ).bind(status, adminName, id).run();
   } else {
     await c.env.DB.prepare(
-      `UPDATE lost_item_reports SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
+      `UPDATE ${info.table} SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
     ).bind(status, id).run();
   }
-  return c.json({ ok: true });
-});
+  await logReportAction(c.env.DB, kind, id, status === 'resolved' ? 'resolved' : 'reopened', adminName, row.summary);
+  return c.json({ ok: true, adminName });
+}
 
-// ===================================================
-// API: 忘れ物報告削除
-// ===================================================
-app.delete('/api/liff/lost-items/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
+async function handleReportDelete(c: Context<{ Bindings: Env }>, kind: string) {
+  const info = REPORT_KINDS[kind];
+  const id = parseInt(c.req.param('id') ?? '');
   if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
-  await c.env.DB.prepare('DELETE FROM lost_item_reports WHERE id = ?').bind(id).run();
-  return c.json({ ok: true });
-});
 
-// ===================================================
-// API: 事故報告ステータス更新
-// ===================================================
-app.put('/api/liff/accident-reports/:id/status', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  const { status, resolvedBy } = await c.req.json<{ status: string; resolvedBy?: string | null }>();
-  if (status !== 'open' && status !== 'resolved') return c.json({ error: 'invalid' }, 400);
-  if (status === 'resolved') {
-    await c.env.DB.prepare(
-      `UPDATE accident_reports SET status = ?, resolved_by_name = ?, resolved_at = datetime('now','localtime') WHERE id = ?`
-    ).bind(status, resolvedBy ?? '管理者', id).run();
-  } else {
-    await c.env.DB.prepare(
-      `UPDATE accident_reports SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
-    ).bind(status, id).run();
-  }
-  return c.json({ ok: true });
-});
+  const adminName = await getAdminName(c);
+  const row = await c.env.DB.prepare(
+    `SELECT id, ${info.summarySql} AS summary FROM ${info.table} WHERE id = ?`
+  ).bind(id).first<{ id: number; summary: string }>();
+  if (!row) return c.json({ error: 'not found' }, 404);
 
-// ===================================================
-// API: 事故報告削除
-// ===================================================
-app.delete('/api/liff/accident-reports/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
+  await c.env.DB.prepare(`DELETE FROM ${info.table} WHERE id = ?`).bind(id).run();
+  await logReportAction(c.env.DB, kind, id, 'deleted', adminName, row.summary);
+  return c.json({ ok: true });
+}
+
+app.put('/api/liff/lost-items/:id/status',        (c) => handleReportStatus(c, 'lost_item'));
+app.delete('/api/liff/lost-items/:id',            (c) => handleReportDelete(c, 'lost_item'));
+app.put('/api/liff/accident-reports/:id/status',  (c) => handleReportStatus(c, 'accident'));
+app.delete('/api/liff/accident-reports/:id',      (c) => handleReportDelete(c, 'accident'));
+app.put('/api/liff/violation-reports/:id/status', (c) => handleReportStatus(c, 'violation'));
+app.delete('/api/liff/violation-reports/:id',     (c) => handleReportDelete(c, 'violation'));
+
+// 対応履歴の取得（行の「履歴」ボタン用）
+// パスを既存の権限マッピング（/api/liff/lost-items 等の前方一致）に乗せるため種別ごとに定義
+const ACTION_LABELS: Record<string, string> = { resolved: '解決済にした', reopened: '再開した', deleted: '削除した' };
+
+async function handleReportLogs(c: Context<{ Bindings: Env }>, kind: string) {
+  const id = parseInt(c.req.param('id') ?? '');
   if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
-  await c.env.DB.prepare('DELETE FROM accident_reports WHERE id = ?').bind(id).run();
-  return c.json({ ok: true });
-});
+  const rows = await c.env.DB.prepare(
+    'SELECT action, admin_name, summary, created_at FROM report_action_logs WHERE report_kind = ? AND report_id = ? ORDER BY created_at DESC, id DESC LIMIT 50'
+  ).bind(kind, id).all<{ action: string; admin_name: string; summary: string | null; created_at: string }>();
+  const logs = (rows.results ?? []).map(r => ({
+    ...r, action_label: ACTION_LABELS[r.action] ?? r.action,
+  }));
+  return c.json({ logs });
+}
 
-// ===================================================
-// API: 違反報告ステータス更新
-// ===================================================
-app.put('/api/liff/violation-reports/:id/status', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  const { status, resolvedBy } = await c.req.json<{ status: string; resolvedBy?: string | null }>();
-  if (status !== 'open' && status !== 'resolved') return c.json({ error: 'invalid' }, 400);
-  if (status === 'resolved') {
-    await c.env.DB.prepare(
-      `UPDATE violation_reports SET status = ?, resolved_by_name = ?, resolved_at = datetime('now','localtime') WHERE id = ?`
-    ).bind(status, resolvedBy ?? '管理者', id).run();
-  } else {
-    await c.env.DB.prepare(
-      `UPDATE violation_reports SET status = ?, resolved_by_name = NULL, resolved_at = NULL WHERE id = ?`
-    ).bind(status, id).run();
-  }
-  return c.json({ ok: true });
-});
-
-// ===================================================
-// API: 違反報告削除
-// ===================================================
-app.delete('/api/liff/violation-reports/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
-  await c.env.DB.prepare('DELETE FROM violation_reports WHERE id = ?').bind(id).run();
-  return c.json({ ok: true });
-});
+app.get('/api/liff/lost-items/:id/logs',        (c) => handleReportLogs(c, 'lost_item'));
+app.get('/api/liff/accident-reports/:id/logs',  (c) => handleReportLogs(c, 'accident'));
+app.get('/api/liff/violation-reports/:id/logs', (c) => handleReportLogs(c, 'violation'));
 
 // ===================================================
 // API: 違反種類マスタ更新
 // ===================================================
 app.put('/api/violation-types/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
+  const id = parseInt(c.req.param('id') ?? '');
   if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
   const { name, points, fine_amount, is_active } = await c.req.json<{
     name: string; points: number; fine_amount: number; is_active: boolean;

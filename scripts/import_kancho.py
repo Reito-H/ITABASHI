@@ -69,7 +69,8 @@ def cell_text(v) -> str:
     if isinstance(v, int) and 40000 < v < 60000:  # Excelシリアル日付が生で入っている場合
         d = datetime.date(1899, 12, 30) + datetime.timedelta(days=v)
         return f'{d.month}/{d.day}'
-    return str(v).strip()
+    s = str(v).strip()
+    return '非' if s == '明' else s  # 「明」記号は廃止。非＝明け扱い
 
 
 def cell_fill(cell):

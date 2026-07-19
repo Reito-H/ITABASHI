@@ -204,16 +204,16 @@ app.put('/api/kancho/members/:id', async (c) => {
 
 // ===== API: 記号マスタ =====
 app.post('/api/kancho/types', async (c) => {
-  const b = await c.req.json<{ code?: string; label?: string; color?: string; section?: string; daily_required?: number; sort_order?: number; use_team_color?: number; counts_as_work?: number; counts_as_off?: number }>();
+  const b = await c.req.json<{ code?: string; label?: string; color?: string; section?: string; daily_required?: number; sort_order?: number; use_team_color?: number; counts_as_work?: number; counts_as_off?: number; show_in_input?: number }>();
   const code = (b.code ?? '').trim();
   if (!code) return c.json({ error: '記号を入力してください' }, 400);
   const section = ['main', 'sub', 'all'].includes(b.section ?? '') ? b.section : 'main';
   const { id: adminId, name } = await adminName(c);
   try {
     await c.env.DB.prepare(
-      'INSERT INTO kancho_shift_types (code, label, color, section, daily_required, sort_order, use_team_color, counts_as_work, counts_as_off) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO kancho_shift_types (code, label, color, section, daily_required, sort_order, use_team_color, counts_as_work, counts_as_off, show_in_input) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     ).bind(code, b.label ?? '', b.color ?? '#e5e7eb', section, b.daily_required ?? 0, b.sort_order ?? 0,
-           b.use_team_color ? 1 : 0, b.counts_as_work ? 1 : 0, b.counts_as_off ? 1 : 0).run();
+           b.use_team_color ? 1 : 0, b.counts_as_work ? 1 : 0, b.counts_as_off ? 1 : 0, b.show_in_input === 0 ? 0 : 1).run();
   } catch {
     return c.json({ error: '同じ記号が既に登録されています' }, 400);
   }
@@ -225,7 +225,7 @@ app.post('/api/kancho/types', async (c) => {
 
 app.put('/api/kancho/types/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
-  const b = await c.req.json<{ code?: string; label?: string; color?: string; section?: string; daily_required?: number; sort_order?: number; is_active?: number; use_team_color?: number; counts_as_work?: number; counts_as_off?: number }>();
+  const b = await c.req.json<{ code?: string; label?: string; color?: string; section?: string; daily_required?: number; sort_order?: number; is_active?: number; use_team_color?: number; counts_as_work?: number; counts_as_off?: number; show_in_input?: number }>();
   const old = await c.env.DB.prepare('SELECT * FROM kancho_shift_types WHERE id = ?').bind(id).first<KanchoShiftType>();
   if (!old) return c.json({ error: '記号が見つかりません' }, 404);
   const code = (b.code ?? old.code).trim();
@@ -234,11 +234,12 @@ app.put('/api/kancho/types/:id', async (c) => {
   const { id: adminId, name } = await adminName(c);
   try {
     await c.env.DB.prepare(
-      'UPDATE kancho_shift_types SET code = ?, label = ?, color = ?, section = ?, daily_required = ?, sort_order = ?, is_active = ?, use_team_color = ?, counts_as_work = ?, counts_as_off = ? WHERE id = ?'
+      'UPDATE kancho_shift_types SET code = ?, label = ?, color = ?, section = ?, daily_required = ?, sort_order = ?, is_active = ?, use_team_color = ?, counts_as_work = ?, counts_as_off = ?, show_in_input = ? WHERE id = ?'
     ).bind(code, b.label ?? old.label, b.color ?? old.color, section,
            b.daily_required ?? old.daily_required,
            b.sort_order ?? old.sort_order, b.is_active ?? old.is_active,
-           b.use_team_color ?? old.use_team_color, b.counts_as_work ?? old.counts_as_work, b.counts_as_off ?? old.counts_as_off, id).run();
+           b.use_team_color ?? old.use_team_color, b.counts_as_work ?? old.counts_as_work, b.counts_as_off ?? old.counts_as_off,
+           b.show_in_input ?? old.show_in_input, id).run();
   } catch {
     return c.json({ error: '同じ記号が既に登録されています' }, 400);
   }

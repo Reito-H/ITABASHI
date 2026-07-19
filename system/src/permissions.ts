@@ -28,7 +28,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/violations/,           'settings.violations'],
   [/^\/settings\/benten/,               'settings.benten'],
   [/^\/settings\/schedule-types/,       'settings.schedule-types'],
-  [/^\/settings\/legacy/,               'settings.schedule-types'],
   [/^\/settings\/coaches/,              'settings.coaches'],
   [/^\/settings\/instructors/,          'settings.instructors'],
   [/^\/settings\/periods/,              'settings.periods'],
@@ -94,6 +93,38 @@ export function requiredPermissionKey(subPath: string): string | null {
     if (re.test(subPath)) return key;
   }
   return null;
+}
+
+// ルートAPI（/{SECRET}/admin 配下ではない /api/...）の書き込みに必要な権限キー。
+// GETは複数ページから参照されるため制限せず、データ変更（非GET）のみ .edit を要求する。
+// 1つのAPIを複数ページが使う場合は、いずれかの .edit があれば許可。
+const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
+  [/^\/api\/line\/announcements/, ['announcements']],
+  [/^\/api\/line\//,              ['line']],
+  [/^\/api\/shift/,               ['shift']],
+  [/^\/api\/instructor-schedule/, ['shift']],
+  [/^\/api\/employees/,           ['staff', 'newcomers', 'shift']],
+  [/^\/api\/sales/,               ['staff']],
+  [/^\/api\/info/,                ['newcomers']],
+  [/^\/api\/events/,              ['events']],
+  [/^\/api\/interviews/,          ['newcomers']],
+  [/^\/api\/schedule-types/,      ['settings.schedule-types']],
+  [/^\/api\/coaches/,             ['settings.coaches']],
+  [/^\/api\/instructors/,         ['settings.instructors']],
+  [/^\/api\/instructor-invite/,   ['settings.instructors']],
+  [/^\/api\/period-settings/,     ['settings.periods']],
+  [/^\/api\/notifications/,       ['settings.notifications']],
+  [/^\/api\/inspection/,          ['inspection']],
+];
+
+// 制限アカウントによるルートAPIへの書き込みを判定（GET/HEAD/OPTIONSは常に許可）
+// マッピングにないパスへの書き込みは安全側に倒して拒否
+export function isRootApiWriteAllowed(perms: string[], path: string, method: string): boolean {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
+  for (const [re, keys] of ROOT_API_WRITE_PERMISSIONS) {
+    if (re.test(path)) return keys.some(k => perms.includes(`${k}.edit`));
+  }
+  return false;
 }
 
 // 制限アカウントがアクセス可能か判定

@@ -12,6 +12,7 @@ import type {
   Employee, ShiftEntry, Instructor, InstructorSchedule, ScheduleType, Coach
 } from '../html/shift';
 import { ADMIN_PATH } from '../config';
+import qrcode from 'qrcode-generator';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -164,7 +165,7 @@ app.post('/setup', async (c) => {
 app.get('/', async (c) => {
   const today = new Date().toISOString().split('T')[0];
 
-  const [empStats, unrespondedEvents, overdueInterviews, lastLogin] = await Promise.all([
+  const [empStats, unrespondedEvents, overdueInterviews, openReports, lastLogin] = await Promise.all([
     c.env.DB.prepare(`
       SELECT
         COUNT(*) AS total,
@@ -180,6 +181,12 @@ app.get('/', async (c) => {
           SELECT emp_id FROM interview_records WHERE interview_date >= ?
         )
     `).bind(today, today).first<{ cnt: number }>(),
+    c.env.DB.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM lost_item_reports WHERE status != 'resolved') AS lost,
+        (SELECT COUNT(*) FROM accident_reports WHERE status != 'resolved') AS accident,
+        (SELECT COUNT(*) FROM violation_reports WHERE status != 'resolved') AS violation
+    `).first<{ lost: number; accident: number; violation: number }>().catch(() => null),
     c.env.DB.prepare('SELECT * FROM login_logs ORDER BY logged_at DESC LIMIT 5').all<{
       id: number; ip: string; country: string; city: string;
       latitude: string; longitude: string; user_agent: string; logged_at: string;
@@ -225,12 +232,20 @@ app.get('/', async (c) => {
     { label: '在籍社員数',       value: empCount.cnt,               sub: `研修中 ${trainingCount.cnt}名 / 配属済 ${regularCount.cnt}名`, color: '#1a3a5c' },
     { label: '未対応の報告',     value: unrespondedEvents?.cnt ?? 0, sub: '嫌なこと報告（管理者メモなし）',                                   color: (unrespondedEvents?.cnt ?? 0) > 0 ? '#b91c1c' : '#374151' },
     { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',                                           color: (overdueInterviews?.cnt ?? 0) > 0 ? '#b45309' : '#374151' },
-  ].map(s => `
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;display:flex;flex-direction:column;gap:6px;">
+    { label: '対応中の現場報告', value: (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0),
+      sub: `忘れ物 ${openReports?.lost ?? 0} / 事故 ${openReports?.accident ?? 0} / 違反 ${openReports?.violation ?? 0}`,
+      color: ((openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0)) > 0 ? '#b91c1c' : '#374151',
+      href: `${ADMIN_PATH}/settings/lost-items` },
+  ].map((s: { label: string; value: number; sub: string; color: string; href?: string }) => {
+    const inner = `
       <div style="font-size:12px;color:#6b7280;font-weight:500;letter-spacing:0.03em;">${escHtml(s.label)}</div>
       <div style="font-size:32px;font-weight:800;color:${s.color};line-height:1;">${s.value}</div>
-      <div style="font-size:11px;color:#9ca3af;">${escHtml(s.sub)}</div>
-    </div>`).join('');
+      <div style="font-size:11px;color:#9ca3af;">${escHtml(s.sub)}</div>`;
+    const style = 'background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;display:flex;flex-direction:column;gap:6px;';
+    return s.href
+      ? `<a href="${s.href}" style="${style}text-decoration:none;">${inner}</a>`
+      : `<div style="${style}">${inner}</div>`;
+  }).join('');
 
   const eventRows = (recentEvents.results ?? []).length === 0
     ? '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">報告はありません</div>'
@@ -650,32 +665,40 @@ app.get('/shift/print/:empId', async (c) => {
 // ===== 設定トップ（カード一覧）=====
 app.get('/settings', (c) => {
   const ADMIN = ADMIN_PATH;
-  const cards = [
-    { href: `${ADMIN}/settings/accounts`,             perm: 'settings.accounts',       title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
-    { href: `${ADMIN}/settings/liff`,                 perm: 'settings.liff',           title: 'LINEリフ権限管理', desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
-    { href: `${ADMIN}/settings/lost-items`,           perm: 'settings.lost-items',     title: '忘れ物報告一覧',   desc: '社員報告・客問い合わせの履歴と状態管理', highlight: true },
-    { href: `${ADMIN}/settings/accidents`,            perm: 'settings.accidents',      title: '事故報告一覧',     desc: '事故報告の履歴・進捗管理', highlight: true },
-    { href: `${ADMIN}/settings/violations`,           perm: 'settings.violations',     title: '違反報告一覧',     desc: '乗務員の違反報告の履歴・進捗管理', highlight: true },
-    { href: `${ADMIN}/settings/violation-types`,      perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
-    { href: `${ADMIN}/settings/benten`,               perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理', highlight: true },
-    { href: `${ADMIN}/announcements`,                 perm: 'announcements',           title: 'お知らせ配信',     desc: 'LINEで一斉送信・配信履歴の確認' },
-    { href: `${ADMIN}/line`,                          perm: 'line',                    title: 'LINE管理',         desc: '新人招待コード発行・紐付け状況' },
-    { href: `${ADMIN}/settings/schedule-types`,       perm: 'settings.schedule-types', title: 'シフト区分',       desc: 'プリセットボタンの区分名・色・目標回数' },
-    { href: `${ADMIN}/settings/coaches`,              perm: 'settings.coaches',        title: '研修担当',         desc: 'シフト表の研修担当者（コーチ）一覧' },
-    { href: `${ADMIN}/settings/instructors`,          perm: 'settings.instructors',    title: '班長・指導者',     desc: 'シフト表下部の班長・指導者一覧' },
-    { href: `${ADMIN}/settings/periods`,              perm: 'settings.periods',        title: '月度設定',         desc: '各月度の開始日・締め日の設定' },
-    { href: `${ADMIN}/settings/notifications`,        perm: 'settings.notifications',  title: 'LINE通知設定',     desc: '班長向け定時通知の送信時刻・有効/無効設定' },
-    { href: `${ADMIN}/settings/offices`,              perm: 'settings.offices',        title: '営業所',           desc: '各営業所の電話番号・住所の管理' },
-    { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド', desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
-    { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',       title: 'チュートリアル',   desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
-    { href: `${ADMIN}/settings/status`,               perm: 'settings.status',         title: 'システムステータス', desc: 'サーバー・DB・API・通信状態の確認・アクセスQRコード' },
+  type SettingCard = { href: string; perm: string; title: string; desc: string; highlight?: boolean };
+  // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
+  const groups: Array<{ heading: string; cards: SettingCard[] }> = [
+    { heading: '日々の運用', cards: [
+      { href: `${ADMIN}/settings/lost-items`,  perm: 'settings.lost-items', title: '忘れ物報告',   desc: '報告センター — 社員報告・客問い合わせの履歴と状態管理', highlight: true },
+      { href: `${ADMIN}/settings/accidents`,   perm: 'settings.accidents',  title: '事故報告',     desc: '報告センター — 事故報告の履歴・進捗管理', highlight: true },
+      { href: `${ADMIN}/settings/violations`,  perm: 'settings.violations', title: '違反報告',     desc: '報告センター — 乗務員の違反報告の履歴・進捗管理', highlight: true },
+    ]},
+    { heading: '権限・アカウント', cards: [
+      { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
+      { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINEリフ権限管理',   desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
+    ]},
+    { heading: 'シフト関連の設定', cards: [
+      { href: `${ADMIN}/settings/schedule-types`, perm: 'settings.schedule-types', title: 'シフト区分',   desc: 'プリセットボタンの区分名・色・目標回数' },
+      { href: `${ADMIN}/settings/coaches`,        perm: 'settings.coaches',        title: '研修担当',     desc: 'シフト表の研修担当者（コーチ）一覧' },
+      { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
+      { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },
+      { href: `${ADMIN}/settings/benten`,         perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理' },
+    ]},
+    { heading: 'LINE関連', cards: [
+      { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理',     desc: '新人招待コード発行・紐付け状況' },
+      { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定', desc: '朝レポート・報告アラート・ベンテン/班長通知の時刻とON/OFF' },
+    ]},
+    { heading: 'マスタ管理', cards: [
+      { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所',              desc: '各営業所の電話番号・住所の管理' },
+      { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
+    ]},
+    { heading: 'ガイド・システム', cards: [
+      { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
+      { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド',     desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
+      { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・API・通信状態の確認・アクセスQRコード' },
+    ]},
   ];
-  const html = `
-    <div style="max-width:560px;">
-      <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
-
-      <div style="display:flex;flex-direction:column;gap:12px;">
-        ${cards.map((card: { href: string; perm: string; title: string; desc: string; highlight?: boolean }) => `
+  const cardHtml = (card: SettingCard) => `
           <a href="${card.href}" data-perm-key="${card.perm}" style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
             onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
             <div>
@@ -683,8 +706,18 @@ app.get('/settings', (c) => {
               <div style="font-size:12px;color:#6b7280;">${card.desc}</div>
             </div>
             <div style="margin-left:auto;color:#9ca3af;font-size:18px;">›</div>
-          </a>`).join('')}
-      </div>
+          </a>`;
+  const html = `
+    <div style="max-width:560px;">
+      <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
+
+      ${groups.map(g => `
+      <div style="margin-bottom:24px;">
+        <div style="font-size:12px;font-weight:700;color:#9ca3af;letter-spacing:0.08em;margin-bottom:10px;">${g.heading}</div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${g.cards.map(cardHtml).join('')}
+        </div>
+      </div>`).join('')}
     </div>`;
   return c.html(layout('設定', html, 'settings'));
 });
@@ -779,23 +812,28 @@ app.get('/settings/schedule-types', async (c) => {
     }
     async function saveAll() {
       var btn = document.getElementById('save-all-btn');
-      btn.disabled = true; btn.textContent = '保存中...';
       var ids = Array.from(document.querySelectorAll('tr[id^="row-"]')).map(function(r) { return parseInt(r.id.replace('row-','')); });
-      var errors = [];
+      var items = [];
       for (var i = 0; i < ids.length; i++) {
         var id = ids[i];
         var code = document.getElementById('code-' + id).value.trim();
         var color = document.getElementById('color-' + id).value;
         var sort_order = parseInt(document.getElementById('sort-' + id).value) || 0;
         var targetEl = document.getElementById('target-' + id); var target = targetEl.value ? parseInt(targetEl.value) : null;
-        if (!code) { errors.push(id + '行目: 区分名が空です'); continue; }
-        var res = await fetch('/api/schedule-types/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code,color,sort_order,target}) });
-        if (!res.ok) errors.push(code + ' の保存に失敗');
-        else { var el = document.getElementById('changed-' + id); if (el) el.style.display = 'none'; }
+        if (!code) { alert('区分名が空の行があります'); return; }
+        items.push({id:id,code:code,color:color,sort_order:sort_order,target:target});
       }
-      btn.disabled = false; btn.textContent = '変更を一括保存';
-      if (errors.length) alert('エラー:\\n' + errors.join('\\n'));
-      else { btn.textContent = '✓ 保存完了'; setTimeout(function(){ btn.textContent = '変更を一括保存'; }, 2000); }
+      btn.disabled = true; btn.textContent = '保存中...';
+      var res = await fetch('/api/schedule-types/bulk', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(items) });
+      btn.disabled = false;
+      if (!res.ok) {
+        btn.textContent = '変更を一括保存';
+        var j = await res.json().catch(function(){ return {}; });
+        alert('保存に失敗しました' + (j.error ? ': ' + j.error : ''));
+      } else {
+        ids.forEach(function(id) { var el = document.getElementById('changed-' + id); if (el) el.style.display = 'none'; });
+        btn.textContent = '✓ 保存完了'; setTimeout(function(){ btn.textContent = '変更を一括保存'; }, 2000);
+      }
     }
     async function toggleType(id, current) {
       await fetch('/api/schedule-types/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({is_active: current?0:1}) });
@@ -1022,17 +1060,21 @@ app.get('/settings/periods', async (c) => {
     <script>
     async function saveAllPeriods() {
       var btn = document.getElementById('save-period-btn');
-      btn.disabled = true; btn.textContent = '保存中...';
-      var errors = [];
+      var items = [];
       for (var m = 1; m <= 12; m++) {
         var start = parseInt(document.getElementById('ps_start_' + m).value);
         var close = parseInt(document.getElementById('ps_close_' + m).value);
-        if (!start||start<1||start>31||!close||close<1||close>31) { errors.push(m + '月度: 日付が不正です'); continue; }
-        var res = await fetch('/api/period-settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({month:m,start_day:start,close_day:close}) });
-        if (!res.ok) errors.push(m + '月度の保存に失敗');
+        if (!start||start<1||start>31||!close||close<1||close>31) { alert(m + '月度: 日付が不正です'); return; }
+        items.push({month:m,start_day:start,close_day:close});
       }
+      btn.disabled = true; btn.textContent = '保存中...';
+      var res = await fetch('/api/period-settings', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(items) });
       btn.disabled = false;
-      if (errors.length) { btn.textContent = '全月度を一括保存'; alert('エラー:\\n' + errors.join('\\n')); }
+      if (!res.ok) {
+        btn.textContent = '全月度を一括保存';
+        var j = await res.json().catch(function(){ return {}; });
+        alert('保存に失敗しました' + (j.error ? ': ' + j.error : ''));
+      }
       else { btn.textContent = '✓ 保存完了'; setTimeout(function(){ btn.textContent = '全月度を一括保存'; }, 2500); }
     }
     </script>`;
@@ -1045,13 +1087,15 @@ app.get('/settings/notifications', async (c) => {
     type: string; send_hour: number; send_minute: number; is_enabled: number; last_sent_date: string | null; updated_at: string;
   }>();
 
-  const TYPE_LABELS: Record<string, { label: string; desc: string }> = {
-    morning_report:   { label: '朝の出勤レポート',       desc: '当直・出勤担当者一覧 / 今月度平均売上 / 未対応報告数' },
-    bad_event_alert:  { label: '嫌なこと報告アラート',   desc: '未対応の嫌なこと報告がある場合のみ送信' },
+  const TYPE_LABELS: Record<string, { label: string; desc: string; dest: string }> = {
+    morning_report:     { label: '朝の出勤レポート',       desc: '当直・出勤担当者一覧 / 今月度平均売上 / 未対応報告数', dest: 'LINE連携済みの班長・指導者' },
+    bad_event_alert:    { label: '嫌なこと報告アラート',   desc: '未対応の嫌なこと報告がある場合のみ送信', dest: 'LINE連携済みの班長・指導者' },
+    benten_shift_daily: { label: 'ベンテンシフト通知',     desc: '当日のベンテンクラブシフトをLINEグループへ自動送信（設定 → ベンテンクラブ シフト でも管理可）', dest: 'ベンテンクラブのLINEグループ' },
+    kancho_attendance:  { label: '班長出勤通知',           desc: '本日の班長シフト出勤者一覧を送信（班長シフト画面でもON/OFF可）', dest: '班長シフトの通知先グループ' },
   };
 
   const rows = (settingsRes.results ?? []).map((s: any) => {
-    const info = TYPE_LABELS[s.type] ?? { label: s.type, desc: '' };
+    const info = TYPE_LABELS[s.type] ?? { label: s.type, desc: '', dest: '' };
     const hh = String(s.send_hour).padStart(2, '0');
     const mm = String(s.send_minute).padStart(2, '0');
     return `
@@ -1060,6 +1104,7 @@ app.get('/settings/notifications', async (c) => {
         <div>
           <div style="font-size:15px;font-weight:700;color:#1e3a5f;">${escHtml(info.label)}</div>
           <div style="font-size:12px;color:#6b7280;margin-top:3px;">${escHtml(info.desc)}</div>
+          ${info.dest ? `<div style="font-size:11px;color:#6b7280;margin-top:4px;">送信先: ${escHtml(info.dest)}</div>` : ''}
           <div style="font-size:11px;color:#9ca3af;margin-top:4px;">最終送信: ${escHtml(s.last_sent_date ?? '未送信')}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
@@ -1090,7 +1135,7 @@ app.get('/settings/notifications', async (c) => {
 
   const html = settingsSubHeader('LINE通知設定') + `
     <div style="max-width:640px;">
-      <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">LINE連携済みの班長・指導者全員に送信されます。連携者がいない場合は送信されません。</p>
+      <p style="font-size:13px;color:#6b7280;margin-bottom:16px;">すべての定時LINE通知をここで管理できます。送信先が未設定・未連携の通知は送信されません。</p>
       ${rows || '<p style="color:#9ca3af;font-size:13px;">通知設定が見つかりません。migration_008.sql を実行してください。</p>'}
     </div>
     <script>
@@ -1341,6 +1386,13 @@ app.get('/settings/tutorial', (c) => {
     <a href="#vehicle">1-10. 車両検索 — 無線番号・ナンバーで車両照会</a>
     <a href="#line">1-11. LINE管理 — ユーザー連携状況</a>
     <a href="#settings">1-12. 設定 — 各種マスタ管理</a>
+    <a href="#kancho">1-13. 班長シフト — 班長・指導者の月間シフト</a>
+    <a href="#staff-search">1-14. 社員絞り込み検索 — 条件を組み合わせた検索</a>
+    <a href="#inspection">1-15. 点検管理 — 車両点検スケジュール</a>
+    <a href="#manual-bot">1-16. マニュアルBot — AIチャットで質問</a>
+    <a href="#report-center">1-17. 報告センター — 忘れ物・事故・違反</a>
+    <a href="#benten-shift">1-18. ベンテンクラブ シフト</a>
+    <a href="#line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
     <div class="tut-toc-section" style="margin-top:12px;">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
     <a href="#veh-what">2-1. 車番検索でできること</a>
     <a href="#veh-how">2-2. 検索の方法</a>
@@ -1589,18 +1641,148 @@ app.get('/settings/tutorial', (c) => {
   <!-- 1-12 設定 -->
   <div class="tut-section" id="settings">
     <h3><span class="num">12</span>設定 — 各種マスタ管理</h3>
+    <p style="font-size:13px;">設定ページは次の6グループに分かれています。アカウントに権限のない項目は表示されません。</p>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍日々の運用</p>
     <table class="tut-table">
-      <tr><th>設定項目</th><th>内容</th></tr>
+      <tr><th>項目</th><th>内容</th></tr>
+      <tr><td>忘れ物報告 / 事故報告 / 違反報告</td><td>報告センター。タブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
+    </table>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍権限・アカウント</p>
+    <table class="tut-table">
+      <tr><th>項目</th><th>内容</th></tr>
+      <tr><td>アカウント権限管理</td><td>管理画面アカウントの作成と、機能ごとの閲覧/編集権限の設定</td></tr>
+      <tr><td>LINEリフ権限管理</td><td>統括管理者・運行管理者・車番管理者などLINE側の権限割り当てとユーザー一覧</td></tr>
+    </table>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍シフト関連の設定</p>
+    <table class="tut-table">
+      <tr><th>項目</th><th>内容</th></tr>
       <tr><td>シフト区分</td><td>実研・公休・座学などの区分名・背景色・月間目標回数を追加・編集</td></tr>
       <tr><td>研修担当</td><td>シフト入力時に選択できるコーチ（研修担当者）の名前を登録</td></tr>
       <tr><td>班長・指導者</td><td>シフト表下部の指導者スケジュール欄を管理。LINE連携の招待コード発行も可能</td></tr>
       <tr><td>月度設定</td><td>各月の締め日・開始日を設定（例：17日締め 18日開始）</td></tr>
-      <tr><td>LINE通知設定</td><td>班長へのシフトリマインダーなど定時通知の有効/無効・送信時刻を設定</td></tr>
-      <tr><td>車両検索管理者</td><td>LINEで「車番連携」と送信し、自己申請で権限を取得（管理画面からの手動登録は廃止）</td></tr>
+      <tr><td>ベンテンクラブ シフト</td><td>ベンテンクラブの会員・グループ・シフト種別・LINE自動送信の管理（詳細は 1-18）</td></tr>
+    </table>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍LINE関連</p>
+    <table class="tut-table">
+      <tr><th>項目</th><th>内容</th></tr>
+      <tr><td>LINE管理</td><td>新人向け招待コードの発行・紐付け状況の確認</td></tr>
+      <tr><td>LINE通知設定</td><td>朝の出勤レポート・嫌なこと報告アラート・ベンテンシフト通知・班長出勤通知の時刻とON/OFFをまとめて管理</td></tr>
+    </table>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍マスタ管理</p>
+    <table class="tut-table">
+      <tr><th>項目</th><th>内容</th></tr>
+      <tr><td>営業所</td><td>各営業所・連絡先の電話番号・住所（車両検索の結果にも表示される）</td></tr>
+      <tr><td>違反種類・点数/反則金</td><td>違反報告フォームの選択肢と点数・反則金の管理</td></tr>
+    </table>
+
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍ガイド・システム</p>
+    <table class="tut-table">
+      <tr><th>項目</th><th>内容</th></tr>
+      <tr><td>チュートリアル</td><td>このマニュアル（印刷・PDF出力対応）</td></tr>
       <tr><td>車番検索ガイド</td><td>班長・指導者向けLINE車番検索の使い方ページ（印刷・配布用）</td></tr>
       <tr><td>システムステータス</td><td>サーバー・DB・APIの稼働状態確認。管理画面アクセスQRコードの表示・ダウンロードもここから</td></tr>
-      <tr><td>チュートリアル</td><td>このマニュアル（印刷・PDF出力対応）</td></tr>
     </table>
+    <div class="tut-note">車番検索の権限は、本人がLINEで「車番連携」と送信して自己申請する方式です（管理画面からの手動登録は廃止）。</div>
+  </div>
+
+  <!-- 1-13 班長シフト -->
+  <div class="tut-section" id="kancho">
+    <h3><span class="num">13</span>班長シフト — 班長・指導者の月間シフト</h3>
+    <p style="font-size:13px;">班長・指導者の月間シフト表をWebで管理します。紙のExcel運用の置き換えです。</p>
+    <ol class="tut-steps">
+      <li>左メニュー「班長シフト」を開き、月を選択</li>
+      <li>「編集モード」でセルをタップして勤務区分（日勤・当直・公休など）を入力</li>
+      <li>「一括保存」で確定 — 保存前のセルは黄色の点線で表示されます</li>
+    </ol>
+    <table class="tut-table">
+      <tr><th>機能</th><th>内容</th></tr>
+      <tr><td>希望マーク</td><td>本人がLINE（LIFF）から出した希望はセル右上に赤い三角で表示</td></tr>
+      <tr><td>メモ</td><td>日付ごとの申し送りメモを残せる</td></tr>
+      <tr><td>印刷</td><td>印刷用ページからA4で出力可能</td></tr>
+      <tr><td>0時LINE通知</td><td>毎日0時に「本日の出勤者」を通知（設定 → LINE通知設定 でも管理可）</td></tr>
+    </table>
+    <div class="tut-tip">閲覧だけできる人と編集できる人は、アカウント権限管理で分けられます。</div>
+  </div>
+
+  <!-- 1-14 社員絞り込み検索 -->
+  <div class="tut-section" id="staff-search">
+    <h3><span class="num">14</span>社員絞り込み検索 — 条件を組み合わせた検索</h3>
+    <p style="font-size:13px;">名前・社員番号のキーワードに加えて、課・班・勤務形態・在籍状態・入社区分・入社日/退職日の期間・年齢・車種などの条件を組み合わせて社員を検索できます。</p>
+    <ol class="tut-steps">
+      <li>左メニュー「社員絞り込み検索」を開く</li>
+      <li>条件を選んで「検索」— 条件は複数選択できます</li>
+      <li>結果の氏名をクリックすると社員詳細ページへ移動</li>
+    </ol>
+    <div class="tut-tip">ふりがな（カタカナ）でも検索できます。条件をやり直すときは「リセット」を押してください。</div>
+  </div>
+
+  <!-- 1-15 点検管理 -->
+  <div class="tut-section" id="inspection">
+    <h3><span class="num">15</span>点検管理 — 車両点検スケジュール</h3>
+    <p style="font-size:13px;">課ごとの車両点検予定（車番・点検種別・出発時刻）を月表で管理します。</p>
+    <ol class="tut-steps">
+      <li>左メニュー「点検管理」を開き、月と課を選択</li>
+      <li>日付をタップして車番・点検種別・時刻を入力</li>
+      <li>紙の予定表の写真を取り込むと、AIが読み取って一括登録することもできます</li>
+    </ol>
+    <div class="tut-warn">写真のAI読み取りは日付ズレなどの誤読が起きることがあります。取り込んだ後は必ず紙の原本と目で照合してください。</div>
+  </div>
+
+  <!-- 1-16 マニュアルBot -->
+  <div class="tut-section" id="manual-bot">
+    <h3><span class="num">16</span>マニュアルBot — AIチャットで質問</h3>
+    <p style="font-size:13px;">登録済みのマニュアル（S.RIDE・決済・チケット・メーター操作など）をもとに、AIがチャット形式で質問に答えます。</p>
+    <ol class="tut-steps">
+      <li>左メニュー「マニュアルBot」を開く</li>
+      <li>カテゴリボタンを押すか、入力欄に質問を書いて送信</li>
+      <li>回答の根拠になったマニュアル名も表示されます</li>
+    </ol>
+    <div class="tut-note">AIはマニュアルに書かれていないことには答えられません。回答が「わからない」の場合は事務所に確認してください。</div>
+  </div>
+
+  <!-- 1-17 報告センター -->
+  <div class="tut-section" id="report-center">
+    <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反</h3>
+    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF）から送った報告を、設定 → 報告センター（忘れ物/事故/違反タブ）で確認・管理します。</p>
+    <ol class="tut-steps">
+      <li>設定 → 「忘れ物報告」「事故報告」「違反報告」のいずれかを開く（上部タブで切り替え）</li>
+      <li>「対応中」「解決済」ボタンで絞り込み</li>
+      <li>対応が終わったら「解決済にする」— ログイン中のアカウント名と日時が「対応者」列に自動で記録されます</li>
+    </ol>
+    <table class="tut-table">
+      <tr><th>列</th><th>内容</th></tr>
+      <tr><td>報告者</td><td>LINEからこの報告を送った人（運行管理者など）</td></tr>
+      <tr><td>対応者</td><td>「解決済にする」を押した管理画面アカウントと日時</td></tr>
+      <tr><td>履歴ボタン</td><td>この報告に対する解決・再開・削除の全操作と操作者を表示</td></tr>
+    </table>
+    <div class="tut-tip">ダッシュボードの「対応中の現場報告」に未対応件数が表示されます。0でない場合は早めに確認してください。</div>
+    <div class="tut-note">報告を削除してもデータ上の履歴には「誰が・いつ・何を削除したか」が残ります。</div>
+  </div>
+
+  <!-- 1-18 ベンテンクラブ シフト -->
+  <div class="tut-section" id="benten-shift">
+    <h3><span class="num">18</span>ベンテンクラブ シフト</h3>
+    <p style="font-size:13px;">ベンテンクラブ会員のシフトを管理し、LINEグループへ毎日自動送信します。</p>
+    <table class="tut-table">
+      <tr><th>設定項目</th><th>内容</th></tr>
+      <tr><td>会員</td><td>会員の名前・所属グループ・表示順の管理</td></tr>
+      <tr><td>グループ / シフト種別</td><td>グループ分けと、H勤・D勤などの種別・色の管理</td></tr>
+      <tr><td>表示期間</td><td>LIFFのシフト表に表示する期間の追加・削除</td></tr>
+      <tr><td>LINE自動送信</td><td>毎日決まった時刻に「本日出勤者」をグループへ送信。時刻・ON/OFFはLINE通知設定と共通</td></tr>
+    </table>
+    <div class="tut-note">グループ連携は、Botをグループに招待して「ベンテングループ登録」と送信すると完了します。</div>
+  </div>
+
+  <!-- 1-19 LINE利用状況 -->
+  <div class="tut-section" id="line-usage">
+    <h3><span class="num">19</span>LINE利用状況 — 操作ログの確認</h3>
+    <p style="font-size:13px;">LINE連携ユーザーが「いつ・どの機能を使ったか」を確認できます。今日・7日間・30日間の利用者数と、ユーザーごとの利用回数・最終利用日時が一覧になります。</p>
+    <div class="tut-note">このページはフル権限の管理者（admin）だけが見られます。</div>
   </div>
 
   <hr class="tut-divider">
@@ -1721,337 +1903,6 @@ app.get('/settings/tutorial', (c) => {
 </div>`;
 
   return c.html(layout('チュートリアル', html, 'settings'));
-});
-
-// ===== 旧 /settings（単一ページ版）は削除 =====
-app.get('/settings/legacy', async (c) => {
-  const [typesRes, coachesRes, instructorsRes, periodCfg] = await Promise.all([
-    c.env.DB.prepare('SELECT * FROM schedule_types ORDER BY sort_order, id')
-      .all<{ id: number; code: string; color: string; sort_order: number; is_active: number; target: number | null }>(),
-    c.env.DB.prepare('SELECT * FROM coaches ORDER BY sort_order, id')
-      .all<{ id: number; name: string; is_active: number; sort_order: number }>(),
-    c.env.DB.prepare('SELECT * FROM instructors ORDER BY sort_order, id')
-      .all<{ id: number; name: string; role: string | null; is_active: number; sort_order: number }>(),
-    getPeriodSettings(c.env.DB),
-  ]);
-  const types = typesRes;
-
-  const rows = (types.results ?? []).map((t: any) => `
-    <tr id="row-${t.id}" style="opacity:${t.is_active ? '1' : '0.45'};">
-      <td class="px-3 py-2 border-b">
-        <input type="text" value="${escHtml(t.code)}" id="code-${t.id}"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:90px;">
-      </td>
-      <td class="px-3 py-2 border-b">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <input type="color" value="${escHtml(t.color)}" id="color-${t.id}" style="width:36px;height:28px;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
-          <span style="background:${escHtml(t.color)};padding:2px 10px;border-radius:4px;border:1px solid #d1d5db;font-size:13px;">${escHtml(t.code)}</span>
-        </div>
-      </td>
-      <td class="px-3 py-2 border-b">
-        <input type="number" value="${t.sort_order}" id="sort-${t.id}" min="0" max="99"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:55px;">
-      </td>
-      <td class="px-3 py-2 border-b">
-        <div style="display:flex;align-items:center;gap:4px;">
-          <input type="number" value="${t.target ?? ''}" id="target-${t.id}" min="1" max="999" placeholder="—"
-            style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:58px;">
-          <span style="font-size:11px;color:#9ca3af;">回</span>
-        </div>
-      </td>
-      <td class="px-3 py-2 border-b">
-        <div style="display:flex;gap:4px;">
-          <button onclick="saveType(${t.id})" style="padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;font-size:12px;cursor:pointer;">保存</button>
-          <button onclick="toggleType(${t.id},${t.is_active})" style="padding:4px 8px;background:${t.is_active ? '#f3f4f6' : '#bbf7d0'};border:1px solid #d1d5db;border-radius:4px;font-size:12px;cursor:pointer;">
-            ${t.is_active ? '非表示' : '表示'}
-          </button>
-          <button onclick="deleteType(${t.id},'${escHtml(t.code)}')" style="padding:4px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:12px;cursor:pointer;">削除</button>
-        </div>
-      </td>
-    </tr>`).join('');
-
-  const content = `
-    <div class="bg-white rounded-xl shadow p-6 max-w-2xl">
-      <h3 class="font-semibold text-gray-700 mb-4">シフト区分の設定</h3>
-      <p class="text-sm text-gray-500 mb-4">シフト管理画面のプリセットボタンと凡例に使われます。<strong>目標回数</strong>を設定するとシフト表の集計ボタンで達成状況を確認できます。</p>
-      <table class="w-full mb-6">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">区分名</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">色</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">順番</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">目標回数</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">操作</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-
-      <div style="border-top:1px solid #e5e7eb;padding-top:16px;">
-        <h4 class="text-sm font-semibold text-gray-700 mb-3">新しい区分を追加</h4>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <input type="text" id="new-code" placeholder="区分名（例: 実地）"
-            style="border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;width:130px;">
-          <input type="color" id="new-color" value="#e0f2fe"
-            style="width:40px;height:34px;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;">
-          <input type="number" id="new-sort" value="99" min="0" max="99"
-            style="border:1px solid #d1d5db;border-radius:6px;padding:7px 8px;font-size:13px;width:60px;">
-          <button onclick="addType()" style="padding:7px 18px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;">追加</button>
-        </div>
-      </div>
-    </div>
-    <script>
-    async function saveType(id) {
-      const code = document.getElementById('code-' + id).value.trim();
-      const color = document.getElementById('color-' + id).value;
-      const sort_order = parseInt(document.getElementById('sort-' + id).value) || 0;
-      const targetVal = document.getElementById('target-' + id).value;
-      const target = targetVal ? parseInt(targetVal) : null;
-      if (!code) { alert('区分名を入力してください'); return; }
-      const res = await fetch('/api/schedule-types/' + id, {
-        method: 'PUT',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ code, color, sort_order, target })
-      });
-      if (res.ok) { location.reload(); } else { alert('保存に失敗しました'); }
-    }
-    async function toggleType(id, current) {
-      await fetch('/api/schedule-types/' + id, {
-        method: 'PUT', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ is_active: current ? 0 : 1 })
-      });
-      location.reload();
-    }
-    async function deleteType(id, name) {
-      if (!confirm('「' + name + '」を削除しますか？')) return;
-      await fetch('/api/schedule-types/' + id, { method: 'DELETE' });
-      location.reload();
-    }
-    async function addType() {
-      const code = document.getElementById('new-code').value.trim();
-      const color = document.getElementById('new-color').value;
-      const sort_order = parseInt(document.getElementById('new-sort').value) || 99;
-      if (!code) { alert('区分名を入力してください'); return; }
-      const res = await fetch('/api/schedule-types', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ code, color, sort_order })
-      });
-      if (res.ok) { location.reload(); }
-      else { const j = await res.json(); alert(j.error ?? '追加に失敗しました'); }
-    }
-    </script>
-  `;
-  const coachRows = (coachesRes.results ?? []).map((c: any) => `
-    <tr style="opacity:${c.is_active ? 1 : 0.4}">
-      <td class="px-3 py-2 border-b">
-        <input type="text" value="${escHtml(c.name)}" id="cname-${c.id}"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:120px;">
-      </td>
-      <td class="px-3 py-2 border-b">
-        <input type="number" value="${c.sort_order}" id="csort-${c.id}" min="0" max="99"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:55px;">
-      </td>
-      <td class="px-3 py-2 border-b">
-        <div style="display:flex;gap:4px;">
-          <button onclick="saveCoach(${c.id})" style="padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;font-size:12px;cursor:pointer;">保存</button>
-          <button onclick="deleteCoach(${c.id},'${escHtml(c.name)}')" style="padding:4px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:12px;cursor:pointer;">削除</button>
-        </div>
-      </td>
-    </tr>`).join('');
-
-  const coachSection = `
-    <div class="bg-white rounded-xl shadow p-6 max-w-2xl mt-6">
-      <h3 class="font-semibold text-gray-700 mb-1">研修担当（コーチ）の登録</h3>
-      <p class="text-sm text-gray-500 mb-4">シフト管理画面の各セル3行目に表示されます。</p>
-      <table class="w-full mb-4">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">氏名</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">順番</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">操作</th>
-          </tr>
-        </thead>
-        <tbody id="coach-list">${coachRows || '<tr><td colspan="3" class="px-3 py-4 text-center text-sm text-gray-400 border-b">未登録</td></tr>'}</tbody>
-      </table>
-      <div style="border-top:1px solid #e5e7eb;padding-top:14px;">
-        <h4 class="text-sm font-semibold text-gray-700 mb-2">新規追加</h4>
-        <div style="display:flex;gap:8px;align-items:center;">
-          <input type="text" id="new-coach-name" placeholder="氏名（例: 山田 太郎）"
-            style="border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;flex:1;">
-          <button onclick="addCoach()" style="padding:7px 18px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;white-space:nowrap;">追加</button>
-        </div>
-      </div>
-    </div>
-    <script>
-    async function saveCoach(id) {
-      const name = document.getElementById('cname-' + id).value.trim();
-      const sort_order = parseInt(document.getElementById('csort-' + id).value) || 0;
-      if (!name) { alert('名前を入力してください'); return; }
-      const res = await fetch('/api/coaches/' + id, {
-        method: 'PUT', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name, sort_order })
-      });
-      if (res.ok) location.reload(); else alert('保存に失敗しました');
-    }
-    async function deleteCoach(id, name) {
-      if (!confirm(name + ' を削除しますか？')) return;
-      await fetch('/api/coaches/' + id, { method: 'DELETE' });
-      location.reload();
-    }
-    async function addCoach() {
-      const name = document.getElementById('new-coach-name').value.trim();
-      if (!name) { alert('名前を入力してください'); return; }
-      const res = await fetch('/api/coaches', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name })
-      });
-      if (res.ok) location.reload();
-      else { const j = await res.json(); alert(j.error ?? '追加に失敗しました'); }
-    }
-    </script>`;
-
-  const MONTH_NAMES = ['1月度','2月度','3月度','4月度','5月度','6月度','7月度','8月度','9月度','10月度','11月度','12月度'];
-  const periodRows = Array.from({length: 12}, (_, i) => {
-    const m = i + 1;
-    const cfg = periodCfg[m] ?? { close_day: 17, start_day: 18 };
-    return `<tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${MONTH_NAMES[i]}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">
-        前月 <input type="number" id="ps_start_${m}" value="${cfg.start_day}" min="1" max="31"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 6px;font-size:13px;width:52px;text-align:center;"> 日〜
-      </td>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">
-        当月 <input type="number" id="ps_close_${m}" value="${cfg.close_day}" min="1" max="31"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 6px;font-size:13px;width:52px;text-align:center;"> 日
-      </td>
-      <td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">
-        <button onclick="savePeriod(${m})" style="padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;font-size:12px;cursor:pointer;">保存</button>
-      </td>
-    </tr>`;
-  }).join('');
-
-  const periodSection = `
-    <div class="bg-white rounded-xl shadow p-6 max-w-2xl mt-6">
-      <h3 class="font-semibold text-gray-700 mb-1">月度設定</h3>
-      <p class="text-sm text-gray-500 mb-4">月度ごとの開始日（前月）と締め日（当月）を設定します。<br>例: 6月度 = 前月18日〜当月17日</p>
-      <table class="w-full">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">月度</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">開始（前月）</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">締め（当月）</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">操作</th>
-          </tr>
-        </thead>
-        <tbody>${periodRows}</tbody>
-      </table>
-    </div>
-    <script>
-    async function savePeriod(month) {
-      var start = parseInt(document.getElementById('ps_start_' + month).value);
-      var close = parseInt(document.getElementById('ps_close_' + month).value);
-      if (!start || start < 1 || start > 31 || !close || close < 1 || close > 31) {
-        alert('日付は1〜31の範囲で入力してください');
-        return;
-      }
-      var res = await fetch('/api/period-settings', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ month: month, start_day: start, close_day: close })
-      });
-      if (res.ok) { alert(month + '月度の設定を保存しました'); }
-      else { alert('保存に失敗しました'); }
-    }
-    </script>`;
-
-  const instructorRows2 = (instructorsRes.results ?? []).map((inst: any) => `
-    <tr style="opacity:${inst.is_active ? 1 : 0.4}">
-      <td class="px-3 py-2 border-b">
-        <input type="text" value="${escHtml(inst.name)}" id="iname-${inst.id}"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:120px;">
-      </td>
-      <td class="px-3 py-2 border-b">
-        <input type="text" value="${escHtml(inst.role ?? '')}" id="irole-${inst.id}" placeholder="例: 4課 新人教育"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:150px;">
-      </td>
-      <td class="px-3 py-2 border-b">
-        <input type="number" value="${inst.sort_order}" id="isort-${inst.id}" min="0" max="99"
-          style="border:1px solid #d1d5db;border-radius:4px;padding:4px 8px;font-size:13px;width:55px;">
-      </td>
-      <td class="px-3 py-2 border-b">
-        <div style="display:flex;gap:4px;">
-          <button onclick="saveInstructor(${inst.id})" style="padding:4px 10px;background:#2563eb;color:white;border:none;border-radius:4px;font-size:12px;cursor:pointer;">保存</button>
-          <button onclick="toggleInstructor(${inst.id},${inst.is_active})" style="padding:4px 8px;background:${inst.is_active ? '#f3f4f6' : '#bbf7d0'};border:1px solid #d1d5db;border-radius:4px;font-size:12px;cursor:pointer;">
-            ${inst.is_active ? '非表示' : '表示'}
-          </button>
-          <button onclick="deleteInstructor(${inst.id},'${escHtml(inst.name)}')" style="padding:4px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:12px;cursor:pointer;">削除</button>
-        </div>
-      </td>
-    </tr>`).join('');
-
-  const instructorSection = `
-    <div class="bg-white rounded-xl shadow p-6 max-w-2xl mt-6">
-      <h3 class="font-semibold text-gray-700 mb-1">班長・指導者の登録</h3>
-      <p class="text-sm text-gray-500 mb-4">シフト管理画面の下部「班長・指導者スケジュール」に表示されます。</p>
-      <table class="w-full mb-4">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">氏名</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">役職・備考</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">順番</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">操作</th>
-          </tr>
-        </thead>
-        <tbody>${instructorRows2 || '<tr><td colspan="4" class="px-3 py-4 text-center text-sm text-gray-400 border-b">未登録</td></tr>'}</tbody>
-      </table>
-      <div style="border-top:1px solid #e5e7eb;padding-top:14px;">
-        <h4 class="text-sm font-semibold text-gray-700 mb-2">新規追加</h4>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <input type="text" id="new-inst-name" placeholder="氏名（例: 松本班長）"
-            style="border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;width:140px;">
-          <input type="text" id="new-inst-role" placeholder="役職（例: 4課 新人教育）"
-            style="border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;width:160px;">
-          <button onclick="addInstructor()" style="padding:7px 18px;background:#7c3aed;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;white-space:nowrap;">追加</button>
-        </div>
-      </div>
-    </div>
-    <script>
-    async function saveInstructor(id) {
-      const name = document.getElementById('iname-' + id).value.trim();
-      const role = document.getElementById('irole-' + id).value.trim();
-      const sort_order = parseInt(document.getElementById('isort-' + id).value) || 0;
-      if (!name) { alert('名前を入力してください'); return; }
-      const res = await fetch('/api/instructors/' + id, {
-        method: 'PUT', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name, role: role || null, sort_order })
-      });
-      if (res.ok) location.reload(); else alert('保存に失敗しました');
-    }
-    async function toggleInstructor(id, current) {
-      await fetch('/api/instructors/' + id, {
-        method: 'PUT', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ is_active: current ? 0 : 1 })
-      });
-      location.reload();
-    }
-    async function deleteInstructor(id, name) {
-      if (!confirm(name + ' を削除しますか？')) return;
-      await fetch('/api/instructors/' + id, { method: 'DELETE' });
-      location.reload();
-    }
-    async function addInstructor() {
-      const name = document.getElementById('new-inst-name').value.trim();
-      const role = document.getElementById('new-inst-role').value.trim();
-      if (!name) { alert('名前を入力してください'); return; }
-      const res = await fetch('/api/instructors', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ name, role: role || null })
-      });
-      if (res.ok) location.reload();
-      else { const j = await res.json(); alert(j.error ?? '追加に失敗しました'); }
-    }
-    </script>`;
-
-  return c.html(layout('設定（旧）', content + coachSection + instructorSection + periodSection, 'settings'));
 });
 
 // ===== 社員一覧 =====
@@ -2917,6 +2768,14 @@ app.get('/info/export', async (c) => {
 // ===== システムステータス =====
 app.get('/settings/status', async (c) => {
   const adminLoginUrl = `https://bentenclub.com${ADMIN_PATH}/login`;
+
+  // QRコードはサーバー側でSVG生成（外部CDN依存なし）
+  const qr = qrcode(0, 'M');
+  qr.addData(adminLoginUrl);
+  qr.make();
+  const qrSvg = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true })
+    .replace(/black/g, '#1e3a5f').replace(/white/g, '#ffffff');
+
   let dbOk = false;
   let dbMsg = '';
   let empCount = 0;
@@ -2935,8 +2794,9 @@ app.get('/settings/status', async (c) => {
         <div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">管理画面 アクセスQRコード</div>
         <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">このQRコードをスキャンすると管理画面のログインページが開きます</div>
         <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
+          <style>#qr-container svg{width:100%;height:100%;display:block;}</style>
           <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;display:inline-block;line-height:0;">
-            <div id="qr-container"></div>
+            <div id="qr-container" style="width:160px;height:160px;">${qrSvg}</div>
           </div>
           <div style="flex:1;min-width:160px;">
             <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">アクセス先URL</div>
@@ -2989,8 +2849,7 @@ app.get('/settings/status', async (c) => {
     <script>
       var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
       var API_TARGETS = [
-        { label: '社員一覧 API', url: '/api/employees' },
-        { label: '社員CSVインポート API', url: '/api/employees/csv-import', method: 'POST', body: '', expect: [400, 405, 200] },
+        { label: '社員データベース API', url: '/api/employees/count' },
         { label: 'シフト区分 API', url: '/api/schedule-types' },
         { label: 'コーチ API', url: '/api/coaches' },
         { label: 'LINE通知設定 API', url: '/api/notifications' },
@@ -3049,25 +2908,26 @@ app.get('/settings/status', async (c) => {
       }
 
       runChecks();
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    <script>
+
       var QR_URL = ${JSON.stringify(adminLoginUrl)};
-      if (typeof QRCode !== 'undefined') {
-        new QRCode(document.getElementById('qr-container'), {
-          text: QR_URL, width: 160, height: 160,
-          colorDark: '#1e3a5f', colorLight: '#ffffff',
-          correctLevel: QRCode.CorrectLevel.M
-        });
-      }
       function downloadQR() {
-        var canvas = document.querySelector('#qr-container canvas');
-        if (canvas) {
+        var svg = document.querySelector('#qr-container svg');
+        if (!svg) return;
+        var xml = new XMLSerializer().serializeToString(svg);
+        var img = new Image();
+        img.onload = function() {
+          var size = 320;
+          var canvas = document.createElement('canvas');
+          canvas.width = size; canvas.height = size;
+          var ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, size, size);
+          ctx.drawImage(img, 0, 0, size, size);
           var link = document.createElement('a');
           link.download = '管理画面QRコード.png';
           link.href = canvas.toDataURL('image/png');
           link.click();
-        }
+        };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
       }
       function copyUrl() {
         navigator.clipboard.writeText(QR_URL).then(function() {

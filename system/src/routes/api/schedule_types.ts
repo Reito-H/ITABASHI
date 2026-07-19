@@ -33,6 +33,26 @@ app.post('/', async (c) => {
   }
 });
 
+// 一括更新（1リクエストで全行を保存）
+app.put('/bulk', async (c) => {
+  const items = await c.req.json<Array<{
+    id: number; code: string; color: string; sort_order: number; target: number | null;
+  }>>();
+  if (!Array.isArray(items) || items.length === 0 || items.length > 100) {
+    return c.json({ error: 'リクエストが不正です' }, 400);
+  }
+  for (const t of items) {
+    if (!t.id || !t.code?.trim()) return c.json({ error: '区分名が空の行があります' }, 400);
+  }
+  const stmt = c.env.DB.prepare(
+    'UPDATE schedule_types SET code = ?, color = ?, sort_order = ?, target = ? WHERE id = ?'
+  );
+  await c.env.DB.batch(items.map(t =>
+    stmt.bind(t.code.trim(), t.color ?? '#f3f4f6', t.sort_order ?? 99, t.target ?? null, t.id)
+  ));
+  return c.json({ ok: true });
+});
+
 // 更新
 app.put('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
