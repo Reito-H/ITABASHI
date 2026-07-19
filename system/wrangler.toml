@@ -21,6 +21,8 @@ LIFF_ID_STAFF_LOOKUP_PLUS = "2010598812-8spA8woR"
 LIFF_ID_OTHER_FEATURES = "2010598812-C477DCKE"
 # 違反報告 LIFF（エンドポイントURL: https://bentenclub.com/liff/violation）
 LIFF_ID_VIOLATION = "2010598812-GNdHG7J6"
+# 一般報告 LIFF（エンドポイントURL: https://bentenclub.com/liff/general-report）
+LIFF_ID_GENERAL_REPORT = "2010598812-HftZFUKb"
 # ベンテンクラブ シフト（LINE Developers で LIFF作成後に設定）
 LIFF_ID_BENTEN_SHIFT = "2010598812-yt0r1ZAW"
 # ベンテン会員・シフトマスター用リッチメニュー（未作成なら空のまま=メニューなし）

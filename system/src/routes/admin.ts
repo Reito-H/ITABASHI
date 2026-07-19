@@ -185,8 +185,9 @@ app.get('/', async (c) => {
       SELECT
         (SELECT COUNT(*) FROM lost_item_reports WHERE status != 'resolved') AS lost,
         (SELECT COUNT(*) FROM accident_reports WHERE status != 'resolved') AS accident,
-        (SELECT COUNT(*) FROM violation_reports WHERE status != 'resolved') AS violation
-    `).first<{ lost: number; accident: number; violation: number }>().catch(() => null),
+        (SELECT COUNT(*) FROM violation_reports WHERE status != 'resolved') AS violation,
+        (SELECT COUNT(*) FROM general_reports WHERE status != 'resolved') AS general
+    `).first<{ lost: number; accident: number; violation: number; general: number }>().catch(() => null),
     c.env.DB.prepare('SELECT * FROM login_logs ORDER BY logged_at DESC LIMIT 5').all<{
       id: number; ip: string; country: string; city: string;
       latitude: string; longitude: string; user_agent: string; logged_at: string;
@@ -232,9 +233,9 @@ app.get('/', async (c) => {
     { label: '在籍社員数',       value: empCount.cnt,               sub: `研修中 ${trainingCount.cnt}名 / 配属済 ${regularCount.cnt}名`, color: '#1a3a5c' },
     { label: '未対応の報告',     value: unrespondedEvents?.cnt ?? 0, sub: '嫌なこと報告（管理者メモなし）',                                   color: (unrespondedEvents?.cnt ?? 0) > 0 ? '#b91c1c' : '#374151' },
     { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',                                           color: (overdueInterviews?.cnt ?? 0) > 0 ? '#b45309' : '#374151' },
-    { label: '対応中の現場報告', value: (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0),
-      sub: `忘れ物 ${openReports?.lost ?? 0} / 事故 ${openReports?.accident ?? 0} / 違反 ${openReports?.violation ?? 0}`,
-      color: ((openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0)) > 0 ? '#b91c1c' : '#374151',
+    { label: '対応中の現場報告', value: (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0),
+      sub: `忘れ物 ${openReports?.lost ?? 0} / 事故 ${openReports?.accident ?? 0} / 違反 ${openReports?.violation ?? 0} / 一般 ${openReports?.general ?? 0}`,
+      color: ((openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0)) > 0 ? '#b91c1c' : '#374151',
       href: `${ADMIN_PATH}/settings/lost-items` },
   ].map((s: { label: string; value: number; sub: string; color: string; href?: string }) => {
     const inner = `
@@ -672,6 +673,7 @@ app.get('/settings', (c) => {
       { href: `${ADMIN}/settings/lost-items`,  perm: 'settings.lost-items', title: '忘れ物報告',   desc: '報告センター — 社員報告・客問い合わせの履歴と状態管理', highlight: true },
       { href: `${ADMIN}/settings/accidents`,   perm: 'settings.accidents',  title: '事故報告',     desc: '報告センター — 事故報告の履歴・進捗管理', highlight: true },
       { href: `${ADMIN}/settings/violations`,  perm: 'settings.violations', title: '違反報告',     desc: '報告センター — 乗務員の違反報告の履歴・進捗管理', highlight: true },
+      { href: `${ADMIN}/settings/general-reports`, perm: 'settings.general-reports', title: '一般報告', desc: '報告センター — 事故・違反に当てはまらない報告の履歴・進捗管理', highlight: true },
     ]},
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
@@ -1390,7 +1392,7 @@ app.get('/settings/tutorial', (c) => {
     <a href="#staff-search">1-14. 社員絞り込み検索 — 条件を組み合わせた検索</a>
     <a href="#inspection">1-15. 点検管理 — 車両点検スケジュール</a>
     <a href="#manual-bot">1-16. マニュアルBot — AIチャットで質問</a>
-    <a href="#report-center">1-17. 報告センター — 忘れ物・事故・違反</a>
+    <a href="#report-center">1-17. 報告センター — 忘れ物・事故・違反・一般報告</a>
     <a href="#benten-shift">1-18. ベンテンクラブ シフト</a>
     <a href="#line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
     <div class="tut-toc-section" style="margin-top:12px;">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
@@ -1646,7 +1648,7 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍日々の運用</p>
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
-      <tr><td>忘れ物報告 / 事故報告 / 違反報告</td><td>報告センター。タブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
+      <tr><td>忘れ物報告 / 事故報告 / 違反報告 / 一般報告</td><td>報告センター。タブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍権限・アカウント</p>
@@ -1747,10 +1749,10 @@ app.get('/settings/tutorial', (c) => {
 
   <!-- 1-17 報告センター -->
   <div class="tut-section" id="report-center">
-    <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反</h3>
-    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF）から送った報告を、設定 → 報告センター（忘れ物/事故/違反タブ）で確認・管理します。</p>
+    <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反・一般報告</h3>
+    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告タブ）で確認・管理します。</p>
     <ol class="tut-steps">
-      <li>設定 → 「忘れ物報告」「事故報告」「違反報告」のいずれかを開く（上部タブで切り替え）</li>
+      <li>設定 → 「忘れ物報告」「事故報告」「違反報告」「一般報告」のいずれかを開く（上部タブで切り替え）</li>
       <li>「対応中」「解決済」ボタンで絞り込み</li>
       <li>対応が終わったら「解決済にする」— ログイン中のアカウント名と日時が「対応者」列に自動で記録されます</li>
     </ol>

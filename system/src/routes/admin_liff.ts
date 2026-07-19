@@ -49,12 +49,13 @@ async function getAdminName(c: { req: { header: (n: string) => string | undefine
   return adminRow?.username ?? '管理者';
 }
 
-// 忘れ物・事故・違反 共通のタブナビ（権限のないタブは data-perm-key で自動的に非表示になる）
-function reportTabs(active: 'lost' | 'accident' | 'violation'): string {
+// 忘れ物・事故・違反・一般 共通のタブナビ（権限のないタブは data-perm-key で自動的に非表示になる）
+function reportTabs(active: 'lost' | 'accident' | 'violation' | 'general'): string {
   const tabs = [
-    { key: 'lost',      href: `${ADMIN_PATH}/settings/lost-items`, perm: 'settings.lost-items', label: '忘れ物' },
-    { key: 'accident',  href: `${ADMIN_PATH}/settings/accidents`,  perm: 'settings.accidents',  label: '事故' },
-    { key: 'violation', href: `${ADMIN_PATH}/settings/violations`, perm: 'settings.violations', label: '違反' },
+    { key: 'lost',      href: `${ADMIN_PATH}/settings/lost-items`,      perm: 'settings.lost-items',      label: '忘れ物' },
+    { key: 'accident',  href: `${ADMIN_PATH}/settings/accidents`,       perm: 'settings.accidents',       label: '事故' },
+    { key: 'violation', href: `${ADMIN_PATH}/settings/violations`,      perm: 'settings.violations',      label: '違反' },
+    { key: 'general',   href: `${ADMIN_PATH}/settings/general-reports`, perm: 'settings.general-reports', label: '一般報告' },
   ];
   return `<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e5e7eb;">
     ${tabs.map(t => `<a href="${t.href}" data-perm-key="${t.perm}" style="padding:8px 20px;font-size:14px;text-decoration:none;font-weight:600;margin-bottom:-2px;${t.key === active
@@ -659,6 +660,111 @@ app.get('/settings/violations', async (c) => {
 });
 
 // ===================================================
+// GET /settings/general-reports — 一般報告一覧ページ
+// ===================================================
+app.get('/settings/general-reports', async (c) => {
+  const statusFilter = c.req.query('status') ?? '';
+
+  let where = '';
+  const binds: string[] = [];
+  if (statusFilter === 'open' || statusFilter === 'resolved') {
+    where = 'WHERE r.status = ?'; binds.push(statusFilter);
+  }
+
+  const reports = await c.env.DB.prepare(`
+    SELECT r.*, u.name AS reporter_name
+    FROM general_reports r
+    LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
+    ${where} ORDER BY r.created_at DESC LIMIT 200
+  `).bind(...binds).all<{
+    id: number; received_at: string | null; vehicle_no: string | null;
+    employee_name: string | null; employee_division: number | null; employee_team: number | null;
+    content: string | null; status: string; created_at: string;
+    resolved_by_name: string | null; resolved_at: string | null;
+    reporter_name: string | null;
+  }>();
+
+  const all = reports.results ?? [];
+
+  const rows = all.map(r => {
+    const empStr = r.employee_name
+      ? `${r.employee_division ? r.employee_division + '課' : ''}${r.employee_team ? r.employee_team + '班' : ''} ${r.employee_name}`
+      : '—';
+    return `<tr id="report-row-${r.id}">
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:360px;white-space:pre-wrap;word-break:break-word;">${escHtml(r.content ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(r.reporter_name ?? '—')}</td>
+      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${statusCellHtml(r.status === 'resolved', '対応済')}
+      </td>
+      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
+        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
+      </td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
+        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
+          style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
+          ${r.status === 'resolved' ? '再開' : '対応済にする'}
+        </button>
+        <button onclick="showReportLogs(${r.id})"
+          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
+        <button onclick="deleteReport(${r.id},'${escHtml((r.vehicle_no ?? '車番なし') + (r.content ? ' / ' + r.content.slice(0, 20) : ''))}')"
+          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const filterBtn = (label: string, s: string) => {
+    const active = statusFilter === s;
+    return `<a href="${ADMIN_PATH}/settings/general-reports?status=${s}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
+      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
+  };
+
+  const content = `
+    ${subHeader('報告センター')}
+    ${reportTabs('general')}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+      ${filterBtn('すべて', '')}
+      ${filterBtn('対応中', 'open')}
+      ${filterBtn('対応済', 'resolved')}
+    </div>
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
+      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
+        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:800px;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">登録日時</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">受電</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">車番</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告内容</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
+              <th style="padding:8px 12px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="9" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ${reportLogModalHtml()}
+    <script>
+    ${reportRowScript('/api/liff/general-reports', '一般報告', '対応済')}
+    </script>
+  `;
+
+  return c.html(layout('一般報告一覧', content, 'settings'));
+});
+
+// ===================================================
 // GET /settings/violation-types — 違反種類・点数/反則金マスタ管理ページ
 // ===================================================
 app.get('/settings/violation-types', async (c) => {
@@ -779,6 +885,7 @@ const REPORT_KINDS: Record<string, { table: string; summarySql: string }> = {
   lost_item: { table: 'lost_item_reports', summarySql: "COALESCE(vehicle_no,'車番不明') || ' / ' || COALESCE(item_description,'—')" },
   accident:  { table: 'accident_reports',  summarySql: "COALESCE(vehicle_no,'車番不明') || ' / ' || COALESCE(accident_type,'—')" },
   violation: { table: 'violation_reports', summarySql: "COALESCE(vehicle_no,'車番不明') || ' / ' || COALESCE(violation_type_name,'—')" },
+  general:   { table: 'general_reports',   summarySql: "COALESCE(vehicle_no,'車番なし') || ' / ' || COALESCE(substr(content,1,20),'—')" },
 };
 
 async function logReportAction(
@@ -838,6 +945,8 @@ app.put('/api/liff/accident-reports/:id/status',  (c) => handleReportStatus(c, '
 app.delete('/api/liff/accident-reports/:id',      (c) => handleReportDelete(c, 'accident'));
 app.put('/api/liff/violation-reports/:id/status', (c) => handleReportStatus(c, 'violation'));
 app.delete('/api/liff/violation-reports/:id',     (c) => handleReportDelete(c, 'violation'));
+app.put('/api/liff/general-reports/:id/status',   (c) => handleReportStatus(c, 'general'));
+app.delete('/api/liff/general-reports/:id',       (c) => handleReportDelete(c, 'general'));
 
 // 対応履歴の取得（行の「履歴」ボタン用）
 // パスを既存の権限マッピング（/api/liff/lost-items 等の前方一致）に乗せるため種別ごとに定義
@@ -858,6 +967,7 @@ async function handleReportLogs(c: Context<{ Bindings: Env }>, kind: string) {
 app.get('/api/liff/lost-items/:id/logs',        (c) => handleReportLogs(c, 'lost_item'));
 app.get('/api/liff/accident-reports/:id/logs',  (c) => handleReportLogs(c, 'accident'));
 app.get('/api/liff/violation-reports/:id/logs', (c) => handleReportLogs(c, 'violation'));
+app.get('/api/liff/general-reports/:id/logs',   (c) => handleReportLogs(c, 'general'));
 
 // ===================================================
 // API: 違反種類マスタ更新

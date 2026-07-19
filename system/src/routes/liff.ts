@@ -56,6 +56,13 @@ app.get('/liff/violation', (c) => {
   return c.html(html);
 });
 
+// ===== LIFF: 一般報告フォーム（事故・違反に当てはまらない単純な報告）=====
+app.get('/liff/general-report', (c) => {
+  const liffId = c.env.LIFF_ID_GENERAL_REPORT ?? '';
+  const html = liffGeneralReportPage(liffId);
+  return c.html(html);
+});
+
 // ===== LIFF: 社員照会 =====
 app.get('/liff/staff-lookup', (c) => {
   const liffId = c.env.LIFF_ID_STAFF_LOOKUP ?? '';
@@ -591,6 +598,54 @@ app.post('/api/liff/violation', async (c) => {
   return c.json({ ok: true, summary });
 });
 
+// ===== LIFF API: 一般報告 送信 =====
+app.post('/api/liff/general-report', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const liffUser = await c.env.DB.prepare(
+    'SELECT role FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string }>();
+  if (!liffUser || !['general_manager', 'operations_manager'].includes(liffUser.role)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const body = await c.req.json<{
+    received_at?: string;
+    vehicle_no?: string;
+    employee_name?: string;
+    employee_emp_no?: string;
+    employee_division?: number | null;
+    employee_team?: number | null;
+    content?: string;
+  }>();
+
+  await c.env.DB.prepare(`
+    INSERT INTO general_reports
+      (received_at, vehicle_no, employee_name, employee_emp_no,
+       employee_division, employee_team, content, reported_by_uid)
+    VALUES (?,?,?,?,?,?,?,?)
+  `).bind(
+    body.received_at ?? null,
+    body.vehicle_no ?? null,
+    body.employee_name ?? null,
+    body.employee_emp_no ?? null,
+    body.employee_division ?? null,
+    body.employee_team ?? null,
+    body.content ?? null,
+    uid,
+  ).run();
+
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '一般報告送信',
+    `${body.vehicle_no ?? ''} ${(body.content ?? '').slice(0, 30)}`.trim());
+
+  const summary = buildGeneralReportSummary(body);
+  const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
+  if (at) await pushMessage(uid, at, summary);
+
+  return c.json({ ok: true, summary });
+});
+
 // ===================================================
 // テキスト生成ユーティリティ
 // ===================================================
@@ -658,6 +713,19 @@ function buildViolationSummary(body: Record<string, unknown>): string {
     lines.push(`違反種類: ${body.violation_type_name}（${[pts, fine].filter(Boolean).join(' / ')}）`);
   }
   if (body.notes) lines.push(`備考: ${body.notes}`);
+  return lines.join('\n');
+}
+
+function buildGeneralReportSummary(body: Record<string, unknown>): string {
+  const lines: string[] = ['【報告】'];
+  if (body.received_at) lines.push(`受電: ${body.received_at}`);
+  if (body.vehicle_no)  lines.push(`車番: ${body.vehicle_no}`);
+  if (body.employee_name) {
+    const div = body.employee_division ? `${body.employee_division}課` : '';
+    const team = body.employee_team ? `${body.employee_team}班` : '';
+    lines.push(`乗務員: ${div}${team} ${body.employee_name}${body.employee_emp_no ? `（${body.employee_emp_no}）` : ''}`);
+  }
+  if (body.content) lines.push(`\n${body.content}`);
   return lines.join('\n');
 }
 
@@ -1517,6 +1585,230 @@ function liffViolationPage(liffId: string): string {
     };
 
     fetch('/api/liff/violation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN },
+      body: JSON.stringify(payload),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        document.getElementById('form-page').style.display = 'none';
+        document.getElementById('success-page').style.display = 'block';
+        document.getElementById('summary-text').textContent = data.summary;
+      } else {
+        btn.disabled = false;
+        btn.textContent = '送信する';
+        alert('送信に失敗しました: ' + (data.error || '不明なエラー'));
+      }
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.textContent = '送信する';
+      alert('通信エラーが発生しました');
+    });
+  }
+  </script>
+</body>
+</html>`;
+}
+
+function liffGeneralReportPage(liffId: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>報告</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
+    .page { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
+    .header { background: #0f766e; color: white; padding: 14px 16px; border-radius: 12px; margin-bottom: 16px; }
+    .header h1 { margin: 0; font-size: 17px; font-weight: 700; }
+    .header p { margin: 4px 0 0; font-size: 12px; opacity: 0.8; }
+    .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card-title { font-size: 13px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    .field { margin-bottom: 12px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 13px; color: #374151; margin-bottom: 5px; font-weight: 500; }
+    input[type=text], input[type=tel], input[type=time], input[type=date], textarea, select {
+      width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px;
+      font-size: 15px; font-family: inherit; background: #f9fafb; color: #111827;
+      -webkit-appearance: none; appearance: none; outline: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #2563eb; background: white; }
+    textarea { resize: vertical; min-height: 120px; }
+    .emp-wrap { position: relative; }
+    .emp-suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-radius: 8px; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.12); max-height: 200px; overflow-y: auto; margin-top: 2px; display: none; }
+    .emp-item { padding: 10px 12px; font-size: 14px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+    .emp-item:last-child { border-bottom: none; }
+    .emp-item:hover { background: #eff6ff; }
+    .emp-meta { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .emp-selected { font-size: 13px; color: #059669; margin-top: 4px; font-weight: 600; }
+    .btn-submit { width: 100%; background: #0f766e; color: white; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: background 0.15s; }
+    .btn-submit:active { background: #0b5b54; }
+    .btn-submit:disabled { background: #9ca3af; cursor: default; }
+    .success { text-align: center; padding: 32px 16px; }
+    .success-icon { font-size: 48px; margin-bottom: 16px; }
+    .success-title { font-size: 20px; font-weight: 700; color: #0f766e; margin-bottom: 8px; }
+    .success-summary { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; text-align: left; font-size: 13px; color: #374151; white-space: pre-line; margin: 16px 0; line-height: 1.7; }
+    .btn-close { background: #f3f4f6; color: #374151; border: none; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="loading">読み込み中...</div>
+  <div id="app" style="display:none;">
+    <div class="page" id="form-page">
+      <div class="header">
+        <h1>報告</h1>
+        <p>事故・違反・忘れ物以外の連絡事項はこちらから</p>
+      </div>
+
+      <!-- 基本情報 -->
+      <div class="card">
+        <div class="card-title">基本情報</div>
+        <div class="field">
+          <label>受電時刻</label>
+          <input type="time" id="received_at">
+        </div>
+        <div class="field">
+          <label>車番（あれば）</label>
+          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric">
+        </div>
+      </div>
+
+      <!-- 乗務員情報 -->
+      <div class="card">
+        <div class="card-title">乗務員（あれば）</div>
+        <div class="field">
+          <div class="emp-wrap">
+            <input type="text" id="emp-search" placeholder="氏名・社員番号で検索" autocomplete="off"
+              oninput="empSearchDebounce()">
+            <div class="emp-suggestions" id="emp-suggestions"></div>
+          </div>
+          <div class="emp-selected" id="emp-selected" style="display:none;"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="emp-detail-row">
+          <div class="field" style="margin-bottom:0;">
+            <label>課</label>
+            <input type="text" id="employee_division" placeholder="3" readonly style="background:#f3f4f6;color:#6b7280;">
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>班</label>
+            <input type="text" id="employee_team" placeholder="6" readonly style="background:#f3f4f6;color:#6b7280;">
+          </div>
+        </div>
+      </div>
+
+      <!-- 報告内容 -->
+      <div class="card">
+        <div class="card-title">報告内容</div>
+        <div class="field">
+          <textarea id="content" placeholder="報告したい内容を自由に入力してください"></textarea>
+        </div>
+      </div>
+
+      <button class="btn-submit" id="btn-submit" onclick="submitForm()">送信する</button>
+    </div>
+
+    <!-- 送信完了画面 -->
+    <div class="page success" id="success-page" style="display:none;">
+      <div class="success-icon">✅</div>
+      <div class="success-title">送信しました</div>
+      <p style="color:#6b7280;font-size:14px;">LINEにも同じ内容を送信しました。<br>コピーして転送にご利用ください。</p>
+      <div class="success-summary" id="summary-text"></div>
+      <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();">閉じる</button>
+    </div>
+  </div>
+
+  <script>
+  var LIFF_ACCESS_TOKEN = '';
+  var selectedEmp = null;
+  var empSearchTimer = null;
+
+  liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
+    .then(function() {
+      LIFF_ACCESS_TOKEN = liff.getAccessToken() || '';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      var now = new Date();
+      var hh = String(now.getHours()).padStart(2, '0');
+      var mm = String(now.getMinutes()).padStart(2, '0');
+      document.getElementById('received_at').value = hh + ':' + mm;
+    })
+    .catch(function(err) {
+      document.getElementById('loading').textContent = 'エラー: ' + err.message;
+    });
+
+  function empSearchDebounce() {
+    clearTimeout(empSearchTimer);
+    empSearchTimer = setTimeout(doEmpSearch, 300);
+  }
+
+  function doEmpSearch() {
+    var q = document.getElementById('emp-search').value.trim();
+    var sug = document.getElementById('emp-suggestions');
+    if (q.length < 1) { sug.style.display = 'none'; return; }
+    fetch('/api/liff/employees?q=' + encodeURIComponent(q), {
+      headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data || data.length === 0) { sug.style.display = 'none'; return; }
+      sug.innerHTML = data.map(function(e) {
+        var div = e.division ? e.division + '課' : '';
+        var team = e.team ? e.team + '班' : '';
+        return '<div class="emp-item" onclick="selectEmp(' + JSON.stringify(e).replace(/</g,'\\u003c').replace(/"/g,'&quot;') + ')">'
+          + '<div>' + e.name + '</div>'
+          + '<div class="emp-meta">' + div + team + ' / ' + e.emp_no + '</div>'
+          + '</div>';
+      }).join('');
+      sug.style.display = 'block';
+    })
+    .catch(function() { sug.style.display = 'none'; });
+  }
+
+  function selectEmp(e) {
+    selectedEmp = e;
+    document.getElementById('emp-search').value = '';
+    document.getElementById('emp-suggestions').style.display = 'none';
+    var div = e.division ? e.division + '課' : '';
+    var team = e.team ? e.team + '班' : '';
+    document.getElementById('emp-selected').style.display = 'block';
+    document.getElementById('emp-selected').textContent = '✓ ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
+    document.getElementById('employee_division').value = e.division || '';
+    document.getElementById('employee_team').value = e.team || '';
+  }
+
+  document.addEventListener('click', function(e) {
+    var sug = document.getElementById('emp-suggestions');
+    if (!document.getElementById('emp-search').contains(e.target) && !sug.contains(e.target)) {
+      sug.style.display = 'none';
+    }
+  });
+
+  function submitForm() {
+    var content = document.getElementById('content').value.trim();
+    if (!content) { alert('報告内容を入力してください'); return; }
+
+    var btn = document.getElementById('btn-submit');
+    btn.disabled = true;
+    btn.textContent = '送信中...';
+
+    var payload = {
+      received_at: document.getElementById('received_at').value || null,
+      vehicle_no: document.getElementById('vehicle_no').value.trim() || null,
+      employee_name: selectedEmp ? selectedEmp.name : null,
+      employee_emp_no: selectedEmp ? selectedEmp.emp_no : null,
+      employee_division: selectedEmp ? selectedEmp.division : null,
+      employee_team: selectedEmp ? selectedEmp.team : null,
+      content: content,
+    };
+
+    fetch('/api/liff/general-report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN },
       body: JSON.stringify(payload),

@@ -222,6 +222,7 @@ function classifyBotFeature(inputText: string, state: string): string {
   if (inputText === '忘れ物対応' || inputText === '忘れ物') return '忘れ物対応';
   if (inputText === '事故報告' || inputText === '事故') return '事故報告';
   if (inputText === '違反報告' || inputText === '違反') return '違反報告';
+  if (inputText === '一般報告') return '一般報告';
   if (inputText === '嫌なこと報告') return '嫌なこと報告';
   if (inputText === '報告') return '報告メニュー';
   if (inputText === 'シフト確認') return 'シフト確認';
@@ -770,6 +771,8 @@ async function handleOperationsUser(
     if (accidentLiffId) items.push({ label: '🚨 事故報告', uri: `https://liff.line.me/${accidentLiffId}` });
     const violationLiffId = env.LIFF_ID_VIOLATION ?? '';
     if (violationLiffId) items.push({ label: '⚠️ 違反報告', uri: `https://liff.line.me/${violationLiffId}` });
+    const generalReportLiffId = env.LIFF_ID_GENERAL_REPORT ?? '';
+    if (generalReportLiffId) items.push({ label: '📝 一般報告', uri: `https://liff.line.me/${generalReportLiffId}` });
     await reply(replyToken, at, [textWithUriQuickReply('報告する内容を選んでください。', items)]);
     return;
   }
@@ -780,6 +783,16 @@ async function handleOperationsUser(
     const url = liffId ? `https://liff.line.me/${liffId}` : '';
     if (url) {
       await reply(replyToken, at, [text(`⚠️ 違反報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
+    }
+    return;
+  }
+
+  // 一般報告（事故・違反に当てはまらない単純な報告）→ LIFF URLを送信
+  if (inputText === '一般報告') {
+    const liffId = env.LIFF_ID_GENERAL_REPORT ?? '';
+    const url = liffId ? `https://liff.line.me/${liffId}` : '';
+    if (url) {
+      await reply(replyToken, at, [text(`📝 報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
     }
     return;
   }

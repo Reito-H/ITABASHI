@@ -12,6 +12,7 @@
 //               vehicles / inspection / manual-chat / settings / announcements / line
 //   設定カード: settings.liff / settings.lost-items / settings.accidents /
 //               settings.violations / settings.violation-types /
+//               settings.general-reports /
 //               settings.benten / settings.schedule-types / settings.coaches /
 //               settings.instructors / settings.periods / settings.notifications /
 //               settings.offices / settings.vehicle-search-guide /
@@ -26,6 +27,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/accidents/,            'settings.accidents'],
   [/^\/settings\/violation-types/,      'settings.violation-types'],
   [/^\/settings\/violations/,           'settings.violations'],
+  [/^\/settings\/general-reports/,      'settings.general-reports'],
   [/^\/settings\/benten/,               'settings.benten'],
   [/^\/settings\/schedule-types/,       'settings.schedule-types'],
   [/^\/settings\/coaches/,              'settings.coaches'],
@@ -45,6 +47,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/liff\/lost-items/,          'settings.lost-items'],
   [/^\/api\/liff\/accident-reports/,    'settings.accidents'],
   [/^\/api\/liff\/violation-reports/,   'settings.violations'],
+  [/^\/api\/liff\/general-reports/,     'settings.general-reports'],
   [/^\/api\/violation-types/,           'settings.violation-types'],
   // 各ページ
   [/^\/kancho-shift/, 'kancho-shift'],
@@ -159,6 +162,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.lost-items',           label: '忘れ物報告一覧' },
     { key: 'settings.accidents',            label: '事故報告一覧' },
     { key: 'settings.violations',           label: '違反報告一覧' },
+    { key: 'settings.general-reports',      label: '一般報告一覧' },
     { key: 'settings.violation-types',      label: '違反種類・点数/反則金' },
     { key: 'settings.benten',               label: 'ベンテンクラブ シフト' },
     { key: 'settings.schedule-types',       label: 'シフト区分' },
