@@ -57,11 +57,11 @@ const VEHICLE_LOOKUP_JS = `
       // 途中入力で車番が変わっていたら古い結果は捨てる
       if (document.getElementById('vehicle_no').value.trim() !== no) return;
       if (!data || !data.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
-      box.innerHTML = '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">この車番の担当乗務員（タップで乗務員欄にセット）</div>'
+      box.innerHTML = '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">この車番をよく使う乗務員（タップで乗務員欄にセット）</div>'
         + data.map(function(e) {
           var div = e.division ? e.division + '課' : '';
           var team = e.team ? e.team + '班' : '';
-          var meta = (div + team ? div + team + ' / ' : '') + e.emp_no;
+          var meta = (div + team ? div + team + ' / ' : '') + e.emp_no + (e.hint ? ' ・ ' + e.hint : '');
           return '<div onclick="selectEmp(' + JSON.stringify(e).replace(/</g,'\\\\u003c').replace(/"/g,'&quot;') + ')"'
             + ' style="padding:9px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:14px;">'
             + e.name + ' <span style="color:#6b7280;font-size:12px;">' + meta + '</span></div>';
@@ -163,18 +163,41 @@ app.get('/api/liff/vehicle-employees', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
 
+  // 車番は最大4桁の数字（3桁も実在）
   const no = (c.req.query('no') ?? '').trim();
   if (!/^\d{2,4}$/.test(no)) return c.json([]);
 
+  // 担当車番（car_no）の完全一致に加え、売上CSVインポート由来の
+  // 使用車番Top5（used_cars: JSON配列）にその車番を含む乗務員を逆引きする。
+  // LIKEは '"5232"' のように引用符ごと照合し、523↔5232 のような部分一致誤ヒットを防ぐ
   const rows = await c.env.DB.prepare(`
-    SELECT id, emp_no, name, division, team
+    SELECT id, emp_no, name, division, team, car_no, used_cars
     FROM employees
-    WHERE is_active = 1 AND status = 'completed' AND car_no = ?
+    WHERE is_active = 1 AND status = 'completed'
+      AND (car_no = ? OR used_cars LIKE ?)
     ORDER BY division, team, seq_no, id
-    LIMIT 10
-  `).bind(no).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null }>();
+  `).bind(no, `%"${no}"%`).all<{
+    id: number; emp_no: string; name: string;
+    division: number | null; team: number | null;
+    car_no: string | null; used_cars: string | null;
+  }>();
 
-  return c.json(rows.results ?? []);
+  // 担当車番一致を最優先、次に使用頻度順位（used_cars内の並び順）で上位8名
+  const ranked = (rows.results ?? []).map((r) => {
+    let rank = 99;
+    try {
+      const idx = (JSON.parse(r.used_cars ?? '[]') as string[]).indexOf(no);
+      if (idx >= 0) rank = idx;
+    } catch { /* used_cars不正値は頻度情報なし扱い */ }
+    const assigned = r.car_no === no;
+    return {
+      id: r.id, emp_no: r.emp_no, name: r.name, division: r.division, team: r.team,
+      hint: assigned ? '担当車' : `使用${rank + 1}位`,
+      sort: assigned ? -1 : rank,
+    };
+  });
+  ranked.sort((a, b) => a.sort - b.sort);
+  return c.json(ranked.slice(0, 8).map(({ sort: _sort, ...rest }) => rest));
 });
 
 // ===== LIFF API: 課ごとの在籍人数（社員照会＋の課選択画面用）=====
@@ -189,13 +212,14 @@ app.get('/api/liff/staff-lookup/divisions', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
 
+  // 課ごとの人数に加えて、各課に実在する班の一覧もフロントに渡す（班チップ生成用）
   const rows = await c.env.DB.prepare(`
-    SELECT division, COUNT(*) AS cnt
+    SELECT division, team, COUNT(*) AS cnt
     FROM employees
     WHERE is_active = 1 AND division IS NOT NULL
-    GROUP BY division
-    ORDER BY division
-  `).all<{ division: number; cnt: number }>();
+    GROUP BY division, team
+    ORDER BY division, team
+  `).all<{ division: number; team: number | null; cnt: number }>();
 
   return c.json(rows.results ?? []);
 });
@@ -233,7 +257,8 @@ app.get('/api/liff/staff-lookup', async (c) => {
     const like = `${q}%`;
     params.push(like, like, like);
   }
-  const limit = division && q.length < 1 ? 100 : 30;
+  // 課指定の一覧表示は全員を返す（1課あたり230名前後のため上限500で実質無制限）。キーワード検索は従来通り30件
+  const limit = division && q.length < 1 ? 500 : 30;
 
   const rows = await c.env.DB.prepare(`
     SELECT id, emp_no, name, name_kana, division, team,
@@ -606,8 +631,19 @@ app.post('/api/liff/violation', async (c) => {
     employee_division?: number | null;
     employee_team?: number | null;
     violation_type_id?: number | null;
+    location?: string;
+    travel_from?: string;
+    travel_to?: string;
+    car_status?: string;
+    substitute_needed?: boolean;
     notes?: string;
   }>();
+
+  const carStatus = ['空車', '実車', '迎車'].includes(body.car_status ?? '') ? body.car_status! : null;
+  // 代車要請の要否は実車・迎車時のみ意味を持つ（空車・未選択時はNULL）
+  const substituteNeeded = (carStatus === '実車' || carStatus === '迎車')
+    ? (body.substitute_needed ? 1 : 0)
+    : null;
 
   // クライアント値は信用せず、選択されたIDからサーバー側で点数・反則金を引き直してスナップショットする
   let violationTypeName: string | null = null;
@@ -628,8 +664,9 @@ app.post('/api/liff/violation', async (c) => {
     INSERT INTO violation_reports
       (received_at, vehicle_no, violation_at, employee_name, employee_emp_no,
        employee_division, employee_team, violation_type_id, violation_type_name,
-       violation_points, violation_fine_amount, notes, reported_by_uid)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+       violation_points, violation_fine_amount, location, travel_from, travel_to,
+       car_status, substitute_needed, notes, reported_by_uid)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.received_at ?? null,
     body.vehicle_no ?? null,
@@ -642,6 +679,11 @@ app.post('/api/liff/violation', async (c) => {
     violationTypeName,
     violationPoints,
     violationFineAmount,
+    body.location ?? null,
+    body.travel_from ?? null,
+    body.travel_to ?? null,
+    carStatus,
+    substituteNeeded,
     body.notes ?? null,
     uid,
   ).run();
@@ -654,6 +696,8 @@ app.post('/api/liff/violation', async (c) => {
     violation_type_name: violationTypeName,
     violation_points: violationPoints,
     violation_fine_amount: violationFineAmount,
+    car_status: carStatus,
+    substitute_needed: substituteNeeded,
   });
   const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
   if (at) await pushMessage(uid, at, summary);
@@ -774,6 +818,14 @@ function buildViolationSummary(body: Record<string, unknown>): string {
     const pts = typeof body.violation_points === 'number' ? `${body.violation_points}点` : '';
     const fine = typeof body.violation_fine_amount === 'number' ? `反則金${body.violation_fine_amount.toLocaleString()}円` : '';
     lines.push(`違反種類: ${body.violation_type_name}（${[pts, fine].filter(Boolean).join(' / ')}）`);
+  }
+  if (body.location) lines.push(`場所: ${body.location}`);
+  if (body.travel_from || body.travel_to) {
+    lines.push(`進行方向: ${body.travel_from || '不明'} → ${body.travel_to || '不明'}`);
+  }
+  if (body.car_status) lines.push(`状態: ${body.car_status}`);
+  if (body.car_status === '実車' || body.car_status === '迎車') {
+    lines.push(`代車要請: ${body.substitute_needed ? '必要' : '不要'}`);
   }
   if (body.notes) lines.push(`備考: ${body.notes}`);
   return lines.join('\n');
@@ -1435,6 +1487,14 @@ function liffViolationPage(liffId: string): string {
     .emp-selected { font-size: 13px; color: #059669; margin-top: 4px; font-weight: 600; }
     .violation-info { display: none; margin-top: 8px; padding: 10px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-size: 14px; color: #991b1b; font-weight: 600; }
     .violation-info.visible { display: block; }
+    .toggle-group { display: flex; gap: 10px; flex-wrap: wrap; }
+    .toggle-btn { padding: 8px 16px; border: 2px solid #d1d5db; border-radius: 8px; background: white; color: #374151; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .toggle-btn.active { border-color: #7c2d12; background: #fef2f2; color: #7c2d12; }
+    .check-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+    .check-row label { margin: 0; flex: 1; font-weight: 400; cursor: pointer; }
+    .check-row input[type=checkbox] { width: 20px; height: 20px; accent-color: #7c2d12; flex-shrink: 0; }
+    .car-status-dep { display: none; }
+    .car-status-dep.visible { display: flex; }
     .btn-submit { width: 100%; background: #7c2d12; color: white; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; transition: background 0.15s; }
     .btn-submit:active { background: #5c2109; }
     .btn-submit:disabled { background: #9ca3af; cursor: default; }
@@ -1513,6 +1573,37 @@ function liffViolationPage(liffId: string): string {
         </div>
       </div>
 
+      <!-- 発生場所・走行状況 -->
+      <div class="card">
+        <div class="card-title">発生場所・走行状況</div>
+        <div class="field">
+          <label>住所（違反発生場所）</label>
+          <input type="text" id="location" placeholder="例: 板橋区大山東町51-1 付近">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div class="field" style="margin-bottom:0;">
+            <label>どこから</label>
+            <input type="text" id="travel_from" placeholder="例: 池袋駅">
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>どこへ進行中</label>
+            <input type="text" id="travel_to" placeholder="例: 成増方面">
+          </div>
+        </div>
+        <div class="field" style="margin-top:12px;margin-bottom:0;">
+          <label>乗車状態</label>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn" id="cs-kusha" onclick="setCarStatus('空車')">空車</button>
+            <button type="button" class="toggle-btn" id="cs-jissha" onclick="setCarStatus('実車')">実車</button>
+            <button type="button" class="toggle-btn" id="cs-geisha" onclick="setCarStatus('迎車')">迎車</button>
+          </div>
+          <div class="check-row car-status-dep" id="substitute-row">
+            <input type="checkbox" id="substitute_needed">
+            <label for="substitute_needed">代車要請が必要</label>
+          </div>
+        </div>
+      </div>
+
       <!-- 備考 -->
       <div class="card">
         <div class="card-title">備考</div>
@@ -1539,6 +1630,7 @@ function liffViolationPage(liffId: string): string {
   var selectedEmp = null;
   var empSearchTimer = null;
   var violationTypes = [];
+  var currentCarStatus = '';
 
   liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
     .then(function() {
@@ -1584,6 +1676,23 @@ function liffViolationPage(liffId: string): string {
     if (!vt) { info.className = 'violation-info'; return; }
     info.textContent = '違反点数: ' + vt.points + '点 / 反則金: ' + vt.fine_amount.toLocaleString() + '円';
     info.className = 'violation-info visible';
+  }
+
+  function setCarStatus(s) {
+    currentCarStatus = s;
+    ['kusha','jissha','geisha'].forEach(function(id) {
+      document.getElementById('cs-' + id).className = 'toggle-btn';
+    });
+    var map = { '空車': 'kusha', '実車': 'jissha', '迎車': 'geisha' };
+    if (map[s]) document.getElementById('cs-' + map[s]).className = 'toggle-btn active';
+
+    var row = document.getElementById('substitute-row');
+    if (s === '実車' || s === '迎車') {
+      row.className = 'check-row car-status-dep visible';
+    } else {
+      row.className = 'check-row car-status-dep';
+      document.getElementById('substitute_needed').checked = false;
+    }
   }
 
   function empSearchDebounce() {
@@ -1653,6 +1762,11 @@ function liffViolationPage(liffId: string): string {
       employee_division: selectedEmp ? selectedEmp.division : null,
       employee_team: selectedEmp ? selectedEmp.team : null,
       violation_type_id: document.getElementById('violation_type_id').value || null,
+      location: document.getElementById('location').value.trim() || null,
+      travel_from: document.getElementById('travel_from').value.trim() || null,
+      travel_to: document.getElementById('travel_to').value.trim() || null,
+      car_status: currentCarStatus || null,
+      substitute_needed: document.getElementById('substitute_needed').checked,
       notes: document.getElementById('notes').value.trim() || null,
     };
 
@@ -2666,7 +2780,9 @@ function liffStaffLookupPlusPage(liffId: string): string {
   var _division = null;
   var _team = null;
   var _divCounts = {};
+  var _divTeams = {};
   var _allMode = false;
+  var _lastLimit = 30;
 
   // iOS: キーボード表示時にビジュアルビューポートがずれてページが左に流れたまま戻らなくなる対策
   if (window.visualViewport) {
@@ -2693,8 +2809,14 @@ function liffStaffLookupPlusPage(liffId: string): string {
     fetch('/api/liff/staff-lookup/divisions', { headers: { Authorization: 'Bearer '+AT } })
     .then(function(r){ return r.json(); })
     .then(function(d){
-      _divCounts = {};
-      (d||[]).forEach(function(row){ _divCounts[row.division] = row.cnt; });
+      _divCounts = {}; _divTeams = {};
+      (d||[]).forEach(function(row){
+        _divCounts[row.division] = (_divCounts[row.division]||0) + row.cnt;
+        if (row.team != null) {
+          if (!_divTeams[row.division]) _divTeams[row.division] = [];
+          if (_divTeams[row.division].indexOf(row.team)===-1) _divTeams[row.division].push(row.team);
+        }
+      });
       renderDivisionGrid();
     })
     .catch(function(){ renderDivisionGrid(); });
@@ -2744,11 +2866,9 @@ function liffStaffLookupPlusPage(liffId: string): string {
     document.getElementById('view-search').classList.remove('slide-in');
   }
 
-  /* 班チップ（社内の班番号は自由入力運用のため、結果に出てきた班から動的に生成） */
+  /* 班チップ（DBの課×班マスタから生成。検索結果由来だと表示上限で班が欠けるため） */
   function renderTeamChips() {
-    var teams = [];
-    _list.forEach(function(e){ if(e.team && teams.indexOf(e.team)===-1) teams.push(e.team); });
-    teams.sort(function(a,b){ return a-b; });
+    var teams = (_divTeams[_division] || []).slice().sort(function(a,b){ return a-b; });
     var el = document.getElementById('team-chips');
     if (!teams.length) { el.innerHTML=''; el.style.display='none'; return; }
     el.style.display='flex';
@@ -2760,7 +2880,8 @@ function liffStaffLookupPlusPage(liffId: string): string {
   }
   function selectTeam(t) {
     _team = t;
-    doSearch(document.getElementById('search-input').value.trim());
+    renderTeamChips();
+    doSearch(toKatakana(document.getElementById('search-input').value.trim()));
   }
 
   /* ビュー切替（追加フォーム） */
@@ -2808,11 +2929,10 @@ function liffStaffLookupPlusPage(liffId: string): string {
     var url = _division
       ? '/api/liff/staff-lookup?division='+_division+(_team?'&team='+_team:'')+(q?'&q='+encodeURIComponent(q):'')
       : '/api/liff/staff-lookup?q='+encodeURIComponent(q);
+    _lastLimit = (_division && !q) ? 500 : 30;
     fetch(url, { headers: { Authorization: 'Bearer '+AT } })
     .then(function(r){ return r.json(); }).then(function(d){
       _list=d||[];
-      // 班チップは絞り込み前の課全体のリストから作りたいので、課選択時・班未指定・キーワードなしの時だけ再構築
-      if (_division && !_team && !q) renderTeamChips();
       renderList(_list);
     })
     .catch(function(){ document.getElementById('results-list').innerHTML='<div class="no-results">通信エラー</div>'; });
@@ -2820,7 +2940,7 @@ function liffStaffLookupPlusPage(liffId: string): string {
   function renderList(list) {
     var cnt = document.getElementById('result-count'), el = document.getElementById('results-list');
     if (!list.length) { cnt.style.display='none'; el.innerHTML='<div class="no-results">該当する社員が見つかりませんでした</div>'; return; }
-    cnt.style.display='block'; cnt.textContent=list.length+'件'+(list.length>=100?'（上位100件）':(list.length>=30?'（上位30件）':''));
+    cnt.style.display='block'; cnt.textContent=list.length+'件'+(list.length>=_lastLimit?'（上位'+_lastLimit+'件）':'');
     el.innerHTML = list.map(function(e,i){
       var div=e.division?e.division+'課':'', team=e.team?e.team+'班':'', loc=(div+team)||'所属未設定';
       return '<div class="emp-card" onclick="openDetail('+i+')">'

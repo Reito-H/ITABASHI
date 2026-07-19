@@ -590,6 +590,8 @@ app.get('/settings/violations', async (c) => {
     id: number; received_at: string | null; vehicle_no: string | null; violation_at: string | null;
     employee_name: string | null; employee_division: number | null; employee_team: number | null;
     violation_type_name: string | null; violation_points: number | null; violation_fine_amount: number | null;
+    location: string | null; travel_from: string | null; travel_to: string | null;
+    car_status: string | null; substitute_needed: number | null;
     status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null;
@@ -604,6 +606,17 @@ app.get('/settings/violations', async (c) => {
     const violationStr = r.violation_type_name
       ? `${r.violation_type_name}${typeof r.violation_points === 'number' ? `（${r.violation_points}点/${(r.violation_fine_amount ?? 0).toLocaleString()}円）` : ''}`
       : '—';
+    const placeParts: string[] = [];
+    if (r.location) placeParts.push(escHtml(r.location));
+    if (r.travel_from || r.travel_to) placeParts.push(escHtml(`${r.travel_from ?? '?'}→${r.travel_to ?? '?'}`));
+    if (r.car_status) {
+      let cs = r.car_status;
+      if ((r.car_status === '実車' || r.car_status === '迎車') && r.substitute_needed !== null) {
+        cs += ` / 代車${r.substitute_needed ? '要' : '不要'}`;
+      }
+      placeParts.push(escHtml(cs));
+    }
+    const placeStr = placeParts.length ? placeParts.join('<br>') : '—';
     return `<tr id="report-row-${r.id}">
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
@@ -611,6 +624,7 @@ app.get('/settings/violations', async (c) => {
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.violation_at ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(violationStr)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${placeStr}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(r.reporter_name ?? '—')}</td>
       <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
         ${statusCellHtml(r.status === 'resolved', '対応済')}
@@ -659,6 +673,7 @@ app.get('/settings/violations', async (c) => {
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反発生日時</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反種類（点数/反則金）</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">場所・状態</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
@@ -666,7 +681,7 @@ app.get('/settings/violations', async (c) => {
             </tr>
           </thead>
           <tbody>
-            ${rows || '<tr><td colspan="10" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+            ${rows || '<tr><td colspan="11" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
           </tbody>
         </table>
       </div>
