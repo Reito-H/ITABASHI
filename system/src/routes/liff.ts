@@ -35,9 +35,9 @@ async function pushMessage(to: string, accessToken: string, text: string): Promi
   });
 }
 
-// 車番入力→担当乗務員候補の表示（各報告フォーム共通）。
-// 板橋の車両（= employees.car_no に登録がある車番）なら課・班つきで候補を出し、
-// タップで既存の selectEmp() に流して乗務員欄へセットする。
+// 車番入力→課・班の断定表示＋担当乗務員候補（各報告フォーム共通）。
+// 班マスタ（vehicle_teams）にある板橋の車番なら「○課○班の車両」を即表示し、
+// 乗務実績からの候補はタップで既存の selectEmp() に流して乗務員欄へセットする。
 // 各フォームの <script> 内に ${VEHICLE_LOOKUP_JS} で埋め込む（LIFF_ACCESS_TOKEN と selectEmp に依存）
 const VEHICLE_LOOKUP_JS = `
   var vehicleLookupTimer = null;
@@ -56,16 +56,25 @@ const VEHICLE_LOOKUP_JS = `
     .then(function(data) {
       // 途中入力で車番が変わっていたら古い結果は捨てる
       if (document.getElementById('vehicle_no').value.trim() !== no) return;
-      if (!data || !data.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
-      box.innerHTML = '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">この車番をよく使う乗務員（タップで乗務員欄にセット）</div>'
-        + data.map(function(e) {
-          var div = e.division ? e.division + '課' : '';
-          var team = e.team ? e.team + '班' : '';
-          var meta = (div + team ? div + team + ' / ' : '') + e.emp_no + (e.hint ? ' ・ ' + e.hint : '');
-          return '<div onclick="selectEmp(' + JSON.stringify(e).replace(/</g,'\\\\u003c').replace(/"/g,'&quot;') + ')"'
-            + ' style="padding:9px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:14px;">'
-            + e.name + ' <span style="color:#6b7280;font-size:12px;">' + meta + '</span></div>';
-        }).join('');
+      var v = data && data.vehicle;
+      var list = (data && data.employees) || [];
+      if (!v && !list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      var html = '';
+      if (v) {
+        html += '<div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">🚕 ' + no + ' は <span style="color:#1d4ed8;">' + v.division + '課 ' + v.team + '班</span> の車両</div>';
+      }
+      if (list.length) {
+        html += '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">この車番をよく使う乗務員（タップで乗務員欄にセット）</div>'
+          + list.map(function(e) {
+            var div = e.division ? e.division + '課' : '';
+            var team = e.team ? e.team + '班' : '';
+            var meta = (div + team ? div + team + ' / ' : '') + e.emp_no + (e.hint ? ' ・ ' + e.hint : '');
+            return '<div onclick="selectEmp(' + JSON.stringify(e).replace(/</g,'\\\\u003c').replace(/"/g,'&quot;') + ')"'
+              + ' style="padding:9px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:14px;">'
+              + e.name + ' <span style="color:#6b7280;font-size:12px;">' + meta + '</span></div>';
+          }).join('');
+      }
+      box.innerHTML = html;
       box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
     })
     .catch(function() { box.style.display = 'none'; });
@@ -165,7 +174,14 @@ app.get('/api/liff/vehicle-employees', async (c) => {
 
   // 車番は最大4桁の数字（3桁も実在）
   const no = (c.req.query('no') ?? '').trim();
-  if (!/^\d{2,4}$/.test(no)) return c.json([]);
+  if (!/^\d{2,4}$/.test(no)) return c.json({ vehicle: null, employees: [] });
+
+  // 板橋の車番→班マスタ（vehicle_teams、migration_041）。
+  // 営業所掲示の「班・ドアNO一覧」由来で、ヒットすれば課・班を断定できる。
+  // 課は班から導出: 1,2班=1課 / 3,4班=2課 / 5,6班=3課 / 7,8班=4課
+  const vt = await c.env.DB.prepare('SELECT team FROM vehicle_teams WHERE car_no = ?')
+    .bind(no).first<{ team: number }>();
+  const vehicle = vt ? { team: vt.team, division: Math.ceil(vt.team / 2) } : null;
 
   // 担当車番（car_no）の完全一致に加え、売上CSVインポート由来の
   // 使用車番Top5（used_cars: JSON配列）にその車番を含む乗務員を逆引きする。
@@ -197,7 +213,7 @@ app.get('/api/liff/vehicle-employees', async (c) => {
     };
   });
   ranked.sort((a, b) => a.sort - b.sort);
-  return c.json(ranked.slice(0, 8).map(({ sort: _sort, ...rest }) => rest));
+  return c.json({ vehicle, employees: ranked.slice(0, 8).map(({ sort: _sort, ...rest }) => rest) });
 });
 
 // ===== LIFF API: 課ごとの在籍人数（社員照会＋の課選択画面用）=====
