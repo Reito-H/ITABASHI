@@ -35,6 +35,43 @@ async function pushMessage(to: string, accessToken: string, text: string): Promi
   });
 }
 
+// 車番入力→担当乗務員候補の表示（各報告フォーム共通）。
+// 板橋の車両（= employees.car_no に登録がある車番）なら課・班つきで候補を出し、
+// タップで既存の selectEmp() に流して乗務員欄へセットする。
+// 各フォームの <script> 内に ${VEHICLE_LOOKUP_JS} で埋め込む（LIFF_ACCESS_TOKEN と selectEmp に依存）
+const VEHICLE_LOOKUP_JS = `
+  var vehicleLookupTimer = null;
+  function vehicleLookupDebounce() {
+    clearTimeout(vehicleLookupTimer);
+    vehicleLookupTimer = setTimeout(doVehicleLookup, 400);
+  }
+  function doVehicleLookup() {
+    var no = document.getElementById('vehicle_no').value.trim();
+    var box = document.getElementById('vehicle-emp-hint');
+    if (!/^[0-9]{2,4}$/.test(no)) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    fetch('/api/liff/vehicle-employees?no=' + encodeURIComponent(no), {
+      headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      // 途中入力で車番が変わっていたら古い結果は捨てる
+      if (document.getElementById('vehicle_no').value.trim() !== no) return;
+      if (!data || !data.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      box.innerHTML = '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">この車番の担当乗務員（タップで乗務員欄にセット）</div>'
+        + data.map(function(e) {
+          var div = e.division ? e.division + '課' : '';
+          var team = e.team ? e.team + '班' : '';
+          var meta = (div + team ? div + team + ' / ' : '') + e.emp_no;
+          return '<div onclick="selectEmp(' + JSON.stringify(e).replace(/</g,'\\\\u003c').replace(/"/g,'&quot;') + ')"'
+            + ' style="padding:9px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:14px;">'
+            + e.name + ' <span style="color:#6b7280;font-size:12px;">' + meta + '</span></div>';
+        }).join('');
+      box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
+    })
+    .catch(function() { box.style.display = 'none'; });
+  }
+`;
+
 // ===== LIFF: 忘れ物対応フォーム =====
 app.get('/liff/lost-item', (c) => {
   const liffId = c.env.LIFF_ID_LOST_ITEM ?? '';
@@ -110,6 +147,32 @@ app.get('/api/liff/employees', async (c) => {
     ORDER BY division, team, seq_no, id
     LIMIT 20
   `).bind(like, like, like).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null }>();
+
+  return c.json(rows.results ?? []);
+});
+
+// ===== LIFF API: 車番→担当乗務員検索（報告フォームの車番入力から課・班を自動表示）=====
+app.get('/api/liff/vehicle-employees', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const liffUser = await c.env.DB.prepare(
+    'SELECT role FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string }>();
+  if (!liffUser || !['general_manager', 'operations_manager'].includes(liffUser.role)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const no = (c.req.query('no') ?? '').trim();
+  if (!/^\d{2,4}$/.test(no)) return c.json([]);
+
+  const rows = await c.env.DB.prepare(`
+    SELECT id, emp_no, name, division, team
+    FROM employees
+    WHERE is_active = 1 AND status = 'completed' AND car_no = ?
+    ORDER BY division, team, seq_no, id
+    LIMIT 10
+  `).bind(no).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null }>();
 
   return c.json(rows.results ?? []);
 });
@@ -811,7 +874,8 @@ function liffLostItemPage(liffId: string): string {
         </div>
         <div class="field">
           <label>車番</label>
-          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric">
+          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce()">
+          <div id="vehicle-emp-hint" style="display:none;"></div>
         </div>
       </div>
 
@@ -972,6 +1036,8 @@ function liffLostItemPage(liffId: string): string {
     }
   });
 
+  ${VEHICLE_LOOKUP_JS}
+
   function submitForm() {
     var btn = document.getElementById('btn-submit');
     btn.disabled = true;
@@ -1100,7 +1166,8 @@ function liffAccidentPage(liffId: string): string {
         </div>
         <div class="field">
           <label>車番</label>
-          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric">
+          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce()">
+          <div id="vehicle-emp-hint" style="display:none;"></div>
         </div>
       </div>
 
@@ -1279,6 +1346,8 @@ function liffAccidentPage(liffId: string): string {
     }
   });
 
+  ${VEHICLE_LOOKUP_JS}
+
   function submitForm() {
     var btn = document.getElementById('btn-submit');
     btn.disabled = true;
@@ -1394,7 +1463,8 @@ function liffViolationPage(liffId: string): string {
         </div>
         <div class="field">
           <label>車番</label>
-          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric">
+          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce()">
+          <div id="vehicle-emp-hint" style="display:none;"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div class="field" style="margin-bottom:0;">
@@ -1563,6 +1633,8 @@ function liffViolationPage(liffId: string): string {
     }
   });
 
+  ${VEHICLE_LOOKUP_JS}
+
   function submitForm() {
     var btn = document.getElementById('btn-submit');
     btn.disabled = true;
@@ -1676,7 +1748,8 @@ function liffGeneralReportPage(liffId: string): string {
         </div>
         <div class="field">
           <label>車番（あれば）</label>
-          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric">
+          <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce()">
+          <div id="vehicle-emp-hint" style="display:none;"></div>
         </div>
       </div>
 
@@ -1789,6 +1862,8 @@ function liffGeneralReportPage(liffId: string): string {
       sug.style.display = 'none';
     }
   });
+
+  ${VEHICLE_LOOKUP_JS}
 
   function submitForm() {
     var content = document.getElementById('content').value.trim();
