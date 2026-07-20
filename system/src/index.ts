@@ -32,6 +32,9 @@ import adminManualRoutes from './routes/admin_manual';
 import manualChatApi from './routes/api/manual_chat';
 import adminKanchoRoutes from './routes/admin_kancho';
 import adminAccountsRoutes from './routes/admin_accounts';
+import adminDiaRoutes from './routes/admin_dia';
+import diaApi from './routes/api/dia';
+import adminTantoshaRoutes from './routes/admin_tantosha';
 import liffKanchoRoutes from './routes/liff_kancho';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
@@ -169,6 +172,8 @@ app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminManualRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
 app.route(`/${SECRET}/admin`, adminAccountsRoutes);
+app.route(`/${SECRET}/admin`, adminDiaRoutes);
+app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
 
 // =====================
 // API（認証必須）
@@ -212,6 +217,7 @@ app.route('/api/period-settings', periodSettingsApi);
 app.route('/api/notifications', notificationsApi);
 app.route('/api/instructor-invite', instructorInviteApi);
 app.route('/api/inspection', inspectionApi);
+app.route('/api/dia', diaApi);
 app.route('/api', manualChatApi);
 
 // =====================

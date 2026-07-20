@@ -9,6 +9,8 @@ import { queryManual } from './utils/manual_search';
 import { isTicketQuestion, queryTicket } from './utils/ticket_bot';
 import { logLineActivity } from './utils/activity_log';
 import { setBentenConfig, linkBentenMember, BENTEN_MASTER_ROLES } from './benten';
+import { getTantoshaShiftMap, tantoshaShiftLabel, isItabashi } from './utils/tantosha_lookup';
+import type { TantoshaShift } from './utils/tantosha_lookup';
 
 // ===================================================
 // 型定義
@@ -62,7 +64,7 @@ async function searchVehicles(db: D1Database, query: string): Promise<Vehicle[]>
   return result.results ?? [];
 }
 
-function formatVehicleResults(query: string, vehicles: Vehicle[]): string {
+function formatVehicleResults(query: string, vehicles: Vehicle[], shiftMap?: Map<string, TantoshaShift>): string {
   if (vehicles.length === 0) {
     return `「${query}」に該当する車両が見つかりませんでした。`;
   }
@@ -73,6 +75,11 @@ function formatVehicleResults(query: string, vehicles: Vehicle[]): string {
     if (v.plate_no)         lines.push(`車両番号: ${v.plate_no}`);
     if (v.car_type)         lines.push(`車種: ${v.car_type}`);
     if (v.office)           lines.push(`営業所: ${v.office}`);
+    // 板橋の車両は担当車表の勤務（H勤車など）を表示
+    if (shiftMap && v.radio_no != null && isItabashi(v.office, v.office2)) {
+      const label = tantoshaShiftLabel(shiftMap.get(String(v.radio_no)));
+      if (label) lines.push(`勤務: ${label}`);
+    }
     // 課・班（班データがある場合のみ表示）
     if (v.division || v.team) {
       const divTeam = v.division
@@ -737,7 +744,9 @@ async function handleOperationsUser(
   // 数字 → 車番検索
   if (/^\d{1,6}$/.test(inputText)) {
     const vehicles = await searchVehicles(env.DB, inputText);
-    await reply(replyToken, at, [text(formatVehicleResults(inputText, vehicles))]);
+    const shiftMap = vehicles.some(v => isItabashi(v.office, v.office2))
+      ? await getTantoshaShiftMap(env.DB) : undefined;
+    await reply(replyToken, at, [text(formatVehicleResults(inputText, vehicles, shiftMap))]);
     return;
   }
 
@@ -846,7 +855,9 @@ async function handleVehicleManager(
 ): Promise<void> {
   if (/^\d{1,6}$/.test(inputText)) {
     const vehicles = await searchVehicles(env.DB, inputText);
-    await reply(replyToken, at, [text(formatVehicleResults(inputText, vehicles))]);
+    const shiftMap = vehicles.some(v => isItabashi(v.office, v.office2))
+      ? await getTantoshaShiftMap(env.DB) : undefined;
+    await reply(replyToken, at, [text(formatVehicleResults(inputText, vehicles, shiftMap))]);
     return;
   }
   if (inputText === '車番検索') {

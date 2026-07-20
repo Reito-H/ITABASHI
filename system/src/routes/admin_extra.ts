@@ -10,6 +10,8 @@ import type { Env } from '../auth';
 import type { SalesSummary, DailySale } from '../html/sales';
 import type { InterviewRecord } from './api/interviews';
 import { ROLE_LABELS, ROLE_COLORS } from './admin_liff';
+import { getTantoshaShiftMap, tantoshaShiftLabel, isItabashi } from '../utils/tantosha_lookup';
+import type { TantoshaShift } from '../utils/tantosha_lookup';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -1444,6 +1446,7 @@ app.get('/vehicles', async (c) => {
 
   let results: VehicleRow[] = [];
   let searched = false;
+  let shiftMap = new Map<string, TantoshaShift>();
 
   if (q.length > 0) {
     searched = true;
@@ -1458,7 +1461,17 @@ app.get('/vehicles', async (c) => {
       LIMIT 50
     `).bind(q, q, q).all<VehicleRow>();
     results = res.results ?? [];
+    // 板橋の車両は担当車表から勤務（H勤/B/D勤/日勤）を引く
+    if (results.some(v => isItabashi(v.office, v.office2))) {
+      shiftMap = await getTantoshaShiftMap(c.env.DB);
+    }
   }
+
+  // 担当車表の勤務ラベル（板橋のみ）
+  const shiftOf = (v: VehicleRow): string => {
+    if (!isItabashi(v.office, v.office2) || v.radio_no == null) return '';
+    return tantoshaShiftLabel(shiftMap.get(String(v.radio_no)));
+  };
 
   const rows = results.map(v => `
     <tr class="hover:bg-gray-50">
@@ -1468,11 +1481,12 @@ app.get('/vehicles', async (c) => {
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(v.office ?? '-')}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(v.division ?? '-')}</td>
       <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${v.team ? escHtml(v.team) + '班' : '-'}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;color:#1e40af;">${escHtml(shiftOf(v) || '-')}</td>
     </tr>`).join('');
 
   const emptyMsg = searched
-    ? `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">「${escHtml(q)}」の検索結果はありません</td></tr>`
-    : `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">上の検索ボックスに番号を入力してください</td></tr>`;
+    ? `<tr><td colspan="7" style="padding:24px;text-align:center;color:#9ca3af;">「${escHtml(q)}」の検索結果はありません</td></tr>`
+    : `<tr><td colspan="7" style="padding:24px;text-align:center;color:#9ca3af;">上の検索ボックスに番号を入力してください</td></tr>`;
 
   const content = `
     <form method="get" style="display:flex;gap:8px;margin-bottom:16px;">
@@ -1510,6 +1524,7 @@ app.get('/vehicles', async (c) => {
             <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">営業所</th>
             <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">課</th>
             <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">班</th>
+            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">勤務（担当車表）</th>
           </tr>
         </thead>
         <tbody>${rows || emptyMsg}</tbody>

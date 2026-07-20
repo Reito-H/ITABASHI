@@ -899,6 +899,7 @@ app.get('/settings', (c) => {
     ]},
     { heading: 'シフト関連の設定', cards: [
       { href: `${ADMIN}/settings/schedule-types`, perm: 'settings.schedule-types', title: 'シフト区分',   desc: 'プリセットボタンの区分名・色・目標回数' },
+      { href: `${ADMIN}/settings/dia`,            perm: 'settings.dia',            title: '勤務ダイヤ・サイクル', desc: 'ダイヤマスター（勤務時間帯・指導基準）とサイクル一覧表の管理' },
       { href: `${ADMIN}/settings/coaches`,        perm: 'settings.coaches',        title: '研修担当',     desc: 'シフト表の研修担当者（コーチ）一覧' },
       { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
       { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },

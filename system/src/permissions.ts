@@ -13,7 +13,7 @@
 //   設定カード: settings.liff / settings.lost-items / settings.accidents /
 //               settings.violations / settings.violation-types /
 //               settings.general-reports /
-//               settings.benten / settings.schedule-types / settings.coaches /
+//               settings.benten / settings.schedule-types / settings.dia / settings.coaches /
 //               settings.instructors / settings.periods / settings.notifications /
 //               settings.offices / settings.vehicle-search-guide /
 //               settings.tutorial / settings.status
@@ -30,6 +30,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/general-reports/,      'settings.general-reports'],
   [/^\/settings\/benten/,               'settings.benten'],
   [/^\/settings\/schedule-types/,       'settings.schedule-types'],
+  [/^\/settings\/dia/,                  'settings.dia'],
   [/^\/settings\/coaches/,              'settings.coaches'],
   [/^\/settings\/instructors/,          'settings.instructors'],
   [/^\/settings\/periods/,              'settings.periods'],
@@ -52,6 +53,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // 各ページ
   [/^\/kancho-shift/, 'kancho-shift'],
   [/^\/api\/kancho/,  'kancho-shift'],
+  [/^\/tantosha/,     'tantosha'],
+  [/^\/api\/tantosha/, 'tantosha'],
   [/^\/shift/,        'shift'],
   [/^\/newcomers/,    'newcomers'],
   [/^\/employees/,    'newcomers'],
@@ -112,6 +115,7 @@ const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
   [/^\/api\/events/,              ['events']],
   [/^\/api\/interviews/,          ['newcomers']],
   [/^\/api\/schedule-types/,      ['settings.schedule-types']],
+  [/^\/api\/dia/,                 ['settings.dia']],
   [/^\/api\/coaches/,             ['settings.coaches']],
   [/^\/api\/instructors/,         ['settings.instructors']],
   [/^\/api\/instructor-invite/,   ['settings.instructors']],
@@ -145,6 +149,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'home',          label: 'ホーム' },
     { key: 'shift',         label: '新人シフト管理' },
     { key: 'kancho-shift',  label: '班長シフト' },
+    { key: 'tantosha',      label: '担当車表' },
     { key: 'newcomers',     label: '総合新人管理' },
     { key: 'staff',         label: '社員管理' },
     { key: 'staff-search',  label: '社員絞り込み検索' },
@@ -166,6 +171,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.violation-types',      label: '違反種類・点数/反則金' },
     { key: 'settings.benten',               label: 'ベンテンクラブ シフト' },
     { key: 'settings.schedule-types',       label: 'シフト区分' },
+    { key: 'settings.dia',                  label: '勤務ダイヤ・サイクル' },
     { key: 'settings.coaches',              label: '研修担当' },
     { key: 'settings.instructors',          label: '班長・指導者' },
     { key: 'settings.periods',              label: '月度設定' },
