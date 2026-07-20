@@ -121,7 +121,6 @@ export function layout(title: string, content: string, activePage: string = ''):
   <div class="sidebar" id="sidebar">
     <div style="padding:18px 18px 14px;border-bottom:1px solid rgba(255,255,255,0.1);">
       <div style="color:white;font-weight:700;font-size:13px;letter-spacing:0.04em;">Benten管理システム</div>
-      <div style="color:#7cb3d8;font-size:10px;margin-top:3px;letter-spacing:0.06em;">CREW MANAGEMENT</div>
     </div>
     <nav style="flex:1;overflow-y:auto;padding:6px 0;">
       ${navItems.map(item => `
@@ -363,7 +362,6 @@ export function loginPage(error: string = '', csrfToken: string = ''): string {
   <div class="left">
     <div class="left-logo">
       <div class="left-logo-title">Benten管理システム</div>
-      <div class="left-logo-sub">CREW MANAGEMENT</div>
     </div>
     <nav class="left-nav">
       <div class="left-nav-item active">ログイン</div>

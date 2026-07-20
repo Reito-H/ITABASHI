@@ -9,7 +9,7 @@ import { generateInviteCode } from '../auth';
 import type { Env } from '../auth';
 import type { SalesSummary, DailySale } from '../html/sales';
 import type { InterviewRecord } from './api/interviews';
-import { ROLE_LABELS } from './admin_liff';
+import { ROLE_LABELS, ROLE_COLORS } from './admin_liff';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -937,265 +937,491 @@ app.get('/announcements', async (c) => {
 
   const linkedCount = (employees.results ?? []).filter(e => e.has_line).length;
 
-  // 入社月リスト（hire_dateの年月を集計）
-  const months = [...new Set(
-    (employees.results ?? [])
-      .filter(e => e.hire_date)
-      .map(e => e.hire_date.slice(0, 7))
-  )].sort().reverse();
+  // 入社月ごとのLINE連携済み人数
+  const monthCounts = new Map<string, number>();
+  for (const e of employees.results ?? []) {
+    if (!e.hire_date) continue;
+    const m = e.hire_date.slice(0, 7);
+    monthCounts.set(m, (monthCounts.get(m) ?? 0) + (e.has_line ? 1 : 0));
+  }
+  const months = [...monthCounts.keys()].sort().reverse();
 
-  const empOptions = (employees.results ?? []).map(e =>
-    `<option value="${e.id}" ${!e.has_line ? 'style="color:#9ca3af;"' : ''}>
-      ${escHtml(e.name)}（${escHtml(e.emp_no)}）${e.has_line ? '' : ' ※LINE未紐付'}
-    </option>`
-  ).join('');
-
-  const monthOptions = months.map(m =>
-    `<option value="${m}">${m.replace('-', '年')}月入社</option>`
-  ).join('');
+  // 権限ごとの人数（絞り込みチップ用）
+  const roleCounts = new Map<string, number>();
+  for (const u of liffUsers) roleCounts.set(u.role, (roleCounts.get(u.role) ?? 0) + 1);
 
   const TARGET_LABEL: Record<string, string> = {
     all: '全員', entry_month: '入社月', individual: '個別指定', liff: 'LINE連携者'
   };
 
-  const liffUserOptions = liffUsers.map(u =>
-    `<option value="${u.id}">${escHtml(u.name ?? '(名前未設定)')}（${escHtml(ROLE_LABELS[u.role] ?? u.role)}）</option>`
+  const roleChips = [...roleCounts.entries()].map(([role, n]) =>
+    `<button type="button" class="ann-chip" data-role="${escHtml(role)}" onclick="setRoleFilter('${escHtml(role)}', this)">${escHtml(ROLE_LABELS[role] ?? role)}<span class="ann-chip-n">${n}</span></button>`
+  ).join('');
+
+  const liffUserRows = liffUsers.map(u => {
+    const color = ROLE_COLORS[u.role] ?? '#64748b';
+    const name = u.name ?? '(名前未設定)';
+    return `
+      <label class="ann-user" data-name="${escHtml(name)}" data-role="${escHtml(u.role)}">
+        <input type="checkbox" name="liff_user" value="${u.id}" onchange="updateCount()">
+        <span class="ann-check"></span>
+        <span class="ann-user-name">${escHtml(name)}</span>
+        <span class="ann-badge" style="color:${color};background:${color}1a;">${escHtml(ROLE_LABELS[u.role] ?? u.role)}</span>
+      </label>`;
+  }).join('');
+
+  const empRows = (employees.results ?? []).map(e => `
+      <label class="ann-user${e.has_line ? '' : ' ann-user-off'}" data-name="${escHtml(e.name)} ${escHtml(e.emp_no)}">
+        <input type="checkbox" name="emp" value="${e.id}" ${e.has_line ? '' : 'disabled'} onchange="updateCount()">
+        <span class="ann-check"></span>
+        <span class="ann-user-name">${escHtml(e.name)}</span>
+        <span class="ann-user-meta">${escHtml(e.emp_no)}</span>
+        ${e.has_line ? '' : '<span class="ann-badge ann-badge-off">LINE未連携</span>'}
+      </label>`
+  ).join('');
+
+  const monthOptions = months.map(m =>
+    `<option value="${m}" data-count="${monthCounts.get(m) ?? 0}">${m.replace('-', '年')}月入社（連携済 ${monthCounts.get(m) ?? 0}名）</option>`
   ).join('');
 
   const fmtTargetData = (type: string, data: string | null): string | null =>
     type === 'liff' && data
-      ? data.split(',').map(x => liffNameMap.get(x.trim()) ?? x.trim()).join('・')
+      ? data.split(',').map(x => liffNameMap.get(x.trim()) ?? x.trim()).join('、')
       : data;
 
   const historyRows = (history.results ?? []).map(r => `
-    <tr class="hover:bg-gray-50 cursor-pointer" onclick="showDetail(${r.id})">
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.title)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;">
-        <span style="background:#eff6ff;color:#1d4ed8;padding:2px 7px;border-radius:4px;">${escHtml(TARGET_LABEL[r.target_type] ?? r.target_type)}</span>
-        ${r.target_data ? `<span style="margin-left:4px;font-size:11px;color:#9ca3af;">${escHtml(fmtTargetData(r.target_type, r.target_data) ?? '')}</span>` : ''}
+    <tr class="ann-row" onclick="showDetail(${r.id})">
+      <td class="ann-td ann-td-title">${escHtml(r.title)}</td>
+      <td class="ann-td">
+        <span class="ann-tag">${escHtml(TARGET_LABEL[r.target_type] ?? r.target_type)}</span>
+        ${r.target_data ? `<span class="ann-td-sub">${escHtml(fmtTargetData(r.target_type, r.target_data) ?? '')}</span>` : ''}
       </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;text-align:center;">
-        <span style="font-weight:700;color:#1a3a5c;">${r.sent_count}</span><span style="font-size:11px;color:#6b7280;">名</span>
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;">${r.created_at.slice(0, 16)}</td>
+      <td class="ann-td ann-td-num">${r.sent_count}<span class="ann-td-unit">名</span></td>
+      <td class="ann-td ann-td-date">${r.created_at.slice(0, 16)}</td>
     </tr>`
   ).join('');
 
   const content = `
-<div style="max-width:800px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+<style>
+.ann-wrap{max-width:880px;font-family:'Hiragino Sans','Meiryo',sans-serif;color:#0f172a;}
+.ann-card{background:#fff;border:1px solid #e5e9f0;border-radius:16px;margin-bottom:20px;overflow:hidden;}
+.ann-head{padding:18px 24px 0;display:flex;align-items:baseline;gap:10px;}
+.ann-head h3{font-size:16px;font-weight:700;color:#12263f;letter-spacing:.01em;}
+.ann-sub{font-size:12px;color:#8a94a6;}
+.ann-head-bar{padding:16px 24px;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:baseline;}
+.ann-head-bar h3{font-size:16px;font-weight:700;color:#12263f;}
+.ann-body{padding:20px 24px 24px;}
+.ann-label{display:block;font-size:12px;font-weight:600;color:#5b6472;margin:16px 0 6px;}
+.ann-label:first-child{margin-top:0;}
+.ann-req{color:#e5484d;margin-left:2px;}
+.ann-input,.ann-textarea,.ann-select{width:100%;border:1.5px solid #e5e9f0;border-radius:10px;padding:10px 14px;font-size:14px;font-family:inherit;background:#fbfcfe;transition:border-color .15s,box-shadow .15s,background .15s;outline:none;box-sizing:border-box;color:inherit;}
+.ann-input:focus,.ann-textarea:focus,.ann-select:focus{border-color:#1a3a5c;background:#fff;box-shadow:0 0 0 3px rgba(26,58,92,.08);}
+.ann-textarea{resize:vertical;line-height:1.7;}
+.ann-seg{display:inline-flex;background:#eef1f6;border-radius:11px;padding:3px;gap:2px;}
+.ann-seg button{border:none;background:transparent;padding:8px 18px;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer;color:#5b6472;transition:all .15s;}
+.ann-seg button.on{background:#fff;color:#12263f;font-weight:700;box-shadow:0 1px 3px rgba(15,23,42,.12);}
+.ann-panel{margin-top:14px;}
+.ann-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+.ann-search{position:relative;flex:1;min-width:220px;}
+.ann-search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:#9aa4b2;fill:none;}
+.ann-search input{padding-left:36px;}
+.ann-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;}
+.ann-chip{border:1px solid #e5e9f0;background:#fff;border-radius:999px;padding:5px 13px;font-size:12px;font-family:inherit;color:#5b6472;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:5px;}
+.ann-chip:hover{border-color:#c9d2de;}
+.ann-chip.on{background:#1a3a5c;border-color:#1a3a5c;color:#fff;}
+.ann-chip-n{font-size:10px;opacity:.65;}
+.ann-listtools{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.ann-linkbtn{border:none;background:none;color:#1a3a5c;font-size:12px;font-family:inherit;cursor:pointer;padding:2px 8px;border-radius:6px;font-weight:600;}
+.ann-linkbtn:hover{background:#eef1f6;}
+.ann-list{border:1px solid #e5e9f0;border-radius:12px;max-height:320px;overflow-y:auto;background:#fff;}
+.ann-user{display:flex;align-items:center;gap:11px;padding:10px 14px;cursor:pointer;border-bottom:1px solid #f4f6f9;transition:background .1s;position:relative;}
+.ann-user:last-child{border-bottom:none;}
+.ann-user:hover{background:#f8fafc;}
+.ann-user.hide{display:none;}
+.ann-user-off{opacity:.45;cursor:default;}
+.ann-user input{position:absolute;opacity:0;pointer-events:none;}
+.ann-check{width:18px;height:18px;border:1.5px solid #c9d2de;border-radius:6px;flex:none;position:relative;transition:all .12s;background:#fff;}
+.ann-user input:checked ~ .ann-check{background:#1a3a5c;border-color:#1a3a5c;}
+.ann-user input:checked ~ .ann-check::after{content:'';position:absolute;left:5px;top:2px;width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
+.ann-user-name{font-size:13.5px;font-weight:600;color:#12263f;}
+.ann-user-meta{font-size:11.5px;color:#9aa4b2;}
+.ann-badge{margin-left:auto;font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;flex:none;}
+.ann-badge-off{color:#9aa4b2;background:#f1f5f9;}
+.ann-empty{padding:28px;text-align:center;color:#9aa4b2;font-size:13px;}
+.ann-info{font-size:13px;color:#5b6472;background:#f8fafc;border:1px solid #eef1f6;border-radius:10px;padding:12px 16px;}
+.ann-info b{color:#1a3a5c;}
+.ann-preview{margin-top:18px;background:#eef1f6;border-radius:14px;padding:16px 18px;display:none;}
+.ann-preview.show{display:block;}
+.ann-preview-label{font-size:11px;font-weight:600;color:#8a94a6;margin-bottom:10px;letter-spacing:.04em;}
+.ann-bubble{background:#fff;border-radius:4px 16px 16px 16px;padding:12px 15px;font-size:13px;line-height:1.75;white-space:pre-wrap;color:#1c2733;max-width:480px;box-shadow:0 1px 2px rgba(15,23,42,.06);}
+.ann-footer{display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:18px;border-top:1px solid #f1f5f9;}
+.ann-count{font-size:13px;color:#5b6472;}
+.ann-count b{font-size:17px;color:#1a3a5c;font-weight:700;margin:0 3px;}
+.ann-send{background:#1a3a5c;color:#fff;border:none;border-radius:10px;padding:11px 28px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer;transition:all .15s;}
+.ann-send:hover:not(:disabled){background:#254b73;}
+.ann-send:disabled{background:#c9d2de;cursor:not-allowed;}
+.ann-table{width:100%;border-collapse:collapse;}
+.ann-table th{padding:10px 16px;text-align:left;font-size:11px;font-weight:600;color:#8a94a6;letter-spacing:.05em;border-bottom:1px solid #eef1f6;background:#fbfcfe;}
+.ann-td{padding:11px 16px;border-bottom:1px solid #f4f6f9;font-size:13px;color:#5b6472;}
+.ann-row{cursor:pointer;transition:background .1s;}
+.ann-row:hover{background:#f8fafc;}
+.ann-row:last-child .ann-td{border-bottom:none;}
+.ann-td-title{font-weight:600;color:#12263f;}
+.ann-tag{background:#eef4fb;color:#1d4ed8;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:600;}
+.ann-td-sub{margin-left:6px;font-size:11px;color:#9aa4b2;}
+.ann-td-num{text-align:center;font-weight:700;color:#1a3a5c;}
+.ann-td-unit{font-size:11px;color:#9aa4b2;font-weight:400;margin-left:1px;}
+.ann-td-date{white-space:nowrap;font-size:12px;}
+.ann-modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(3px);z-index:100;align-items:center;justify-content:center;}
+.ann-modal.show{display:flex;}
+.ann-modal-card{background:#fff;border-radius:16px;padding:24px;max-width:520px;width:90%;max-height:82vh;overflow-y:auto;animation:annUp .18s ease;}
+@keyframes annUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+.ann-modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
+.ann-modal-head h3{font-size:16px;font-weight:700;color:#12263f;}
+.ann-x{background:none;border:none;font-size:20px;cursor:pointer;color:#9aa4b2;line-height:1;padding:4px;}
+.ann-modal-body{font-size:13px;white-space:pre-wrap;background:#f8fafc;border-radius:10px;padding:14px 16px;line-height:1.75;color:#1c2733;}
+.ann-modal-meta{margin-top:12px;font-size:12px;color:#9aa4b2;}
+.ann-confirm{margin:0 0 14px;}
+.ann-confirm-row{display:flex;gap:10px;font-size:13px;margin-bottom:8px;}
+.ann-confirm-row dt{flex:none;width:64px;color:#8a94a6;font-weight:600;}
+.ann-confirm-row dd{margin:0;color:#12263f;}
+.ann-modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;}
+.ann-btn-ghost{border:1px solid #e5e9f0;background:#fff;border-radius:10px;padding:9px 20px;font-size:13px;font-family:inherit;cursor:pointer;color:#5b6472;}
+.ann-btn-ghost:hover{background:#f8fafc;}
+#ann-toast{position:fixed;bottom:28px;left:50%;transform:translate(-50%,20px);background:#12263f;color:#fff;padding:11px 22px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:200;box-shadow:0 8px 24px rgba(15,23,42,.25);}
+#ann-toast.show{opacity:1;transform:translate(-50%,0);}
+#ann-toast.err{background:#b3261e;}
+</style>
+
+<div class="ann-wrap">
 
   <!-- 配信フォーム -->
-  <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:24px;margin-bottom:24px;">
-    <h3 style="font-size:15px;font-weight:bold;color:#1e3a5f;margin-bottom:16px;">📢 お知らせを配信する</h3>
+  <div class="ann-card">
+    <div class="ann-head"><h3>新規配信</h3><span class="ann-sub">LINE公式アカウントからテキストメッセージを送信します</span></div>
+    <div class="ann-body">
+      <label class="ann-label">タイトル<span class="ann-req">*</span></label>
+      <input type="text" id="ann-title" class="ann-input" placeholder="例: 研修スケジュール変更のお知らせ" oninput="refreshPreview()">
 
-    <div style="margin-bottom:14px;">
-      <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">タイトル <span style="color:#ef4444;">*</span></label>
-      <input type="text" id="ann-title" placeholder="例: 6月度 研修スケジュール変更のお知らせ"
-        style="width:100%;border:1px solid #d1d5db;border-radius:7px;padding:9px 12px;font-size:13px;font-family:inherit;">
-    </div>
+      <label class="ann-label">本文<span class="ann-req">*</span></label>
+      <textarea id="ann-message" class="ann-textarea" rows="5" placeholder="配信する内容を入力してください" oninput="refreshPreview()"></textarea>
 
-    <div style="margin-bottom:14px;">
-      <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:5px;">本文 <span style="color:#ef4444;">*</span></label>
-      <textarea id="ann-message" rows="5" placeholder="配信する内容を入力してください..."
-        style="width:100%;border:1px solid #d1d5db;border-radius:7px;padding:9px 12px;font-size:13px;font-family:inherit;resize:vertical;"></textarea>
-    </div>
-
-    <!-- 対象選択 -->
-    <div style="margin-bottom:16px;">
-      <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:8px;">配信対象</label>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:1.5px solid #d1d5db;border-radius:7px;font-size:13px;" id="lbl-all">
-          <input type="radio" name="target_type" value="all" checked onchange="onTargetChange(this.value)">
-          全員（LINE紐付 ${linkedCount}名）
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:1.5px solid #d1d5db;border-radius:7px;font-size:13px;" id="lbl-month">
-          <input type="radio" name="target_type" value="entry_month" onchange="onTargetChange(this.value)">
-          入社月で絞る
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:1.5px solid #d1d5db;border-radius:7px;font-size:13px;" id="lbl-ind">
-          <input type="radio" name="target_type" value="individual" onchange="onTargetChange(this.value)">
-          個別指定
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:7px 14px;border:1.5px solid #d1d5db;border-radius:7px;font-size:13px;" id="lbl-liff">
-          <input type="radio" name="target_type" value="liff" onchange="onTargetChange(this.value)">
-          LINE連携者（${liffTotal}名）
-        </label>
+      <label class="ann-label">配信対象</label>
+      <div class="ann-seg" id="ann-seg">
+        <button type="button" class="on" onclick="setTarget('liff', this)">LINE連携者</button>
+        <button type="button" onclick="setTarget('all', this)">全員</button>
+        <button type="button" onclick="setTarget('entry_month', this)">入社月</button>
+        <button type="button" onclick="setTarget('individual', this)">個別指定</button>
       </div>
-      <!-- LINE連携者選択 -->
-      <div id="liff-user-sel" style="display:none;margin-top:10px;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;">
-          <span style="font-size:11px;color:#6b7280;">Ctrl / Cmd + クリックで複数選択（LINE Botに登録済みの連携者）</span>
-          <button type="button" onclick="toggleAllLiff(true)" style="font-size:11px;padding:2px 10px;border:1px solid #d1d5db;border-radius:5px;background:white;cursor:pointer;">全選択</button>
-          <button type="button" onclick="toggleAllLiff(false)" style="font-size:11px;padding:2px 10px;border:1px solid #d1d5db;border-radius:5px;background:white;cursor:pointer;">解除</button>
+
+      <!-- LINE連携者 -->
+      <div class="ann-panel" id="panel-liff">
+        <div class="ann-toolbar">
+          <div class="ann-search">
+            <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input type="text" id="liff-search" class="ann-input" placeholder="名前で検索" oninput="filterLiff()">
+          </div>
         </div>
-        <select id="ann-liff-users" multiple size="8"
-          style="width:100%;border:1px solid #d1d5db;border-radius:7px;padding:6px;font-size:13px;">
-          ${liffUserOptions || '<option disabled>LINE連携者がいません</option>'}
-        </select>
+        <div class="ann-chips" id="role-chips">
+          <button type="button" class="ann-chip on" data-role="" onclick="setRoleFilter('', this)">すべて<span class="ann-chip-n">${liffTotal}</span></button>
+          ${roleChips}
+        </div>
+        <div class="ann-listtools">
+          <span class="ann-user-meta" id="liff-shown"></span>
+          <span>
+            <button type="button" class="ann-linkbtn" onclick="toggleList('liff-list', true)">表示中を全選択</button>
+            <button type="button" class="ann-linkbtn" onclick="toggleList('liff-list', false)">選択解除</button>
+          </span>
+        </div>
+        <div class="ann-list" id="liff-list">
+          ${liffUserRows || '<div class="ann-empty">LINE連携者がいません</div>'}
+        </div>
       </div>
-      <!-- 入社月選択 -->
-      <div id="entry-month-sel" style="display:none;margin-top:10px;">
-        <select id="ann-entry-month" style="border:1px solid #d1d5db;border-radius:7px;padding:7px 12px;font-size:13px;">
-          ${monthOptions || '<option value="">入社月データがありません</option>'}
-        </select>
-      </div>
-      <!-- 個別社員選択 -->
-      <div id="individual-sel" style="display:none;margin-top:10px;">
-        <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">Ctrl / Cmd + クリックで複数選択</div>
-        <select id="ann-employees" multiple size="6"
-          style="width:100%;border:1px solid #d1d5db;border-radius:7px;padding:6px;font-size:13px;">
-          ${empOptions}
-        </select>
-      </div>
-    </div>
 
-    <!-- プレビュー -->
-    <div id="preview-box" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;margin-bottom:14px;">
-      <div style="font-size:11px;font-weight:600;color:#166534;margin-bottom:6px;">📱 LINEでの表示プレビュー</div>
-      <div id="preview-text" style="font-size:13px;white-space:pre-wrap;color:#1a3a5c;"></div>
-    </div>
+      <!-- 全員 -->
+      <div class="ann-panel" id="panel-all" style="display:none;">
+        <div class="ann-info">LINE連携済みの全社員 <b>${linkedCount}名</b> に送信します。</div>
+      </div>
 
-    <div style="display:flex;gap:10px;justify-content:flex-end;">
-      <button onclick="showPreview()" style="padding:9px 18px;border:1px solid #d1d5db;border-radius:7px;font-size:13px;cursor:pointer;background:white;">プレビュー</button>
-      <button onclick="sendAnnouncement()" style="padding:9px 24px;background:#1a3a5c;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">配信する</button>
+      <!-- 入社月 -->
+      <div class="ann-panel" id="panel-entry_month" style="display:none;">
+        <select id="ann-entry-month" class="ann-select" style="max-width:340px;" onchange="updateCount()">
+          ${monthOptions || '<option value="" data-count="0">入社月データがありません</option>'}
+        </select>
+      </div>
+
+      <!-- 個別指定 -->
+      <div class="ann-panel" id="panel-individual" style="display:none;">
+        <div class="ann-toolbar">
+          <div class="ann-search">
+            <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <input type="text" id="emp-search" class="ann-input" placeholder="名前・社員番号で検索" oninput="filterEmp()">
+          </div>
+        </div>
+        <div class="ann-listtools">
+          <span></span>
+          <span>
+            <button type="button" class="ann-linkbtn" onclick="toggleList('emp-list', true)">表示中を全選択</button>
+            <button type="button" class="ann-linkbtn" onclick="toggleList('emp-list', false)">選択解除</button>
+          </span>
+        </div>
+        <div class="ann-list" id="emp-list">
+          ${empRows || '<div class="ann-empty">社員がいません</div>'}
+        </div>
+      </div>
+
+      <!-- プレビュー -->
+      <div class="ann-preview" id="ann-preview">
+        <div class="ann-preview-label">LINE プレビュー</div>
+        <div class="ann-bubble" id="ann-preview-text"></div>
+      </div>
+
+      <div class="ann-footer">
+        <span class="ann-count">送信対象<b id="ann-count">0</b>名</span>
+        <button class="ann-send" id="ann-send" onclick="openConfirm()">配信する</button>
+      </div>
     </div>
   </div>
 
   <!-- 配信履歴 -->
-  <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);overflow:hidden;">
-    <div style="padding:16px 20px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;">
-      <h3 style="font-size:15px;font-weight:bold;color:#1e3a5f;">配信履歴</h3>
-      <span style="font-size:12px;color:#9ca3af;">最新30件</span>
-    </div>
-    <table style="width:100%;border-collapse:collapse;">
-      <thead style="background:#f9fafb;">
-        <tr>
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">タイトル</th>
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">対象</th>
-          <th style="padding:8px 12px;text-align:center;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">送信数</th>
-          <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">配信日時</th>
-        </tr>
+  <div class="ann-card">
+    <div class="ann-head-bar"><h3>配信履歴</h3><span class="ann-sub">最新30件</span></div>
+    <table class="ann-table">
+      <thead>
+        <tr><th>タイトル</th><th>対象</th><th style="text-align:center;">送信数</th><th>配信日時</th></tr>
       </thead>
-      <tbody id="history-body">
-        ${historyRows || '<tr><td colspan="4" style="padding:24px;text-align:center;color:#9ca3af;">配信履歴がありません</td></tr>'}
+      <tbody>
+        ${historyRows || '<tr><td colspan="4" class="ann-empty">配信履歴がありません</td></tr>'}
       </tbody>
     </table>
   </div>
+</div>
 
-  <!-- 詳細モーダル -->
-  <div id="detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;align-items:center;justify-content:center;">
-    <div style="background:white;border-radius:12px;padding:24px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3 id="modal-title" style="font-size:16px;font-weight:bold;color:#1e3a5f;"></h3>
-        <button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#6b7280;">×</button>
-      </div>
-      <div id="modal-body" style="font-size:13px;white-space:pre-wrap;background:#f9fafb;border-radius:8px;padding:14px;line-height:1.7;"></div>
-      <div id="modal-meta" style="margin-top:12px;font-size:12px;color:#9ca3af;"></div>
+<!-- 配信確認モーダル -->
+<div class="ann-modal" id="confirm-modal">
+  <div class="ann-modal-card">
+    <div class="ann-modal-head">
+      <h3>配信内容の確認</h3>
+      <button class="ann-x" onclick="closeConfirm()">×</button>
+    </div>
+    <dl class="ann-confirm">
+      <div class="ann-confirm-row"><dt>対象</dt><dd id="c-target"></dd></div>
+      <div class="ann-confirm-row"><dt>送信数</dt><dd id="c-count"></dd></div>
+    </dl>
+    <div class="ann-modal-body" id="c-msg"></div>
+    <div class="ann-modal-actions">
+      <button class="ann-btn-ghost" onclick="closeConfirm()">キャンセル</button>
+      <button class="ann-send" id="c-send" onclick="doSend()">配信する</button>
     </div>
   </div>
 </div>
 
+<!-- 履歴詳細モーダル -->
+<div class="ann-modal" id="detail-modal">
+  <div class="ann-modal-card">
+    <div class="ann-modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="ann-x" onclick="closeDetail()">×</button>
+    </div>
+    <div class="ann-modal-body" id="modal-body"></div>
+    <div class="ann-modal-meta" id="modal-meta"></div>
+  </div>
+</div>
+
+<div id="ann-toast"></div>
+
 <script>
 const annHistory = ${safeJson(history.results ?? [])};
-
 const LIFF_USER_NAMES = ${safeJson(Object.fromEntries(liffNameMap))};
+const LINKED_COUNT = ${linkedCount};
+let targetType = 'liff';
+let roleFilter = '';
 
-function onTargetChange(val) {
-  document.getElementById('entry-month-sel').style.display = val === 'entry_month' ? 'block' : 'none';
-  document.getElementById('individual-sel').style.display = val === 'individual' ? 'block' : 'none';
-  document.getElementById('liff-user-sel').style.display = val === 'liff' ? 'block' : 'none';
+function setTarget(t, btn) {
+  targetType = t;
+  document.querySelectorAll('#ann-seg button').forEach(function(b) { b.classList.remove('on'); });
+  btn.classList.add('on');
+  ['liff', 'all', 'entry_month', 'individual'].forEach(function(p) {
+    document.getElementById('panel-' + p).style.display = p === t ? 'block' : 'none';
+  });
+  updateCount();
 }
 
-function toggleAllLiff(on) {
-  Array.from(document.getElementById('ann-liff-users').options).forEach(o => { if (!o.disabled) o.selected = on; });
+function rowsOf(listId) {
+  return Array.from(document.getElementById(listId).querySelectorAll('.ann-user'));
+}
+
+function filterLiff() {
+  const q = document.getElementById('liff-search').value.trim().toLowerCase();
+  let shown = 0;
+  rowsOf('liff-list').forEach(function(r) {
+    const hit = (!q || r.dataset.name.toLowerCase().indexOf(q) !== -1) && (!roleFilter || r.dataset.role === roleFilter);
+    r.classList.toggle('hide', !hit);
+    if (hit) shown++;
+  });
+  document.getElementById('liff-shown').textContent = shown + '名を表示中';
+}
+
+function setRoleFilter(role, btn) {
+  roleFilter = role;
+  document.querySelectorAll('#role-chips .ann-chip').forEach(function(b) { b.classList.remove('on'); });
+  btn.classList.add('on');
+  filterLiff();
+}
+
+function filterEmp() {
+  const q = document.getElementById('emp-search').value.trim().toLowerCase();
+  rowsOf('emp-list').forEach(function(r) {
+    r.classList.toggle('hide', !!q && r.dataset.name.toLowerCase().indexOf(q) === -1);
+  });
+}
+
+function toggleList(listId, on) {
+  rowsOf(listId).forEach(function(r) {
+    if (r.classList.contains('hide')) return;
+    const cb = r.querySelector('input');
+    if (cb && !cb.disabled) cb.checked = on;
+  });
+  updateCount();
+}
+
+function checkedIds(listId) {
+  return Array.from(document.getElementById(listId).querySelectorAll('input:checked')).map(function(i) { return i.value; });
+}
+
+function currentCount() {
+  if (targetType === 'liff') return checkedIds('liff-list').length;
+  if (targetType === 'individual') return checkedIds('emp-list').length;
+  if (targetType === 'all') return LINKED_COUNT;
+  const sel = document.getElementById('ann-entry-month');
+  const opt = sel.options[sel.selectedIndex];
+  return opt ? parseInt(opt.dataset.count || '0') : 0;
+}
+
+function updateCount() {
+  const n = currentCount();
+  document.getElementById('ann-count').textContent = n;
+  document.getElementById('ann-send').disabled = n === 0;
+}
+
+function refreshPreview() {
+  const title = document.getElementById('ann-title').value.trim();
+  const msg = document.getElementById('ann-message').value.trim();
+  const box = document.getElementById('ann-preview');
+  if (!title && !msg) { box.classList.remove('show'); return; }
+  document.getElementById('ann-preview-text').textContent =
+    '【お知らせ】' + (title || '（タイトル）') + '\\n\\n' + (msg || '（本文）');
+  box.classList.add('show');
 }
 
 function getTarget() {
-  const type = document.querySelector('input[name="target_type"]:checked')?.value ?? 'all';
-  let data = null;
-  if (type === 'entry_month') {
-    data = document.getElementById('ann-entry-month').value;
-  } else if (type === 'individual') {
-    const sel = document.getElementById('ann-employees');
-    const ids = Array.from(sel.selectedOptions).map(o => o.value).join(',');
-    data = ids || null;
-  } else if (type === 'liff') {
-    const sel = document.getElementById('ann-liff-users');
-    const ids = Array.from(sel.selectedOptions).map(o => o.value).join(',');
-    data = ids || null;
+  if (targetType === 'entry_month') return { type: targetType, data: document.getElementById('ann-entry-month').value || null };
+  if (targetType === 'individual') return { type: targetType, data: checkedIds('emp-list').join(',') || null };
+  if (targetType === 'liff') return { type: targetType, data: checkedIds('liff-list').join(',') || null };
+  return { type: 'all', data: null };
+}
+
+function targetSummary() {
+  if (targetType === 'all') return 'LINE連携済みの全社員';
+  if (targetType === 'entry_month') {
+    const sel = document.getElementById('ann-entry-month');
+    const opt = sel.options[sel.selectedIndex];
+    return opt ? opt.textContent : '入社月';
   }
-  return { type, data };
+  const listId = targetType === 'liff' ? 'liff-list' : 'emp-list';
+  const names = Array.from(document.getElementById(listId).querySelectorAll('input:checked')).map(function(i) {
+    return i.closest('.ann-user').querySelector('.ann-user-name').textContent;
+  });
+  if (names.length === 0) return '未選択';
+  return names.length <= 5 ? names.join('、') : names.slice(0, 4).join('、') + ' ほか' + (names.length - 4) + '名';
 }
 
-function showPreview() {
-  const title = document.getElementById('ann-title').value.trim();
-  const msg = document.getElementById('ann-message').value.trim();
-  if (!title && !msg) return;
-  const box = document.getElementById('preview-box');
-  document.getElementById('preview-text').textContent = '📢 ' + (title || '（タイトル）') + '\\n\\n' + (msg || '（本文）');
-  box.style.display = 'block';
-}
-
-async function sendAnnouncement() {
+function openConfirm() {
   const title = document.getElementById('ann-title').value.trim();
   const message = document.getElementById('ann-message').value.trim();
-  if (!title || !message) { alert('タイトルと本文を入力してください'); return; }
+  if (!title || !message) { showToast('タイトルと本文を入力してください', true); return; }
+  const t = getTarget();
+  if ((t.type === 'liff' || t.type === 'individual') && !t.data) { showToast('送信先を1名以上選択してください', true); return; }
+  document.getElementById('c-target').textContent = targetSummary();
+  document.getElementById('c-count').textContent = currentCount() + '名';
+  document.getElementById('c-msg').textContent = '【お知らせ】' + title + '\\n\\n' + message;
+  document.getElementById('confirm-modal').classList.add('show');
+}
 
-  const { type, data } = getTarget();
-  if (type === 'liff' && !data) { alert('送信するLINE連携者を1名以上選択してください'); return; }
+function closeConfirm() {
+  document.getElementById('confirm-modal').classList.remove('show');
+}
 
-  let liffLabel = '';
-  if (type === 'liff') {
-    const names = data.split(',').map(id => LIFF_USER_NAMES[id] ?? id);
-    liffLabel = names.length <= 5
-      ? names.join('・')
-      : names.slice(0, 3).join('・') + ' ほか' + (names.length - 3) + '名';
+async function doSend() {
+  const btn = document.getElementById('c-send');
+  btn.disabled = true;
+  btn.textContent = '送信中...';
+  const t = getTarget();
+  try {
+    const res = await fetch('/api/line/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: document.getElementById('ann-title').value.trim(),
+        message: document.getElementById('ann-message').value.trim(),
+        target_type: t.type,
+        target_data: t.data
+      })
+    });
+    const json = await res.json();
+    if (res.ok) {
+      closeConfirm();
+      showToast('配信しました（送信数 ' + json.sent + '名）' + (json.warning ? ' ／ ' + json.warning : ''));
+      setTimeout(function() { location.reload(); }, 1500);
+    } else {
+      showToast('配信に失敗しました: ' + (json.error || '不明なエラー'), true);
+      btn.disabled = false;
+      btn.textContent = '配信する';
+    }
+  } catch (e) {
+    showToast('通信エラーが発生しました', true);
+    btn.disabled = false;
+    btn.textContent = '配信する';
   }
-  const targetLabel = type === 'all' ? '全員'
-    : type === 'entry_month' ? (data + '入社')
-    : type === 'liff' ? ('LINE連携者（' + liffLabel + '）')
-    : '個別指定';
-  if (!confirm('「' + title + '」を ' + targetLabel + ' に配信しますか？\\n\\n' + message)) return;
+}
 
-  const res = await fetch('/api/line/announcements', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, message, target_type: type, target_data: data })
-  });
-  const json = await res.json();
-  if (res.ok) {
-    const warn = json.warning ? '\\n⚠️ ' + json.warning : '';
-    alert('配信しました！（送信数: ' + json.sent + '名）' + warn);
-    location.reload();
-  } else {
-    alert('配信に失敗しました: ' + (json.error ?? '不明なエラー'));
-  }
+let toastTimer = null;
+function showToast(msg, isErr) {
+  const el = document.getElementById('ann-toast');
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { el.classList.remove('show'); }, 3200);
 }
 
 function showDetail(id) {
-  const r = annHistory.find(a => a.id === id);
+  const r = annHistory.find(function(a) { return a.id === id; });
   if (!r) return;
-  const TARGET_LABEL = { all: '全員', entry_month: '入社月', individual: '個別指定', liff: 'LINE連携者' };
+  const TL = { all: '全員', entry_month: '入社月', individual: '個別指定', liff: 'LINE連携者' };
   const targetData = r.target_type === 'liff' && r.target_data
-    ? r.target_data.split(',').map(x => LIFF_USER_NAMES[x.trim()] ?? x.trim()).join('・')
+    ? r.target_data.split(',').map(function(x) { return LIFF_USER_NAMES[x.trim()] || x.trim(); }).join('、')
     : r.target_data;
   document.getElementById('modal-title').textContent = r.title;
   document.getElementById('modal-body').textContent = r.message;
   document.getElementById('modal-meta').textContent =
-    '対象: ' + (TARGET_LABEL[r.target_type] ?? r.target_type) +
-    (targetData ? ' (' + targetData + ')' : '') +
-    '　送信数: ' + r.sent_count + '名　' + r.created_at.slice(0, 16);
-  const modal = document.getElementById('detail-modal');
-  modal.style.display = 'flex';
+    '対象: ' + (TL[r.target_type] || r.target_type) +
+    (targetData ? '（' + targetData + '）' : '') +
+    ' ／ 送信数: ' + r.sent_count + '名 ／ ' + r.created_at.slice(0, 16);
+  document.getElementById('detail-modal').classList.add('show');
 }
 
-function closeModal() {
-  document.getElementById('detail-modal').style.display = 'none';
+function closeDetail() {
+  document.getElementById('detail-modal').classList.remove('show');
 }
 
-document.getElementById('detail-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
+['confirm-modal', 'detail-modal'].forEach(function(id) {
+  document.getElementById(id).addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('show');
+  });
 });
+
+filterLiff();
+updateCount();
 </script>
 `;
   return c.html(layout('お知らせ配信', content, 'announcements'));

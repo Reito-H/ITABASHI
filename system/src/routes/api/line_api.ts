@@ -102,7 +102,7 @@ app.post('/announcements', async (c) => {
     return c.json({ ok: true, sent: 0, warning: '送信対象のLINE紐付き社員がいません' });
   }
 
-  const lineMessage = [{ type: 'text', text: `📢 ${title}\n\n${message}` }];
+  const lineMessage = [{ type: 'text', text: `【お知らせ】${title}\n\n${message}` }];
   await lineMulticast(c.env.LINE_CHANNEL_ACCESS_TOKEN, uids, lineMessage);
 
   await c.env.DB.prepare(

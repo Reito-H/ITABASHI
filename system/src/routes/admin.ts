@@ -164,7 +164,20 @@ app.post('/setup', async (c) => {
 
 // ===== ダッシュボード =====
 app.get('/', async (c) => {
-  const today = new Date().toISOString().split('T')[0];
+  const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const today = jstNow.toISOString().split('T')[0];
+
+  // 直近6ヶ月の "YYYY-MM" リスト（分析グラフ用）
+  const months: string[] = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth() - i, 1));
+    months.push(d.toISOString().slice(0, 7));
+  }
+  const sinceMonth = `${months[0]}-01`;
+  const curY = jstNow.getUTCFullYear();
+  const curM = jstNow.getUTCMonth() + 1;
+  const prevY = curM === 1 ? curY - 1 : curY;
+  const prevM = curM === 1 ? 12 : curM - 1;
 
   const [empStats, unrespondedEvents, overdueInterviews, openReports, lastLogin] = await Promise.all([
     c.env.DB.prepare(`
@@ -198,6 +211,50 @@ app.get('/', async (c) => {
   const trainingCount = { cnt: empStats?.training_count ?? 0 };
   const regularCount  = { cnt: empStats?.regular_count  ?? 0 };
 
+  // ===== 分析データ（テーブル欠損時も落ちないよう個別にガード） =====
+  const [hireTrend, reportTrend, divisionComp, salesStats, lineUsage] = await Promise.all([
+    // 入社人数の推移（退職者含む・hire_date基準）
+    c.env.DB.prepare(`
+      SELECT substr(hire_date, 1, 7) AS ym, COUNT(*) AS cnt
+      FROM employees
+      WHERE hire_date >= ? AND hire_date != ''
+      GROUP BY ym
+    `).bind(sinceMonth).all<{ ym: string; cnt: number }>().catch(() => null),
+    // 報告件数の推移（嫌なこと・忘れ物・事故・違反・一般の合算）
+    c.env.DB.prepare(`
+      SELECT ym, SUM(cnt) AS cnt FROM (
+        SELECT substr(created_at, 1, 7) AS ym, COUNT(*) AS cnt FROM bad_events WHERE created_at >= ? GROUP BY ym
+        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM lost_item_reports  WHERE created_at >= ? GROUP BY 1
+        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM accident_reports   WHERE created_at >= ? GROUP BY 1
+        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM violation_reports  WHERE created_at >= ? GROUP BY 1
+        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM general_reports    WHERE created_at >= ? GROUP BY 1
+      ) GROUP BY ym
+    `).bind(sinceMonth, sinceMonth, sinceMonth, sinceMonth, sinceMonth)
+      .all<{ ym: string; cnt: number }>().catch(() => null),
+    // 課別の在籍構成
+    c.env.DB.prepare(`
+      SELECT division, COUNT(*) AS cnt FROM employees
+      WHERE is_active = 1 GROUP BY division ORDER BY division
+    `).all<{ division: number | null; cnt: number }>().catch(() => null),
+    // 売上（今月度・前月度）
+    c.env.DB.prepare(`
+      SELECT period_year AS y, period_month AS m,
+             SUM(amount) AS total, COUNT(DISTINCT emp_id) AS people
+      FROM sales_records
+      WHERE (period_year = ? AND period_month = ?) OR (period_year = ? AND period_month = ?)
+      GROUP BY y, m
+    `).bind(curY, curM, prevY, prevM)
+      .all<{ y: number; m: number; total: number; people: number }>().catch(() => null),
+    // LINE利用（本日・直近7日）
+    c.env.DB.prepare(`
+      SELECT
+        SUM(CASE WHEN date(created_at) = date('now','localtime') THEN 1 ELSE 0 END) AS today_cnt,
+        SUM(CASE WHEN created_at >= datetime('now','localtime','-7 days') THEN 1 ELSE 0 END) AS week_cnt,
+        COUNT(DISTINCT CASE WHEN created_at >= datetime('now','localtime','-7 days') THEN line_uid END) AS week_users
+      FROM line_activity_logs
+    `).first<{ today_cnt: number; week_cnt: number; week_users: number }>().catch(() => null),
+  ]);
+
   const recentEvents = await c.env.DB.prepare(`
     SELECT b.id, b.category, b.content, b.admin_memo, b.created_at, e.name
     FROM bad_events b
@@ -230,24 +287,111 @@ app.get('/', async (c) => {
     'その他': '#e5e7eb'
   };
 
+  const openReportTotal = (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0);
   const statCards = [
     { label: '在籍社員数',       value: empCount.cnt,               sub: `研修中 ${trainingCount.cnt}名 / 配属済 ${regularCount.cnt}名`, color: '#1a3a5c' },
-    { label: '未対応の報告',     value: unrespondedEvents?.cnt ?? 0, sub: '嫌なこと報告（管理者メモなし）',                                   color: (unrespondedEvents?.cnt ?? 0) > 0 ? '#b91c1c' : '#374151' },
-    { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',                                           color: (overdueInterviews?.cnt ?? 0) > 0 ? '#b45309' : '#374151' },
-    { label: '対応中の現場報告', value: (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0),
+    { label: '未対応の報告',     value: unrespondedEvents?.cnt ?? 0, sub: '嫌なこと報告（管理者メモなし）',
+      color: (unrespondedEvents?.cnt ?? 0) > 0 ? '#b91c1c' : '#1a3a5c', href: `${ADMIN_PATH}/events` },
+    { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',
+      color: (overdueInterviews?.cnt ?? 0) > 0 ? '#b45309' : '#1a3a5c', href: `${ADMIN_PATH}/interviews` },
+    { label: '対応中の現場報告', value: openReportTotal,
       sub: `忘れ物 ${openReports?.lost ?? 0} / 事故 ${openReports?.accident ?? 0} / 違反 ${openReports?.violation ?? 0} / 一般 ${openReports?.general ?? 0}`,
-      color: ((openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0)) > 0 ? '#b91c1c' : '#374151',
-      href: `${ADMIN_PATH}/settings/lost-items` },
+      color: openReportTotal > 0 ? '#b91c1c' : '#1a3a5c',
+      href: `${ADMIN_PATH}/settings/reports` },
   ].map((s: { label: string; value: number; sub: string; color: string; href?: string }) => {
     const inner = `
-      <div style="font-size:12px;color:#6b7280;font-weight:500;letter-spacing:0.03em;">${escHtml(s.label)}</div>
-      <div style="font-size:32px;font-weight:800;color:${s.color};line-height:1;">${s.value}</div>
-      <div style="font-size:11px;color:#9ca3af;">${escHtml(s.sub)}</div>`;
-    const style = 'background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;display:flex;flex-direction:column;gap:6px;';
+      <div class="hm-stat-label">${escHtml(s.label)}</div>
+      <div class="hm-stat-value" style="color:${s.color};">${s.value}</div>
+      <div class="hm-stat-sub">${escHtml(s.sub)}</div>`;
     return s.href
-      ? `<a href="${s.href}" style="${style}text-decoration:none;">${inner}</a>`
-      : `<div style="${style}">${inner}</div>`;
+      ? `<a href="${s.href}" class="hm-stat">${inner}</a>`
+      : `<div class="hm-stat">${inner}</div>`;
   }).join('');
+
+  // ===== クイックアクセス（権限フィルタ: data-nav-id / data-perm-key で自動非表示） =====
+  const quickLinks = [
+    { href: `${ADMIN_PATH}/shift`,            nav: 'shift',         label: '新人シフト管理' },
+    { href: `${ADMIN_PATH}/kancho-shift`,     nav: 'kancho-shift',  label: '班長シフト' },
+    { href: `${ADMIN_PATH}/newcomers`,        nav: 'newcomers',     label: '総合新人管理' },
+    { href: `${ADMIN_PATH}/staff`,            nav: 'staff',         label: '社員管理' },
+    { href: `${ADMIN_PATH}/staff/search`,     nav: 'staff-search',  label: '社員絞り込み検索' },
+    { href: `${ADMIN_PATH}/events`,           nav: 'events',        label: '報告一覧' },
+    { href: `${ADMIN_PATH}/vehicles`,         nav: 'vehicles',      label: '車両検索' },
+    { href: `${ADMIN_PATH}/inspection`,       nav: 'inspection',    label: '点検管理' },
+    { href: `${ADMIN_PATH}/announcements`,    nav: 'announcements', label: 'お知らせ配信' },
+  ];
+  const quickHtml = quickLinks.map(q =>
+    `<a href="${q.href}" data-nav-id="${q.nav}" class="hm-quick">${escHtml(q.label)}</a>`
+  ).join('') +
+    `<a href="${ADMIN_PATH}/settings/reports" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports" class="hm-quick">報告センター</a>`;
+
+  // ===== 分析グラフ（縦棒: 直近6ヶ月） =====
+  const monthLabel = (ym: string) => `${parseInt(ym.slice(5, 7))}月`;
+  const toSeries = (rows: Array<{ ym: string; cnt: number }> | undefined) => {
+    const map = new Map((rows ?? []).map(r => [r.ym, r.cnt]));
+    return months.map(ym => ({ label: monthLabel(ym), value: map.get(ym) ?? 0 }));
+  };
+  const barChart = (data: Array<{ label: string; value: number }>, color: string) => {
+    const max = Math.max(...data.map(d => d.value), 1);
+    return `<div class="hm-bars">` + data.map(d => `
+      <div class="hm-bar-col">
+        <div class="hm-bar-val">${d.value > 0 ? d.value : ''}</div>
+        <div class="hm-bar" style="height:${d.value > 0 ? Math.max(Math.round(d.value / max * 74), 5) : 2}px;background:${color};"></div>
+        <div class="hm-bar-lb">${escHtml(d.label)}</div>
+      </div>`).join('') + `</div>`;
+  };
+  const hireSeries   = toSeries(hireTrend?.results);
+  const reportSeries = toSeries(reportTrend?.results);
+  const hireTotal6   = hireSeries.reduce((a, b) => a + b.value, 0);
+  const reportTotal6 = reportSeries.reduce((a, b) => a + b.value, 0);
+
+  // 課別構成（横棒）
+  const divRows = divisionComp?.results ?? [];
+  const divMax = Math.max(...divRows.map(r => r.cnt), 1);
+  const divisionHtml = divRows.length === 0
+    ? '<div class="hm-empty">データなし</div>'
+    : divRows.map(r => `
+      <div class="hm-div-row">
+        <span class="hm-div-name">${r.division != null ? `${r.division}課` : '未配属'}</span>
+        <div class="hm-div-track"><div class="hm-div-fill" style="width:${Math.round(r.cnt / divMax * 100)}%;"></div></div>
+        <span class="hm-div-cnt">${r.cnt}名</span>
+      </div>`).join('');
+
+  // 売上サマリー（今月度 vs 前月度）
+  const salesRows = salesStats?.results ?? [];
+  const curSales  = salesRows.find(r => r.y === curY && r.m === curM);
+  const prevSales = salesRows.find(r => r.y === prevY && r.m === prevM);
+  const salesDiffHtml = (() => {
+    if (!curSales || !prevSales || !prevSales.total) return '<span class="hm-kpi-note">前月比 —</span>';
+    const pct = Math.round((curSales.total / prevSales.total - 1) * 1000) / 10;
+    const up = pct >= 0;
+    return `<span class="hm-kpi-note" style="color:${up ? '#16a34a' : '#b91c1c'};font-weight:700;">前月比 ${up ? '+' : ''}${pct}%</span>`;
+  })();
+  const salesCardHtml = `
+    <a href="${ADMIN_PATH}/staff" data-nav-id="staff" class="hm-card hm-card-link">
+      <div class="hm-card-head"><span class="hm-card-title">今月度の売上</span><span class="hm-card-sub">${curM}月度</span></div>
+      <div class="hm-card-body">
+        <div class="hm-kpi-main">${curSales ? '¥' + curSales.total.toLocaleString('ja-JP') : '記録なし'}</div>
+        <div class="hm-kpi-row">
+          ${salesDiffHtml}
+          <span class="hm-kpi-note">記録 ${curSales?.people ?? 0}名</span>
+          <span class="hm-kpi-note">前月 ${prevSales ? '¥' + prevSales.total.toLocaleString('ja-JP') : '—'}</span>
+        </div>
+      </div>
+    </a>`;
+
+  // LINE利用サマリー
+  const lineCardHtml = `
+    <div class="hm-card">
+      <div class="hm-card-head"><span class="hm-card-title">LINE利用状況</span><span class="hm-card-sub">Bot・LIFF操作</span></div>
+      <div class="hm-card-body">
+        <div class="hm-kpi-main">${lineUsage?.today_cnt ?? 0}<span class="hm-kpi-unit">件 / 本日</span></div>
+        <div class="hm-kpi-row">
+          <span class="hm-kpi-note">直近7日 ${lineUsage?.week_cnt ?? 0}件</span>
+          <span class="hm-kpi-note">利用者 ${lineUsage?.week_users ?? 0}名</span>
+        </div>
+      </div>
+    </div>`;
 
   const eventRows = (recentEvents.results ?? []).length === 0
     ? '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">報告はありません</div>'
@@ -297,40 +441,114 @@ app.get('/', async (c) => {
   }).join('') || '<div style="color:#9ca3af;font-size:13px;padding:8px 0;">ログイン記録なし</div>';
 
   const content = `
-<div style="font-family:'Hiragino Sans','Meiryo',sans-serif;">
+<style>
+  .hm { font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; }
+  .hm-sec-title { font-size:12px; font-weight:700; color:#94a3b8; letter-spacing:.08em; margin:0 2px 10px; }
+  /* サマリーカード */
+  .hm-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:26px; }
+  .hm-stat { display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #e8edf3; border-radius:12px; padding:18px 20px; text-decoration:none; transition:border-color .15s, box-shadow .15s; }
+  a.hm-stat:hover { border-color:#c3d3e4; box-shadow:0 4px 14px rgba(26,58,92,.08); }
+  .hm-stat-label { font-size:12px; color:#64748b; font-weight:600; letter-spacing:.03em; }
+  .hm-stat-value { font-size:30px; font-weight:800; line-height:1; }
+  .hm-stat-sub { font-size:11px; color:#94a3b8; }
+  /* クイックアクセス */
+  .hm-quicks { display:grid; grid-template-columns:repeat(auto-fill,minmax(158px,1fr)); gap:10px; margin-bottom:26px; }
+  .hm-quick { display:flex; align-items:center; background:#fff; border:1px solid #e8edf3; border-left:3px solid #1a3a5c; border-radius:10px; padding:13px 16px; font-size:13px; font-weight:600; color:#1e3a5f; text-decoration:none; transition:background .15s, border-color .15s, box-shadow .15s; }
+  .hm-quick:hover { background:#f4f8fc; border-color:#c3d3e4; border-left-color:#2d6a9f; box-shadow:0 3px 10px rgba(26,58,92,.08); }
+  /* 分析カード */
+  .hm-ana { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+  .hm-ana3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:26px; }
+  .hm-card { background:#fff; border:1px solid #e8edf3; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+  .hm-card-link { text-decoration:none; transition:border-color .15s, box-shadow .15s; }
+  .hm-card-link:hover { border-color:#c3d3e4; box-shadow:0 4px 14px rgba(26,58,92,.08); }
+  .hm-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:13px 16px; border-bottom:1px solid #f1f5f9; }
+  .hm-card-title { font-size:13px; font-weight:700; color:#1e293b; }
+  .hm-card-sub { font-size:11px; color:#94a3b8; }
+  .hm-card-more { font-size:12px; color:#2563eb; text-decoration:none; }
+  .hm-card-body { padding:14px 16px; flex:1; }
+  .hm-empty { padding:20px; text-align:center; color:#9ca3af; font-size:13px; }
+  /* 縦棒グラフ */
+  .hm-bars { display:flex; align-items:flex-end; gap:8px; height:118px; padding-top:4px; }
+  .hm-bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px; min-width:0; }
+  .hm-bar-val { font-size:11px; font-weight:700; color:#475569; line-height:1; height:12px; }
+  .hm-bar { width:100%; max-width:38px; border-radius:4px 4px 2px 2px; transition:height .2s; }
+  .hm-bar-lb { font-size:10px; color:#94a3b8; white-space:nowrap; }
+  /* 課別横棒 */
+  .hm-div-row { display:flex; align-items:center; gap:10px; padding:5px 0; }
+  .hm-div-name { font-size:12px; color:#475569; font-weight:600; width:44px; flex:none; }
+  .hm-div-track { flex:1; height:10px; background:#f1f5f9; border-radius:5px; overflow:hidden; }
+  .hm-div-fill { height:100%; background:linear-gradient(90deg,#2d6a9f,#1a3a5c); border-radius:5px; }
+  .hm-div-cnt { font-size:12px; color:#1e293b; font-weight:700; width:38px; text-align:right; flex:none; }
+  /* KPI */
+  .hm-kpi-main { font-size:26px; font-weight:800; color:#1a3a5c; line-height:1.1; }
+  .hm-kpi-unit { font-size:12px; font-weight:600; color:#94a3b8; margin-left:5px; }
+  .hm-kpi-row { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:10px; }
+  .hm-kpi-note { font-size:11px; color:#64748b; }
+  /* 下段リスト */
+  .hm-lists { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+  @media (max-width: 900px) {
+    .hm-stats { grid-template-columns:repeat(2,1fr); }
+    .hm-ana, .hm-lists { grid-template-columns:1fr; }
+    .hm-ana3 { grid-template-columns:1fr; }
+  }
+</style>
+<div class="hm">
 
   <!-- サマリーカード -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;">
+  <div class="hm-stats">
     ${statCards}
   </div>
 
-  <!-- メインコンテンツ（2カラム） -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+  <!-- クイックアクセス -->
+  <div class="hm-sec-title">クイックアクセス</div>
+  <div class="hm-quicks">
+    ${quickHtml}
+  </div>
 
-    <!-- 嫌なこと報告 -->
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;font-weight:700;color:#1e293b;">嫌なこと報告（最新）</span>
-        <a href="${ADMIN_PATH}/events" style="font-size:12px;color:#2563eb;text-decoration:none;">すべて見る</a>
+  <!-- データ分析 -->
+  <div class="hm-sec-title">データ分析（直近6ヶ月）</div>
+  <div class="hm-ana">
+    <div class="hm-card">
+      <div class="hm-card-head"><span class="hm-card-title">入社人数の推移</span><span class="hm-card-sub">合計 ${hireTotal6}名</span></div>
+      <div class="hm-card-body">${barChart(hireSeries, '#2d6a9f')}</div>
+    </div>
+    <div class="hm-card">
+      <div class="hm-card-head"><span class="hm-card-title">報告件数の推移</span><span class="hm-card-sub">全報告合算 ${reportTotal6}件</span></div>
+      <div class="hm-card-body">${barChart(reportSeries, '#b45309')}</div>
+    </div>
+  </div>
+  <div class="hm-ana3">
+    <div class="hm-card">
+      <div class="hm-card-head"><span class="hm-card-title">課別の在籍構成</span><span class="hm-card-sub">在籍 ${empCount.cnt}名</span></div>
+      <div class="hm-card-body">${divisionHtml}</div>
+    </div>
+    ${salesCardHtml}
+    ${lineCardHtml}
+  </div>
+
+  <!-- 要対応リスト -->
+  <div class="hm-lists">
+    <div class="hm-card">
+      <div class="hm-card-head">
+        <span class="hm-card-title">嫌なこと報告（最新）</span>
+        <a href="${ADMIN_PATH}/events" class="hm-card-more">すべて見る</a>
       </div>
       ${eventRows}
     </div>
-
-    <!-- 面談期限超過 -->
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;font-weight:700;color:#1e293b;">面談期限超過</span>
-        <a href="${ADMIN_PATH}/interviews" style="font-size:12px;color:#2563eb;text-decoration:none;">面談一覧へ</a>
+    <div class="hm-card">
+      <div class="hm-card-head">
+        <span class="hm-card-title">面談期限超過</span>
+        <a href="${ADMIN_PATH}/interviews" class="hm-card-more">面談一覧へ</a>
       </div>
       ${overdueRows}
     </div>
   </div>
 
   <!-- ログイン履歴 -->
-  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:16px 20px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <span style="font-size:13px;font-weight:700;color:#1e293b;">最近のログイン</span>
-      <a href="${ADMIN_PATH}/login-logs" style="font-size:12px;color:#2563eb;text-decoration:none;">すべて見る</a>
+  <div class="hm-card" style="padding:0 20px 12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 10px;">
+      <span class="hm-card-title">最近のログイン</span>
+      <a href="${ADMIN_PATH}/login-logs" class="hm-card-more">すべて見る</a>
     </div>
     ${loginRows}
   </div>
@@ -697,7 +915,7 @@ app.get('/settings', (c) => {
     { heading: 'ガイド・システム', cards: [
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
       { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド',     desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
-      { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・API・通信状態の確認・アクセスQRコード' },
+      { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・通信状態・利用統計・DB統計・アクセスQRコード' },
     ]},
   ];
   const cardHtml = (card: SettingCard) => `
@@ -2817,6 +3035,130 @@ app.get('/settings/status', async (c) => {
   const isAdmin = adminId ? await isAdminAccount(c.env.DB, adminId) : false;
   const maintenanceOn = await getMaintenanceMode(c.env.DB);
 
+  // ===== 実データ収集（利用状況・DB統計・直近アクティビティ） =====
+  const [usageStats, featureTop, dailyUsage, dbCounts, recentActivity, loginStats] = await Promise.all([
+    // LINE操作の利用量（需要の把握）
+    c.env.DB.prepare(`
+      SELECT
+        SUM(CASE WHEN date(created_at) = date('now','localtime') THEN 1 ELSE 0 END) AS today_cnt,
+        SUM(CASE WHEN created_at >= datetime('now','localtime','-7 days')  THEN 1 ELSE 0 END) AS week_cnt,
+        SUM(CASE WHEN created_at >= datetime('now','localtime','-30 days') THEN 1 ELSE 0 END) AS month_cnt,
+        COUNT(DISTINCT CASE WHEN created_at >= datetime('now','localtime','-30 days') THEN line_uid END) AS month_users,
+        SUM(CASE WHEN channel = 'bot'  AND created_at >= datetime('now','localtime','-30 days') THEN 1 ELSE 0 END) AS bot_cnt,
+        SUM(CASE WHEN channel = 'liff' AND created_at >= datetime('now','localtime','-30 days') THEN 1 ELSE 0 END) AS liff_cnt
+      FROM line_activity_logs
+    `).first<{ today_cnt: number; week_cnt: number; month_cnt: number; month_users: number; bot_cnt: number; liff_cnt: number }>().catch(() => null),
+    // 機能別利用トップ（直近30日）
+    c.env.DB.prepare(`
+      SELECT feature, COUNT(*) AS cnt FROM line_activity_logs
+      WHERE created_at >= datetime('now','localtime','-30 days') AND feature IS NOT NULL
+      GROUP BY feature ORDER BY cnt DESC LIMIT 8
+    `).all<{ feature: string; cnt: number }>().catch(() => null),
+    // 日別利用量（直近14日）
+    c.env.DB.prepare(`
+      SELECT date(created_at) AS d, COUNT(*) AS cnt FROM line_activity_logs
+      WHERE created_at >= datetime('now','localtime','-14 days')
+      GROUP BY d ORDER BY d
+    `).all<{ d: string; cnt: number }>().catch(() => null),
+    // 主要テーブルのレコード数（テーブル欠損時はそのテーブルのみ「—」表示）
+    (async () => {
+      const defs: Array<[string, string]> = [
+        ['employees',      'SELECT COUNT(*) AS cnt FROM employees'],
+        ['shift_entries',  'SELECT COUNT(*) AS cnt FROM shift_entries'],
+        ['sales_records',  'SELECT COUNT(*) AS cnt FROM sales_records'],
+        ['odo_records',    'SELECT COUNT(*) AS cnt FROM odo_records'],
+        ['vehicles',       'SELECT COUNT(*) AS cnt FROM vehicles'],
+        ['liff_users',     'SELECT COUNT(*) AS cnt FROM line_liff_users'],
+        ['line_logs',      'SELECT COUNT(*) AS cnt FROM line_activity_logs'],
+        ['reports',        `SELECT (SELECT COUNT(*) FROM bad_events)
+                              + (SELECT COUNT(*) FROM lost_item_reports)
+                              + (SELECT COUNT(*) FROM accident_reports)
+                              + (SELECT COUNT(*) FROM violation_reports)
+                              + (SELECT COUNT(*) FROM general_reports) AS cnt`],
+        ['chat_logs',      'SELECT COUNT(*) AS cnt FROM manual_chat_logs'],
+        ['sessions',       'SELECT COUNT(*) AS cnt FROM sessions'],
+        ['login_logs',     'SELECT COUNT(*) AS cnt FROM login_logs'],
+      ];
+      const counts = await Promise.all(defs.map(([, sql]) =>
+        c.env.DB.prepare(sql).first<{ cnt: number }>().then(r => r?.cnt ?? 0).catch(() => null)
+      ));
+      const out: Record<string, number | null> = {};
+      defs.forEach(([key], i) => { out[key] = counts[i]; });
+      return out;
+    })(),
+    // 直近アクティビティ（実ログ）
+    c.env.DB.prepare(`
+      SELECT created_at, channel, event_type, feature, detail
+      FROM line_activity_logs ORDER BY created_at DESC LIMIT 12
+    `).all<{ created_at: string; channel: string; event_type: string; feature: string | null; detail: string | null }>().catch(() => null),
+    // 管理画面ログイン（直近30日）
+    c.env.DB.prepare(`
+      SELECT COUNT(*) AS month_cnt, MAX(logged_at) AS last_at FROM login_logs
+      WHERE logged_at >= datetime('now','localtime','-30 days')
+    `).first<{ month_cnt: number; last_at: string | null }>().catch(() => null),
+  ]);
+
+  // エッジ接続情報（このリクエスト自体の実測値）
+  const cfInfo = ((c.req.raw as any).cf ?? {}) as Record<string, unknown>;
+  const cfStr = (k: string) => { const v = cfInfo[k]; return v == null ? '—' : String(v); };
+
+  // ===== 表示用パーツ生成 =====
+  // 日別利用バー（直近14日、0件の日も表示）
+  const dayList: string[] = [];
+  for (let i = 13; i >= 0; i--) {
+    dayList.push(new Date(Date.now() + 9 * 3600 * 1000 - i * 86400000).toISOString().slice(0, 10));
+  }
+  const dailyMap = new Map((dailyUsage?.results ?? []).map(r => [r.d, r.cnt]));
+  const dailyMax = Math.max(...dayList.map(d => dailyMap.get(d) ?? 0), 1);
+  const dailyBarsHtml = dayList.map(d => {
+    const v = dailyMap.get(d) ?? 0;
+    const h = v > 0 ? Math.max(Math.round(v / dailyMax * 56), 4) : 2;
+    return `<div class="ub-col" title="${d}: ${v}件"><div class="ub-val">${v > 0 ? v : ''}</div><div class="ub-bar" style="height:${h}px;"></div><div class="ub-lb">${parseInt(d.slice(8, 10))}</div></div>`;
+  }).join('');
+
+  // 機能別利用トップ（直近30日）
+  const featList = featureTop?.results ?? [];
+  const featMax = Math.max(...featList.map(f => f.cnt), 1);
+  const featRowsHtml = featList.length === 0
+    ? '<div style="font-size:12px;color:#9ca3af;">記録なし</div>'
+    : featList.map(f => `
+      <div style="display:flex;align-items:center;gap:10px;padding:3px 0;">
+        <span style="font-size:12px;color:#475569;width:130px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.feature)}</span>
+        <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${Math.round(f.cnt / featMax * 100)}%;background:#2d6a9f;border-radius:4px;"></div></div>
+        <span style="font-size:12px;color:#1e293b;font-weight:700;width:52px;text-align:right;flex:none;">${f.cnt}件</span>
+      </div>`).join('');
+
+  // DB統計
+  const dbStatDefs: Array<[string, string]> = [
+    ['employees',      '社員マスタ'],
+    ['shift_entries',  'シフトエントリ'],
+    ['sales_records',  '売上記録'],
+    ['odo_records',    'ODO記録'],
+    ['vehicles',       '車両マスタ'],
+    ['liff_users',     'LIFF利用者'],
+    ['line_logs',      'LINE操作ログ'],
+    ['reports',        '各種報告（累計）'],
+    ['chat_logs',      'マニュアルBot質問'],
+    ['sessions',       '有効セッション'],
+    ['login_logs',     'ログイン記録'],
+  ];
+  const dbStatsHtml = dbStatDefs.map(([key, label]) => `
+      <div style="background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;padding:9px 12px;">
+        <div style="font-size:11px;color:#64748b;">${label}</div>
+        <div class="mono" style="font-size:16px;font-weight:700;color:#1e3a5f;margin-top:2px;">${dbCounts[key] != null ? (dbCounts[key] as number).toLocaleString('ja-JP') : '—'}</div>
+      </div>`).join('');
+
+  // 直近アクティビティ（実ログ）
+  const actRowsHtml = (recentActivity?.results ?? []).length === 0
+    ? '<div style="font-size:12px;color:#9ca3af;padding:10px 14px;">記録なし</div>'
+    : (recentActivity?.results ?? []).map(a => `
+      <div style="display:flex;gap:10px;align-items:baseline;padding:4px 14px;border-bottom:1px solid #f1f5f9;">
+        <span class="mono" style="font-size:11px;color:#94a3b8;flex:none;">${escHtml((a.created_at ?? '').slice(5, 16))}</span>
+        <span class="mono" style="font-size:10px;font-weight:700;color:${a.channel === 'liff' ? '#7c3aed' : '#0369a1'};flex:none;width:32px;">${escHtml((a.channel ?? '').toUpperCase())}</span>
+        <span style="font-size:12px;color:#334155;font-weight:600;flex:none;">${escHtml(a.feature ?? a.event_type ?? '')}</span>
+        <span style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml((a.detail ?? '').slice(0, 60))}</span>
+      </div>`).join('');
+
   // メンテナンス制御カード（adminアカウントのみ表示）
   const maintenanceCard = isAdmin ? `
       <div class="sys-panel">
@@ -2857,14 +3199,17 @@ app.get('/settings/status', async (c) => {
       .sys-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;}
       .b-ok{background:#dcfce7;color:#16a34a;}
       .b-ng{background:#fee2e2;color:#dc2626;}
-      .code-stream{height:214px;overflow:hidden;background:#f8fafc;padding:10px 14px;font-size:11px;line-height:1.8;color:#475569;white-space:nowrap;}
-      .code-stream div{overflow:hidden;text-overflow:ellipsis;}
-      .cs-fn{color:#0369a1;}
-      .cs-hx{color:#7c3aed;}
-      .cs-ok{color:#16a34a;font-weight:700;}
-      .cs-wr{color:#d97706;font-weight:700;}
-      .cs-dim{color:#94a3b8;}
-      .hexline{font-size:10px;color:#94a3b8;padding:6px 14px;border-top:1px dashed #e2e8f0;background:#fbfdff;white-space:nowrap;overflow:hidden;}
+      .ub-wrap{display:flex;align-items:flex-end;gap:5px;height:92px;padding-top:4px;}
+      .ub-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;min-width:0;}
+      .ub-val{font-size:10px;font-weight:700;color:#475569;line-height:1;height:10px;}
+      .ub-bar{width:100%;max-width:26px;background:#2d6a9f;border-radius:3px 3px 1px 1px;}
+      .ub-lb{font-size:9px;color:#94a3b8;}
+      .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:14px;}
+      .kpi-cell{background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;padding:9px 12px;}
+      .kpi-cell .kl{font-size:11px;color:#64748b;}
+      .kpi-cell .kv{font-size:17px;font-weight:800;color:#1e3a5f;margin-top:2px;}
+      .kpi-cell .kv .ku{font-size:11px;font-weight:600;color:#94a3b8;margin-left:2px;}
+      .db-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;}
       .sw{position:relative;display:inline-block;width:54px;height:30px;flex:none;}
       .sw input{opacity:0;width:0;height:0;}
       .sw .tr{position:absolute;inset:0;background:#cbd5e1;border-radius:30px;transition:.25s;cursor:pointer;}
@@ -2898,7 +3243,7 @@ app.get('/settings/status', async (c) => {
 
       <!-- サーバー・DB（サーバーサイド確認済み） -->
       <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">CORE INFRASTRUCTURE</span><span class="sys-ps mono">SERVER / DATABASE</span></div>
+        <div class="sys-ph"><span class="sys-pt mono">CORE INFRASTRUCTURE</span><span class="sys-ps mono">SERVER / DATABASE / EDGE</span></div>
         <div class="sys-pb" style="display:flex;flex-direction:column;gap:9px;">
           <div class="sys-row">
             <span style="font-size:13px;color:#374151;">Cloudflare Workersサーバー</span>
@@ -2911,6 +3256,45 @@ app.get('/settings/status', async (c) => {
               : `<span class="sys-badge b-ng" title="${escHtml(dbMsg)}">エラー</span>`
             }
           </div>
+          <div class="sys-row">
+            <span style="font-size:13px;color:#374151;">接続エッジ（データセンター）</span>
+            <span class="mono" style="font-size:12px;color:#334155;font-weight:600;">${escHtml(cfStr('colo'))} / ${escHtml(cfStr('country'))}${cfInfo['city'] ? ' ' + escHtml(cfStr('city')) : ''}</span>
+          </div>
+          <div class="sys-row">
+            <span style="font-size:13px;color:#374151;">通信プロトコル / 暗号化</span>
+            <span class="mono" style="font-size:12px;color:#334155;font-weight:600;">${escHtml(cfStr('httpProtocol'))} / ${escHtml(cfStr('tlsVersion'))}</span>
+          </div>
+          <div class="sys-row">
+            <span style="font-size:13px;color:#374151;">接続回線</span>
+            <span class="mono" style="font-size:12px;color:#334155;font-weight:600;" title="AS${escHtml(cfStr('asn'))}">${escHtml(cfStr('asOrganization'))}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 利用状況（需要データ） -->
+      <div class="sys-panel">
+        <div class="sys-ph"><span class="sys-pt mono">USAGE ANALYTICS</span><span class="sys-ps mono">LINE BOT / LIFF DEMAND</span></div>
+        <div class="sys-pb">
+          <div class="kpi-grid">
+            <div class="kpi-cell"><div class="kl">本日の操作</div><div class="kv">${usageStats?.today_cnt ?? 0}<span class="ku">件</span></div></div>
+            <div class="kpi-cell"><div class="kl">直近7日</div><div class="kv">${(usageStats?.week_cnt ?? 0).toLocaleString('ja-JP')}<span class="ku">件</span></div></div>
+            <div class="kpi-cell"><div class="kl">直近30日</div><div class="kv">${(usageStats?.month_cnt ?? 0).toLocaleString('ja-JP')}<span class="ku">件</span></div></div>
+            <div class="kpi-cell"><div class="kl">30日利用者</div><div class="kv">${usageStats?.month_users ?? 0}<span class="ku">名</span></div></div>
+            <div class="kpi-cell"><div class="kl">Bot / LIFF比率</div><div class="kv">${usageStats?.bot_cnt ?? 0}<span class="ku">/</span>${usageStats?.liff_cnt ?? 0}</div></div>
+            <div class="kpi-cell"><div class="kl">管理画面ログイン(30日)</div><div class="kv">${loginStats?.month_cnt ?? 0}<span class="ku">回</span></div></div>
+          </div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">日別操作件数（直近14日）</div>
+          <div class="ub-wrap">${dailyBarsHtml}</div>
+          <div style="font-size:11px;color:#94a3b8;margin:14px 0 6px;">機能別利用トップ（直近30日）</div>
+          ${featRowsHtml}
+        </div>
+      </div>
+
+      <!-- DB統計 -->
+      <div class="sys-panel">
+        <div class="sys-ph"><span class="sys-pt mono">DATABASE STATS</span><span class="sys-ps mono">D1 RECORD COUNT</span></div>
+        <div class="sys-pb">
+          <div class="db-grid">${dbStatsHtml}</div>
         </div>
       </div>
 
@@ -2928,14 +3312,13 @@ app.get('/settings/status', async (c) => {
         </div>
       </div>
 
-      <!-- プロセストレース（演出） -->
+      <!-- 直近アクティビティ（実ログ） -->
       <div class="sys-panel">
         <div class="sys-ph">
-          <span class="sys-pt mono">PROCESS TRACE</span>
-          <span class="sys-ps mono" style="display:flex;align-items:center;gap:6px;"><span class="led led-g" style="width:6px;height:6px;"></span>LIVE</span>
+          <span class="sys-pt mono">ACTIVITY TRACE</span>
+          <span class="sys-ps mono" style="display:flex;align-items:center;gap:6px;"><span class="led led-g" style="width:6px;height:6px;"></span>直近のLINE操作 実ログ</span>
         </div>
-        <div class="code-stream mono" id="code-stream"></div>
-        <div class="hexline mono" id="hexline"></div>
+        <div style="padding:6px 0;">${actRowsHtml}</div>
       </div>
 
       <!-- 通信ログ -->
@@ -3072,49 +3455,6 @@ app.get('/settings/status', async (c) => {
         var msg = document.getElementById('maint-msg');
         if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
       }
-
-      // ---- プロセストレース（意味のないコードが流れる演出） ----
-      var CS_FN = ['core.sync', 'auth.rotate', 'db.vacuum', 'net.trace', 'shift.calc', 'line.hook', 'cache.warm', 'sec.scan', 'io.flush', 'cron.tick', 'tls.handshake', 'kv.compact'];
-      var CS_OP = ['verify', 'link', 'hash', 'mount', 'probe', 'bind', 'sweep', 'patch', 'index', 'fork', 'commit', 'seal'];
-      var CS_OB = ['block', 'node', 'sector', 'route', 'token', 'frame', 'queue', 'shard', 'table', 'pool', 'lease', 'chunk'];
-      function csHex(n) { var s = ''; for (var i = 0; i < n; i++) { s += '0123456789ABCDEF'.charAt(Math.floor(Math.random() * 16)); } return s; }
-      function csPick(a) { return a[Math.floor(Math.random() * a.length)]; }
-      function csTime() {
-        var d = new Date();
-        function p(x) { return (x < 10 ? '0' : '') + x; }
-        return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()) + '.' + ('00' + d.getMilliseconds()).slice(-3);
-      }
-      function csLine() {
-        var r = Math.random();
-        if (r < 0.5) {
-          return '<span class="cs-dim">[' + csTime() + ']</span> <span class="cs-fn">' + csPick(CS_FN) + '</span> &#9656; ' + csPick(CS_OP) + ' ' + csPick(CS_OB) + ' <span class="cs-hx">0x' + csHex(4) + '</span> ... <span class="cs-ok">OK</span> <span class="cs-dim">(' + (2 + Math.floor(Math.random() * 38)) + 'ms)</span>';
-        } else if (r < 0.72) {
-          return '<span class="cs-dim">0x' + csHex(4) + '</span>&nbsp;&nbsp;' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + ' ' + csHex(4) + '&nbsp;&nbsp;<span class="cs-dim">crc=' + csHex(2) + '</span>';
-        } else if (r < 0.9) {
-          return 'if (<span class="cs-fn">' + csPick(CS_OB) + '</span>[' + Math.floor(Math.random() * 32) + '].load &gt; 0.' + (60 + Math.floor(Math.random() * 39)) + ') <span class="cs-fn">rebalance</span>(cluster_' + Math.floor(Math.random() * 4) + ');';
-        } else if (r < 0.96) {
-          return 'for (i = 0; i &lt; ' + (8 + Math.floor(Math.random() * 56)) + '; i++) <span class="cs-fn">checksum</span>(buf[i], <span class="cs-hx">0x' + csHex(2) + '</span>);';
-        } else {
-          return '<span class="cs-wr">WARN</span> <span class="cs-dim">latency spike ' + (80 + Math.floor(Math.random() * 200)) + 'ms on</span> ' + csPick(CS_FN) + ' <span class="cs-dim">- retry scheduled</span>';
-        }
-      }
-      var csBox = document.getElementById('code-stream');
-      function csPush() {
-        if (!csBox) return;
-        var div = document.createElement('div');
-        div.innerHTML = csLine();
-        csBox.appendChild(div);
-        while (csBox.children.length > 10) csBox.removeChild(csBox.firstChild);
-      }
-      for (var csI = 0; csI < 10; csI++) csPush();
-      setInterval(csPush, 340);
-      var hexEl = document.getElementById('hexline');
-      setInterval(function() {
-        if (!hexEl) return;
-        var s = 'BUS ';
-        for (var i = 0; i < 9; i++) { s += csHex(4) + ' '; }
-        hexEl.textContent = s + '// ' + csTime();
-      }, 600);
 
       // ---- QRコード ----
       var QR_URL = ${JSON.stringify(adminLoginUrl)};
