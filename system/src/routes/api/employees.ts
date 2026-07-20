@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../auth';
+import { getPeriod } from '../../auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -211,6 +212,7 @@ app.post('/csv-import', async (c) => {
       avg_return_time?: string | null;
       used_cars?: string | null;
       isLongAbsent?: boolean;
+      salesEntries?: Array<{ date: string; dutyCode: string; amount: number }>;
     }>;
   };
   try {
@@ -302,7 +304,64 @@ app.post('/csv-import', async (c) => {
     }
   }
 
-  return c.json({ ok: true, inserted: toInsert.length, updated: toUpdate.length, errors });
+  // 税込売上（CSV最終列）を各社員の売上記録(sales_records)へ反映
+  // 会社公式データのため上書き優先。ride_countは列指定しないので既存値を保持する
+  let salesUpdated = 0;
+  const DUTY_CODES = ['a', 'b', 'B', 'D', 'H'];
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const salesByEmpNo = new Map<string, Array<{ date: string; dutyCode: string; amount: number }>>();
+  for (const emp of valid) {
+    if (emp.salesEntries?.length) salesByEmpNo.set(emp.emp_no, emp.salesEntries);
+  }
+
+  if (salesByEmpNo.size > 0) {
+    const empNos = [...salesByEmpNo.keys()];
+    const idMap = new Map<string, number>();
+    for (let ci = 0; ci < empNos.length; ci += LOOKUP_CHUNK) {
+      const lc = empNos.slice(ci, ci + LOOKUP_CHUNK);
+      const ph = lc.map(() => '?').join(',');
+      const rows = await c.env.DB.prepare(
+        `SELECT id, emp_no FROM employees WHERE emp_no IN (${ph})`
+      ).bind(...lc).all<{ id: number; emp_no: string }>();
+      for (const r of (rows.results ?? [])) idMap.set(r.emp_no, r.id);
+    }
+
+    const salesStatements: D1Stmt[] = [];
+    for (const [empNo, entries] of salesByEmpNo) {
+      const empId = idMap.get(empNo);
+      if (!empId) continue;
+      for (const entry of entries) {
+        const amount = Math.round(Number(entry.amount));
+        if (!Number.isFinite(amount) || amount < 0 || amount > 999999) continue;
+        if (!DATE_RE.test(entry.date) || !DUTY_CODES.includes(entry.dutyCode)) continue;
+        const { year, month } = getPeriod(entry.date);
+        salesStatements.push(
+          c.env.DB.prepare(`
+            INSERT INTO sales_records (emp_id, date, amount, duty_code, period_year, period_month, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            ON CONFLICT(emp_id, date) DO UPDATE SET
+              amount = excluded.amount,
+              duty_code = excluded.duty_code,
+              period_year = excluded.period_year,
+              period_month = excluded.period_month,
+              updated_at = datetime('now', 'localtime')
+          `).bind(empId, entry.date, amount, entry.dutyCode, year, month)
+        );
+      }
+    }
+
+    for (let i = 0; i < salesStatements.length; i += CHUNK) {
+      const chunk = salesStatements.slice(i, i + CHUNK);
+      try {
+        await c.env.DB.batch(chunk);
+        salesUpdated += chunk.length;
+      } catch (e) {
+        errors.push(`sales[${i}–${i + CHUNK - 1}]: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  return c.json({ ok: true, inserted: toInsert.length, updated: toUpdate.length, salesUpdated, errors });
 });
 
 // emp_noベースの一括退職処理（CSVインポート退職候補向け）

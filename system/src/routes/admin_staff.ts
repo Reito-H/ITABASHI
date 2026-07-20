@@ -613,6 +613,8 @@ const WORK_TYPE_MAP = {
   '日勤A':'a','日勤Ａ':'a','日勤B':'B','日勤Ｂ':'B',
   'D勤':'D','Ｄ勤':'D','B勤':'b','Ｂ勤':'b',
   'H勤':'H','Ｈ勤':'H','公H':'H','公Ｈ':'H',
+  '公B':'B','公Ｂ':'B','公D':'D','公Ｄ':'D','公a':'a','公ａ':'a','公b':'b','公ｂ':'b',
+  'A勤':'a','Ａ勤':'a',
 };
 const TIME_CANDS = [6.0,6.5,8.0,9.5,15.0,16.0,18.0,19.0];
 const TIME_LABELS = {6.0:'6:00',6.5:'6:50',8.0:'8:00',9.5:'9:30',15.0:'15:00',16.0:'16:00',18.0:'18:00',19.0:'19:00'};
@@ -657,13 +659,14 @@ async function parseCsvText(text) {
       const carRaw  = cols[6]?.trim();
       const startRaw = parseFloat(cols[7]?.trim());
       const retRaw   = parseFloat(cols[8]?.trim());
+      const salesRaw = cols[9]?.trim();
 
       if (!empNo || !name || !/^\\d{8}$/.test(empNo)) continue;
       if (dateRaw && dateRaw > csvMaxDate) csvMaxDate = dateRaw;
 
       if (!empMap[empNo]) {
         empMap[empNo] = { emp_no:empNo, name, team:parseInt(teamRaw)||null,
-          workTypes:[], carFreq:{}, startEntries:[], returnTimes:[], dates:[] };
+          workTypes:[], carFreq:{}, startEntries:[], returnTimes:[], dates:[], salesEntries:[] };
       }
       const e = empMap[empNo];
       const mapped = WORK_TYPE_MAP[workRaw];
@@ -672,6 +675,16 @@ async function parseCsvText(text) {
       if (!isNaN(startRaw) && startRaw>0) e.startEntries.push({date:dateRaw, time:startRaw});
       if (!isNaN(retRaw) && retRaw>0) e.returnTimes.push(retRaw);
       if (dateRaw) e.dates.push(dateRaw);
+
+      // 税込売上（10列目）: 社員番号・日付・勤務区分（duty_code）が揃っている行のみ売上記録へ反映
+      const salesAmount = parseInt(salesRaw, 10);
+      if (mapped && dateRaw && !isNaN(salesAmount) && salesAmount >= 0 && salesAmount <= 999999) {
+        const m = dateRaw.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})$/);
+        if (m) {
+          const isoDate = m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+          e.salesEntries.push({ date: isoDate, dutyCode: mapped, amount: salesAmount });
+        }
+      }
     }
     // UIをブロックしないよう次のフレームに譲る
     setProgress(Math.floor(end / total * 80), \`解析中 \${end.toLocaleString()} / \${total.toLocaleString()} 行\`);
@@ -728,6 +741,7 @@ async function parseCsvText(text) {
       avg_return_time,
       lastDate, daysSinceLast, isLongAbsent,
       hasTimeChange, recentAvg, earlyAvg,
+      salesEntries: e.salesEntries,
     };
   });
 
@@ -743,6 +757,7 @@ function renderCsvPreview() {
   const updCnt    = csvParsedData.filter(e=> EXISTING_EMP_NOS.has(e.emp_no)).length;
   const absCnt    = csvParsedData.filter(e=>e.isLongAbsent).length;
   const chgCnt    = csvParsedData.filter(e=>e.hasTimeChange).length;
+  const salesCnt  = csvParsedData.reduce((s,e)=>s+(e.salesEntries?e.salesEntries.length:0), 0);
 
   document.getElementById('csv-summary').innerHTML =
     '解析: <strong>'+csvParsedData.length+'名</strong> — '+
@@ -750,7 +765,9 @@ function renderCsvPreview() {
     '<span style="color:#1d4ed8;">更新 '+updCnt+'名</span>'+
     (absCnt ? ' / <span style="color:#dc2626;">長期不在 '+absCnt+'名</span>' : '')+
     (chgCnt ? ' / <span style="color:#d97706;">シフト変化 '+chgCnt+'名</span>' : '')+
-    '<div style="font-size:11px;color:#6b7280;margin-top:4px;">※ CSV追加社員は一般社員として登録されます。新人シフト管理には出ません。</div>';
+    (salesCnt ? ' / <span style="color:#059669;">税込売上 '+salesCnt+'件を反映</span>' : '')+
+    '<div style="font-size:11px;color:#6b7280;margin-top:4px;">※ CSV追加社員は一般社員として登録されます。新人シフト管理には出ません。</div>'+
+    (salesCnt ? '<div style="font-size:11px;color:#6b7280;margin-top:2px;">※ 税込売上は該当日の社員の売上記録に反映されます（既存の手入力があれば上書き、乗車回数は保持）。</div>' : '');
 
   const tbody = document.getElementById('csv-preview-body');
   tbody.innerHTML = csvParsedData.map(e => {
@@ -900,11 +917,12 @@ async function executeCsvImport() {
     avg_return_time: e.avg_return_time,
     used_cars: e.used_cars,
     isLongAbsent: e.isLongAbsent || false,
+    salesEntries: e.salesEntries || [],
   }));
 
   // 100名ずつ分割して送信（大量データでもタイムアウトしない）
   const BATCH = 100;
-  let totalInserted = 0, totalUpdated = 0;
+  let totalInserted = 0, totalUpdated = 0, totalSales = 0;
   const allErrors = [];
 
   try {
@@ -918,6 +936,7 @@ async function executeCsvImport() {
       if (res.ok) {
         totalInserted += json.inserted || 0;
         totalUpdated  += json.updated  || 0;
+        totalSales    += json.salesUpdated || 0;
         if (json.errors?.length) allErrors.push(...json.errors);
       } else {
         allErrors.push(json.error || \`batch \${i} エラー\`);
@@ -927,6 +946,7 @@ async function executeCsvImport() {
     const resultDiv = document.getElementById('csv-result');
     resultDiv.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;font-size:13px;color:#166534;">'+
       'インポート完了: <strong>新規追加 '+totalInserted+'名</strong> / <strong>更新 '+totalUpdated+'名</strong>'+
+      (totalSales ? ' / <strong>税込売上 '+totalSales+'件を反映</strong>' : '')+
       (allErrors.length?'<div style="margin-top:8px;color:#dc2626;font-size:12px;">エラー: '+allErrors.join('、')+'</div>':'')+
       '<div style="margin-top:10px;"><a href="'+ADMIN_PATH+'/staff" style="color:#1d4ed8;font-size:13px;">→ 社員一覧を更新</a></div></div>';
     resultDiv.style.display='block';
