@@ -13,6 +13,7 @@ import type { Env } from '../auth';
 import { getPeriod, getPeriodRange, getPeriodSettings } from '../auth';
 import { bentenUidFromRequest, loadBentenFont } from '../benten';
 import { logLineActivity } from '../utils/activity_log';
+import { buildShiftSalesPdf } from '../utils/shift_sales_pdf';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -30,6 +31,57 @@ async function salesAuth(c: { req: { raw: Request }; env: Env }): Promise<Auth |
   ).bind(uid).first<{ role: string; emp_id: number | null; name: string | null }>();
   if (!row || !SALES_ODO_ROLES.includes(row.role) || !row.emp_id) return null;
   return { uid, empId: row.emp_id, empName: row.name ?? '' };
+}
+
+// QR確認用の認証。運行管理者・統括管理者は「全社員検索可」、それ以外（乗務社員等）は「本人のQRのみ」
+const QR_MANAGER_ROLES = ['operations_manager', 'general_manager'];
+const QR_ALLOWED_ROLES = [...SALES_ODO_ROLES, 'operations_manager'];
+
+type QrAuth = { uid: string; role: string; empId: number | null };
+
+async function qrAuth(c: { req: { raw: Request }; env: Env }): Promise<QrAuth | null> {
+  const uid = await bentenUidFromRequest(c.req.raw);
+  if (!uid) return null;
+  const row = await c.env.DB.prepare(
+    'SELECT role, emp_id FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string; emp_id: number | null }>();
+  if (!row || !QR_ALLOWED_ROLES.includes(row.role)) return null;
+  return { uid, role: row.role, empId: row.emp_id };
+}
+
+// QR実績確認PDF用の署名付き一時チケット（LIFF内蔵ブラウザのダウンロード制限を避け、
+// liff.openWindowで外部ブラウザに渡すためBearerトークンなしで検証できるようにする）
+const QR_TICKET_TTL_SEC = 120;
+
+async function hmacHex(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function signQrTicket(env: Env, empId: number, year: number, month: number): Promise<string | null> {
+  const secret = env.QR_TICKET_SECRET;
+  if (!secret) return null;
+  const expires = Math.floor(Date.now() / 1000) + QR_TICKET_TTL_SEC;
+  const payload = `${empId}.${year}.${month}.${expires}`;
+  const sig = await hmacHex(secret, payload);
+  return `${payload}.${sig}`;
+}
+
+async function verifyQrTicket(env: Env, ticket: string): Promise<{ empId: number; year: number; month: number } | null> {
+  const secret = env.QR_TICKET_SECRET;
+  if (!secret) return null;
+  const parts = ticket.split('.');
+  if (parts.length !== 5) return null;
+  const [empIdStr, yearStr, monthStr, expiresStr, sig] = parts;
+  const payload = `${empIdStr}.${yearStr}.${monthStr}.${expiresStr}`;
+  const expected = await hmacHex(secret, payload);
+  if (expected !== sig) return null;
+  const expires = parseInt(expiresStr, 10);
+  if (!expires || Math.floor(Date.now() / 1000) > expires) return null;
+  return { empId: parseInt(empIdStr, 10), year: parseInt(yearStr, 10), month: parseInt(monthStr, 10) };
 }
 
 type DailyRow = { date: string; amount: number; ride_count: number | null; duty_code: string | null };
@@ -69,6 +121,77 @@ async function loadSummary(env: Env, empId: number, year: number, month: number)
 app.get('/liff/sales', (c) => {
   const liffId = c.env.LIFF_ID_SALES ?? '';
   return c.html(salesPageHtml(liffId));
+});
+
+// ===================================================
+// API: 本人確認（QRスキャンで読み取った社員番号との照合用）
+// ===================================================
+app.get('/api/liff/sales/qr-ticket', async (c) => {
+  const auth = await qrAuth(c);
+  if (!auth) return c.json({ error: 'forbidden' }, 403);
+
+  const scannedEmpNo = (c.req.query('empNo') ?? '').trim();
+  if (!/^\d{8}$/.test(scannedEmpNo)) return c.json({ error: '社員番号の形式が不正なQRコードです' }, 400);
+
+  type EmpRow = { id: number; emp_no: string; name: string };
+  const isManagerLookup = QR_MANAGER_ROLES.includes(auth.role);
+
+  let emp: EmpRow | null;
+  if (isManagerLookup) {
+    // 運行管理者・統括管理者は全社員のQRを検索可能
+    emp = await c.env.DB.prepare('SELECT id, emp_no, name FROM employees WHERE emp_no = ?')
+      .bind(scannedEmpNo).first<EmpRow>();
+  } else {
+    // それ以外（乗務社員等）は本人のQRのみ
+    if (!auth.empId) return c.json({ error: '社員情報に紐づいていません' }, 403);
+    const own = await c.env.DB.prepare('SELECT id, emp_no, name FROM employees WHERE id = ?')
+      .bind(auth.empId).first<EmpRow>();
+    emp = own && own.emp_no === scannedEmpNo ? own : null;
+    if (own && !emp) return c.json({ error: `本人の社員証ではありません（読取: ${scannedEmpNo} / 本人: ${own.emp_no}）` }, 403);
+  }
+  if (!emp) return c.json({ error: `該当する社員が見つかりません（読取番号: ${scannedEmpNo}）` }, 404);
+
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const { year, month } = getPeriod(today);
+
+  const ticket = await signQrTicket(c.env, emp.id, year, month);
+  if (!ticket) return c.json({ error: 'チケット発行に失敗しました（QR_TICKET_SECRET未設定）' }, 503);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'QR実績確認', `対象:${emp.emp_no} ${year}年${month}月度`);
+
+  return c.json({ ticket, empNo: emp.emp_no, empName: emp.name, year, month });
+});
+
+// チケット検証のみで開けるPDF（Bearer不要・liff.openWindowで外部ブラウザから開くため）
+app.get('/api/liff/sales/qr-pdf-file', async (c) => {
+  const ticket = c.req.query('ticket') ?? '';
+  const parsed = await verifyQrTicket(c.env, ticket);
+  if (!parsed) return c.text('リンクの有効期限が切れています。もう一度QRをスキャンしてください。', 403);
+
+  const emp = await c.env.DB.prepare('SELECT emp_no, name, division, team FROM employees WHERE id = ?')
+    .bind(parsed.empId).first<{ emp_no: string; name: string; division: number | null; team: number | null }>();
+  if (!emp) return c.text('社員情報が見つかりません', 404);
+
+  const settings = await getPeriodSettings(c.env.DB);
+  const { start, end } = getPeriodRange(parsed.year, parsed.month, settings);
+  const dbRows = (await c.env.DB.prepare(
+    'SELECT date, amount, duty_code FROM sales_records WHERE emp_id = ? AND date >= ? AND date <= ? ORDER BY date'
+  ).bind(parsed.empId, start, end).all<{ date: string; amount: number; duty_code: string | null }>()).results ?? [];
+  const rows = dbRows.map(r => ({ date: r.date, amount: r.amount, dutyCode: r.duty_code }));
+
+  const bytes = await buildShiftSalesPdf({
+    env: c.env, empName: emp.name, empNo: emp.emp_no, division: emp.division, team: emp.team,
+    year: parsed.year, month: parsed.month, start, end, rows,
+  });
+  if (!bytes) return c.text('PDF未設定（フォントが設定されていません）', 503);
+
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="qr_shift_sales_${emp.emp_no}_${parsed.year}_${parsed.month}.pdf"`,
+      'Cache-Control': 'no-store',
+    },
+  });
 });
 
 // ===================================================
@@ -214,6 +337,45 @@ app.get('/api/liff/sales/pdf', async (c) => {
 });
 
 // ===================================================
+// API: 勤務実績・売上表PDF（紙帳票風・本人分のみ）
+// ===================================================
+app.get('/api/liff/sales/shift-pdf', async (c) => {
+  const auth = await salesAuth(c);
+  if (!auth) return c.json({ error: 'forbidden' }, 403);
+
+  const year = parseInt(c.req.query('year') ?? '0');
+  const month = parseInt(c.req.query('month') ?? '0');
+  if (!year || !month) return c.json({ error: 'パラメータ不足' }, 400);
+
+  const emp = await c.env.DB.prepare('SELECT emp_no, division, team FROM employees WHERE id = ?')
+    .bind(auth.empId).first<{ emp_no: string; division: number | null; team: number | null }>();
+  if (!emp) return c.json({ error: '社員情報が見つかりません' }, 404);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', '勤務実績・売上表PDF出力', `${year}年${month}月度`);
+
+  const settings = await getPeriodSettings(c.env.DB);
+  const { start, end } = getPeriodRange(year, month, settings);
+  const dbRows = (await c.env.DB.prepare(
+    'SELECT date, amount, duty_code FROM sales_records WHERE emp_id = ? AND date >= ? AND date <= ? ORDER BY date'
+  ).bind(auth.empId, start, end).all<{ date: string; amount: number; duty_code: string | null }>()).results ?? [];
+  const rows = dbRows.map(r => ({ date: r.date, amount: r.amount, dutyCode: r.duty_code }));
+
+  const bytes = await buildShiftSalesPdf({
+    env: c.env, empName: auth.empName, empNo: emp.emp_no, division: emp.division, team: emp.team,
+    year, month, start, end, rows,
+  });
+  if (!bytes) return c.text('PDF未設定（フォントが設定されていません）', 503);
+
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="shift_sales_${year}_${month}.pdf"`,
+      'Cache-Control': 'no-store',
+    },
+  });
+});
+
+// ===================================================
 // HTML
 // ===================================================
 function salesPageHtml(liffId: string): string {
@@ -282,6 +444,12 @@ function salesPageHtml(liffId: string): string {
     <div class="icon">⚠️</div>
     <div id="err-msg"></div>
   </div>
+  <div id="view-qr-standalone" style="display:none;padding:32px 20px;text-align:center;">
+    <div style="font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:16px;">QR実績確認</div>
+    <div id="qr-status" style="color:#374151;font-size:14px;line-height:1.7;">QRコードをスキャンしています…</div>
+    <button id="qr-open-btn" class="pdf-btn" style="max-width:280px;margin-top:20px;display:none;" onclick="openQrPdf()">実績表を開く</button>
+    <button class="pdf-btn" style="max-width:280px;margin-top:12px;" onclick="startQrScan()">再スキャン</button>
+  </div>
   <div id="app" style="display:none;">
     <div class="header">
       <h1>売上記録</h1>
@@ -345,6 +513,8 @@ function salesPageHtml(liffId: string): string {
       </div>
       <div class="chart-wrap"><canvas id="chart" height="160"></canvas></div>
       <button class="pdf-btn" onclick="downloadPdf()">PDFをダウンロード</button>
+      <button class="pdf-btn" style="background:#374151;" onclick="downloadShiftPdf()">勤務実績・売上表PDF</button>
+      <button class="pdf-btn" style="background:#0f766e;" onclick="startQrScan()">QRで本人確認して表示</button>
     </div>
   </div>
   <div class="toast" id="toast"></div>
@@ -368,12 +538,17 @@ function salesPageHtml(liffId: string): string {
       curMonth = parseInt(today.slice(5, 7));
       document.getElementById('in-date').value = today;
       var params = new URLSearchParams(location.search);
+      if (params.get('tab') === 'qr') {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('view-qr-standalone').style.display = 'block';
+        startQrScan();
+        return null;
+      }
       if (params.get('tab') === 'summary') switchTab('summary');
-      return loadEntry();
-    })
-    .then(function() {
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
+      return loadEntry().then(function() {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+      });
     })
     .catch(function(err) {
       document.getElementById('loading').style.display = 'none';
@@ -514,6 +689,72 @@ function salesPageHtml(liffId: string): string {
         var a = document.createElement('a');
         a.href = url;
         a.download = 'sales_' + curYear + '_' + curMonth + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      })
+      .catch(function(err) { toast(err.message || 'エラーが発生しました'); });
+  }
+
+  function qrSetStatus(msg) {
+    var el = document.getElementById('qr-status');
+    if (el) el.textContent = msg; else toast(msg);
+  }
+
+  var qrPdfTicketUrl = null;
+
+  function startQrScan() {
+    if (!liff.scanCodeV2) {
+      qrSetStatus('QRスキャンに対応していません。LINEアプリを最新版に更新してください。');
+      return;
+    }
+    document.getElementById('qr-open-btn').style.display = 'none';
+    qrPdfTicketUrl = null;
+    qrSetStatus('QRコードをスキャンしています…');
+    liff.scanCodeV2().then(function(result) {
+      var text = (result && result.value) || '';
+      var m = text.match(/^(\\d{8})km$/i);
+      if (!m) { qrSetStatus('認識できないQRコードです（読取内容: ' + text + '）'); return; }
+      var scannedEmpNo = m[1];
+      qrSetStatus('確認中…');
+      return fetch('/api/liff/sales/qr-ticket?empNo=' + scannedEmpNo, { headers: { Authorization: 'Bearer ' + AT } })
+        .then(function(res) {
+          return res.json().then(function(j) {
+            if (!res.ok) throw new Error(j.error || 'チケット発行に失敗しました');
+            return j;
+          });
+        })
+        .then(function(j) {
+          qrPdfTicketUrl = location.origin + '/api/liff/sales/qr-pdf-file?ticket=' + encodeURIComponent(j.ticket);
+          document.getElementById('qr-open-btn').style.display = 'block';
+          qrSetStatus('実績表の準備ができました（' + j.empName + ' / ' + j.empNo + '）。下のボタンで開いてください。');
+        });
+    }).catch(function(err) {
+      qrSetStatus(err && err.message ? err.message : 'QRスキャンをキャンセルまたは失敗しました');
+    });
+  }
+
+  function openQrPdf() {
+    if (!qrPdfTicketUrl) return;
+    if (liff.openWindow) {
+      liff.openWindow({ url: qrPdfTicketUrl, external: true });
+    } else {
+      window.open(qrPdfTicketUrl, '_blank');
+    }
+  }
+
+  function downloadShiftPdf() {
+    fetch('/api/liff/sales/shift-pdf?year=' + curYear + '&month=' + curMonth, { headers: { Authorization: 'Bearer ' + AT } })
+      .then(function(res) {
+        if (!res.ok) throw new Error('PDF生成に失敗しました');
+        return res.blob();
+      })
+      .then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'shift_sales_' + curYear + '_' + curMonth + '.pdf';
         document.body.appendChild(a);
         a.click();
         a.remove();

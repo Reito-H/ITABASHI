@@ -1613,6 +1613,14 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
   ${isNewcomer && emp ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;display:flex;align-items:center;gap:8px;"><span style="font-weight:700;">新人シフト管理対象</span><span style="font-size:12px;">— 新人シフト管理に表示されています</span></div>` : ''}
   ${!emp?.is_active && emp ? `<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;">この社員は退職済みです。退職日: ${escHtml(emp.retirement_date ?? '—')}</div>` : ''}
 
+  ${!isNew ? `
+  <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #e5e7eb;">
+    <button type="button" onclick="switchStaffTab('basic')" id="tabbtn-basic" style="padding:10px 20px;background:none;border:none;border-bottom:2px solid #1a3a5c;margin-bottom:-2px;font-size:13px;font-weight:700;color:#1a3a5c;cursor:pointer;">基本情報</button>
+    <button type="button" onclick="switchStaffTab('sales')" id="tabbtn-sales" style="padding:10px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:13px;font-weight:700;color:#9ca3af;cursor:pointer;">売上分析</button>
+  </div>
+  ` : ''}
+
+  <div id="tab-content-basic">
   <form id="staff-form">
 
     <!-- セクション: 基本情報 -->
@@ -1780,8 +1788,42 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
     </div>
 
   </form>
-</div>
+  </div>
 
+  ${!isNew ? `
+  <div id="tab-content-sales" style="display:none;">
+    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0;">売上分析 — ${escHtml(emp!.name)}</h3>
+        <select id="sales-months" onchange="loadSalesAnalytics()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+          <option value="3">直近3ヶ月</option>
+          <option value="6" selected>直近6ヶ月</option>
+          <option value="12">直近12ヶ月</option>
+          <option value="24">直近24ヶ月</option>
+        </select>
+      </div>
+      <div id="sales-loading" style="color:#9ca3af;font-size:13px;">読み込み中…</div>
+      <div id="sales-content" style="display:none;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;padding:12px 14px;background:#f9fafb;border-radius:8px;">
+          <span style="font-size:12px;color:#6b7280;">月度PDF（勤務実績・売上表）:</span>
+          <select id="pdf-month-select" style="border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:12px;"></select>
+          <button type="button" onclick="downloadShiftSalesPdf()" style="padding:5px 14px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;">PDFダウンロード</button>
+        </div>
+        <div style="position:relative;height:240px;margin-bottom:24px;"><canvas id="sales-monthly-chart"></canvas></div>
+        <div style="position:relative;height:240px;margin-bottom:24px;"><canvas id="sales-weekday-chart"></canvas></div>
+        <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">暦要因別の営収差（この社員の平均日商との比較）</h4>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
+            <th style="padding:6px 8px;">要因</th><th style="padding:6px 8px;">該当日平均</th><th style="padding:6px 8px;">非該当日平均</th><th style="padding:6px 8px;">差分</th><th style="padding:6px 8px;">件数</th>
+          </tr></thead>
+          <tbody id="sales-factor-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  ` : ''}
+
+${!isNew ? `<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>` : ''}
 <script>
 const IS_NEW = ${isNew};
 const STAFF_ID = ${emp?.id ?? 'null'};
@@ -1964,6 +2006,89 @@ async function toggleExcludeRetirement(id, currentVal, name) {
 
 // 初期化時に時間選択肢を更新
 updateStartTimes();
+
+// ===== 売上分析タブ =====
+let salesAnalyticsLoaded = false;
+let salesMonthlyChart = null, salesWeekdayChart = null;
+
+function switchStaffTab(tab) {
+  const isBasic = tab === 'basic';
+  document.getElementById('tab-content-basic').style.display = isBasic ? '' : 'none';
+  document.getElementById('tab-content-sales').style.display = isBasic ? 'none' : '';
+  document.getElementById('tabbtn-basic').style.borderBottomColor = isBasic ? '#1a3a5c' : 'transparent';
+  document.getElementById('tabbtn-basic').style.color = isBasic ? '#1a3a5c' : '#9ca3af';
+  document.getElementById('tabbtn-sales').style.borderBottomColor = isBasic ? 'transparent' : '#1a3a5c';
+  document.getElementById('tabbtn-sales').style.color = isBasic ? '#9ca3af' : '#1a3a5c';
+  if (!isBasic && !salesAnalyticsLoaded) {
+    salesAnalyticsLoaded = true;
+    loadSalesAnalytics();
+  }
+}
+
+function downloadShiftSalesPdf() {
+  const val = document.getElementById('pdf-month-select').value;
+  if (!val) { alert('対象月度がありません（売上データがまだ登録されていません）'); return; }
+  const [year, month] = val.split('-');
+  window.open('/api/sales-analytics/employee/' + STAFF_ID + '/pdf?year=' + year + '&month=' + month, '_blank');
+}
+
+async function loadSalesAnalytics() {
+  const months = document.getElementById('sales-months').value;
+  document.getElementById('sales-loading').style.display = '';
+  document.getElementById('sales-content').style.display = 'none';
+  try {
+    const res = await fetch('/api/sales-analytics/employee/' + STAFF_ID + '?months=' + months);
+    const json = await res.json();
+    if (!res.ok) { document.getElementById('sales-loading').textContent = json.error || '読み込みに失敗しました'; return; }
+
+    if (!json.monthly.length) {
+      document.getElementById('sales-loading').textContent = 'この期間の売上データがありません（CSVインポートまたはLINE売上記録で登録されると表示されます）';
+      return;
+    }
+
+    document.getElementById('sales-loading').style.display = 'none';
+    document.getElementById('sales-content').style.display = '';
+
+    const pdfSelect = document.getElementById('pdf-month-select');
+    pdfSelect.innerHTML = json.monthly.slice().reverse().map(m =>
+      '<option value="' + m.year + '-' + m.month + '">' + m.year + '年' + m.month + '月度</option>'
+    ).join('');
+
+    const monthLabels = json.monthly.map(m => m.year + '年' + m.month + '月度');
+    const monthTotals = json.monthly.map(m => m.total);
+    if (salesMonthlyChart) salesMonthlyChart.destroy();
+    salesMonthlyChart = new Chart(document.getElementById('sales-monthly-chart').getContext('2d'), {
+      type: 'bar',
+      data: { labels: monthLabels, datasets: [{ label: '月度売上合計(円)', data: monthTotals, backgroundColor: 'rgba(37,99,235,0.7)', borderRadius: 4 }] },
+      options: { responsive: true, plugins: { title: { display: true, text: '月度売上推移' } }, scales: { y: { beginAtZero: true } } }
+    });
+
+    const wdLabels = json.weekdayBreakdown.map(w => w.label);
+    const wdAvgs = json.weekdayBreakdown.map(w => w.avg || 0);
+    if (salesWeekdayChart) salesWeekdayChart.destroy();
+    salesWeekdayChart = new Chart(document.getElementById('sales-weekday-chart').getContext('2d'), {
+      type: 'bar',
+      data: { labels: wdLabels, datasets: [{ label: '曜日別平均売上(円)', data: wdAvgs, backgroundColor: 'rgba(5,150,105,0.7)', borderRadius: 4 }] },
+      options: { responsive: true, plugins: { title: { display: true, text: '曜日別 平均売上' } }, scales: { y: { beginAtZero: true } } }
+    });
+
+    const tbody = document.getElementById('sales-factor-tbody');
+    tbody.innerHTML = json.factorBreakdown.map(f => {
+      if (f.countTrue === 0) return '';
+      const diffColor = f.diffPct === null ? '#9ca3af' : (f.diffPct >= 0 ? '#059669' : '#dc2626');
+      const diffText = f.diffPct === null ? '—' : (f.diffPct >= 0 ? '+' : '') + f.diffPct + '%';
+      return '<tr style="border-bottom:1px solid #f3f4f6;">' +
+        '<td style="padding:7px 8px;font-weight:600;">' + f.label + '</td>' +
+        '<td style="padding:7px 8px;">' + (f.avgTrue !== null ? f.avgTrue.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
+        '<td style="padding:7px 8px;">' + (f.avgFalse !== null ? f.avgFalse.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
+        '<td style="padding:7px 8px;font-weight:700;color:' + diffColor + ';">' + diffText + '</td>' +
+        '<td style="padding:7px 8px;color:#9ca3af;">' + f.countTrue + '件</td>' +
+        '</tr>';
+    }).join('');
+  } catch (err) {
+    document.getElementById('sales-loading').textContent = '通信エラーが発生しました';
+  }
+}
 </script>`;
 }
 

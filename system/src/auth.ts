@@ -3,6 +3,7 @@
 export type Env = {
   DB: D1Database;
   SETUP_KEY?: string;
+  QR_TICKET_SECRET?: string; // QR実績確認PDFの署名付き一時チケット用
   LINE_CHANNEL_SECRET?: string;
   LINE_CHANNEL_ACCESS_TOKEN?: string;
   // PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者

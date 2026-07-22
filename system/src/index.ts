@@ -4,8 +4,10 @@ import { getAdminPermissions, isPathAllowed, isRootApiWriteAllowed, filterHtmlBy
 import adminRoutes from './routes/admin';
 import adminExtraRoutes from './routes/admin_extra';
 import adminStaffRoutes from './routes/admin_staff';
+import adminSalesAnalyticsRoutes from './routes/admin_sales_analytics';
 import shiftApi from './routes/api/shift';
 import employeesApi from './routes/api/employees';
+import salesAnalyticsApi from './routes/api/sales_analytics';
 import salesApi from './routes/api/sales';
 import infoApi from './routes/api/info';
 import instructorApi from './routes/api/instructor';
@@ -165,6 +167,7 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
 app.route(`/${SECRET}/admin`, adminRoutes);
 app.route(`/${SECRET}/admin`, adminExtraRoutes);
 app.route(`/${SECRET}/admin`, adminStaffRoutes);
+app.route(`/${SECRET}/admin`, adminSalesAnalyticsRoutes);
 app.route(`/${SECRET}/admin`, adminLiffRoutes);
 app.route(`/${SECRET}/admin`, adminLineUsageRoutes);
 app.route(`/${SECRET}/admin`, adminBentenRoutes);
@@ -205,6 +208,7 @@ app.use('/api/*', async (c, next) => {
 app.route('/api/shift', shiftApi);
 app.route('/api/instructor-schedule', instructorApi);
 app.route('/api/employees', employeesApi);
+app.route('/api/sales-analytics', salesAnalyticsApi);
 app.route('/api/sales', salesApi);
 app.route('/api/info', infoApi);
 app.route('/api/events', eventsApi);
