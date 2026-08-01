@@ -1,7 +1,7 @@
-# 提案書: ベンテンクラブシフト機能の Benten管理システム統合
+# 提案書: ベンテンクラブシフト機能の ホシコン統合
 
 > 作成日: 2026-07-11
-> 対象: 中止になった「Bentenシフト」(Next.js + Firebase) の機能を、既存の Benten管理システム (Cloudflare Workers + D1 + LINE LIFF) に統合する
+> 対象: 中止になった「Bentenシフト」(Next.js + Firebase) の機能を、既存の ホシコン (Cloudflare Workers + D1 + LINE LIFF) に統合する
 
 ---
 

@@ -40,8 +40,10 @@ app.get('/api/liff/kancho-shift', async (c) => {
   const { start: dispStart, end: dispEnd, dates } = getShiftDisplayRange(year, month, periodCfg);
 
   const [members, types, shifts, memos] = await Promise.all([
-    c.env.DB.prepare("SELECT id, name, role, section, sort_order, team_color, is_indoor FROM kancho_members WHERE is_active = 1 ORDER BY section, sort_order, id").all(),
-    c.env.DB.prepare('SELECT code, label, color, section, daily_required, use_team_color, counts_as_work, counts_as_off FROM kancho_shift_types WHERE is_active = 1 ORDER BY sort_order, id').all(),
+    c.env.DB.prepare("SELECT id, name, role, section, sort_order, team_color, is_indoor FROM kancho_members WHERE is_active = 1 AND year = ? AND month = ? ORDER BY section, sort_order, id")
+      .bind(year, month).all(),
+    c.env.DB.prepare('SELECT code, label, color, section, daily_required, use_team_color, counts_as_work, counts_as_off FROM kancho_shift_types WHERE is_active = 1 AND year = ? AND month = ? ORDER BY sort_order, id')
+      .bind(year, month).all(),
     c.env.DB.prepare('SELECT member_id, date, code, is_diagonal, is_wish, cell_color FROM kancho_shifts WHERE date BETWEEN ? AND ?')
       .bind(dispStart, dispEnd).all(),
     c.env.DB.prepare('SELECT kind, title, content FROM kancho_memos WHERE year = ? AND month = ? ORDER BY kind, sort_order, id')

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Env } from '../../auth';
-import { queryManual } from '../../utils/manual_search';
+import { queryManual, getManualBotEnabled, MANUAL_BOT_DISABLED_MESSAGE } from '../../utils/manual_search';
 import { isTicketQuestion, queryTicket } from '../../utils/ticket_bot';
 
 const app = new Hono<{ Bindings: Env & { GROQ_API_KEY: string } }>();
@@ -11,6 +11,12 @@ app.post('/manual-chat', async (c) => {
 
   const question = (body.question ?? '').trim();
   if (!question) return c.json({ error: '質問を入力してください' }, 400);
+
+  // チケット専用Botは対象外で常時稼働。マニュアルBotのみ一時停止フラグで制御。
+  if (!isTicketQuestion(question) && !(await getManualBotEnabled(c.env.DB))) {
+    return c.json({ answer: MANUAL_BOT_DISABLED_MESSAGE });
+  }
+
   if (!c.env.GROQ_API_KEY) return c.json({ error: 'GROQ_API_KEYが設定されていません' }, 500);
 
   const query = isTicketQuestion(question) ? queryTicket : queryManual;

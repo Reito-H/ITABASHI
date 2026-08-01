@@ -104,9 +104,10 @@ export async function sendKanchoAttendance(env: Env, todayStr: string): Promise<
   const uids = (recipients.results ?? []).map(r => r.line_uid);
   if (uids.length === 0) return;
 
+  const { year, month } = getPeriod(todayStr);
   const members = await env.DB.prepare(
-    "SELECT id, name, role FROM kancho_members WHERE section = 'main' AND is_active = 1 AND is_indoor = 1 ORDER BY sort_order, id"
-  ).all<{ id: number; name: string; role: string | null }>();
+    "SELECT id, name, role FROM kancho_members WHERE section = 'main' AND is_active = 1 AND is_indoor = 1 AND year = ? AND month = ? ORDER BY sort_order, id"
+  ).bind(year, month).all<{ id: number; name: string; role: string | null }>();
   const shifts = await env.DB.prepare(
     'SELECT member_id, code, is_diagonal, cell_color FROM kancho_shifts WHERE date = ?'
   ).bind(todayStr).all<{ member_id: number; code: string; is_diagonal: number; cell_color: string | null }>();

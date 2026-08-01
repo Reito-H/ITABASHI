@@ -49,41 +49,6 @@ async function qrAuth(c: { req: { raw: Request }; env: Env }): Promise<QrAuth | 
   return { uid, role: row.role, empId: row.emp_id };
 }
 
-// QR実績確認PDF用の署名付き一時チケット（LIFF内蔵ブラウザのダウンロード制限を避け、
-// liff.openWindowで外部ブラウザに渡すためBearerトークンなしで検証できるようにする）
-const QR_TICKET_TTL_SEC = 120;
-
-async function hmacHex(secret: string, message: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
-  );
-  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
-  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function signQrTicket(env: Env, empId: number, year: number, month: number): Promise<string | null> {
-  const secret = env.QR_TICKET_SECRET;
-  if (!secret) return null;
-  const expires = Math.floor(Date.now() / 1000) + QR_TICKET_TTL_SEC;
-  const payload = `${empId}.${year}.${month}.${expires}`;
-  const sig = await hmacHex(secret, payload);
-  return `${payload}.${sig}`;
-}
-
-async function verifyQrTicket(env: Env, ticket: string): Promise<{ empId: number; year: number; month: number } | null> {
-  const secret = env.QR_TICKET_SECRET;
-  if (!secret) return null;
-  const parts = ticket.split('.');
-  if (parts.length !== 5) return null;
-  const [empIdStr, yearStr, monthStr, expiresStr, sig] = parts;
-  const payload = `${empIdStr}.${yearStr}.${monthStr}.${expiresStr}`;
-  const expected = await hmacHex(secret, payload);
-  if (expected !== sig) return null;
-  const expires = parseInt(expiresStr, 10);
-  if (!expires || Math.floor(Date.now() / 1000) > expires) return null;
-  return { empId: parseInt(empIdStr, 10), year: parseInt(yearStr, 10), month: parseInt(monthStr, 10) };
-}
-
 type DailyRow = { date: string; amount: number; ride_count: number | null; duty_code: string | null };
 
 function dutyWeight(dutyCode: string | null): number {
@@ -124,9 +89,9 @@ app.get('/liff/sales', (c) => {
 });
 
 // ===================================================
-// API: 本人確認（QRスキャンで読み取った社員番号との照合用）
+// API: 本人確認（QRスキャンで読み取った社員番号を社員IDへ解決）
 // ===================================================
-app.get('/api/liff/sales/qr-ticket', async (c) => {
+app.get('/api/liff/sales/qr-resolve', async (c) => {
   const auth = await qrAuth(c);
   if (!auth) return c.json({ error: 'forbidden' }, 403);
 
@@ -151,47 +116,102 @@ app.get('/api/liff/sales/qr-ticket', async (c) => {
   }
   if (!emp) return c.json({ error: `該当する社員が見つかりません（読取番号: ${scannedEmpNo}）` }, 404);
 
-  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-  const { year, month } = getPeriod(today);
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'QR実績確認', `対象:${emp.emp_no}`);
 
-  const ticket = await signQrTicket(c.env, emp.id, year, month);
-  if (!ticket) return c.json({ error: 'チケット発行に失敗しました（QR_TICKET_SECRET未設定）' }, 503);
-
-  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'QR実績確認', `対象:${emp.emp_no} ${year}年${month}月度`);
-
-  return c.json({ ticket, empNo: emp.emp_no, empName: emp.name, year, month });
+  return c.json({ empId: emp.id, empNo: emp.emp_no, empName: emp.name });
 });
 
-// チケット検証のみで開けるPDF（Bearer不要・liff.openWindowで外部ブラウザから開くため）
-app.get('/api/liff/sales/qr-pdf-file', async (c) => {
-  const ticket = c.req.query('ticket') ?? '';
-  const parsed = await verifyQrTicket(c.env, ticket);
-  if (!parsed) return c.text('リンクの有効期限が切れています。もう一度QRをスキャンしてください。', 403);
+// ===================================================
+// API: QR確認後の月次実績（表表示用）
+// ===================================================
+app.get('/api/liff/sales/qr-monthly', async (c) => {
+  const auth = await qrAuth(c);
+  if (!auth) return c.json({ error: 'forbidden' }, 403);
 
-  const emp = await c.env.DB.prepare('SELECT emp_no, name, division, team FROM employees WHERE id = ?')
-    .bind(parsed.empId).first<{ emp_no: string; name: string; division: number | null; team: number | null }>();
-  if (!emp) return c.text('社員情報が見つかりません', 404);
+  const empId = parseInt(c.req.query('empId') ?? '0');
+  const year = parseInt(c.req.query('year') ?? '0');
+  const month = parseInt(c.req.query('month') ?? '0');
+  if (!empId || !year || !month) return c.json({ error: 'パラメータ不足' }, 400);
 
-  const settings = await getPeriodSettings(c.env.DB);
-  const { start, end } = getPeriodRange(parsed.year, parsed.month, settings);
-  const dbRows = (await c.env.DB.prepare(
-    'SELECT date, amount, duty_code FROM sales_records WHERE emp_id = ? AND date >= ? AND date <= ? ORDER BY date'
-  ).bind(parsed.empId, start, end).all<{ date: string; amount: number; duty_code: string | null }>()).results ?? [];
-  const rows = dbRows.map(r => ({ date: r.date, amount: r.amount, dutyCode: r.duty_code }));
+  const isManagerLookup = QR_MANAGER_ROLES.includes(auth.role);
+  if (!isManagerLookup && auth.empId !== empId) return c.json({ error: '本人以外の実績は閲覧できません' }, 403);
 
-  const bytes = await buildShiftSalesPdf({
-    env: c.env, empName: emp.name, empNo: emp.emp_no, division: emp.division, team: emp.team,
-    year: parsed.year, month: parsed.month, start, end, rows,
+  const emp = await c.env.DB.prepare('SELECT emp_no, name FROM employees WHERE id = ?')
+    .bind(empId).first<{ emp_no: string; name: string }>();
+  if (!emp) return c.json({ error: '社員情報が見つかりません' }, 404);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'QR実績確認(月次)', `対象:${emp.emp_no} ${year}年${month}月度`);
+
+  const s = await loadSummary(c.env, empId, year, month);
+  return c.json({
+    empNo: emp.emp_no, empName: emp.name,
+    year, month, start: s.start, end: s.end,
+    totalAmount: s.totalAmount,
+    totalAmountExcl: s.totalAmountExcl,
+    totalCount: s.totalCount,
+    workingDays: s.workingDays,
+    avgAmount: s.avgAmount,
+    daily: s.rows.map(r => ({ date: r.date, amount: r.amount, rideCount: r.ride_count, dutyLabel: dutyLabel(r.duty_code) })),
   });
-  if (!bytes) return c.text('PDF未設定（フォントが設定されていません）', 503);
+});
 
-  return new Response(bytes, {
-    headers: {
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `inline; filename="qr_shift_sales_${emp.emp_no}_${parsed.year}_${parsed.month}.pdf"`,
-      'Cache-Control': 'no-store',
-    },
+// QR確認結果を自分自身のLINEにテキストで転送（他者への共有はLINEの転送機能を使ってもらう想定）
+async function pushMessage(to: string, accessToken: string, text: string): Promise<void> {
+  await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ to, messages: [{ type: 'text', text }] }),
   });
+}
+
+function buildQrSummaryText(emp: { emp_no: string; name: string }, s: Awaited<ReturnType<typeof loadSummary>>, year: number, month: number): string {
+  const lines: string[] = [];
+  lines.push('【売上実績確認】');
+  lines.push(`対象: ${emp.name}（${emp.emp_no}）`);
+  lines.push(`月度: ${year}年${month}月度（${s.start} 〜 ${s.end}）`);
+  lines.push('');
+  lines.push(`税込合計: ${s.totalAmount.toLocaleString('ja-JP')}円`);
+  lines.push(`税抜合計: ${s.totalAmountExcl.toLocaleString('ja-JP')}円`);
+  lines.push(`実働カウント: ${s.totalCount}`);
+  lines.push(`乗務日数: ${s.workingDays}日`);
+  lines.push(`平均日商: ${s.avgAmount.toLocaleString('ja-JP')}円`);
+  if (s.rows.length) {
+    lines.push('');
+    for (const r of s.rows) {
+      const ride = r.ride_count != null ? `（${r.ride_count}回）` : '';
+      lines.push(`${r.date} ${dutyLabel(r.duty_code)} ${r.amount.toLocaleString('ja-JP')}円${ride}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+app.post('/api/liff/sales/qr-share', async (c) => {
+  const auth = await qrAuth(c);
+  if (!auth) return c.json({ error: 'forbidden' }, 403);
+
+  const body = await c.req.json<{ empId?: number; year?: number; month?: number }>();
+  const empId = Number(body.empId);
+  const year = Number(body.year);
+  const month = Number(body.month);
+  if (!empId || !year || !month) return c.json({ error: 'パラメータ不足' }, 400);
+
+  const isManagerLookup = QR_MANAGER_ROLES.includes(auth.role);
+  if (!isManagerLookup && auth.empId !== empId) return c.json({ error: '本人以外の実績は閲覧できません' }, 403);
+
+  const emp = await c.env.DB.prepare('SELECT emp_no, name FROM employees WHERE id = ?')
+    .bind(empId).first<{ emp_no: string; name: string }>();
+  if (!emp) return c.json({ error: '社員情報が見つかりません' }, 404);
+
+  const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
+  if (!at) return c.json({ error: 'LINE連携が設定されていません' }, 503);
+
+  const s = await loadSummary(c.env, empId, year, month);
+  const text = buildQrSummaryText(emp, s, year, month);
+  await pushMessage(auth.uid, at, text);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'QR実績確認(LINE転送)', `対象:${emp.emp_no} ${year}年${month}月度`);
+
+  return c.json({ ok: true });
 });
 
 // ===================================================
@@ -436,6 +456,31 @@ function salesPageHtml(liffId: string): string {
     .err-page .icon { font-size: 44px; margin-bottom: 12px; }
     .toast { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: #1e3a5f; color: white; padding: 9px 18px; border-radius: 20px; font-size: 13px; z-index: 50; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
     .toast.show { opacity: 1; }
+
+    /* QR実績確認（運行管理者・統括管理者向け・見やすさ優先） */
+    .qr-page { max-width: 520px; margin: 0 auto; padding: 24px 16px 40px; }
+    .qr-title { font-size: 19px; font-weight: 700; color: #1e3a5f; margin-bottom: 18px; text-align: center; }
+    .qr-status { color: #374151; font-size: 16px; line-height: 1.8; text-align: center; }
+    .qr-scan-btn, .qr-rescan-btn { display: block; width: 100%; max-width: 320px; margin: 20px auto 0; border: none; border-radius: 12px; padding: 16px; font-size: 17px; font-weight: 700; cursor: pointer; }
+    .qr-scan-btn { background: #0f766e; color: white; }
+    .qr-rescan-btn { background: #f3f4f6; color: #374151; margin-top: 18px; }
+    .qr-emp { text-align: center; margin-bottom: 16px; }
+    .qr-emp .name { font-size: 21px; font-weight: 800; color: #111827; }
+    .qr-emp .no { font-size: 15px; color: #6b7280; margin-top: 4px; }
+    .qr-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .qr-nav button { border: 1px solid #d1d5db; background: white; border-radius: 10px; padding: 11px 16px; font-size: 15px; font-weight: 700; cursor: pointer; color: #1e3a5f; }
+    .qr-nav .ym { font-size: 18px; font-weight: 800; color: #1e3a5f; }
+    .qr-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+    .qr-cards .card { padding: 14px; margin-bottom: 0; }
+    .qr-cards .card .label { font-size: 13px; color: #6b7280; margin-bottom: 6px; }
+    .qr-cards .card .val { font-size: 21px; font-weight: 800; color: #1e3a5f; }
+    .qr-table-wrap { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 8px; }
+    .qr-table { width: 100%; border-collapse: collapse; font-size: 16px; }
+    .qr-table th { background: #1e3a5f; color: white; padding: 12px 10px; font-size: 14px; font-weight: 700; text-align: left; }
+    .qr-table td { padding: 13px 10px; border-top: 1px solid #f0f4f8; color: #111827; }
+    .qr-table tr:nth-child(even) td { background: #f8fafc; }
+    .qr-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .qr-empty { text-align: center; color: #6b7280; font-size: 15px; padding: 24px 8px; }
   </style>
 </head>
 <body>
@@ -444,11 +489,41 @@ function salesPageHtml(liffId: string): string {
     <div class="icon">⚠️</div>
     <div id="err-msg"></div>
   </div>
-  <div id="view-qr-standalone" style="display:none;padding:32px 20px;text-align:center;">
-    <div style="font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:16px;">QR実績確認</div>
-    <div id="qr-status" style="color:#374151;font-size:14px;line-height:1.7;">QRコードをスキャンしています…</div>
-    <button id="qr-open-btn" class="pdf-btn" style="max-width:280px;margin-top:20px;display:none;" onclick="openQrPdf()">実績表を開く</button>
-    <button class="pdf-btn" style="max-width:280px;margin-top:12px;" onclick="startQrScan()">再スキャン</button>
+  <div id="view-qr-standalone" style="display:none;">
+    <div class="qr-page">
+      <div class="qr-title">QR実績確認</div>
+
+      <div id="qr-scan-block">
+        <div class="qr-status" id="qr-status">QRコードをスキャンしています…</div>
+        <button class="qr-scan-btn" id="qr-scan-again-btn" style="display:none;" onclick="startQrScan()">もう一度スキャン</button>
+      </div>
+
+      <div id="qr-result" style="display:none;">
+        <div class="qr-emp">
+          <div class="name" id="qr-emp-name"></div>
+          <div class="no" id="qr-emp-no"></div>
+        </div>
+        <div class="qr-nav">
+          <button onclick="qrMoveMonth(-1)">◀ 前月度</button>
+          <div class="ym" id="qr-ym-label"></div>
+          <button onclick="qrMoveMonth(1)">次月度 ▶</button>
+        </div>
+        <div class="qr-cards">
+          <div class="card"><div class="label">税込合計</div><div class="val" id="qr-v-amount"></div></div>
+          <div class="card"><div class="label">税抜合計</div><div class="val" id="qr-v-amount-excl"></div></div>
+          <div class="card"><div class="label">実働カウント</div><div class="val" id="qr-v-count"></div></div>
+          <div class="card"><div class="label">平均日商</div><div class="val" id="qr-v-avg"></div></div>
+        </div>
+        <div class="qr-table-wrap">
+          <table class="qr-table">
+            <thead><tr><th>日付</th><th>区分</th><th style="text-align:right;">売上</th><th style="text-align:right;">乗車</th></tr></thead>
+            <tbody id="qr-table-body"></tbody>
+          </table>
+        </div>
+        <button class="qr-scan-btn" id="qr-share-btn" onclick="shareQrToLine()">自分のLINEに転送</button>
+        <button class="qr-rescan-btn" onclick="startQrScan()">別の社員をスキャン</button>
+      </div>
+    </div>
   </div>
   <div id="app" style="display:none;">
     <div class="header">
@@ -702,46 +777,110 @@ function salesPageHtml(liffId: string): string {
     if (el) el.textContent = msg; else toast(msg);
   }
 
-  var qrPdfTicketUrl = null;
+  var qrEmpId = null, qrYear = 0, qrMonth = 0;
 
   function startQrScan() {
     if (!liff.scanCodeV2) {
       qrSetStatus('QRスキャンに対応していません。LINEアプリを最新版に更新してください。');
       return;
     }
-    document.getElementById('qr-open-btn').style.display = 'none';
-    qrPdfTicketUrl = null;
+    document.getElementById('qr-result').style.display = 'none';
+    document.getElementById('qr-scan-block').style.display = 'block';
+    document.getElementById('qr-scan-again-btn').style.display = 'none';
     qrSetStatus('QRコードをスキャンしています…');
     liff.scanCodeV2().then(function(result) {
       var text = (result && result.value) || '';
       var m = text.match(/^(\\d{8})km$/i);
-      if (!m) { qrSetStatus('認識できないQRコードです（読取内容: ' + text + '）'); return; }
+      if (!m) {
+        qrSetStatus('認識できないQRコードです（読取内容: ' + text + '）');
+        document.getElementById('qr-scan-again-btn').style.display = 'block';
+        return;
+      }
       var scannedEmpNo = m[1];
       qrSetStatus('確認中…');
-      return fetch('/api/liff/sales/qr-ticket?empNo=' + scannedEmpNo, { headers: { Authorization: 'Bearer ' + AT } })
+      return fetch('/api/liff/sales/qr-resolve?empNo=' + scannedEmpNo, { headers: { Authorization: 'Bearer ' + AT } })
         .then(function(res) {
           return res.json().then(function(j) {
-            if (!res.ok) throw new Error(j.error || 'チケット発行に失敗しました');
+            if (!res.ok) throw new Error(j.error || '確認に失敗しました');
             return j;
           });
         })
         .then(function(j) {
-          qrPdfTicketUrl = location.origin + '/api/liff/sales/qr-pdf-file?ticket=' + encodeURIComponent(j.ticket);
-          document.getElementById('qr-open-btn').style.display = 'block';
-          qrSetStatus('実績表の準備ができました（' + j.empName + ' / ' + j.empNo + '）。下のボタンで開いてください。');
+          qrEmpId = j.empId;
+          document.getElementById('qr-emp-name').textContent = j.empName;
+          document.getElementById('qr-emp-no').textContent = '社員番号: ' + j.empNo;
+          var today = jstToday();
+          qrYear = parseInt(today.slice(0, 4));
+          qrMonth = parseInt(today.slice(5, 7));
+          return loadQrMonthly();
         });
     }).catch(function(err) {
       qrSetStatus(err && err.message ? err.message : 'QRスキャンをキャンセルまたは失敗しました');
+      document.getElementById('qr-scan-again-btn').style.display = 'block';
     });
   }
 
-  function openQrPdf() {
-    if (!qrPdfTicketUrl) return;
-    if (liff.openWindow) {
-      liff.openWindow({ url: qrPdfTicketUrl, external: true });
-    } else {
-      window.open(qrPdfTicketUrl, '_blank');
-    }
+  function qrMoveMonth(delta) {
+    qrMonth += delta;
+    if (qrMonth < 1) { qrMonth = 12; qrYear--; }
+    if (qrMonth > 12) { qrMonth = 1; qrYear++; }
+    loadQrMonthly();
+  }
+
+  function loadQrMonthly() {
+    return fetch('/api/liff/sales/qr-monthly?empId=' + qrEmpId + '&year=' + qrYear + '&month=' + qrMonth, { headers: { Authorization: 'Bearer ' + AT } })
+      .then(function(res) {
+        return res.json().then(function(j) {
+          if (!res.ok) throw new Error(j.error || '取得に失敗しました');
+          return j;
+        });
+      })
+      .then(function(s) {
+        document.getElementById('qr-scan-block').style.display = 'none';
+        document.getElementById('qr-result').style.display = 'block';
+        document.getElementById('qr-ym-label').textContent = s.year + '年' + s.month + '月度';
+        document.getElementById('qr-v-amount').textContent = s.totalAmount.toLocaleString('ja-JP') + '円';
+        document.getElementById('qr-v-amount-excl').textContent = s.totalAmountExcl.toLocaleString('ja-JP') + '円';
+        document.getElementById('qr-v-count').textContent = s.totalCount;
+        document.getElementById('qr-v-avg').textContent = s.avgAmount.toLocaleString('ja-JP') + '円';
+        var body = document.getElementById('qr-table-body');
+        if (!s.daily.length) {
+          body.innerHTML = '<tr><td colspan="4" class="qr-empty">この月度の記録はありません</td></tr>';
+        } else {
+          body.innerHTML = s.daily.map(function(d) {
+            return '<tr><td>' + d.date.slice(5) + '</td><td>' + d.dutyLabel + '</td>'
+              + '<td class="num">' + d.amount.toLocaleString('ja-JP') + '円</td>'
+              + '<td class="num">' + (d.rideCount != null ? d.rideCount : '—') + '</td></tr>';
+          }).join('');
+        }
+      })
+      .catch(function(err) {
+        document.getElementById('qr-scan-block').style.display = 'block';
+        document.getElementById('qr-result').style.display = 'none';
+        qrSetStatus(err.message || '取得に失敗しました');
+        document.getElementById('qr-scan-again-btn').style.display = 'block';
+      });
+  }
+
+  function shareQrToLine() {
+    if (!qrEmpId) return;
+    var btn = document.getElementById('qr-share-btn');
+    btn.disabled = true;
+    btn.textContent = '転送中...';
+    fetch('/api/liff/sales/qr-share', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + AT, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ empId: qrEmpId, year: qrYear, month: qrMonth }),
+    })
+      .then(function(res) {
+        return res.json().then(function(j) {
+          if (!res.ok) throw new Error(j.error || '転送に失敗しました');
+          return j;
+        });
+      })
+      .then(function() { toast('LINEに転送しました'); })
+      .catch(function(err) { toast(err.message || '転送に失敗しました'); })
+      .then(function() { btn.disabled = false; btn.textContent = '自分のLINEに転送'; });
   }
 
   function downloadShiftPdf() {

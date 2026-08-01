@@ -6,7 +6,7 @@ import { buildShiftSalesPdf } from '../../utils/shift_sales_pdf';
 
 const app = new Hono<{ Bindings: Env }>();
 
-type Row = { date: string; amount: number; duty_code: string | null; period_year: number | null; period_month: number | null };
+type Row = { date: string; amount: number; duty_code: string | null; period_year: number | null; period_month: number | null; ride_count: number | null; distance_km: number | null };
 
 function dutyWeight(dutyCode: string | null): number {
   if (!dutyCode) return 1.0;
@@ -71,7 +71,7 @@ app.get('/employee/:empId', async (c) => {
   const sinceStr = since.toISOString().slice(0, 10);
 
   const dbRows = (await c.env.DB.prepare(
-    'SELECT date, amount, duty_code, period_year, period_month FROM sales_records WHERE emp_id = ? AND date >= ? ORDER BY date'
+    'SELECT date, amount, duty_code, period_year, period_month, ride_count, distance_km FROM sales_records WHERE emp_id = ? AND date >= ? ORDER BY date'
   ).bind(empId, sinceStr).all<Row>()).results ?? [];
 
   const enriched = dbRows.map(r => ({ ...r, f: getDayFactors(r.date) }));
@@ -93,6 +93,8 @@ app.get('/employee/:empId', async (c) => {
   const daily = enriched.map(r => ({
     date: r.date, amount: r.amount, dutyCode: r.duty_code,
     weekdayLabel: r.f.weekdayLabel, labels: r.f.labels,
+    periodYear: r.period_year, periodMonth: r.period_month,
+    rideCount: r.ride_count, distanceKm: r.distance_km,
   }));
 
   return c.json({

@@ -4,7 +4,7 @@
 //   ・直 = 当直 9:00〜翌3:00 / 斜体の直 = 斜め直 14:00〜翌8:00
 //   ・赤文字 = 希望休の反映
 //   ・セル背景 = セル個別色(他班ヘルプ等) > 班色(直遅早) > 記号色 > 空白は班色
-import { escHtml, safeJson } from './layout';
+import { escHtml, safeJson, saveToastHtml, saveToastScript } from './layout';
 import { ADMIN_PATH } from '../config';
 
 export type KanchoMember = {
@@ -16,6 +16,12 @@ export type KanchoMember = {
   is_active: number;
   team_color: string | null; // 班色(#rrggbb)
   is_indoor: number;         // 1=内勤班長(表に表示)
+  is_rookie: number;         // 1=新人班長（当直ペア自動禁止の判定用。社員全体の「新人」概念とは無関係）
+  year: number;              // 月度ごとに独立データ（新しい月度は前月度から自動コピー）
+  month: number;
+  emp_no: string | null;     // 社員番号（社員マスタemployees.emp_noと同値。希望休フォームの本人確認に使用）
+  slot_key: string | null;   // 枠の月度をまたぐ同一性キー。編集を将来の既存月度へ自動伝播するために使う
+  prev_name?: string | null; // 前月度で同じ行(section・班色・role・並び順)だった人の名前。月またぎのグレー日付の自動反映と名前欄の「旧名→新名」表示に使用（サーバー側で相関サブクエリにより算出）
 };
 
 export type KanchoShiftType = {
@@ -32,6 +38,8 @@ export type KanchoShiftType = {
   counts_as_work: number;   // 出勤数に含める
   counts_as_off: number;    // 公休数に含める
   show_in_input: number;    // 入力モーダルのプリセットボタンに表示
+  year: number;             // 月度ごとに独立データ（新しい月度は前月度から自動コピー）
+  month: number;
 };
 
 export type KanchoCell = {
@@ -58,8 +66,17 @@ export type KanchoWish = {
   note: string;
 };
 
+export type KanchoForbiddenPair = {
+  id: number;
+  member_id_a: number;
+  member_id_b: number;
+  reason: string;
+};
+
 const WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
-const ROLE_ORDER = ['昼日勤班長', '終業班長', '教育班長', '研修課出向', '職員当直'];
+export const ROLE_ORDER = ['昼日勤班長', '終業班長', '教育班長', '研修課出向', '職員当直'];
+// 誰も割り当てられていない枠の名前欄に入れるプレースホルダー
+export const VACANT_SLOT_LABEL = '(空き枠)';
 
 // カウント列の定義（右端に固定4列。直は斜め直も合算）
 const COUNT_COLS = [
@@ -121,6 +138,19 @@ function countsOf(
   return r;
 }
 
+// ヘッダー（共通レイアウトの「班長シフト」タイトル右側）に差し込む月度切り替えナビ
+export function kanchoPeriodNavHtml(year: number, month: number, periodStart: string, periodEnd: string): string {
+  const periodLabel = `${year}年${month}月度（${periodStart}〜${periodEnd}）`;
+  let prevYear = year, prevMonth = month - 1;
+  if (prevMonth < 1) { prevMonth = 12; prevYear--; }
+  let nextYear = year, nextMonth = month + 1;
+  if (nextMonth > 12) { nextMonth = 1; nextYear++; }
+  return `
+    <a href="${ADMIN_PATH}/kancho-shift?year=${prevYear}&month=${prevMonth}" class="btn-nav-sm">◀</a>
+    <span style="font-size:13px;font-weight:700;color:#1e3a5f;white-space:nowrap;">${escHtml(periodLabel)}</span>
+    <a href="${ADMIN_PATH}/kancho-shift?year=${nextYear}&month=${nextMonth}" class="btn-nav-sm">▶</a>`;
+}
+
 export function kanchoShiftPage(
   allMembers: KanchoMember[],
   types: KanchoShiftType[],
@@ -132,7 +162,8 @@ export function kanchoShiftPage(
   periodStart: string,
   periodEnd: string,
   canEdit: boolean,
-  wishes: KanchoWish[] = []
+  wishes: KanchoWish[] = [],
+  forbiddenPairs: KanchoForbiddenPair[] = []
 ): string {
   const members = allMembers.filter(m => m.is_active === 1);
   const wishSet = new Set(wishes.map(w => `${w.member_id}_${w.date}`));
@@ -146,12 +177,6 @@ export function kanchoShiftPage(
   const mainMembers = sortMainMembers(members.filter(m => m.section === 'main' && m.is_indoor === 1));
   const s1Members = members.filter(m => m.section === 's1').sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
   const s2Members = members.filter(m => m.section === 's2').sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-
-  const periodLabel = `${year}年${month}月度（${periodStart}〜${periodEnd}）`;
-  let prevYear = year, prevMonth = month - 1;
-  if (prevMonth < 1) { prevMonth = 12; prevYear--; }
-  let nextYear = year, nextMonth = month + 1;
-  if (nextMonth > 12) { nextMonth = 1; nextYear++; }
 
   const STICKY = 'position:sticky;z-index:2;';
   const HDR_BG = 'background:#1e3a5f;color:white;';
@@ -183,6 +208,12 @@ export function kanchoShiftPage(
       style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}">${escHtml(s?.code ?? '')}</td>`;
   }
 
+  // 前任者と名前が違う場合は「旧名→新名」表示（月をまたいだ入れ替わりを表から分かるように）
+  function nameLabel(m: KanchoMember): string {
+    if (m.prev_name && m.prev_name !== m.name) return `${escHtml(m.prev_name)}→${escHtml(m.name)}`;
+    return escHtml(m.name);
+  }
+
   function mainRows(): string {
     let html = '';
     let lastRole: string | null = null;
@@ -198,8 +229,9 @@ export function kanchoShiftPage(
           style="min-width:30px;text-align:center;font-size:11px;font-weight:600;border:1px solid #d1d5db;background:${cc.color};padding:2px;"></td>`
       ).join('');
       const nameBg = m.team_color ? `background:linear-gradient(to right, ${m.team_color} 6px, #f8fafc 6px);` : FIX_BG;
+      const linkBadge = (canEdit && !m.emp_no) ? '<span title="社員番号が未紐付け" style="color:#dc2626;margin-left:3px;">🔗</span>' : '';
       html += `<tr>
-        <td style="min-width:92px;max-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px 3px 10px;${STICKY}left:0;${nameBg}white-space:nowrap;overflow:hidden;">${escHtml(m.name)}</td>
+        <td class="${canEdit ? 'kc-name' : ''}" data-mid="${m.id}" data-name="${escHtml(m.name)}" style="min-width:92px;max-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px 3px 10px;${STICKY}left:0;${nameBg}white-space:nowrap;overflow:hidden;${canEdit ? 'cursor:pointer;' : ''}">${nameLabel(m)}${linkBadge}</td>
         ${cells}${counts}
       </tr>`;
     }
@@ -221,7 +253,7 @@ export function kanchoShiftPage(
   function subTable(title: string, list: KanchoMember[], secGroup: string): string {
     if (list.length === 0) return '';
     const rows = list.map(m => `<tr>
-      <td style="min-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px;${STICKY}left:0;${FIX_BG}white-space:nowrap;">${escHtml(m.name)}</td>
+      <td style="min-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px;${STICKY}left:0;${FIX_BG}white-space:nowrap;">${nameLabel(m)}</td>
       ${dates.map(d => cell(m, d, secGroup)).join('')}
     </tr>`).join('');
     return `
@@ -277,18 +309,19 @@ export function kanchoShiftPage(
   // ===== メインHTML =====
   return `
 <div style="font-family:'Hiragino Sans','Meiryo',sans-serif;">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
-    <a href="${ADMIN_PATH}/kancho-shift?year=${prevYear}&month=${prevMonth}" class="btn-nav">◀ 前月度</a>
-    <h2 style="font-size:15px;font-weight:bold;color:#1e3a5f;">${escHtml(periodLabel)}</h2>
-    <a href="${ADMIN_PATH}/kancho-shift?year=${nextYear}&month=${nextMonth}" class="btn-nav">次月度 ▶</a>
-    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-      <a href="${ADMIN_PATH}/kancho-shift/print?year=${year}&month=${month}" target="_blank" class="btn-secondary">🖨️ 印刷</a>
-      <button onclick="openHistory()" class="btn-secondary" style="border:none;cursor:pointer;">履歴</button>
-      ${canEdit ? `
-      <button onclick="openWishes()" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">希望休</button>
-      <button onclick="openNotify()" class="btn-secondary" style="border:none;cursor:pointer;">通知設定</button>
-      <button onclick="openMembers()" class="btn-secondary" style="border:none;cursor:pointer;">名簿管理</button>
-      <button onclick="openTypes()" class="btn-secondary" style="border:none;cursor:pointer;">記号管理</button>` : ''}
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+    <a href="${ADMIN_PATH}/kancho-shift/print?year=${year}&month=${month}" target="_blank" class="btn-secondary">🖨️ 印刷</a>
+    <button onclick="openWarnings()" id="warnings-btn" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">⚠ 警告チェック</button>
+    ${canEdit ? `<button onclick="openWishes()" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">希望休</button>` : ''}
+    <div style="position:relative;">
+      <button onclick="toggleGearMenu(event)" id="gear-btn" class="btn-secondary" style="border:none;cursor:pointer;font-size:15px;line-height:1;">⚙️</button>
+      <div id="gear-menu" class="gear-menu">
+        <button class="gear-item" onclick="closeGearMenu();openHistory()">履歴</button>
+        ${canEdit ? `
+        <button class="gear-item" onclick="closeGearMenu();openNotify()">通知設定</button>
+        <a class="gear-item" href="${ADMIN_PATH}/settings/kancho-slots" style="text-decoration:none;box-sizing:border-box;">枠設定（追加・役割・班色）</a>
+        <button class="gear-item" onclick="closeGearMenu();openTypes()">記号管理</button>` : ''}
+      </div>
     </div>
   </div>
 
@@ -299,6 +332,7 @@ export function kanchoShiftPage(
     <span id="edit-error" style="display:none;color:#dc2626;font-size:12px;"></span>
     <div style="margin-left:auto;display:flex;gap:8px;">
       <button onclick="autoAssign()" style="padding:8px 16px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;">希望休を自動反映</button>
+      <button onclick="autoAssign('終業班長')" style="padding:8px 16px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;">終業班長だけ反映</button>
       <button onclick="cancelEdit()" style="padding:8px 16px;background:#fff;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;touch-action:manipulation;">キャンセル</button>
       <button onclick="batchSave()" id="batch-save-btn" disabled style="padding:8px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;opacity:0.5;">一括保存</button>
     </div>
@@ -392,6 +426,23 @@ export function kanchoShiftPage(
   </div>
 </div>
 
+<!-- 担当者変更モーダル -->
+<div id="link-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1002;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">この枠の担当者を変更</h3>
+      <button onclick="closeLinkModal()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
+    </div>
+    <div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:10px;" id="link-name"></div>
+    <div style="font-size:12px;color:#6b7280;margin-bottom:6px;">班長リスト（社員管理で「班長として登録」された人）から選んでください。既に他の枠に入っている人を選ぶと、その枠は空き枠になります</div>
+    <select id="link-select" onchange="onLinkSelectChange()" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:9px;font-size:13px;background:white;margin-bottom:10px;"></select>
+    <div id="link-move-warning" style="display:none;font-size:12px;color:#dc2626;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px;margin-bottom:10px;"></div>
+    <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:4px;">シフト表に表示する名前（苗字だけ等、同姓がいる場合は下の名前も添えて編集してください）</label>
+    <input id="link-dispname" type="text" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:9px;font-size:13px;box-sizing:border-box;margin-bottom:12px;">
+    <button onclick="saveLinkEmp()" id="link-save-btn" style="width:100%;padding:10px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">この担当者に変更する</button>
+  </div>
+</div>
+
 <!-- 履歴モーダル -->
 <div id="history-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
   <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
@@ -403,65 +454,60 @@ export function kanchoShiftPage(
   </div>
 </div>
 
-<!-- 名簿管理モーダル -->
-<div id="members-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:760px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+<!-- 警告チェックモーダル -->
+<div id="warnings-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">名簿管理</h3>
-      <button onclick="sel('#members-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
+      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">警告チェック（${year}年${month}月度）</h3>
+      <button onclick="sel('#warnings-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
     </div>
     <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">
-      「内勤」がオンの班長だけがシフト表に表示されます（乗務に戻ったらオフに）。班色は2人1組の班の色です。変更は行ごとの「保存」で反映されます。
+      当直・遅日勤の頭数、当直の禁忌ペア、課の3:00〜12:00カバー、10日以上の連勤を機械的にチェックします。あくまで目安のため、問題ない運用であれば無視して保存できます（保存はブロックされません）。
     </div>
-    <div id="members-body"></div>
-    <div style="border-top:2px solid #e5e7eb;margin-top:14px;padding-top:12px;">
-      <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">＋ メンバー追加</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        <input id="new-mem-name" type="text" placeholder="名前" style="width:100px;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-        <input id="new-mem-role" type="text" list="role-list" placeholder="役割（mainのみ）" style="width:130px;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-        <select id="new-mem-section" style="border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-          <option value="main">班長シフト表</option><option value="s1">①表</option><option value="s2">②表</option>
-        </select>
-        <select id="new-mem-color" style="border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-          <option value="">班色なし</option><option value="#00ff00">黄緑</option><option value="#ffff00">黄色</option>
-          <option value="#00ffff">水色</option><option value="#ff99cc">ピンク</option>
-        </select>
-        <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-mem-indoor" type="checkbox" checked>内勤</label>
-        <input id="new-mem-sort" type="number" placeholder="順" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-        <button onclick="addMember()" style="padding:7px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">追加</button>
-      </div>
-      <datalist id="role-list">${ROLE_ORDER.map(r => `<option value="${r}">`).join('')}</datalist>
-    </div>
+    <div id="warnings-body" style="font-size:12px;">読み込み中...</div>
   </div>
 </div>
 
 <!-- 記号管理モーダル -->
 <div id="types-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:820px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">シフト記号管理</h3>
-      <button onclick="sel('#types-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
+  <div class="kmodal-box" style="max-width:960px;">
+    <div class="kmodal-header">
+      <h3>シフト記号管理 <span style="font-size:12px;font-weight:400;color:#6b7280;">（${year}年${month}月度）</span></h3>
+      <button class="kmodal-close" onclick="sel('#types-modal').style.display='none'">✕</button>
     </div>
-    <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">
-      班色=セル背景に本人の班色を使う（直・遅・早）。出勤/公休=右端の出勤数・公休数カウントに含める。必要人数=日別チェック行（遅1・直2）。
+    <div class="kmodal-hint">
+      班色=セル背景に本人の班色を使う（直・遅・早）。出勤/公休=右端の出勤数・公休数カウントに含める。必要人数=日別チェック行（当直・遅日勤など）。
     </div>
-    <div id="types-body"></div>
-    <div style="border-top:2px solid #e5e7eb;margin-top:14px;padding-top:12px;">
-      <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">＋ 記号追加</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        <input id="new-type-code" type="text" placeholder="記号" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-        <input id="new-type-label" type="text" placeholder="説明" style="width:160px;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-        <input id="new-type-color" type="color" value="#e5e7eb" style="width:44px;height:34px;border:1px solid #d1d5db;border-radius:6px;padding:2px;cursor:pointer;">
-        <select id="new-type-section" style="border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-          <option value="main">班長表</option><option value="sub">①②表</option><option value="all">両方</option>
-        </select>
-        <input id="new-type-req" type="number" placeholder="必要人数" title="日別必要人数" style="width:76px;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">
-        <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-teamcolor" type="checkbox">班色</label>
-        <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-work" type="checkbox">出勤</label>
-        <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-off" type="checkbox">公休</label>
-        <label style="font-size:12px;display:flex;align-items:center;gap:3px;" title="入力画面のボタンに表示"><input id="new-type-input" type="checkbox" checked>入力</label>
-        <button onclick="addType()" style="padding:7px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">追加</button>
+    <div class="kmodal-scroll">
+      <div class="ktable-wrap">
+        <table class="ktable">
+          <thead><tr>
+            <th>記号</th><th>説明</th><th>色</th><th>表</th><th>必要人数</th><th>班色</th><th>出勤</th><th>公休</th><th>入力</th><th>順</th><th></th>
+          </tr></thead>
+          <tbody id="types-body"></tbody>
+        </table>
       </div>
+
+      <div class="ksection">
+        <div class="ksection-title">＋ 記号追加</div>
+        <div class="kadd-row">
+          <input id="new-type-code" type="text" placeholder="記号" style="width:56px;">
+          <input id="new-type-label" type="text" placeholder="説明" style="width:160px;">
+          <input id="new-type-color" type="color" value="#e5e7eb">
+          <select id="new-type-section">
+            <option value="main">班長表</option><option value="sub">①②表</option><option value="all">両方</option>
+          </select>
+          <input id="new-type-req" type="number" placeholder="必要人数" title="日別必要人数" style="width:76px;">
+          <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-teamcolor" type="checkbox">班色</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-work" type="checkbox">出勤</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-off" type="checkbox">公休</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:3px;" title="入力画面のボタンに表示"><input id="new-type-input" type="checkbox" checked>入力</label>
+          <button class="kchip-btn ok" onclick="addType()">＋ 追加</button>
+        </div>
+      </div>
+    </div>
+    <div class="kmodal-footer">
+      <button onclick="saveAllTypes()" id="types-save-btn" class="kmodal-save-btn">一括保存</button>
     </div>
   </div>
 </div>
@@ -503,18 +549,52 @@ export function kanchoShiftPage(
   </div>
 </div>
 
-<div id="save-toast" style="display:none;position:fixed;bottom:24px;right:24px;background:#166534;color:white;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.25);"></div>
+${saveToastHtml()}
 
 <style>
   .btn-nav { padding:6px 14px;background:#4b6cb7;color:white;border-radius:6px;text-decoration:none;font-size:13px; }
   .btn-nav:hover { background:#3b5aa3; }
+  .btn-nav-sm { display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:36px;padding:0 6px;background:#4b6cb7;color:white;border-radius:8px;text-decoration:none;font-size:18px;font-weight:700;flex-shrink:0;touch-action:manipulation; }
+  .btn-nav-sm:hover { background:#3b5aa3; }
   .btn-secondary { padding:6px 14px;background:#6b7280;color:white;border-radius:6px;text-decoration:none;font-size:13px; }
+  .gear-menu { display:none;position:absolute;right:0;top:calc(100% + 6px);background:white;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,0.18);min-width:150px;z-index:100;overflow:hidden; }
+  .gear-menu.open { display:block; }
+  .gear-item { display:block;width:100%;text-align:left;padding:10px 16px;background:white;border:none;border-bottom:1px solid #f1f5f9;font-size:13px;color:#374151;cursor:pointer; }
+  .gear-item:last-child { border-bottom:none; }
+  .gear-item:hover { background:#f8fafc; }
   .kc:active { opacity:0.6; }
   .kc[data-pending="true"] { outline:2px dashed #f59e0b !important; }
   .kc[data-copysrc="1"] { outline:3px solid #2563eb !important; outline-offset:-3px; }
   .kc[data-wish="1"]::after { content:''; position:absolute; top:0; right:0; border-style:solid; border-width:0 7px 7px 0; border-color:transparent #dc2626 transparent transparent; }
   .kreq-ng { background:#fee2e2 !important; color:#dc2626; font-weight:700; }
   .kreq-ok { background:#f0fdf4 !important; color:#166534; }
+
+  /* 記号管理モーダル（表形式＋常に見えるsticky保存フッター） */
+  .kmodal-box { background:white;border-radius:14px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);display:flex;flex-direction:column;max-height:88vh;overflow:hidden; }
+  .kmodal-header { display:flex;justify-content:space-between;align-items:center;padding:18px 20px 12px; }
+  .kmodal-header h3 { font-size:16px;font-weight:700;color:#1e3a5f;margin:0; }
+  .kmodal-close { color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;line-height:1;padding:0 4px; }
+  .kmodal-hint { font-size:12px;color:#9ca3af;padding:0 20px 12px;line-height:1.6; }
+  .kmodal-scroll { flex:1;overflow-y:auto;padding:0 20px 16px; }
+  .kmodal-footer { border-top:1px solid #e5e7eb;padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;background:#fafafa; }
+  .kmodal-save-btn { padding:10px 28px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 1px 3px rgba(37,99,235,0.4); }
+  .kmodal-save-btn:disabled { opacity:0.6;cursor:default; }
+  .ktable-wrap { overflow-x:auto;border:1px solid #e5e7eb;border-radius:10px; }
+  .ktable { border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap; }
+  .ktable th { position:sticky;top:0;background:#f8fafc;color:#6b7280;font-weight:600;font-size:11px;text-align:left;padding:8px 8px;border-bottom:1px solid #e5e7eb;z-index:1; }
+  .ktable td { padding:6px 8px;border-bottom:1px solid #f1f5f9;vertical-align:middle; }
+  .ktable tbody tr:hover { background:#f8fafc; }
+  .ktable tbody tr.inactive { opacity:0.45; }
+  .ktable input[type=text], .ktable input[type=number], .ktable select {
+    border:1px solid #d1d5db;border-radius:6px;padding:5px 7px;font-size:12.5px;background:white;
+  }
+  .ktable input[type=color] { border:1px solid #d1d5db;border-radius:6px;width:34px;height:28px;padding:2px;cursor:pointer; }
+  .ksection { border-top:1px solid #f1f5f9;margin-top:18px;padding-top:14px; }
+  .ksection-title { font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:8px; }
+  .kadd-row { display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:10px; }
+  .kchip-btn { padding:4px 9px;background:#f3f4f6;border:1px solid #d1d5db;color:#4b5563;border-radius:99px;font-size:11px;cursor:pointer;white-space:nowrap; }
+  .kchip-btn.danger { background:#fef2f2;border-color:#fca5a5;color:#dc2626; }
+  .kchip-btn.ok { background:#f0fdf4;border-color:#86efac;color:#166534; }
 </style>
 
 <script>
@@ -525,7 +605,8 @@ var periodStart = '${periodStart}', periodEnd = '${periodEnd}';
 var _dates = ${safeJson(dates)};
 var _types = ${safeJson(activeTypes.map(t => ({ id: t.id, code: t.code, color: t.color, section: t.section, tc: t.use_team_color, wk: t.counts_as_work, off: t.counts_as_off, inp: t.show_in_input })))};
 var _allTypes = ${safeJson(types.map(t => ({ id: t.id, code: t.code, label: t.label, color: t.color, section: t.section, daily_required: t.daily_required, sort_order: t.sort_order, is_active: t.is_active, use_team_color: t.use_team_color, counts_as_work: t.counts_as_work, counts_as_off: t.counts_as_off, show_in_input: t.show_in_input })))};
-var _allMembers = ${safeJson(allMembers.map(m => ({ id: m.id, name: m.name, role: m.role, section: m.section, sort_order: m.sort_order, is_active: m.is_active, team_color: m.team_color, is_indoor: m.is_indoor })))};
+var _allMembers = ${safeJson(allMembers.map(m => ({ id: m.id, name: m.name, role: m.role, section: m.section, sort_order: m.sort_order, is_active: m.is_active, team_color: m.team_color, is_indoor: m.is_indoor, is_rookie: m.is_rookie, emp_no: m.emp_no })))};
+var _forbiddenPairs = ${safeJson(forbiddenPairs)};  // [{id, member_id_a, member_id_b, reason}]
 var colorMap = {};
 var teamColorCodes = {};
 var workCodes = {};
@@ -547,11 +628,94 @@ var _wishes = ${safeJson(wishes)};  // [{id, member_id, date, note}]
 
 function sel(s) { return document.querySelector(s); }
 function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function showToast(msg) {
-  var el = sel('#save-toast');
-  el.textContent = msg;
-  el.style.display = 'block';
-  setTimeout(function() { el.style.display = 'none'; }, 3000);
+${saveToastScript()}
+
+// ===== ⚙️ 設定メニュー（履歴・通知設定・枠設定への導線・記号管理をまとめたドロップダウン）=====
+function toggleGearMenu(e) {
+  if (e) e.stopPropagation();
+  sel('#gear-menu').classList.toggle('open');
+}
+function closeGearMenu() {
+  var m = sel('#gear-menu');
+  if (m) m.classList.remove('open');
+}
+document.addEventListener('click', function(e) {
+  var menu = sel('#gear-menu');
+  if (!menu || !menu.classList.contains('open')) return;
+  if (e.target.closest && e.target.closest('#gear-menu, #gear-btn')) return;
+  closeGearMenu();
+});
+
+// ===== 担当者の変更（名前セルをタップして開く）=====
+var _linkMid = null;
+var _linkCurrentEmpNo = null;
+var _linkOtherByEmpNo = {};
+async function openLinkModal(mid, name) {
+  _linkMid = mid;
+  _linkCurrentEmpNo = null;
+  _linkOtherByEmpNo = {};
+  sel('#link-name').textContent = '現在の担当: ' + name + ' さん';
+  sel('#link-select').innerHTML = '<option value="">読み込み中...</option>';
+  sel('#link-move-warning').style.display = 'none';
+  sel('#link-dispname').value = name;
+  sel('#link-modal').style.display = 'flex';
+  try {
+    var res = await fetch(API + '/members/' + mid + '/link-candidates');
+    var d = await res.json();
+    _linkCurrentEmpNo = d.current_emp_no || null;
+    var candidates = d.candidates || [];
+    if (!candidates.length) {
+      sel('#link-select').innerHTML = '<option value="">候補の社員がいません</option>';
+      return;
+    }
+    candidates.forEach(function(e) { if (e.other_slot) _linkOtherByEmpNo[e.emp_no] = e.other_slot; });
+    sel('#link-select').innerHTML = '<option value="">-- 選択してください --</option>' + candidates.map(function(e) {
+      var label = escH(e.name) + '（' + escH(e.emp_no) + '）' + (e.other_slot ? '　※現在: ' + escH(e.other_slot) : '');
+      return '<option value="' + escH(e.emp_no) + '"' + (e.emp_no === _linkCurrentEmpNo ? ' selected' : '') + '>' + label + '</option>';
+    }).join('');
+  } catch (e) {
+    alert('読み込みに失敗しました');
+    closeLinkModal();
+  }
+}
+function closeLinkModal() {
+  sel('#link-modal').style.display = 'none';
+  _linkMid = null;
+}
+function onLinkSelectChange() {
+  var s = sel('#link-select');
+  var opt = s.options[s.selectedIndex];
+  var empNo = opt ? opt.value : '';
+  var warn = sel('#link-move-warning');
+  if (empNo && empNo !== _linkCurrentEmpNo && _linkOtherByEmpNo[empNo]) {
+    warn.style.display = 'block';
+    warn.textContent = 'この人は現在「' + _linkOtherByEmpNo[empNo] + '」の枠に入っています。ここに変更すると、その枠は空き枠になります。';
+  } else {
+    warn.style.display = 'none';
+  }
+  if (!opt || !opt.value || opt.value === _linkCurrentEmpNo) return;
+  var full = opt.textContent.replace(/（.*$/, '').trim();
+  sel('#link-dispname').value = full.split(/[\s　]+/)[0] || full;
+}
+async function saveLinkEmp() {
+  var empNo = sel('#link-select').value;
+  var dispName = sel('#link-dispname').value.trim();
+  if (!empNo) { alert('担当者を選んでください'); return; }
+  if (!dispName) { alert('表示する名前を入力してください'); return; }
+  var btn = sel('#link-save-btn');
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    var res = await fetch(API + '/members/' + _linkMid + '/link', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: empNo, name: dispName })
+    });
+    var d = await res.json().catch(function(){return {};});
+    if (!res.ok) throw new Error(d.error || '保存に失敗しました');
+    if (d.moved_from) alert('「' + d.moved_from + '」の枠は空き枠になりました。');
+    location.reload();
+  } catch (e) {
+    alert(e.message || '保存に失敗しました');
+    btn.disabled = false; btn.textContent = 'この担当者に変更する';
+  }
 }
 
 // セルの見た目をdata属性から再描画（Excelの色ルールを再現）
@@ -595,8 +759,8 @@ function recalcAll() {
     td.classList.remove('kreq-ok', 'kreq-ng');
     td.classList.add(n === req ? 'kreq-ok' : 'kreq-ng');
   });
+  if (typeof DEPT_COLOR_MAP !== 'undefined') _refreshWarningsBadge();
 }
-recalcAll();
 
 // ===== 編集モード / コピペ編集モード =====
 function startEdit() {
@@ -723,6 +887,15 @@ document.addEventListener('click', function(e) {
   openCell(td);
 });
 
+// 名前セルのタップ→社員番号の紐付けモーダル
+document.addEventListener('click', function(e) {
+  var t = e.target;
+  var nameTd = (t && t.closest) ? t.closest('.kc-name') : null;
+  if (!nameTd || !CAN_EDIT) return;
+  if (_cpMode || _editMode) return; // 編集モード中は誤操作防止のため無効
+  openLinkModal(nameTd.dataset.mid, nameTd.dataset.name);
+});
+
 // ===== セル編集 =====
 function _presetsFor(sec) {
   return _types.filter(function(t) {
@@ -828,7 +1001,7 @@ function setBlankWork() {
   var td = _cellTd();
   var color = sel('#modal-cl').value || (td ? td.dataset.tc : '') || '';
   if (!color) {
-    showToast('この人の班色が未設定です。名簿管理で班色を設定するか「セルの色」を選んでください');
+    showToast('この人の班色が未設定です。枠設定で班色を設定するか「セルの色」を選んでください');
     return;
   }
   sel('#modal-code').value = '';
@@ -895,121 +1068,182 @@ async function openHistory() {
   }
 }
 
-// ===== 名簿管理 =====
-var SECTION_LABEL = { main: '班長シフト表', s1: '①表', s2: '②表' };
-var COLOR_OPTIONS = [['', '班色なし'], ['#00ff00', '黄緑'], ['#ffff00', '黄色'], ['#00ffff', '水色'], ['#ff99cc', 'ピンク']];
-function openMembers() {
-  var bySec = { main: [], s1: [], s2: [] };
-  _allMembers.forEach(function(m) { (bySec[m.section] || bySec.main).push(m); });
-  var html = '';
-  ['main', 's1', 's2'].forEach(function(secKey) {
-    var list = bySec[secKey];
-    if (list.length === 0 && secKey !== 'main') return;
-    html += '<div style="font-size:12px;font-weight:700;color:#1e3a5f;background:#eff6ff;padding:4px 8px;border-radius:4px;margin:10px 0 6px;">' + SECTION_LABEL[secKey] + '</div>';
-    html += list.sort(function(a, b) { return a.sort_order - b.sort_order || a.id - b.id; }).map(function(m) {
-      var colorSel = '<select class="mem-color" style="border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:12px;background:' + (m.team_color || 'white') + ';">'
-        + COLOR_OPTIONS.map(function(co) { return '<option value="' + co[0] + '"' + ((m.team_color || '') === co[0] ? ' selected' : '') + '>' + co[1] + '</option>'; }).join('')
-        + '</select>';
-      return '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:5px;' + (m.is_active ? '' : 'opacity:0.5;') + '" data-mid="' + m.id + '">'
-        + '<input type="text" class="mem-name" value="' + escH(m.name) + '" style="width:90px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-        + '<input type="text" class="mem-role" list="role-list" value="' + escH(m.role || '') + '" placeholder="役割" style="width:110px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-        + '<select class="mem-section" style="border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-        +   ['main','s1','s2'].map(function(s) { return '<option value="' + s + '"' + (m.section === s ? ' selected' : '') + '>' + SECTION_LABEL[s] + '</option>'; }).join('')
-        + '</select>'
-        + colorSel
-        + '<label style="font-size:12px;display:flex;align-items:center;gap:3px;white-space:nowrap;"><input type="checkbox" class="mem-indoor"' + (m.is_indoor ? ' checked' : '') + '>内勤</label>'
-        + '<input type="number" class="mem-sort" value="' + m.sort_order + '" style="width:52px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-        + '<button onclick="saveMember(' + m.id + ', this)" style="padding:6px 12px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;">保存</button>'
-        + '<button onclick="toggleMember(' + m.id + ', ' + (m.is_active ? 0 : 1) + ')" style="padding:6px 10px;background:' + (m.is_active ? '#fef2f2' : '#f0fdf4') + ';border:1px solid ' + (m.is_active ? '#fca5a5' : '#86efac') + ';color:' + (m.is_active ? '#dc2626' : '#166534') + ';border-radius:6px;font-size:12px;cursor:pointer;">' + (m.is_active ? '削除' : '復元') + '</button>'
-        + '</div>';
-    }).join('');
-  });
-  sel('#members-body').innerHTML = html || '<div style="color:#9ca3af;font-size:13px;">メンバーがいません</div>';
-  sel('#members-modal').style.display = 'flex';
+// ===== 警告チェック（当直/遅日勤の頭数・禁忌ペア・課カバレッジ・連勤。すべて警告表示のみで保存はブロックしない）=====
+var DEPT_COLOR_MAP = { '#00ff00': 1, '#ffff00': 2, '#00ffff': 3, '#ff99cc': 4 };
+var DEPT_LABEL = { 1: '1課（黄緑）', 2: '2課（黄色）', 3: '3課（水色）', 4: '4課（ピンク）' };
+function _shiftOf(mid, date) {
+  var td = sel('.kc[data-member="' + mid + '"][data-date="' + date + '"]');
+  if (!td) return null;
+  return { code: td.dataset.code || '', dg: td.dataset.dg === '1', cl: td.dataset.cl || '' };
 }
-async function saveMember(id, btn) {
-  var row = btn.parentElement;
-  var body = {
-    name: row.querySelector('.mem-name').value,
-    role: row.querySelector('.mem-role').value,
-    section: row.querySelector('.mem-section').value,
-    team_color: row.querySelector('.mem-color').value || null,
-    is_indoor: row.querySelector('.mem-indoor').checked ? 1 : 0,
-    sort_order: parseInt(row.querySelector('.mem-sort').value) || 0
-  };
-  var res = await fetch(API + '/members/' + id, {
-    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+function computeWarnings() {
+  var mains = _allMembers.filter(function(m) { return m.section === 'main' && m.is_active === 1 && m.is_indoor === 1; });
+  var byDept = { 1: [], 2: [], 3: [], 4: [] };
+  mains.forEach(function(m) {
+    var dept = m.team_color ? DEPT_COLOR_MAP[m.team_color] : null;
+    if (dept) byDept[dept].push(m);
   });
-  if (res.ok) location.reload();
-  else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '保存に失敗しました'); }
-}
-async function toggleMember(id, active) {
-  if (!active && !confirm('このメンバーを一覧から外しますか？（過去のシフトは残ります）')) return;
-  var res = await fetch(API + '/members/' + id, {
-    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ is_active: active })
+  var periodDates = _dates.filter(function(d) { return d >= periodStart && d <= periodEnd; });
+
+  var headcountWarnings = [], pairWarnings = [], coverageWarnings = [], coverageNotes = [], streakWarnings = [];
+
+  function _requiredOf(code) {
+    var t = _allTypes.filter(function(x) { return x.code === code && x.is_active === 1 && (x.section === 'main' || x.section === 'all'); })[0];
+    return t ? t.daily_required : 0;
+  }
+  var chokuRequired = _requiredOf('直');
+  var osoRequired = _requiredOf('遅');
+
+  periodDates.forEach(function(d) {
+    var chokuMembers = mains.filter(function(m) { var s = _shiftOf(m.id, d); return s && s.code === '直'; });
+    if (chokuMembers.length < chokuRequired) headcountWarnings.push(d + '：当直が' + chokuMembers.length + '名（必要' + chokuRequired + '名）');
+    var osoCount = mains.filter(function(m) { var s = _shiftOf(m.id, d); return s && s.code === '遅'; }).length;
+    if (osoCount < osoRequired) headcountWarnings.push(d + '：遅日勤が' + osoCount + '名（必要' + osoRequired + '名）');
+
+    for (var i = 0; i < chokuMembers.length; i++) {
+      for (var j = i + 1; j < chokuMembers.length; j++) {
+        var a = chokuMembers[i], b = chokuMembers[j];
+        if (a.is_rookie && b.is_rookie) {
+          pairWarnings.push(d + '：当直「' + a.name + '」×「' + b.name + '」が新人班長同士');
+        }
+        var fp = _forbiddenPairs.filter(function(p) {
+          return (p.member_id_a === a.id && p.member_id_b === b.id) || (p.member_id_a === b.id && p.member_id_b === a.id);
+        })[0];
+        if (fp) pairWarnings.push(d + '：当直「' + a.name + '」×「' + b.name + '」が禁忌ペア' + (fp.reason ? '（' + fp.reason + '）' : ''));
+      }
+    }
   });
-  if (res.ok) location.reload();
-  else alert('変更に失敗しました');
-}
-async function addMember() {
-  var body = {
-    name: sel('#new-mem-name').value,
-    role: sel('#new-mem-role').value,
-    section: sel('#new-mem-section').value,
-    team_color: sel('#new-mem-color').value || null,
-    is_indoor: sel('#new-mem-indoor').checked ? 1 : 0,
-    sort_order: parseInt(sel('#new-mem-sort').value) || 0
-  };
-  if (!body.name.trim()) { alert('名前を入力してください'); return; }
-  var res = await fetch(API + '/members', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+
+  [1, 2, 3, 4].forEach(function(dept) {
+    var members = byDept[dept];
+    if (members.length === 0) return;
+    var shukugyo = members.filter(function(m) { return m.role === '終業班長'; });
+    periodDates.forEach(function(d) {
+      var shukugyoCovered = shukugyo.some(function(m) {
+        var s = _shiftOf(m.id, d);
+        if (!s || !s.code) return true;  // 未入力・空欄＝終業班長のデフォルト出勤とみなす
+        return !offCodes[s.code];
+      });
+      if (shukugyoCovered) return;
+
+      var idx = _dates.indexOf(d);
+      var prevDate = idx > 0 ? _dates[idx - 1] : null;
+      var prevDiagonal = prevDate ? members.some(function(m) { var s = _shiftOf(m.id, prevDate); return s && s.code === '直' && s.dg; }) : false;
+      var todayDayShift = members.some(function(m) { var s = _shiftOf(m.id, d); return s && ((s.code === '' && s.cl) || s.code === '早'); });
+      if (prevDiagonal && todayDayShift) return;
+
+      // 前日斜め直（〜翌8:00）＋当日の通常直（9:00〜）で実質カバーされているケース。
+      // 8:00〜9:00の僅かな隙間は残るため警告からは外すが、念のため下部に注記として残す。
+      var todayChoku = members.some(function(m) { var s = _shiftOf(m.id, d); return s && s.code === '直' && !s.dg; });
+      if (prevDiagonal && todayChoku) {
+        coverageNotes.push(d + '：' + DEPT_LABEL[dept] + ' は前日斜め直＋当日直で実質カバー（8:00〜9:00頃のみ要確認）');
+        return;
+      }
+
+      coverageWarnings.push(d + '：' + DEPT_LABEL[dept] + ' の3:00〜12:00がカバーされていない可能性');
+    });
   });
-  if (res.ok) location.reload();
-  else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '追加に失敗しました'); }
+
+  mains.forEach(function(m) {
+    var streak = 0;
+    for (var i = 0; i < _dates.length; i++) {
+      var s = _shiftOf(m.id, _dates[i]);
+      var isWork = s && (workCodes[s.code] || s.code === '非' || (s.code === '' && s.cl));
+      if (isWork) {
+        streak++;
+        if (streak === 10) streakWarnings.push(m.name + '：' + _dates[i - 9] + ' 〜 ' + _dates[i] + ' が10連勤以上（明け含む）');
+      } else {
+        streak = 0;
+      }
+    }
+  });
+
+  return { headcountWarnings: headcountWarnings, pairWarnings: pairWarnings, coverageWarnings: coverageWarnings, coverageNotes: coverageNotes, streakWarnings: streakWarnings };
 }
+function openWarnings() {
+  var w = computeWarnings();
+  var total = w.headcountWarnings.length + w.pairWarnings.length + w.coverageWarnings.length + w.streakWarnings.length;
+  function section(title, list) {
+    if (list.length === 0) return '';
+    return '<div style="margin-bottom:14px;"><div style="font-weight:700;color:#dc2626;margin-bottom:4px;">' + escH(title) + '（' + list.length + '件）</div>'
+      + list.map(function(t) { return '<div style="color:#dc2626;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:5px 8px;margin-bottom:3px;">' + escH(t) + '</div>'; }).join('')
+      + '</div>';
+  }
+  function noteSection(title, list) {
+    if (list.length === 0) return '';
+    return '<div style="margin-bottom:14px;"><div style="font-weight:700;color:#6b7280;margin-bottom:4px;">' + escH(title) + '（' + list.length + '件）</div>'
+      + list.map(function(t) { return '<div style="color:#4b5563;background:#f3f4f6;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;margin-bottom:3px;">' + escH(t) + '</div>'; }).join('')
+      + '</div>';
+  }
+  sel('#warnings-body').innerHTML = (total === 0
+    ? '<div style="color:#166534;font-weight:700;">警告はありません</div>'
+    : section('当直・遅日勤の頭数不足', w.headcountWarnings)
+      + section('当直の禁忌ペア', w.pairWarnings)
+      + section('課の3:00〜12:00カバー漏れ（可能性・目安）', w.coverageWarnings)
+      + section('10日以上の連勤', w.streakWarnings))
+    + noteSection('前日斜め直＋当日直で実質カバー（参考・念のため確認）', w.coverageNotes);
+  sel('#warnings-modal').style.display = 'flex';
+}
+function _refreshWarningsBadge() {
+  var btn = sel('#warnings-btn');
+  if (!btn) return;
+  var w = computeWarnings();
+  var total = w.headcountWarnings.length + w.pairWarnings.length + w.coverageWarnings.length + w.streakWarnings.length;
+  btn.textContent = total > 0 ? '⚠ 警告チェック（' + total + '件）' : '⚠ 警告チェック';
+}
+recalcAll();  // 全ての集計・警告バッジを初期描画（DEPT_COLOR_MAP等の定義後に実行する必要がある）
 
 // ===== 記号管理 =====
 var TYPE_SECTION_LABEL = { main: '班長表', sub: '①②表', all: '両方' };
 function openTypes() {
   sel('#types-body').innerHTML = _allTypes.map(function(t) {
-    return '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:5px;' + (t.is_active ? '' : 'opacity:0.5;') + '" data-tid="' + t.id + '">'
-      + '<input type="text" class="type-code" value="' + escH(t.code) + '" style="width:48px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-      + '<input type="text" class="type-label" value="' + escH(t.label) + '" placeholder="説明" style="width:150px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-      + '<input type="color" class="type-color" value="' + escH(t.color) + '" style="width:38px;height:32px;border:1px solid #d1d5db;border-radius:6px;padding:2px;cursor:pointer;">'
-      + '<select class="type-section" style="border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:12px;">'
-      +   ['main','sub','all'].map(function(s) { return '<option value="' + s + '"' + (t.section === s ? ' selected' : '') + '>' + TYPE_SECTION_LABEL[s] + '</option>'; }).join('')
-      + '</select>'
-      + '<input type="number" class="type-req" value="' + t.daily_required + '" title="日別必要人数" style="width:48px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-      + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;"><input type="checkbox" class="type-teamcolor"' + (t.use_team_color ? ' checked' : '') + '>班色</label>'
-      + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;"><input type="checkbox" class="type-work"' + (t.counts_as_work ? ' checked' : '') + '>出勤</label>'
-      + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;"><input type="checkbox" class="type-off"' + (t.counts_as_off ? ' checked' : '') + '>公休</label>'
-      + '<label style="font-size:11px;display:flex;align-items:center;gap:2px;" title="入力画面のボタンに表示"><input type="checkbox" class="type-input"' + (t.show_in_input ? ' checked' : '') + '>入力</label>'
-      + '<input type="number" class="type-sort" value="' + t.sort_order + '" title="並び順" style="width:48px;border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:13px;">'
-      + '<button onclick="saveType(' + t.id + ', this)" style="padding:6px 12px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;">保存</button>'
-      + '<button onclick="toggleType(' + t.id + ', ' + (t.is_active ? 0 : 1) + ')" style="padding:6px 10px;background:' + (t.is_active ? '#fef2f2' : '#f0fdf4') + ';border:1px solid ' + (t.is_active ? '#fca5a5' : '#86efac') + ';color:' + (t.is_active ? '#dc2626' : '#166534') + ';border-radius:6px;font-size:12px;cursor:pointer;">' + (t.is_active ? '無効' : '有効') + '</button>'
-      + '</div>';
+    return '<tr class="' + (t.is_active ? '' : 'inactive') + '" data-tid="' + t.id + '">'
+      + '<td><input type="text" class="type-code" value="' + escH(t.code) + '" style="width:48px;"></td>'
+      + '<td><input type="text" class="type-label" value="' + escH(t.label) + '" style="width:150px;"></td>'
+      + '<td><input type="color" class="type-color" value="' + escH(t.color) + '"></td>'
+      + '<td><select class="type-section">' + ['main','sub','all'].map(function(s) { return '<option value="' + s + '"' + (t.section === s ? ' selected' : '') + '>' + TYPE_SECTION_LABEL[s] + '</option>'; }).join('') + '</select></td>'
+      + '<td><input type="number" class="type-req" value="' + t.daily_required + '" style="width:48px;"></td>'
+      + '<td style="text-align:center;"><input type="checkbox" class="type-teamcolor"' + (t.use_team_color ? ' checked' : '') + '></td>'
+      + '<td style="text-align:center;"><input type="checkbox" class="type-work"' + (t.counts_as_work ? ' checked' : '') + '></td>'
+      + '<td style="text-align:center;"><input type="checkbox" class="type-off"' + (t.counts_as_off ? ' checked' : '') + '></td>'
+      + '<td style="text-align:center;"><input type="checkbox" class="type-input"' + (t.show_in_input ? ' checked' : '') + '></td>'
+      + '<td><input type="number" class="type-sort" value="' + t.sort_order + '" style="width:48px;"></td>'
+      + '<td><button class="kchip-btn' + (t.is_active ? ' danger' : ' ok') + '" onclick="toggleType(' + t.id + ', ' + (t.is_active ? 0 : 1) + ')">' + (t.is_active ? '無効' : '有効') + '</button></td>'
+      + '</tr>';
   }).join('');
   sel('#types-modal').style.display = 'flex';
 }
-async function saveType(id, btn) {
-  var row = btn.parentElement;
-  var body = {
-    code: row.querySelector('.type-code').value,
-    label: row.querySelector('.type-label').value,
-    color: row.querySelector('.type-color').value,
-    section: row.querySelector('.type-section').value,
-    daily_required: parseInt(row.querySelector('.type-req').value) || 0,
-    use_team_color: row.querySelector('.type-teamcolor').checked ? 1 : 0,
-    counts_as_work: row.querySelector('.type-work').checked ? 1 : 0,
-    counts_as_off: row.querySelector('.type-off').checked ? 1 : 0,
-    show_in_input: row.querySelector('.type-input').checked ? 1 : 0,
-    sort_order: parseInt(row.querySelector('.type-sort').value) || 0
-  };
-  var res = await fetch(API + '/types/' + id, {
-    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+async function saveAllTypes() {
+  var btn = sel('#types-save-btn');
+  var entries = [];
+  document.querySelectorAll('#types-body [data-tid]').forEach(function(row) {
+    entries.push({
+      id: parseInt(row.dataset.tid),
+      code: row.querySelector('.type-code').value,
+      label: row.querySelector('.type-label').value,
+      color: row.querySelector('.type-color').value,
+      section: row.querySelector('.type-section').value,
+      daily_required: parseInt(row.querySelector('.type-req').value) || 0,
+      use_team_color: row.querySelector('.type-teamcolor').checked ? 1 : 0,
+      counts_as_work: row.querySelector('.type-work').checked ? 1 : 0,
+      counts_as_off: row.querySelector('.type-off').checked ? 1 : 0,
+      show_in_input: row.querySelector('.type-input').checked ? 1 : 0,
+      sort_order: parseInt(row.querySelector('.type-sort').value) || 0
+    });
   });
-  if (res.ok) location.reload();
-  else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '保存に失敗しました'); }
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    var res = await fetch(API + '/types/batch', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ entries: entries })
+    });
+    var d = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(d.error || '保存に失敗しました');
+    if (d.error) alert(d.error);
+    location.reload();
+  } catch (e) {
+    alert(e.message || '保存に失敗しました');
+    btn.disabled = false; btn.textContent = '一括保存';
+  }
 }
 async function toggleType(id, active) {
   var res = await fetch(API + '/types/' + id, {
@@ -1029,7 +1263,8 @@ async function addType() {
     counts_as_work: sel('#new-type-work').checked ? 1 : 0,
     counts_as_off: sel('#new-type-off').checked ? 1 : 0,
     show_in_input: sel('#new-type-input').checked ? 1 : 0,
-    sort_order: (_allTypes.length + 1) * 10
+    sort_order: (_allTypes.length + 1) * 10,
+    year: _year, month: _month
   };
   if (!body.code.trim()) { alert('記号を入力してください'); return; }
   var res = await fetch(API + '/types', {
@@ -1118,8 +1353,15 @@ async function toggleWish(btn) {
 }
 
 // 希望休の自動反映（編集モード中のみ / 保存前に内容を確認できる）
-function autoAssign() {
-  var wishesInPeriod = _wishes.filter(function(w) { return w.date >= periodStart && w.date <= periodEnd; });
+// roleFilter指定時はそのroleの班長の希望休のみ反映（例: '終業班長'）
+function autoAssign(roleFilter) {
+  var roleOf = {};
+  _allMembers.forEach(function(m) { roleOf[m.id] = m.role; });
+  var wishesInPeriod = _wishes.filter(function(w) {
+    if (w.date < periodStart || w.date > periodEnd) return false;
+    if (roleFilter && roleOf[w.member_id] !== roleFilter) return false;
+    return true;
+  });
   var applied = 0, akeSet = 0;
   var conflicts = [];
 
@@ -1143,6 +1385,7 @@ function autoAssign() {
 
   // 2) 当直(斜め直含む)の翌日が空白なら自動で非番に（斜め直の翌日は斜体の非）
   document.querySelectorAll('.kc[data-sec="main"][data-code="直"]').forEach(function(td) {
+    if (roleFilter && roleOf[parseInt(td.dataset.member)] !== roleFilter) return;
     var d = td.dataset.date;
     var idx = _dates.indexOf(d);
     if (idx < 0 || idx + 1 >= _dates.length) return;
@@ -1162,7 +1405,7 @@ function autoAssign() {
 
   _updatePending();
   recalcAll();
-  var msg = '希望休 ' + applied + '件を公休（赤文字）として反映\\n当直翌日の非番 ' + akeSet + '件を自動設定';
+  var msg = (roleFilter ? '【' + roleFilter + 'のみ】' : '') + '希望休 ' + applied + '件を公休（赤文字）として反映\\n当直翌日の非番 ' + akeSet + '件を自動設定';
   if (conflicts.length) msg += '\\n\\n【競合・要確認 ' + conflicts.length + '件】\\n' + conflicts.join('\\n');
   msg += '\\n\\n内容を確認して「一括保存」を押すと確定します。';
   alert(msg);
@@ -1332,6 +1575,7 @@ export function kanchoPrintPage(
   <meta charset="UTF-8">
   <meta name="robots" content="noindex, nofollow">
   <title>班長シフト ${year}年${month}月度</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyZTEzNTQiLz4KICA8cG9seWdvbiBwb2ludHM9IjMyLjAwLDEwLjAwIDM3LjI5LDI0LjcyIDUyLjkyLDI1LjIwIDQwLjU2LDM0Ljc4IDQ0LjkzLDQ5LjgwIDMyLjAwLDQxLjAwIDE5LjA3LDQ5LjgwIDIzLjQ0LDM0Ljc4IDExLjA4LDI1LjIwIDI2LjcxLDI0LjcyIiBmaWxsPSIjZjJjMTRlIi8+Cjwvc3ZnPgo=">
   <style>
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; padding: 10px; }

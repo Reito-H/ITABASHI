@@ -1,8 +1,8 @@
-// LINE利用状況（フル権限adminのみ）
+// LINE利用状況（フル権限adminのみ・設定ページ配下のカードからアクセス）
 // パス /usage はpermissions.tsのPATH_PERMISSIONSに載せない。
 // これにより権限制限アカウント（permissionsがJSON配列のアカウント）はrequiredPermissionKey=null → 403となり、
-// permissions=NULLのフル権限adminだけがアクセスできる。サイドバーのdata-nav-id="line-activity"も
-// どの権限キーにも該当しないため、制限アカウントのメニューからは自動的に消える。
+// permissions=NULLのフル権限adminだけがアクセスできる。設定ページのdata-perm-key="settings.line-usage"も
+// どの権限キーにも該当しないため、制限アカウントの設定一覧からは自動的に消える。
 
 import { Hono } from 'hono';
 import { layout, escHtml } from '../html/layout';
@@ -36,7 +36,7 @@ function statCard(value: string, label: string, color: string = '#1e3a5f'): stri
 }
 
 // 相対表示（"3時間前" 等）。created_atはDBのlocaltime基準なのでSQL側で秒差を出して渡す
-function agoLabel(diffSec: number | null): string {
+export function agoLabel(diffSec: number | null): string {
   if (diffSec == null) return '—';
   if (diffSec < 60) return 'たった今';
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}分前`;
@@ -153,6 +153,9 @@ app.get('/usage', async (c) => {
     </tr>`).join('');
 
   const content = `
+    <div style="margin-bottom:12px;">
+      <a href="${ADMIN_PATH}/settings" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 設定に戻る</a>
+    </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
       <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;margin:0;">LINE利用状況</h2>
       <div style="font-size:11px;color:#9ca3af;">記録開始以降のトーク・LIFF操作を集計（adminアカウント専用ページ）</div>
@@ -211,7 +214,7 @@ app.get('/usage', async (c) => {
     </div>` : ''}
   `;
 
-  return c.html(layout('LINE利用状況', content, 'line-activity'));
+  return c.html(layout('LINE利用状況', content, 'settings'));
 });
 
 // ===================================================
@@ -346,7 +349,7 @@ app.get('/usage/user', async (c) => {
     </div>
   `;
 
-  return c.html(layout('LINE利用状況', content, 'line-activity'));
+  return c.html(layout('LINE利用状況', content, 'settings'));
 });
 
 export default app;

@@ -79,6 +79,29 @@ const VEHICLE_LOOKUP_JS = `
     })
     .catch(function() { box.style.display = 'none'; });
   }
+
+  // 乗務員選択→よく使う車番（頻度順）を表示（タップで車番欄にセット）。
+  // employees.used_cars（CSVインポート時に頻度順Top5で保存済み）が元データ。
+  function renderEmpCarHint(e) {
+    var box = document.getElementById('emp-car-hint');
+    if (!box) return;
+    var cars = [];
+    try { cars = e.used_cars ? JSON.parse(e.used_cars) : []; } catch (err) { cars = []; }
+    if (e.car_no && cars.indexOf(e.car_no) === -1) cars.unshift(e.car_no);
+    if (!cars.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.innerHTML = '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">よく使う車番（タップで車番欄にセット）</div>'
+      + cars.slice(0, 5).map(function(c) {
+        return '<span onclick="selectCarNo(' + JSON.stringify(c).replace(/</g,'\\\\u003c').replace(/"/g,'&quot;') + ')"'
+          + ' style="display:inline-block;padding:6px 10px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin:0 6px 6px 0;cursor:pointer;font-size:13px;">'
+          + (c === e.car_no ? '★' : '') + c + '</span>';
+      }).join('');
+    box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
+  }
+
+  function selectCarNo(no) {
+    document.getElementById('vehicle_no').value = no;
+    doVehicleLookup();
+  }
 `;
 
 // ===== LIFF: 忘れ物対応フォーム =====
@@ -109,6 +132,14 @@ app.get('/liff/general-report', (c) => {
   return c.html(html);
 });
 
+// ===== LIFF: 報告（旧忘れ物・事故・違反・一般報告の4LIFFを統合し正式採用。最上部の種類選択で下のフォームが丸ごと切り替わる。
+//   ルート/変数名は report2 のまま（LIFF側のエンドポイントURL登録済みのため変更しない）=====
+app.get('/liff/report2', (c) => {
+  const liffId = c.env.LIFF_ID_REPORT2 ?? '';
+  const html = liffReport2Page(liffId);
+  return c.html(html);
+});
+
 // ===== LIFF: 社員照会 =====
 app.get('/liff/staff-lookup', (c) => {
   const liffId = c.env.LIFF_ID_STAFF_LOOKUP ?? '';
@@ -126,7 +157,8 @@ app.get('/liff/staff-lookup-plus', (c) => {
 // ===== LIFF: その他機能（示達事項＋各種便利機能へのアクセス）=====
 app.get('/liff/other-features', (c) => {
   const liffId = c.env.LIFF_ID_OTHER_FEATURES ?? '';
-  const html = liffOtherFeaturesPage(liffId);
+  const salesLiffId = c.env.LIFF_ID_SALES ?? '';
+  const html = liffOtherFeaturesPage(liffId, salesLiffId);
   return c.html(html);
 });
 
@@ -149,13 +181,16 @@ app.get('/api/liff/employees', async (c) => {
 
   const like = `%${q}%`;
   const rows = await c.env.DB.prepare(`
-    SELECT id, emp_no, name, division, team
+    SELECT id, emp_no, name, division, team, car_no, used_cars
     FROM employees
     WHERE is_active = 1 AND status = 'completed'
       AND (name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)
     ORDER BY division, team, seq_no, id
     LIMIT 20
-  `).bind(like, like, like).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null }>();
+  `).bind(like, like, like).all<{
+    id: number; emp_no: string; name: string; division: number | null; team: number | null;
+    car_no: string | null; used_cars: string | null;
+  }>();
 
   return c.json(rows.results ?? []);
 });
@@ -734,33 +769,45 @@ app.post('/api/liff/general-report', async (c) => {
   }
 
   const body = await c.req.json<{
+    title?: string;
     received_at?: string;
     vehicle_no?: string;
+    location?: string;
+    route_from?: string;
+    route_to?: string;
     employee_name?: string;
     employee_emp_no?: string;
     employee_division?: number | null;
     employee_team?: number | null;
+    customer_name?: string;
+    customer_phone?: string;
     content?: string;
   }>();
 
   await c.env.DB.prepare(`
     INSERT INTO general_reports
-      (received_at, vehicle_no, employee_name, employee_emp_no,
-       employee_division, employee_team, content, reported_by_uid)
-    VALUES (?,?,?,?,?,?,?,?)
+      (title, received_at, vehicle_no, location, route_from, route_to, employee_name, employee_emp_no,
+       employee_division, employee_team, customer_name, customer_phone, content, reported_by_uid)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
+    body.title ?? null,
     body.received_at ?? null,
     body.vehicle_no ?? null,
+    body.location ?? null,
+    body.route_from ?? null,
+    body.route_to ?? null,
     body.employee_name ?? null,
     body.employee_emp_no ?? null,
     body.employee_division ?? null,
     body.employee_team ?? null,
+    body.customer_name ?? null,
+    body.customer_phone ?? null,
     body.content ?? null,
     uid,
   ).run();
 
   await logLineActivity(c.env.DB, uid, 'liff', 'api', '一般報告送信',
-    `${body.vehicle_no ?? ''} ${(body.content ?? '').slice(0, 30)}`.trim());
+    `${body.title ?? ''} ${body.vehicle_no ?? ''} ${(body.content ?? '').slice(0, 30)}`.trim());
 
   const summary = buildGeneralReportSummary(body);
   const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
@@ -785,7 +832,7 @@ function buildLostItemSummary(body: Record<string, unknown>): string {
   if (body.employee_name) {
     const div = body.employee_division ? `${body.employee_division}課` : '';
     const team = body.employee_team ? `${body.employee_team}班` : '';
-    lines.push(`乗務員: ${div}${team} ${body.employee_name}${body.employee_emp_no ? `（${body.employee_emp_no}）` : ''}`);
+    lines.push(`乗務員: ${div}${team} ${body.employee_name}`);
   }
   if (body.item_description)  lines.push(`忘れ物: ${body.item_description}`);
   if (body.pickup_location)   lines.push(`乗車地: ${body.pickup_location}`);
@@ -804,7 +851,7 @@ function buildAccidentSummary(body: Record<string, unknown>): string {
   if (body.employee_name) {
     const div = body.employee_division ? `${body.employee_division}課` : '';
     const team = body.employee_team ? `${body.employee_team}班` : '';
-    lines.push(`乗務員: ${div}${team} ${body.employee_name}${body.employee_emp_no ? `（${body.employee_emp_no}）` : ''}`);
+    lines.push(`乗務員: ${div}${team} ${body.employee_name}`);
   }
   if (body.accident_type) lines.push(`事故形態: ${body.accident_type}`);
   if (body.car_status)    lines.push(`状態: ${body.car_status}`);
@@ -828,7 +875,7 @@ function buildViolationSummary(body: Record<string, unknown>): string {
   if (body.employee_name) {
     const div = body.employee_division ? `${body.employee_division}課` : '';
     const team = body.employee_team ? `${body.employee_team}班` : '';
-    lines.push(`乗務員: ${div}${team} ${body.employee_name}${body.employee_emp_no ? `（${body.employee_emp_no}）` : ''}`);
+    lines.push(`乗務員: ${div}${team} ${body.employee_name}`);
   }
   if (body.violation_type_name) {
     const pts = typeof body.violation_points === 'number' ? `${body.violation_points}点` : '';
@@ -848,13 +895,23 @@ function buildViolationSummary(body: Record<string, unknown>): string {
 }
 
 function buildGeneralReportSummary(body: Record<string, unknown>): string {
-  const lines: string[] = ['【報告】'];
+  const rawTitle = typeof body.title === 'string' ? body.title.trim() : '';
+  const title = rawTitle.replace(/報告$/, '');
+  const header = title ? `【${title}報告】` : '【報告】';
+  const lines: string[] = [header];
   if (body.received_at) lines.push(`受電: ${body.received_at}`);
   if (body.vehicle_no)  lines.push(`車番: ${body.vehicle_no}`);
+  if (body.location)    lines.push(`住所: ${body.location}`);
+  if (body.route_from || body.route_to) {
+    lines.push(`区間: ${body.route_from ?? '?'} → ${body.route_to ?? '?'}`);
+  }
   if (body.employee_name) {
     const div = body.employee_division ? `${body.employee_division}課` : '';
     const team = body.employee_team ? `${body.employee_team}班` : '';
-    lines.push(`乗務員: ${div}${team} ${body.employee_name}${body.employee_emp_no ? `（${body.employee_emp_no}）` : ''}`);
+    lines.push(`乗務員: ${div}${team} ${body.employee_name}`);
+  }
+  if (body.customer_name || body.customer_phone) {
+    lines.push(`お客様: ${body.customer_name ?? '（氏名不明）'} ${body.customer_phone ?? ''}`.trim());
   }
   if (body.content) lines.push(`\n${body.content}`);
   return lines.join('\n');
@@ -957,6 +1014,7 @@ function liffLostItemPage(liffId: string): string {
             <div class="emp-suggestions" id="emp-suggestions"></div>
           </div>
           <div class="emp-selected" id="emp-selected" style="display:none;"></div>
+          <div id="emp-car-hint" style="display:none;"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="emp-detail-row">
           <div class="field" style="margin-bottom:0;">
@@ -1095,6 +1153,7 @@ function liffLostItemPage(liffId: string): string {
     document.getElementById('emp-selected').textContent = '✓ ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
     document.getElementById('employee_division').value = e.division || '';
     document.getElementById('employee_team').value = e.team || '';
+    renderEmpCarHint(e);
   }
 
   document.addEventListener('click', function(e) {
@@ -1249,6 +1308,7 @@ function liffAccidentPage(liffId: string): string {
             <div class="emp-suggestions" id="emp-suggestions"></div>
           </div>
           <div class="emp-selected" id="emp-selected" style="display:none;"></div>
+          <div id="emp-car-hint" style="display:none;"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
           <div class="field" style="margin-bottom:0;">
@@ -1405,6 +1465,7 @@ function liffAccidentPage(liffId: string): string {
     document.getElementById('emp-selected').textContent = '✓ ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
     document.getElementById('employee_division').value = e.division || '';
     document.getElementById('employee_team').value = e.team || '';
+    renderEmpCarHint(e);
   }
 
   document.addEventListener('click', function(e) {
@@ -1564,6 +1625,7 @@ function liffViolationPage(liffId: string): string {
             <div class="emp-suggestions" id="emp-suggestions"></div>
           </div>
           <div class="emp-selected" id="emp-selected" style="display:none;"></div>
+          <div id="emp-car-hint" style="display:none;"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="emp-detail-row">
           <div class="field" style="margin-bottom:0;">
@@ -1749,6 +1811,7 @@ function liffViolationPage(liffId: string): string {
     document.getElementById('emp-selected').textContent = '✓ ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
     document.getElementById('employee_division').value = e.division || '';
     document.getElementById('employee_team').value = e.team || '';
+    renderEmpCarHint(e);
   }
 
   document.addEventListener('click', function(e) {
@@ -1873,6 +1936,18 @@ function liffGeneralReportPage(liffId: string): string {
       <div class="card">
         <div class="card-title">基本情報</div>
         <div class="field">
+          <label>タイトル（あれば・「報告」は自動で付きます）</label>
+          <input type="text" id="title" list="title-suggestions" placeholder="例: 社内汚損">
+          <datalist id="title-suggestions">
+            <option value="社内汚損">
+            <option value="車両トラブル">
+            <option value="苦情対応">
+            <option value="遅延">
+            <option value="お客様からの着電">
+            <option value="その他連絡">
+          </datalist>
+        </div>
+        <div class="field">
           <label>受電時刻</label>
           <input type="time" id="received_at">
         </div>
@@ -1880,6 +1955,39 @@ function liffGeneralReportPage(liffId: string): string {
           <label>車番（あれば）</label>
           <input type="text" id="vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce()">
           <div id="vehicle-emp-hint" style="display:none;"></div>
+        </div>
+        <div class="field">
+          <label>住所（あれば）</label>
+          <input type="text" id="location" placeholder="例: 板橋区大山東町51-1 付近">
+        </div>
+      </div>
+
+      <!-- お客様からの着電（あれば） -->
+      <div class="card">
+        <div class="card-title">お客様からの着電（あれば）</div>
+        <div class="field">
+          <label>お客様名</label>
+          <input type="text" id="customer_name" placeholder="例: 田中 一郎">
+        </div>
+        <div class="field">
+          <label>電話番号</label>
+          <input type="tel" id="customer_phone" placeholder="090-0000-0000" inputmode="tel">
+        </div>
+      </div>
+
+      <!-- 区間 -->
+      <div class="card">
+        <div class="card-title">区間（あれば）</div>
+        <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end;">
+          <div class="field" style="margin-bottom:0;">
+            <label>出発地</label>
+            <input type="text" id="route_from" placeholder="例: 板橋営業所">
+          </div>
+          <div style="padding-bottom:11px;color:#9ca3af;font-size:16px;">→</div>
+          <div class="field" style="margin-bottom:0;">
+            <label>到着地</label>
+            <input type="text" id="route_to" placeholder="例: 東京駅">
+          </div>
         </div>
       </div>
 
@@ -1893,6 +2001,7 @@ function liffGeneralReportPage(liffId: string): string {
             <div class="emp-suggestions" id="emp-suggestions"></div>
           </div>
           <div class="emp-selected" id="emp-selected" style="display:none;"></div>
+          <div id="emp-car-hint" style="display:none;"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="emp-detail-row">
           <div class="field" style="margin-bottom:0;">
@@ -1984,6 +2093,7 @@ function liffGeneralReportPage(liffId: string): string {
     document.getElementById('emp-selected').textContent = '✓ ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
     document.getElementById('employee_division').value = e.division || '';
     document.getElementById('employee_team').value = e.team || '';
+    renderEmpCarHint(e);
   }
 
   document.addEventListener('click', function(e) {
@@ -2004,12 +2114,18 @@ function liffGeneralReportPage(liffId: string): string {
     btn.textContent = '送信中...';
 
     var payload = {
+      title: document.getElementById('title').value.trim() || null,
       received_at: document.getElementById('received_at').value || null,
       vehicle_no: document.getElementById('vehicle_no').value.trim() || null,
+      location: document.getElementById('location').value.trim() || null,
+      route_from: document.getElementById('route_from').value.trim() || null,
+      route_to: document.getElementById('route_to').value.trim() || null,
       employee_name: selectedEmp ? selectedEmp.name : null,
       employee_emp_no: selectedEmp ? selectedEmp.emp_no : null,
       employee_division: selectedEmp ? selectedEmp.division : null,
       employee_team: selectedEmp ? selectedEmp.team : null,
+      customer_name: document.getElementById('customer_name').value.trim() || null,
+      customer_phone: document.getElementById('customer_phone').value.trim() || null,
       content: content,
     };
 
@@ -2039,6 +2155,573 @@ function liffGeneralReportPage(liffId: string): string {
   </script>
 </body>
 </html>`;
+}
+
+// ===== LIFF: 報告（正式採用。旧忘れ物・事故・違反・一般報告の4フォームを統合） =====
+// 忘れ物・事故・違反・一般報告の4フォームを1ページに統合。
+// 最上部の種類選択（セグメントコントロール）で、下のフィールド群が丸ごと切り替わる。
+// 各フォームのフィールドIDは li-/ac-/vi-/gr- のプレフィックスで衝突を避け、
+// 送信先は既存の単体LIFFと同じAPI（/api/liff/lost-item 等）をそのまま使う。
+function liffReport2Page(liffId: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>報告</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
+    .page { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
+    .header { background: #1e3a5f; color: white; padding: 14px 16px; border-radius: 12px; margin-bottom: 16px; }
+    .header h1 { margin: 0; font-size: 17px; font-weight: 700; }
+    .header p { margin: 4px 0 0; font-size: 12px; opacity: 0.8; }
+    .seg { display: flex; background: #e5e7eb; border-radius: 10px; padding: 3px; margin-bottom: 16px; }
+    .seg button { flex: 1; border: none; background: transparent; padding: 11px 2px; border-radius: 8px; font-size: 13px; font-weight: 700; color: #6b7280; cursor: pointer; }
+    .seg button.active { background: white; color: #1e3a5f; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+    .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card-title { font-size: 13px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    .field { margin-bottom: 12px; }
+    .field:last-child { margin-bottom: 0; }
+    label { display: block; font-size: 13px; color: #374151; margin-bottom: 5px; font-weight: 500; }
+    input[type=text], input[type=tel], input[type=time], input[type=date], textarea, select {
+      width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px;
+      font-size: 15px; font-family: inherit; background: #f9fafb; color: #111827;
+      -webkit-appearance: none; appearance: none; outline: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    input:focus, textarea:focus, select:focus { border-color: #2563eb; background: white; }
+    textarea { resize: vertical; min-height: 90px; }
+    .emp-wrap { position: relative; }
+    .emp-suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-radius: 8px; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.12); max-height: 200px; overflow-y: auto; margin-top: 2px; display: none; }
+    .emp-item { padding: 10px 12px; font-size: 14px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+    .emp-item:last-child { border-bottom: none; }
+    .emp-item:hover { background: #eff6ff; }
+    .emp-meta { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .emp-selected { font-size: 13px; color: #059669; margin-top: 4px; font-weight: 600; }
+    .toggle-group { display: flex; gap: 10px; flex-wrap: wrap; }
+    .toggle-btn { padding: 8px 16px; border: 2px solid #d1d5db; border-radius: 8px; background: white; color: #374151; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .toggle-btn.active { border-color: #1e3a5f; background: #eff6ff; color: #1e3a5f; }
+    .check-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+    .check-row:last-child { border-bottom: none; }
+    .check-row label { margin: 0; flex: 1; font-weight: 400; cursor: pointer; }
+    .check-row input[type=checkbox] { width: 20px; height: 20px; accent-color: #1e3a5f; flex-shrink: 0; }
+    .dep-row { display: none; }
+    .dep-row.visible { display: flex; }
+    .violation-info { display: none; margin-top: 8px; padding: 10px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-size: 14px; color: #991b1b; font-weight: 600; }
+    .violation-info.visible { display: block; }
+    .btn-submit { width: 100%; background: #1e3a5f; color: white; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; }
+    .btn-submit:disabled { background: #9ca3af; cursor: default; }
+    .success { text-align: center; padding: 32px 16px; }
+    .success-icon { font-size: 48px; margin-bottom: 16px; }
+    .success-title { font-size: 20px; font-weight: 700; color: #1e3a5f; margin-bottom: 8px; }
+    .success-summary { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; text-align: left; font-size: 13px; color: #374151; white-space: pre-line; margin: 16px 0; line-height: 1.7; }
+    .btn-close { background: #f3f4f6; color: #374151; border: none; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="loading">読み込み中...</div>
+  <div id="app" style="display:none;">
+    <div class="page" id="form-page">
+      <div class="header">
+        <h1>報告</h1>
+        <p>上で種類を選んでください。必須項目はありません</p>
+      </div>
+
+      <div class="seg">
+        <button type="button" id="seg-lost" class="active" onclick="switchType('lost')">忘れ物</button>
+        <button type="button" id="seg-accident" onclick="switchType('accident')">事故</button>
+        <button type="button" id="seg-violation" onclick="switchType('violation')">違反</button>
+        <button type="button" id="seg-general" onclick="switchType('general')">一般</button>
+      </div>
+
+      <!-- ===== 忘れ物 ===== -->
+      <div id="form-lost">
+        <div class="card">
+          <div class="card-title">種別</div>
+          <div class="toggle-group">
+            <button type="button" class="toggle-btn active" id="li-type-staff" onclick="liSetType('staff')">社員からの報告</button>
+            <button type="button" class="toggle-btn" id="li-type-customer" onclick="liSetType('customer')">客からの問い合わせ</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">基本情報</div>
+          <div class="field"><label>受電時刻</label><input type="time" id="li-received_at"></div>
+          <div class="field">
+            <label>車番</label>
+            <input type="text" id="li-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('lost')">
+            <div id="li-vehicle-emp-hint" style="display:none;"></div>
+          </div>
+        </div>
+        ${empCardHtml('li', 'lost')}
+        <div class="card">
+          <div class="card-title">忘れ物情報</div>
+          <div class="field"><label>忘れ物の内容</label><textarea id="li-item_description" placeholder="例: 黒い財布、iPhone"></textarea></div>
+          <div class="field"><label>乗車地</label><input type="text" id="li-pickup_location" placeholder="例: 板橋駅"></div>
+          <div class="field"><label>降車地</label><input type="text" id="li-dropoff_location" placeholder="例: 池袋駅"></div>
+        </div>
+        <div class="card" id="li-customer-section" style="display:none;">
+          <div class="card-title">お客様情報</div>
+          <div class="field"><label>お客様氏名</label><input type="text" id="li-customer_name" placeholder="田中 一郎"></div>
+          <div class="field"><label>お客様電話番号</label><input type="tel" id="li-customer_phone" placeholder="090-0000-0000" inputmode="tel"></div>
+          <div class="field">
+            <label>返却方法</label>
+            <div class="toggle-group">
+              <button type="button" class="toggle-btn" id="li-return-cod" onclick="liSetReturnMethod('着払い')">着払い</button>
+              <button type="button" class="toggle-btn" id="li-return-pickup" onclick="liSetReturnMethod('来社受け取り')">来社受け取り</button>
+            </div>
+          </div>
+        </div>
+        <div class="card"><div class="card-title">備考</div><div class="field"><textarea id="li-notes" placeholder="その他、特記事項があれば"></textarea></div></div>
+      </div>
+
+      <!-- ===== 事故 ===== -->
+      <div id="form-accident" style="display:none;">
+        <div class="card">
+          <div class="card-title">受電情報</div>
+          <div class="field"><label>受電時刻</label><input type="time" id="ac-received_at"></div>
+          <div class="field">
+            <label>車番</label>
+            <input type="text" id="ac-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('accident')">
+            <div id="ac-vehicle-emp-hint" style="display:none;"></div>
+          </div>
+        </div>
+        ${empCardHtml('ac', 'accident')}
+        <div class="card">
+          <div class="card-title">事故状況</div>
+          <div class="field">
+            <label>乗車状態</label>
+            <div class="toggle-group">
+              <button type="button" class="toggle-btn" id="ac-cs-kusha" onclick="acSetCarStatus('空車')">空車</button>
+              <button type="button" class="toggle-btn" id="ac-cs-jissha" onclick="acSetCarStatus('実車')">実車</button>
+              <button type="button" class="toggle-btn" id="ac-cs-geisha" onclick="acSetCarStatus('迎車')">迎車</button>
+            </div>
+          </div>
+          <div class="field"><label>事故形態</label><input type="text" id="ac-accident_type" placeholder="例: 単独接触事故、追突事故"></div>
+          <div class="field"><label>事故発生場所</label><input type="text" id="ac-location" placeholder="例: 足立区栗原3丁目の住宅街"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">乗客・代車対応</div>
+          <div id="ac-passenger-check" class="check-row" style="display:none;">
+            <input type="checkbox" id="ac-passenger_delivered"><label for="ac-passenger_delivered">乗客を目的地まで送り届けた</label>
+          </div>
+          <div class="check-row"><input type="checkbox" id="ac-substitute_requested"><label for="ac-substitute_requested">代車要請は済んでいる</label></div>
+        </div>
+        <div class="card">
+          <div class="card-title">対応状況</div>
+          <div class="check-row"><input type="checkbox" id="ac-police_notified"><label for="ac-police_notified">警察対応するよう指示した</label></div>
+        </div>
+        <div class="card"><div class="card-title">追加情報・メモ</div><div class="field"><textarea id="ac-additional_info" placeholder="経緯・詳細など"></textarea></div></div>
+      </div>
+
+      <!-- ===== 違反 ===== -->
+      <div id="form-violation" style="display:none;">
+        <div class="card">
+          <div class="card-title">基本情報</div>
+          <div class="field"><label>受電時刻</label><input type="time" id="vi-received_at"></div>
+          <div class="field">
+            <label>車番</label>
+            <input type="text" id="vi-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('violation')">
+            <div id="vi-vehicle-emp-hint" style="display:none;"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="field" style="margin-bottom:0;"><label>違反発生日</label><input type="date" id="vi-violation_date"></div>
+            <div class="field" style="margin-bottom:0;"><label>違反発生時刻</label><input type="time" id="vi-violation_time"></div>
+          </div>
+        </div>
+        ${empCardHtml('vi', 'violation')}
+        <div class="card">
+          <div class="card-title">違反情報</div>
+          <div class="field">
+            <label>違反の種類</label>
+            <select id="vi-violation_type_id" onchange="viOnViolationTypeChange()"><option value="">選択してください</option></select>
+            <div class="violation-info" id="vi-violation-info"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">発生場所・走行状況</div>
+          <div class="field"><label>住所（違反発生場所）</label><input type="text" id="vi-location" placeholder="例: 板橋区大山東町51-1 付近"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="field" style="margin-bottom:0;"><label>どこから</label><input type="text" id="vi-travel_from" placeholder="例: 池袋駅"></div>
+            <div class="field" style="margin-bottom:0;"><label>どこへ進行中</label><input type="text" id="vi-travel_to" placeholder="例: 成増方面"></div>
+          </div>
+          <div class="field" style="margin-top:12px;margin-bottom:0;">
+            <label>乗車状態</label>
+            <div class="toggle-group">
+              <button type="button" class="toggle-btn" id="vi-cs-kusha" onclick="viSetCarStatus('空車')">空車</button>
+              <button type="button" class="toggle-btn" id="vi-cs-jissha" onclick="viSetCarStatus('実車')">実車</button>
+              <button type="button" class="toggle-btn" id="vi-cs-geisha" onclick="viSetCarStatus('迎車')">迎車</button>
+            </div>
+            <div class="check-row dep-row" id="vi-substitute-row">
+              <input type="checkbox" id="vi-substitute_needed"><label for="vi-substitute_needed">代車要請が必要</label>
+            </div>
+          </div>
+        </div>
+        <div class="card"><div class="card-title">備考</div><div class="field"><textarea id="vi-notes" placeholder="その他、特記事項があれば"></textarea></div></div>
+      </div>
+
+      <!-- ===== 一般 ===== -->
+      <div id="form-general" style="display:none;">
+        <div class="card">
+          <div class="card-title">基本情報</div>
+          <div class="field">
+            <label>タイトル（あれば・「報告」は自動で付きます）</label>
+            <input type="text" id="gr-title" list="gr-title-suggestions" placeholder="例: 社内汚損">
+            <datalist id="gr-title-suggestions">
+              <option value="社内汚損"><option value="車両トラブル"><option value="苦情対応">
+              <option value="遅延"><option value="お客様からの着電"><option value="その他連絡">
+            </datalist>
+          </div>
+          <div class="field"><label>受電時刻</label><input type="time" id="gr-received_at"></div>
+          <div class="field">
+            <label>車番（あれば）</label>
+            <input type="text" id="gr-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('general')">
+            <div id="gr-vehicle-emp-hint" style="display:none;"></div>
+          </div>
+          <div class="field"><label>住所（あれば）</label><input type="text" id="gr-location" placeholder="例: 板橋区大山東町51-1 付近"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">お客様からの着電（あれば）</div>
+          <div class="field"><label>お客様名</label><input type="text" id="gr-customer_name" placeholder="例: 田中 一郎"></div>
+          <div class="field"><label>電話番号</label><input type="tel" id="gr-customer_phone" placeholder="090-0000-0000" inputmode="tel"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">区間（あれば）</div>
+          <div style="display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:end;">
+            <div class="field" style="margin-bottom:0;"><label>出発地</label><input type="text" id="gr-route_from" placeholder="例: 板橋営業所"></div>
+            <div style="padding-bottom:11px;color:#9ca3af;font-size:16px;">→</div>
+            <div class="field" style="margin-bottom:0;"><label>到着地</label><input type="text" id="gr-route_to" placeholder="例: 東京駅"></div>
+          </div>
+        </div>
+        ${empCardHtml('gr', 'general')}
+        <div class="card"><div class="card-title">報告内容</div><div class="field"><textarea id="gr-content" placeholder="報告したい内容を自由に入力してください"></textarea></div></div>
+      </div>
+
+      <button class="btn-submit" id="btn-submit" onclick="submitForm()">送信する</button>
+    </div>
+
+    <!-- 送信完了画面 -->
+    <div class="page success" id="success-page" style="display:none;">
+      <div class="success-icon">✅</div>
+      <div class="success-title">送信しました</div>
+      <p style="color:#6b7280;font-size:14px;">LINEにも同じ内容を送信しました。<br>コピーして転送にご利用ください。</p>
+      <div class="success-summary" id="summary-text"></div>
+      <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();">閉じる</button>
+    </div>
+  </div>
+
+  <script>
+  var LIFF_ACCESS_TOKEN = '';
+  var currentType = 'lost';
+  var PREFIX = { lost: 'li', accident: 'ac', violation: 'vi', general: 'gr' };
+  var selectedEmp = { lost: null, accident: null, violation: null, general: null };
+  var empSearchTimers = {};
+  var vehicleLookupTimers = {};
+  var liType = 'staff';
+  var liReturnMethod = '';
+  var acCarStatus = '';
+  var viCarStatus = '';
+  var violationTypes = [];
+
+  liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
+    .then(function() {
+      LIFF_ACCESS_TOKEN = liff.getAccessToken() || '';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      var now = new Date();
+      var hh = String(now.getHours()).padStart(2, '0');
+      var mm = String(now.getMinutes()).padStart(2, '0');
+      ['li-received_at', 'ac-received_at', 'vi-received_at', 'gr-received_at'].forEach(function(id) {
+        document.getElementById(id).value = hh + ':' + mm;
+      });
+      var yyyy = now.getFullYear();
+      var mo = String(now.getMonth() + 1).padStart(2, '0');
+      var dd = String(now.getDate()).padStart(2, '0');
+      document.getElementById('vi-violation_date').value = yyyy + '-' + mo + '-' + dd;
+      document.getElementById('vi-violation_time').value = hh + ':' + mm;
+      loadViolationTypes();
+    })
+    .catch(function(err) {
+      document.getElementById('loading').textContent = 'エラー: ' + err.message;
+    });
+
+  function switchType(t) {
+    currentType = t;
+    ['lost', 'accident', 'violation', 'general'].forEach(function(k) {
+      document.getElementById('seg-' + k).className = (k === t) ? 'active' : '';
+      document.getElementById('form-' + k).style.display = (k === t) ? 'block' : 'none';
+    });
+  }
+
+  function liSetType(t) {
+    liType = t;
+    document.getElementById('li-type-staff').className = 'toggle-btn' + (t === 'staff' ? ' active' : '');
+    document.getElementById('li-type-customer').className = 'toggle-btn' + (t === 'customer' ? ' active' : '');
+    document.getElementById('li-customer-section').style.display = (t === 'customer') ? 'block' : 'none';
+  }
+  function liSetReturnMethod(m) {
+    liReturnMethod = m;
+    document.getElementById('li-return-cod').className = 'toggle-btn' + (m === '着払い' ? ' active' : '');
+    document.getElementById('li-return-pickup').className = 'toggle-btn' + (m === '来社受け取り' ? ' active' : '');
+  }
+  function acSetCarStatus(s) {
+    acCarStatus = s;
+    ['kusha', 'jissha', 'geisha'].forEach(function(id) { document.getElementById('ac-cs-' + id).className = 'toggle-btn'; });
+    var map = { '空車': 'kusha', '実車': 'jissha', '迎車': 'geisha' };
+    if (map[s]) document.getElementById('ac-cs-' + map[s]).className = 'toggle-btn active';
+    document.getElementById('ac-passenger-check').style.display = (s === '実車' || s === '迎車') ? 'flex' : 'none';
+  }
+  function viSetCarStatus(s) {
+    viCarStatus = s;
+    ['kusha', 'jissha', 'geisha'].forEach(function(id) { document.getElementById('vi-cs-' + id).className = 'toggle-btn'; });
+    var map = { '空車': 'kusha', '実車': 'jissha', '迎車': 'geisha' };
+    if (map[s]) document.getElementById('vi-cs-' + map[s]).className = 'toggle-btn active';
+    var row = document.getElementById('vi-substitute-row');
+    if (s === '実車' || s === '迎車') { row.className = 'check-row dep-row visible'; }
+    else { row.className = 'check-row dep-row'; document.getElementById('vi-substitute_needed').checked = false; }
+  }
+
+  function loadViolationTypes() {
+    fetch('/api/liff/violation-types', { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        violationTypes = data || [];
+        var sel = document.getElementById('vi-violation_type_id');
+        violationTypes.forEach(function(vt) {
+          var opt = document.createElement('option');
+          opt.value = vt.id; opt.textContent = vt.name;
+          sel.appendChild(opt);
+        });
+      });
+  }
+  function viOnViolationTypeChange() {
+    var id = document.getElementById('vi-violation_type_id').value;
+    var info = document.getElementById('vi-violation-info');
+    var vt = violationTypes.find(function(v) { return String(v.id) === String(id); });
+    if (!vt) { info.className = 'violation-info'; return; }
+    info.textContent = '違反点数: ' + vt.points + '点 / 反則金: ' + vt.fine_amount.toLocaleString() + '円';
+    info.className = 'violation-info visible';
+  }
+
+  function empSearchDebounce(type) {
+    clearTimeout(empSearchTimers[type]);
+    empSearchTimers[type] = setTimeout(function() { doEmpSearch(type); }, 300);
+  }
+  function doEmpSearch(type) {
+    var p = PREFIX[type];
+    var q = document.getElementById(p + '-emp-search').value.trim();
+    var sug = document.getElementById(p + '-emp-suggestions');
+    if (q.length < 1) { sug.style.display = 'none'; return; }
+    fetch('/api/liff/employees?q=' + encodeURIComponent(q), { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || data.length === 0) { sug.style.display = 'none'; return; }
+        sug.innerHTML = data.map(function(e) {
+          var div = e.division ? e.division + '課' : '';
+          var team = e.team ? e.team + '班' : '';
+          return '<div class="emp-item" onclick="selectEmp(&#39;' + type + '&#39;,' + JSON.stringify(e).replace(/</g,'\\u003c').replace(/"/g,'&quot;') + ')">'
+            + '<div>' + e.name + '</div><div class="emp-meta">' + div + team + ' / ' + e.emp_no + '</div></div>';
+        }).join('');
+        sug.style.display = 'block';
+      })
+      .catch(function() { sug.style.display = 'none'; });
+  }
+  function selectEmp(type, e) {
+    selectedEmp[type] = e;
+    var p = PREFIX[type];
+    document.getElementById(p + '-emp-search').value = '';
+    document.getElementById(p + '-emp-suggestions').style.display = 'none';
+    var div = e.division ? e.division + '課' : '';
+    var team = e.team ? e.team + '班' : '';
+    var sel = document.getElementById(p + '-emp-selected');
+    sel.style.display = 'block';
+    sel.textContent = '選択中: ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
+    document.getElementById(p + '-employee_division').value = e.division || '';
+    document.getElementById(p + '-employee_team').value = e.team || '';
+  }
+  document.addEventListener('click', function(e) {
+    ['li', 'ac', 'vi', 'gr'].forEach(function(p) {
+      var sug = document.getElementById(p + '-emp-suggestions');
+      var input = document.getElementById(p + '-emp-search');
+      if (sug && input && !input.contains(e.target) && !sug.contains(e.target)) sug.style.display = 'none';
+    });
+  });
+
+  function vehicleLookupDebounce(type) {
+    clearTimeout(vehicleLookupTimers[type]);
+    vehicleLookupTimers[type] = setTimeout(function() { doVehicleLookup(type); }, 400);
+  }
+  function doVehicleLookup(type) {
+    var p = PREFIX[type];
+    var no = document.getElementById(p + '-vehicle_no').value.trim();
+    var box = document.getElementById(p + '-vehicle-emp-hint');
+    if (!/^[0-9]{2,4}$/.test(no)) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    fetch('/api/liff/vehicle-employees?no=' + encodeURIComponent(no), { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (document.getElementById(p + '-vehicle_no').value.trim() !== no) return;
+        var v = data && data.vehicle;
+        var list = (data && data.employees) || [];
+        if (!v && !list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+        var html = '';
+        if (v) {
+          html += '<div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">' + no + ' は <span style="color:#1d4ed8;">' + v.division + '課 ' + v.team + '班</span> の車両</div>';
+        }
+        if (list.length) {
+          html += '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">この車番をよく使う乗務員（タップで乗務員欄にセット）</div>'
+            + list.map(function(e) {
+              var div = e.division ? e.division + '課' : '';
+              var team = e.team ? e.team + '班' : '';
+              var meta = (div + team ? div + team + ' / ' : '') + e.emp_no + (e.hint ? ' ・ ' + e.hint : '');
+              return '<div onclick="selectEmp(&#39;' + type + '&#39;,' + JSON.stringify(e).replace(/</g,'\\u003c').replace(/"/g,'&quot;') + ')"'
+                + ' style="padding:9px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:14px;">'
+                + e.name + ' <span style="color:#6b7280;font-size:12px;">' + meta + '</span></div>';
+            }).join('');
+        }
+        box.innerHTML = html;
+        box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
+      })
+      .catch(function() { box.style.display = 'none'; });
+  }
+
+  function val(id) {
+    var v = document.getElementById(id).value;
+    return (v && v.trim()) ? v.trim() : null;
+  }
+
+  function submitForm() {
+    var btn = document.getElementById('btn-submit');
+    btn.disabled = true;
+    btn.textContent = '送信中...';
+
+    var type = currentType;
+    var url, payload;
+    if (type === 'lost') {
+      var liEmp = selectedEmp.lost;
+      url = '/api/liff/lost-item';
+      payload = {
+        report_type: liType,
+        received_at: val('li-received_at'),
+        vehicle_no: val('li-vehicle_no'),
+        employee_name: liEmp ? liEmp.name : null,
+        employee_emp_no: liEmp ? liEmp.emp_no : null,
+        employee_division: liEmp ? liEmp.division : null,
+        employee_team: liEmp ? liEmp.team : null,
+        item_description: val('li-item_description'),
+        pickup_location: val('li-pickup_location'),
+        dropoff_location: val('li-dropoff_location'),
+        customer_name: val('li-customer_name'),
+        customer_phone: val('li-customer_phone'),
+        return_method: liReturnMethod || null,
+        notes: val('li-notes'),
+      };
+    } else if (type === 'accident') {
+      var acEmp = selectedEmp.accident;
+      url = '/api/liff/accident';
+      payload = {
+        received_at: val('ac-received_at'),
+        vehicle_no: val('ac-vehicle_no'),
+        employee_name: acEmp ? acEmp.name : null,
+        employee_emp_no: acEmp ? acEmp.emp_no : null,
+        employee_division: acEmp ? acEmp.division : null,
+        employee_team: acEmp ? acEmp.team : null,
+        accident_type: val('ac-accident_type'),
+        location: val('ac-location'),
+        car_status: acCarStatus || null,
+        substitute_requested: document.getElementById('ac-substitute_requested').checked,
+        police_notified: document.getElementById('ac-police_notified').checked,
+        passenger_delivered: document.getElementById('ac-passenger_delivered').checked,
+        additional_info: val('ac-additional_info'),
+      };
+    } else if (type === 'violation') {
+      var viEmp = selectedEmp.violation;
+      var vDate = document.getElementById('vi-violation_date').value;
+      var vTime = document.getElementById('vi-violation_time').value;
+      var violationAt = vDate ? (vDate + (vTime ? ' ' + vTime : '')) : null;
+      url = '/api/liff/violation';
+      payload = {
+        received_at: val('vi-received_at'),
+        vehicle_no: val('vi-vehicle_no'),
+        violation_at: violationAt,
+        employee_name: viEmp ? viEmp.name : null,
+        employee_emp_no: viEmp ? viEmp.emp_no : null,
+        employee_division: viEmp ? viEmp.division : null,
+        employee_team: viEmp ? viEmp.team : null,
+        violation_type_id: document.getElementById('vi-violation_type_id').value || null,
+        location: val('vi-location'),
+        travel_from: val('vi-travel_from'),
+        travel_to: val('vi-travel_to'),
+        car_status: viCarStatus || null,
+        substitute_needed: document.getElementById('vi-substitute_needed').checked,
+        notes: val('vi-notes'),
+      };
+    } else {
+      var grEmp = selectedEmp.general;
+      url = '/api/liff/general-report';
+      payload = {
+        title: val('gr-title'),
+        received_at: val('gr-received_at'),
+        vehicle_no: val('gr-vehicle_no'),
+        location: val('gr-location'),
+        route_from: val('gr-route_from'),
+        route_to: val('gr-route_to'),
+        employee_name: grEmp ? grEmp.name : null,
+        employee_emp_no: grEmp ? grEmp.emp_no : null,
+        employee_division: grEmp ? grEmp.division : null,
+        employee_team: grEmp ? grEmp.team : null,
+        customer_name: val('gr-customer_name'),
+        customer_phone: val('gr-customer_phone'),
+        content: val('gr-content'),
+      };
+    }
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN },
+      body: JSON.stringify(payload),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        document.getElementById('form-page').style.display = 'none';
+        document.getElementById('success-page').style.display = 'block';
+        document.getElementById('summary-text').textContent = data.summary;
+      } else {
+        btn.disabled = false;
+        btn.textContent = '送信する';
+        alert('送信に失敗しました: ' + (data.error || '不明なエラー'));
+      }
+    })
+    .catch(function() {
+      btn.disabled = false;
+      btn.textContent = '送信する';
+      alert('通信エラーが発生しました');
+    });
+  }
+  </script>
+</body>
+</html>`;
+}
+
+// 乗務員検索カード（報告2共通パーツ）。prefixはフィールドIDの接頭辞、typeはJS側のselectEmp用キー
+function empCardHtml(prefix: string, type: string): string {
+  return `
+        <div class="card">
+          <div class="card-title">乗務員（あれば）</div>
+          <div class="field">
+            <div class="emp-wrap">
+              <input type="text" id="${prefix}-emp-search" placeholder="氏名・社員番号で検索" autocomplete="off" oninput="empSearchDebounce('${type}')">
+              <div class="emp-suggestions" id="${prefix}-emp-suggestions"></div>
+            </div>
+            <div class="emp-selected" id="${prefix}-emp-selected" style="display:none;"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="field" style="margin-bottom:0;"><label>課</label><input type="text" id="${prefix}-employee_division" readonly style="background:#f3f4f6;color:#6b7280;"></div>
+            <div class="field" style="margin-bottom:0;"><label>班</label><input type="text" id="${prefix}-employee_team" readonly style="background:#f3f4f6;color:#6b7280;"></div>
+          </div>
+        </div>`;
 }
 
 function liffStaffLookupPage(liffId: string): string {
@@ -3114,7 +3797,7 @@ const WEEKLY_NOTICES: { day: string; items: string[] }[] = [
   { day: '土', items: ['だろう運転をしない　かもしれない運転を', '大きな声で明るい挨拶　行先コースの確認'] },
 ];
 
-function liffOtherFeaturesPage(liffId: string): string {
+function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -3124,28 +3807,31 @@ function liffOtherFeaturesPage(liffId: string): string {
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
-    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
+    body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 17px; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 15px; }
     .page { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
-    .header { background: #0f766e; color: white; padding: 14px 16px; border-radius: 12px; margin-bottom: 16px; }
-    .header h1 { margin: 0; font-size: 17px; font-weight: 700; }
+    .header { background: #0f766e; color: white; padding: 16px; border-radius: 12px; margin-bottom: 16px; }
+    .header h1 { margin: 0; font-size: 20px; font-weight: 700; }
     .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-    .card-title { font-size: 13px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
-    .notice-day { display: inline-block; font-size: 13px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 6px; padding: 2px 10px; margin-bottom: 8px; }
-    .notice-item { font-size: 14.5px; color: #111827; line-height: 1.6; margin-bottom: 4px; }
+    .card-title { font-size: 14px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+    .notice-day { display: inline-block; font-size: 15px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 6px; padding: 3px 12px; margin-bottom: 10px; }
+    .notice-item { font-size: 17px; color: #111827; line-height: 1.75; margin-bottom: 6px; }
     .notice-item:last-child { margin-bottom: 0; }
     .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .feature-btn { background: white; border: none; border-radius: 12px; padding: 20px 8px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08); cursor: pointer; }
-    .feature-btn .icon { font-size: 26px; margin-bottom: 8px; }
-    .feature-btn .label { font-size: 13px; font-weight: 700; color: #1f2937; }
+    .feature-btn { background: white; border: none; border-radius: 12px; padding: 26px 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08); cursor: pointer; }
+    .feature-btn .icon { font-size: 32px; margin-bottom: 10px; }
+    .feature-btn .label { font-size: 16px; font-weight: 700; color: #1f2937; }
+    .feature-btn.wide { grid-column: 1 / span 2; padding: 22px 10px; }
+    .feature-btn.wide .icon { display: inline; font-size: 24px; margin: 0 8px 0 0; vertical-align: middle; }
+    .feature-btn.wide .label { display: inline; vertical-align: middle; font-size: 17px; }
     .sub-header { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
-    .btn-back { background: none; border: none; color: #0f766e; font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px 0; }
-    .office-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px; border-bottom: 1px solid #f3f4f6; }
+    .btn-back { background: none; border: none; color: #0f766e; font-size: 16px; font-weight: 600; cursor: pointer; padding: 6px 0; }
+    .office-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 4px; border-bottom: 1px solid #f3f4f6; }
     .office-row:last-child { border-bottom: none; }
-    .office-name { font-size: 14.5px; color: #111827; font-weight: 600; }
-    .office-call { color: #0f766e; font-size: 14px; font-weight: 700; text-decoration: none; }
-    .empty-note { color: #6b7280; font-size: 13px; text-align: center; padding: 24px 8px; }
-    .soon-note { color: #6b7280; font-size: 14px; text-align: center; padding: 32px 8px; line-height: 1.7; }
+    .office-name { font-size: 17px; color: #111827; font-weight: 600; }
+    .office-call { color: #0f766e; font-size: 17px; font-weight: 700; text-decoration: none; }
+    .empty-note { color: #6b7280; font-size: 15px; text-align: center; padding: 24px 8px; }
+    .soon-note { color: #6b7280; font-size: 16px; text-align: center; padding: 32px 8px; line-height: 1.7; }
 
     .segment { display: flex; background: #e5e7eb; border-radius: 10px; padding: 3px; margin-bottom: 16px; }
     .segment button { flex: 1; border: none; background: transparent; padding: 10px 0; border-radius: 8px; font-size: 14px; font-weight: 700; color: #6b7280; cursor: pointer; }
@@ -3192,6 +3878,10 @@ function liffOtherFeaturesPage(liffId: string): string {
         <button class="feature-btn" onclick="showTimeCalc()">
           <div class="icon">⏱️</div>
           <div class="label">時間計算</div>
+        </button>
+        <button class="feature-btn wide" onclick="openSalesQr()">
+          <span class="icon">📷</span>
+          <span class="label">QR読み取り（売上実績確認）</span>
         </button>
       </div>
     </div>
@@ -3249,6 +3939,7 @@ function liffOtherFeaturesPage(liffId: string): string {
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
+  var SALES_LIFF_ID = ${JSON.stringify(salesLiffId)};
   var WEEKLY_NOTICES = ${JSON.stringify(WEEKLY_NOTICES)};
   var TC_ITEM_H = 36;
   var tcInitialized = false;
@@ -3375,6 +4066,11 @@ function liffOtherFeaturesPage(liffId: string): string {
     tcScrollTo('tc-hour', tcHour, false);
     tcScrollTo('tc-minute', tcMinute, false);
     tcCompute();
+  }
+
+  function openSalesQr() {
+    if (!SALES_LIFF_ID) { alert('準備中です'); return; }
+    location.href = 'https://liff.line.me/' + SALES_LIFF_ID + '?tab=qr';
   }
 
   function showOffices() {

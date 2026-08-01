@@ -1,6 +1,7 @@
-// Benten管理システム: 全社員横断の売上分析ページ
+// ホシコン: 全社員横断の売上分析ページ
 import { Hono } from 'hono';
 import { layout } from '../html/layout';
+import { crewPortalSubNav } from '../html/crew_portal_nav';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 
@@ -9,6 +10,7 @@ const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 app.get('/sales-analytics', async (c) => {
   const content = `
 <div style="max-width:1100px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+  ${crewPortalSubNav('sales-analytics')}
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
     <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0;">売上分析 — 全社員横断</h2>
     <div id="period-label" style="font-size:12px;color:#6b7280;"></div>
@@ -99,7 +101,7 @@ function renderTable() {
     const changeColor = e.changePct === null ? '#9ca3af' : (e.changePct >= 0 ? '#059669' : '#dc2626');
     const changeText = e.changePct === null ? '—' : (e.changePct >= 0 ? '+' : '') + e.changePct + '%';
     return '<tr style="border-bottom:1px solid #f3f4f6;">' +
-      '<td style="padding:7px 8px;"><a href="' + ADMIN_PATH + '/staff/' + e.empId + '" style="color:#2563eb;text-decoration:none;font-weight:600;">' + escHtmlJs(e.name) + '</a></td>' +
+      '<td style="padding:7px 8px;"><a href="' + ADMIN_PATH + '/crew-portal/employee/' + e.empId + '" style="color:#2563eb;text-decoration:none;font-weight:600;">' + escHtmlJs(e.name) + '</a></td>' +
       '<td style="padding:7px 8px;color:#6b7280;">' + (e.division ?? '—') + '課' + (e.team ? e.team + '班' : '') + '</td>' +
       '<td style="padding:7px 8px;font-weight:600;">' + e.curTotal.toLocaleString('ja-JP') + '円</td>' +
       '<td style="padding:7px 8px;">' + (e.curAvgPerDuty !== null ? e.curAvgPerDuty.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
@@ -119,7 +121,7 @@ const ADMIN_PATH = '${ADMIN_PATH}';
 loadOverview();
 </script>`;
 
-  return c.html(layout('売上分析', content, 'sales-analytics'));
+  return c.html(layout('売上分析', content, 'crew-portal'));
 });
 
 export default app;

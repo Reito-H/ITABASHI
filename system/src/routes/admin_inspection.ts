@@ -27,8 +27,10 @@ function inspectionPage(adminPath: string): string {
 .ins-date-cell.sat{background:#ddeeff;color:#004488}
 .ins-date-cell.sun{background:#ffdddd;color:#880000}
 .ins-han-cell{min-height:34px;position:relative;padding:4px 28px 4px 4px;cursor:pointer}
+.ins-han-cell.ins-han-l{padding:4px 4px 4px 28px}
 .ins-han-cell:hover{background:#f8faff}
 .vtags{display:flex;flex-wrap:wrap;gap:3px;min-height:22px}
+.vtags-r{justify-content:flex-end}
 .vtag{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:3px;font-size:13px;font-weight:700;cursor:pointer;line-height:1.3}
 .vtag:hover{opacity:.75}
 .vt-inspect{color:#000;background:#f4f4f4;border:1px solid #bbb}
@@ -38,6 +40,7 @@ function inspectionPage(adminPath: string): string {
 .vt-recall {color:#000;background:#fff;border:2px solid #333}
 .vt-time{font-size:10px;color:#777;font-weight:400}
 .ins-add-btn{position:absolute;top:50%;right:4px;transform:translateY(-50%);background:#3366aa;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:.7}
+.ins-add-btn.ins-add-l{right:auto;left:4px}
 .ins-add-btn:hover{opacity:1}
 .ins-modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200}
 .ins-modal-box{background:#fff;border-radius:10px;padding:24px;width:380px;max-width:95vw;box-shadow:0 8px 30px rgba(0,0,0,.2)}
@@ -99,6 +102,8 @@ function inspectionPage(adminPath: string): string {
     <span style="color:#bbb">｜</span>
     <button class="btn-p" onclick="insPhotoPick()">📷 写真からAI取込</button>
     <input type="file" id="ins-photo-file" accept="image/*" style="display:none" onchange="insPhotoSelected(this)">
+    <button class="btn-p" onclick="insDownloadMonthImage(this)">🖼 画像で保存</button>
+    <button class="btn-p" onclick="insDownloadMonthExcel(this)">📊 Excelで保存</button>
     <span id="ins-save-badge" class="ins-save-badge"></span>
   </div>
 
@@ -178,6 +183,7 @@ function inspectionPage(adminPath: string): string {
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 const INS_PATH = '';
 
@@ -267,17 +273,20 @@ function insOnYMChange(){
   insRefreshTable();
 }
 
+// 課(1-4)・班(1-2)から実際の班番号(1-8)を算出（1,2班=1課／3,4班=2課／5,6班=3課／7,8班=4課）
+function insTeamNum(dept,han){return (dept-1)*2+han;}
+
 async function insRefreshTable(){
   document.getElementById('ins-dept-title').textContent=IS.dept+'課　定期点検表（'+IS.month+'月）';
   const ym=insGetYM();
   const data=await insFetchData(ym,IS.dept);
   const days=insDIM(IS.year,IS.month);
-  let html='<table class="ins-table"><colgroup><col style="width:44%"><col style="width:12%"><col style="width:44%"></colgroup><thead><tr><th>《1班》</th><th>日付</th><th>《2班》</th></tr></thead><tbody>';
+  let html='<table class="ins-table"><colgroup><col style="width:44%"><col style="width:12%"><col style="width:44%"></colgroup><thead><tr><th>《'+insTeamNum(IS.dept,1)+'班》</th><th>日付</th><th>《'+insTeamNum(IS.dept,2)+'班》</th></tr></thead><tbody>';
   for(let day=1;day<=days;day++){
     const dow=new Date(IS.year,IS.month-1,day).getDay();
     const dc=dow===0?'sun':dow===6?'sat':'';
     const {h1,h2}=insGetDayVehicles(data,day);
-    html+='<tr><td class="ins-han-cell"><div class="vtags" id="ins-tags-'+day+'-1">'+insRenderTags(h1,day,1)+'</div><button class="ins-add-btn" onclick="insOpenModal('+day+',1)">＋</button></td><td class="ins-date-cell '+dc+'">'+day+'</td><td class="ins-han-cell"><div class="vtags" id="ins-tags-'+day+'-2">'+insRenderTags(h2,day,2)+'</div><button class="ins-add-btn" onclick="insOpenModal('+day+',2)">＋</button></td></tr>';
+    html+='<tr><td class="ins-han-cell ins-han-l"><div class="vtags vtags-r" id="ins-tags-'+day+'-1">'+insRenderTags(h1,day,1)+'</div><button class="ins-add-btn ins-add-l" onclick="insOpenModal('+day+',1)">＋</button></td><td class="ins-date-cell '+dc+'">'+day+'</td><td class="ins-han-cell"><div class="vtags" id="ins-tags-'+day+'-2">'+insRenderTags(h2,day,2)+'</div><button class="ins-add-btn" onclick="insOpenModal('+day+',2)">＋</button></td></tr>';
   }
   html+='</tbody></table>';
   document.getElementById('ins-table-container').innerHTML=html;
@@ -292,7 +301,8 @@ function insEsc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').r
 // ===== モーダル =====
 function insOpenModal(day,han,id=null){
   IS.modal={day,han,id};
-  document.getElementById('ins-modal-title').textContent=id?day+'日 '+han+'班 - 車両編集':day+'日 '+han+'班 - 車両追加';
+  const teamNum=insTeamNum(IS.dept,han);
+  document.getElementById('ins-modal-title').textContent=id?day+'日 '+teamNum+'班 - 車両編集':day+'日 '+teamNum+'班 - 車両追加';
   document.getElementById('ins-btn-del').style.display=id?'':'none';
   let num='',type='inspect',time='';
   if(id){
@@ -367,6 +377,269 @@ async function insClearMonth(){
   await fetch(INS_PATH+'/api/inspection/schedule?ym='+ym+'&ka='+IS.dept,{method:'DELETE'});
   delete IS.cache[ym+'_'+IS.dept];
   insRefreshTable();
+}
+
+// ===== 月次表 画像保存（実物のフォント・配色を再現） =====
+const INS_MCOL={inspect:'#000',shaken:'#f00',bomb:'#ff0',sub:'#808',recall:'#000'};
+const INS_MFILL_T1='#99cc00',INS_MFILL_DATE='#ffff99',INS_MFILL_T2='#99ccff';
+
+function insTagMetrics(ctx,v,fMain,fTime){
+  ctx.font=fMain;
+  const numW=ctx.measureText(v.vehicle_num).width;
+  let timeW=0;
+  if(v.dep_time){ctx.font=fTime;timeW=ctx.measureText(v.dep_time).width+10;}
+  return {numW,timeW,total:numW+timeW};
+}
+
+function insWrapTags(ctx,vehicles,maxWidth,fMain,fTime){
+  const gap=26;
+  const lines=[];
+  let cur=[],curW=0;
+  vehicles.forEach(v=>{
+    const m=insTagMetrics(ctx,v,fMain,fTime);
+    const extra=cur.length?gap+m.total:m.total;
+    if(cur.length&&curW+extra>maxWidth){
+      lines.push(cur);cur=[{v,m}];curW=m.total;
+    }else{
+      cur.push({v,m});curW+=extra;
+    }
+  });
+  if(cur.length) lines.push(cur);
+  if(!lines.length) lines.push([]);
+  return lines;
+}
+
+function insLineWidth(line){
+  const gap=26;
+  if(!line.length) return 0;
+  return line.reduce((s,{m})=>s+m.total,0)+gap*(line.length-1);
+}
+
+function insDrawTagLine(ctx,line,x,yc,fMain,fTime){
+  const gap=26;
+  let cx=x;
+  line.forEach(({v,m})=>{
+    ctx.textAlign='left';ctx.textBaseline='middle';
+    if(v.type==='recall'){
+      ctx.strokeStyle='#333';ctx.lineWidth=2;
+      ctx.strokeRect(cx-8,yc-24,m.numW+16,48);
+    }
+    ctx.font=fMain;ctx.fillStyle=INS_MCOL[v.type]||'#000';
+    ctx.fillText(v.vehicle_num,cx,yc);
+    if(v.dep_time){
+      ctx.font=fTime;ctx.fillStyle='#777';
+      ctx.fillText(v.dep_time,cx+m.numW+10,yc);
+    }
+    cx+=m.total+gap;
+  });
+}
+
+async function insRenderMonthCanvas(){
+  const ym=insGetYM();
+  const data=await insFetchData(ym,IS.dept);
+  const days=insDIM(IS.year,IS.month);
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d');
+  const FN='"游ゴシック","Yu Gothic","Hiragino Sans","Meiryo","Noto Sans JP",sans-serif';
+  const MX=60,W=1600,CW=MX*2+W;
+  const C1=Math.round(W*0.43),CD=Math.round(W*0.14),C2=W-C1-CD;
+  const HH=90,MIN_RH=72,LH=44;
+  const fMain='bold 34px '+FN, fTime='24px '+FN;
+
+  // パス1: 各日の行に必要な高さを計測
+  const rows=[];
+  for(let day=1;day<=days;day++){
+    const {h1,h2}=insGetDayVehicles(data,day);
+    const l1=insWrapTags(ctx,h1,C1-40,fMain,fTime);
+    const l2=insWrapTags(ctx,h2,C2-40,fMain,fTime);
+    const lines=Math.max(l1.length,l2.length,1);
+    rows.push({day,l1,l2,rh:Math.max(MIN_RH,28+lines*LH)});
+  }
+  const tableBodyH=rows.reduce((s,r)=>s+r.rh,0);
+  const TY=60+120+76+30;
+  const totalH=TY+HH+tableBodyH+30+40+50;
+  canvas.width=CW; canvas.height=totalH;
+  ctx.textBaseline='middle';
+
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,CW,totalH);
+
+  // タイトル・注意書き
+  let y=60;
+  ctx.fillStyle='#000';ctx.font='bold 76px '+FN;ctx.textAlign='left';
+  ctx.fillText(IS.dept+'課　定期点検表（'+IS.month+'月）',MX,y+50);
+  y+=120;
+  ctx.fillStyle='#f00';ctx.font='bold 46px '+FN;ctx.textAlign='center';
+  ctx.fillText('担当車両の点検車検日を確認願います',CW/2,y+31);
+  y+=76;
+  y+=30;
+
+  // テーブル
+  const TX=MX,TW=W,tableTop=y;
+  ctx.fillStyle=INS_MFILL_T1;ctx.fillRect(TX,tableTop,C1,HH);
+  ctx.fillStyle=INS_MFILL_DATE;ctx.fillRect(TX+C1,tableTop,CD,HH);
+  ctx.fillStyle=INS_MFILL_T2;ctx.fillRect(TX+C1+CD,tableTop,C2,HH);
+  ctx.fillStyle='#000';ctx.font='bold 38px '+FN;ctx.textAlign='center';
+  ctx.fillText('《'+insTeamNum(IS.dept,1)+'班》',TX+C1/2,tableTop+HH/2);
+  ctx.fillText('日付',TX+C1+CD/2,tableTop+HH/2);
+  ctx.fillText('《'+insTeamNum(IS.dept,2)+'班》',TX+C1+CD+C2/2,tableTop+HH/2);
+
+  let ry=tableTop+HH;
+  rows.forEach(r=>{
+    const dow=new Date(IS.year,IS.month-1,r.day).getDay();
+    ctx.fillStyle=INS_MFILL_T1;ctx.fillRect(TX,ry,C1,r.rh);
+    ctx.fillStyle=INS_MFILL_T2;ctx.fillRect(TX+C1+CD,ry,C2,r.rh);
+    ctx.fillStyle=INS_MFILL_DATE;ctx.fillRect(TX+C1,ry,CD,r.rh);
+    const dayColor=dow===6?'#0cf':dow===0?'#f00':'#000';
+    ctx.fillStyle=dayColor;ctx.font='bold 40px '+FN;ctx.textAlign='center';
+    ctx.fillText(String(r.day),TX+C1+CD/2,ry+r.rh/2);
+    const yc0=ry+r.rh/2-((r.l1.length-1)*LH)/2;
+    r.l1.forEach((line,i)=>insDrawTagLine(ctx,line,TX+C1-22-insLineWidth(line),yc0+i*LH,fMain,fTime));
+    const yc1=ry+r.rh/2-((r.l2.length-1)*LH)/2;
+    r.l2.forEach((line,i)=>insDrawTagLine(ctx,line,TX+C1+CD+22,yc1+i*LH,fMain,fTime));
+    ry+=r.rh;
+  });
+
+  // 罫線
+  ctx.strokeStyle='#000';ctx.lineWidth=3;
+  ctx.strokeRect(TX,tableTop,TW,HH+tableBodyH);
+  ctx.beginPath();
+  ctx.moveTo(TX+C1,tableTop);ctx.lineTo(TX+C1,tableTop+HH+tableBodyH);
+  ctx.moveTo(TX+C1+CD,tableTop);ctx.lineTo(TX+C1+CD,tableTop+HH+tableBodyH);
+  ctx.stroke();
+  ctx.strokeStyle='#999';ctx.lineWidth=1;
+  let sy=tableTop+HH;
+  rows.forEach(r=>{ctx.beginPath();ctx.moveTo(TX,sy);ctx.lineTo(TX+TW,sy);ctx.stroke();sy+=r.rh;});
+
+  // 凡例
+  ctx.fillStyle='#00f';ctx.font='bold 30px '+FN;ctx.textAlign='center';
+  ctx.fillText('黒字は点検　赤字は車検　紫字は代替　黄字はボンベ交換　白枠黒字はリコール作業',CW/2,tableTop+HH+tableBodyH+40);
+
+  return canvas;
+}
+
+async function insDownloadMonthImage(btn){
+  if(btn){btn.disabled=true;}
+  try{
+    const canvas=await insRenderMonthCanvas();
+    const a=document.createElement('a');
+    a.download=IS.dept+'課_定期点検表_'+IS.year+'年'+IS.month+'月.png';
+    a.href=canvas.toDataURL('image/png');
+    a.click();
+  }finally{
+    if(btn){btn.disabled=false;}
+  }
+}
+
+// ===== 月次表 Excel保存（実物のフォント・配色を再現） =====
+const INS_XFONT='HGP創英角ポップ体';
+const INS_XCOL={inspect:'FF000000',shaken:'FFFF0000',bomb:'FFFFFF00',sub:'FF800080',recall:'FF000000'};
+const INS_T1COLS=['E','D','C','B','A'];
+const INS_T2COLS=['H','I','J','K','L'];
+const INS_XFILL_T1='FF99CC00';
+const INS_XFILL_DATE='FFFFFF99';
+const INS_XFILL_T2='FF99CCFF';
+
+function insSetCellVehicles(ws,row,cols,vehicles){
+  const n=cols.length;
+  vehicles.forEach((v,i)=>{
+    const idx=Math.min(i,n-1);
+    const addr=cols[idx]+row;
+    const cell=ws.getCell(addr);
+    const text=v.vehicle_num+(v.dep_time?'('+v.dep_time+')':'');
+    cell.value=cell.value?cell.value+'/'+text:text;
+    cell.font={name:INS_XFONT,size:14,color:{argb:INS_XCOL[v.type]||'FF000000'}};
+    cell.alignment={horizontal:'center',vertical:'middle',wrapText:true};
+    if(v.type==='recall'){
+      cell.border={top:{style:'thin'},bottom:{style:'thin'},left:{style:'thin'},right:{style:'thin'}};
+    }
+  });
+}
+
+async function insBuildMonthWorkbook(){
+  const ym=insGetYM();
+  const data=await insFetchData(ym,IS.dept);
+  const days=insDIM(IS.year,IS.month);
+  const wb=new ExcelJS.Workbook();
+  const ws=wb.addWorksheet(IS.dept+'課'+IS.month+'月');
+  ['A','B','C','D','E'].forEach(c=>ws.getColumn(c).width=9);
+  ['F','G'].forEach(c=>ws.getColumn(c).width=3);
+  ['H','I','J','K','L'].forEach(c=>ws.getColumn(c).width=9);
+
+  ws.mergeCells('A1:L1');
+  ws.getCell('A1').value=IS.dept+'課　定期点検表（'+IS.month+'月）';
+  ws.getCell('A1').font={name:INS_XFONT,size:32};
+  ws.getCell('A1').alignment={horizontal:'center',vertical:'middle'};
+  ws.getRow(1).height=46;
+
+  ws.mergeCells('A2:L2');
+  ws.getCell('A2').value='担当車両の点検車検日を確認願います';
+  ws.getCell('A2').font={name:INS_XFONT,size:20,color:{argb:'FFFF0000'}};
+  ws.getCell('A2').alignment={horizontal:'center',vertical:'middle'};
+  ws.getRow(2).height=30;
+
+  ws.mergeCells('A3:E3');
+  ws.getCell('A3').value='《'+insTeamNum(IS.dept,1)+'班》';
+  ws.mergeCells('F3:G3');
+  ws.getCell('F3').value='日付';
+  ws.mergeCells('H3:L3');
+  ws.getCell('H3').value='《'+insTeamNum(IS.dept,2)+'班》';
+  ws.getCell('A3').fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T1}};
+  ws.getCell('F3').fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_DATE}};
+  ws.getCell('H3').fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T2}};
+  ['A3','F3','H3'].forEach((a,i)=>{
+    const cell=ws.getCell(a);
+    cell.font={name:INS_XFONT,size:i===1?14:18};
+    cell.alignment={horizontal:'center',vertical:'middle'};
+  });
+  ws.getRow(3).height=27;
+
+  for(let day=1;day<=days;day++){
+    const row=3+day;
+    const {h1,h2}=insGetDayVehicles(data,day);
+    const dow=new Date(IS.year,IS.month-1,day).getDay();
+    ['A','B','C','D','E'].forEach(c=>{ws.getCell(c+row).fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T1}};});
+    ['H','I','J','K','L'].forEach(c=>{ws.getCell(c+row).fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T2}};});
+    ws.mergeCells('F'+row+':G'+row);
+    const dCell=ws.getCell('F'+row);
+    dCell.value=day;
+    dCell.alignment={horizontal:'center',vertical:'middle'};
+    dCell.fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_DATE}};
+    const dColor=dow===6?'FF00CCFF':dow===0?'FFFF0000':'FF000000';
+    dCell.font={name:INS_XFONT,size:14,color:{argb:dColor}};
+    insSetCellVehicles(ws,row,INS_T1COLS,h1);
+    insSetCellVehicles(ws,row,INS_T2COLS,h2);
+    ws.getRow(row).eachCell({includeEmpty:true},cell=>{
+      cell.border={...cell.border,top:{style:'hair',color:{argb:'FFBBBBBB'}},bottom:{style:'hair',color:{argb:'FFBBBBBB'}}};
+    });
+  }
+
+  const legendRow=4+days;
+  ws.mergeCells('A'+legendRow+':L'+legendRow);
+  const legendCell=ws.getCell('A'+legendRow);
+  legendCell.value='黒字は点検　赤字は車検　紫字は代替　黄字はボンベ交換　白枠黒字はリコール作業';
+  legendCell.font={name:INS_XFONT,size:11,color:{argb:'FF0000FF'}};
+  legendCell.alignment={horizontal:'center',vertical:'middle'};
+
+  ws.pageSetup={paperSize:9,orientation:'portrait',fitToPage:true,fitToWidth:1,fitToHeight:1};
+  return wb;
+}
+
+async function insDownloadMonthExcel(btn){
+  if(btn){btn.disabled=true;}
+  try{
+    const wb=await insBuildMonthWorkbook();
+    const buf=await wb.xlsx.writeBuffer();
+    const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const a=document.createElement('a');
+    a.download=IS.dept+'課_定期点検表_'+IS.year+'年'+IS.month+'月.xlsx';
+    a.href=URL.createObjectURL(blob);
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+  }catch(e){
+    alert('Excel生成に失敗しました: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;}
+  }
 }
 
 // ===== Canvas出力 =====
@@ -587,13 +860,13 @@ function insAiRenderPreview(detectedKa,detectedMonth){
   Object.keys(byDay).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const h1=byDay[day].filter(e=>e.han===1),h2=byDay[day].filter(e=>e.han===2);
     const tag=e=>'<span class="vtag vt-'+e.type+'" style="'+(e._excluded?'opacity:.3;text-decoration:line-through;':'')+'" onclick="insAiToggle('+e._idx+')" title="クリックで除外/戻す">'+insEsc(e.vehicle_num)+'<span class="vt-time">'+INS_TYPE_JP[e.type]+'</span></span>';
-    rows+='<tr><td style="padding:4px"><div class="vtags">'+h1.map(tag).join('')+'</div></td><td class="ins-date-cell">'+day+'</td><td style="padding:4px"><div class="vtags">'+h2.map(tag).join('')+'</div></td></tr>';
+    rows+='<tr><td style="padding:4px"><div class="vtags vtags-r">'+h1.map(tag).join('')+'</div></td><td class="ins-date-cell">'+day+'</td><td style="padding:4px"><div class="vtags">'+h2.map(tag).join('')+'</div></td></tr>';
   });
 
   insAiShow(
     warn+
     '<div style="font-size:13px;color:#333;margin-bottom:10px"><strong>'+insAiEntries.length+'件</strong> の車両を検出しました。内容を確認してください（車番クリックで除外できます）。登録後の修正は表の車番クリックでできます。</div>'+
-    '<div class="ins-table-wrap" style="margin-bottom:12px"><table class="ins-table"><colgroup><col style="width:44%"><col style="width:12%"><col style="width:44%"></colgroup><thead><tr><th>《1班側》</th><th>日付</th><th>《2班側》</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="ins-table-wrap" style="margin-bottom:12px"><table class="ins-table"><colgroup><col style="width:44%"><col style="width:12%"><col style="width:44%"></colgroup><thead><tr><th>《'+insTeamNum(IS.dept,1)+'班側》</th><th>日付</th><th>《'+insTeamNum(IS.dept,2)+'班側》</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<label style="font-size:13px;display:flex;align-items:center;gap:6px;margin-bottom:4px;cursor:pointer"><input type="checkbox" id="ins-ai-replace" checked> '+IS.year+'年'+IS.month+'月 '+IS.dept+'課の既存データを置き換える（外すと追加のみ）</label>'+
     '<div class="ins-actions"><button class="btn-s" onclick="insAiClose()">キャンセル</button><button class="btn-p" id="ins-ai-reg-btn" onclick="insAiRegister()">✓ '+IS.year+'年'+IS.month+'月 '+IS.dept+'課に登録</button></div>'
   );

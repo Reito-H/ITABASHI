@@ -1,4 +1,4 @@
--- Benten管理システム: 社員管理拡張フィールド追加
+-- ホシコン: 社員管理拡張フィールド追加
 ALTER TABLE employees ADD COLUMN work_schedule TEXT;
 ALTER TABLE employees ADD COLUMN start_time TEXT;
 ALTER TABLE employees ADD COLUMN car_no TEXT;

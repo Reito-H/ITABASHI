@@ -1,11 +1,10 @@
 import { Hono } from 'hono';
 import {
   verifyPassword, hashPassword, createSession, deleteSession,
-  isLockedOut, remainingAttempts, recordFailedLogin, getSessionFromCookie, validateSession,
-  getShiftDisplayRange, getPeriodRange, getPeriodSettings, generateInviteCode,
-  type PeriodSettings
+  isLockedOut, recordFailedLogin, getSessionFromCookie,
+  getShiftDisplayRange, getPeriodRange, getPeriodSettings,
 } from '../auth';
-import { layout, loginPage, escHtml } from '../html/layout';
+import { layout, loginPage, loginSelectPage, escHtml, formatJst, type LoginMode } from '../html/layout';
 import { shiftPage } from '../html/shift';
 import type { Env } from '../auth';
 import type {
@@ -14,26 +13,65 @@ import type {
 import { ADMIN_PATH } from '../config';
 import qrcode from 'qrcode-generator';
 import { getMaintenanceMode, setMaintenanceMode, isAdminAccount } from '../utils/maintenance';
+import { getManualBotEnabled, setManualBotEnabled } from '../utils/manual_search';
+import { agoLabel } from './admin_line_usage';
+import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
+// ===== ログイン背景画像（ブラウザキャッシュさせるため別ルートで配信） =====
+app.get('/login-bg.jpg', (c) => {
+  const bytes = Uint8Array.from(atob(LOGIN_BG_JPEG_BASE64), (ch) => ch.charCodeAt(0));
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': 'image/jpeg',
+      'Cache-Control': 'public, max-age=604800, immutable',
+    },
+  });
+});
+
 // ===== ログイン =====
+function getLoginMode(cookieHeader: string | null): LoginMode | null {
+  const m = (cookieHeader ?? '').match(/login_mode=(pc|sp)/);
+  return (m?.[1] as LoginMode) ?? null;
+}
+
 app.get('/login', (c) => {
   const cookie = c.req.header('Cookie') ?? null;
   const sid = getSessionFromCookie(cookie);
   if (sid) return c.redirect(ADMIN_PATH);
+
+  // 表示切替のやり直し要求 → 選択画面へ
+  if (c.req.query('reset') === '1') {
+    const res = c.html(loginSelectPage());
+    res.headers.append('Set-Cookie', 'login_mode=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
+    return res;
+  }
+
+  const queryMode = c.req.query('mode');
+  const mode: LoginMode | null =
+    queryMode === 'pc' || queryMode === 'sp' ? queryMode : getLoginMode(cookie);
+
+  if (!mode) {
+    return c.html(loginSelectPage());
+  }
+
   // CSRFトークン生成
   const csrfToken = crypto.randomUUID();
-  const res = c.html(loginPage('', csrfToken));
+  const res = c.html(loginPage(mode, '', csrfToken));
   res.headers.append('Set-Cookie', `csrf_login=${csrfToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`);
+  if (queryMode === 'pc' || queryMode === 'sp') {
+    res.headers.append('Set-Cookie', `login_mode=${mode}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=15552000`);
+  }
   return res;
 });
 
 app.post('/login', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For') ?? 'unknown';
+  const mode: LoginMode = getLoginMode(c.req.header('Cookie') ?? null) ?? 'pc';
 
   if (await isLockedOut(c.env.DB, ip)) {
-    return c.html(loginPage('しばらく時間をおいてから再試行してください。', ''));
+    return c.html(loginPage(mode, 'しばらく時間をおいてから再試行してください。', ''));
   }
 
   // 空ボディ・不正コンテンツタイプは400で返す（500を防ぐ）
@@ -41,7 +79,7 @@ app.post('/login', async (c) => {
   try {
     form = await c.req.formData();
   } catch {
-    return c.html(loginPage('不正なリクエストです。', ''), 400);
+    return c.html(loginPage(mode, '不正なリクエストです。', ''), 400);
   }
 
   const username = form.get('username')?.toString() ?? '';
@@ -53,13 +91,13 @@ app.post('/login', async (c) => {
   const csrfCookie = cookies.match(/csrf_login=([a-f0-9-]+)/)?.[1] ?? '';
   if (!csrfForm || !csrfCookie || csrfForm !== csrfCookie) {
     const newToken = crypto.randomUUID();
-    const res = c.html(loginPage('セッションが無効です。再度お試しください。', newToken), 403);
+    const res = c.html(loginPage(mode, 'セッションが無効です。再度お試しください。', newToken), 403);
     res.headers.append('Set-Cookie', `csrf_login=${newToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`);
     return res;
   }
 
   if (!username || !password) {
-    return c.html(loginPage('ユーザー名とパスワードを入力してください。', csrfForm), 400);
+    return c.html(loginPage(mode, 'ユーザー名とパスワードを入力してください。', csrfForm), 400);
   }
 
   const admin = await c.env.DB.prepare(
@@ -68,7 +106,7 @@ app.post('/login', async (c) => {
 
   if (!admin || !(await verifyPassword(password, admin.password))) {
     await recordFailedLogin(c.env.DB, ip);
-    return c.html(loginPage('ユーザー名またはパスワードが正しくありません。', ''));
+    return c.html(loginPage(mode, 'ユーザー名またはパスワードが正しくありません。', ''));
   }
 
   const sessionId = await createSession(c.env.DB, admin.id);
@@ -179,7 +217,15 @@ app.get('/', async (c) => {
   const prevY = curM === 1 ? curY - 1 : curY;
   const prevM = curM === 1 ? 12 : curM - 1;
 
-  const [empStats, unrespondedEvents, overdueInterviews, openReports, lastLogin] = await Promise.all([
+  // ===== ダッシュボード表示用データを一括取得 =====
+  // 互いに依存しない17クエリを単一のPromise.allにまとめ、D1への往復を1回に集約する
+  // （旧実装は Promise.all を2回 + 個別await5回に分かれており、直列の往復が発生していた）
+  const selfAdminId = c.get('adminId');
+  const [
+    empStats, unrespondedEvents, overdueInterviews, openReports, lastLogin,
+    hireTrend, reportTrend, divisionComp, salesStats, lineUsage,
+    recentEvents, overdueList, selfAdmin, maintenanceOn, dbHealthOk,
+  ] = await Promise.all([
     c.env.DB.prepare(`
       SELECT
         COUNT(*) AS total,
@@ -206,13 +252,6 @@ app.get('/', async (c) => {
       id: number; ip: string; country: string; city: string;
       latitude: string; longitude: string; user_agent: string; logged_at: string;
     }>(),
-  ]);
-  const empCount     = { cnt: empStats?.total         ?? 0 };
-  const trainingCount = { cnt: empStats?.training_count ?? 0 };
-  const regularCount  = { cnt: empStats?.regular_count  ?? 0 };
-
-  // ===== 分析データ（テーブル欠損時も落ちないよう個別にガード） =====
-  const [hireTrend, reportTrend, divisionComp, salesStats, lineUsage] = await Promise.all([
     // 入社人数の推移（退職者含む・hire_date基準）
     c.env.DB.prepare(`
       SELECT substr(hire_date, 1, 7) AS ym, COUNT(*) AS cnt
@@ -253,32 +292,41 @@ app.get('/', async (c) => {
         COUNT(DISTINCT CASE WHEN created_at >= datetime('now','localtime','-7 days') THEN line_uid END) AS week_users
       FROM line_activity_logs
     `).first<{ today_cnt: number; week_cnt: number; week_users: number }>().catch(() => null),
+    c.env.DB.prepare(`
+      SELECT b.id, b.category, b.content, b.admin_memo, b.created_at, e.name
+      FROM bad_events b
+      JOIN employees e ON b.emp_id = e.id
+      ORDER BY b.created_at DESC LIMIT 8
+    `).all<{ id: number; category: string; content: string; admin_memo: string; name: string; created_at: string }>(),
+    c.env.DB.prepare(`
+      SELECT e.id, e.name, e.emp_no, e.division, e.team,
+        ir.next_interview_date,
+        MAX(ir.interview_date) as last_interview
+      FROM interview_records ir
+      JOIN employees e ON ir.emp_id = e.id
+      WHERE ir.next_interview_date < ? AND ir.next_interview_date != ''
+        AND ir.emp_id NOT IN (
+          SELECT emp_id FROM interview_records WHERE interview_date >= ?
+        )
+      GROUP BY ir.emp_id
+      ORDER BY ir.next_interview_date
+      LIMIT 8
+    `).bind(today, today).all<{
+      id: number; name: string; emp_no: string; division: number; team: number;
+      next_interview_date: string; last_interview: string;
+    }>(),
+    selfAdminId
+      ? c.env.DB.prepare('SELECT username, permissions FROM admins WHERE id = ?')
+          .bind(selfAdminId).first<{ username: string; permissions: string | null }>()
+      : Promise.resolve(null),
+    getMaintenanceMode(c.env.DB).catch(() => false),
+    c.env.DB.prepare('SELECT 1').first().then(() => true).catch(() => false),
   ]);
+  const empCount     = { cnt: empStats?.total         ?? 0 };
+  const trainingCount = { cnt: empStats?.training_count ?? 0 };
+  const regularCount  = { cnt: empStats?.regular_count  ?? 0 };
 
-  const recentEvents = await c.env.DB.prepare(`
-    SELECT b.id, b.category, b.content, b.admin_memo, b.created_at, e.name
-    FROM bad_events b
-    JOIN employees e ON b.emp_id = e.id
-    ORDER BY b.created_at DESC LIMIT 8
-  `).all<{ id: number; category: string; content: string; admin_memo: string; name: string; created_at: string }>();
-
-  const overdueList = await c.env.DB.prepare(`
-    SELECT e.id, e.name, e.emp_no, e.division, e.team,
-      ir.next_interview_date,
-      MAX(ir.interview_date) as last_interview
-    FROM interview_records ir
-    JOIN employees e ON ir.emp_id = e.id
-    WHERE ir.next_interview_date < ? AND ir.next_interview_date != ''
-      AND ir.emp_id NOT IN (
-        SELECT emp_id FROM interview_records WHERE interview_date >= ?
-      )
-    GROUP BY ir.emp_id
-    ORDER BY ir.next_interview_date
-    LIMIT 8
-  `).bind(today, today).all<{
-    id: number; name: string; emp_no: string; division: number; team: number;
-    next_interview_date: string; last_interview: string;
-  }>();
+  const statusCheckedAt = jstNow.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit' });
 
   const CAT_COLOR: Record<string, string> = {
     'クレーマー': '#fecaca',
@@ -289,7 +337,6 @@ app.get('/', async (c) => {
 
   const openReportTotal = (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0);
   const statCards = [
-    { label: '在籍社員数',       value: empCount.cnt,               sub: `研修中 ${trainingCount.cnt}名 / 配属済 ${regularCount.cnt}名`, color: '#1a3a5c' },
     { label: '未対応の報告',     value: unrespondedEvents?.cnt ?? 0, sub: '嫌なこと報告（管理者メモなし）',
       color: (unrespondedEvents?.cnt ?? 0) > 0 ? '#b91c1c' : '#1a3a5c', href: `${ADMIN_PATH}/events` },
     { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',
@@ -308,17 +355,13 @@ app.get('/', async (c) => {
       : `<div class="hm-stat">${inner}</div>`;
   }).join('');
 
-  // ===== クイックアクセス（権限フィルタ: data-nav-id / data-perm-key で自動非表示） =====
+  // ===== よく使う操作（権限フィルタ: data-nav-id / data-perm-key で自動非表示）=====
+  // サイドバーと重複するため、利用頻度の高い項目だけに絞る
   const quickLinks = [
-    { href: `${ADMIN_PATH}/shift`,            nav: 'shift',         label: '新人シフト管理' },
-    { href: `${ADMIN_PATH}/kancho-shift`,     nav: 'kancho-shift',  label: '班長シフト' },
-    { href: `${ADMIN_PATH}/newcomers`,        nav: 'newcomers',     label: '総合新人管理' },
     { href: `${ADMIN_PATH}/staff`,            nav: 'staff',         label: '社員管理' },
-    { href: `${ADMIN_PATH}/staff/search`,     nav: 'staff-search',  label: '社員絞り込み検索' },
-    { href: `${ADMIN_PATH}/events`,           nav: 'events',        label: '報告一覧' },
     { href: `${ADMIN_PATH}/vehicles`,         nav: 'vehicles',      label: '車両検索' },
-    { href: `${ADMIN_PATH}/inspection`,       nav: 'inspection',    label: '点検管理' },
-    { href: `${ADMIN_PATH}/announcements`,    nav: 'announcements', label: 'お知らせ配信' },
+    { href: `${ADMIN_PATH}/shift`,            nav: 'shift',         label: '新人シフト管理' },
+    { href: `${ADMIN_PATH}/events`,           nav: 'events',        label: '報告一覧' },
   ];
   const quickHtml = quickLinks.map(q =>
     `<a href="${q.href}" data-nav-id="${q.nav}" class="hm-quick">${escHtml(q.label)}</a>`
@@ -425,27 +468,57 @@ app.get('/', async (c) => {
       </a>`;
       }).join('');
 
+  // ホームのプレビューでは詳細な監査目的の全IPは見せず、一部伏せ字にする（全件は権限のある/login-logsで確認）
+  const maskIpForPreview = (ip: string | null | undefined): string => {
+    if (!ip) return '不明';
+    if (ip.includes(':')) {
+      const groups = ip.split(':');
+      return `${groups.slice(0, 2).join(':')}:****`;
+    }
+    const parts = ip.split('.');
+    return parts.length === 4 ? `${parts[0]}.${parts[1]}.**.**` : '****';
+  };
+
   const loginRows = (lastLogin?.results ?? []).map(l => {
     const loc = [l.city, l.country].filter(Boolean).join(' / ');
-    const coords = (l.latitude && l.longitude)
-      ? `<a href="https://www.google.com/maps?q=${l.latitude},${l.longitude}" target="_blank" style="color:#2563eb;font-size:10px;margin-left:4px;">地図</a>`
-      : '';
     return `
       <div style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <div>
-          <span style="font-weight:600;color:#374151;font-family:monospace;">${escHtml(l.ip ?? '不明')}</span>
-          <span style="color:#9ca3af;margin-left:8px;">${escHtml(loc || '—')}${coords}</span>
+          <span style="font-weight:600;color:#374151;font-family:monospace;">${escHtml(maskIpForPreview(l.ip))}</span>
+          <span style="color:#9ca3af;margin-left:8px;">${escHtml(loc || '—')}</span>
         </div>
-        <span style="color:#9ca3af;white-space:nowrap;">${escHtml(l.logged_at?.slice(0, 16) ?? '')}</span>
+        <span style="color:#9ca3af;white-space:nowrap;">${escHtml(formatJst(l.logged_at))}</span>
       </div>`;
   }).join('') || '<div style="color:#9ca3af;font-size:13px;padding:8px 0;">ログイン記録なし</div>';
+
+  // ===== ヘッダー: アカウント名・権限バッジ =====
+  const isFullAdmin = selfAdmin ? selfAdmin.permissions === null : false;
+  const headerExtra = selfAdmin ? `
+    <span style="display:flex;align-items:center;gap:8px;">
+      <span style="background:${isFullAdmin ? '#eff6ff' : '#f3f4f6'};color:${isFullAdmin ? '#1d4ed8' : '#4b5563'};font-size:11px;font-weight:700;padding:3px 10px;border-radius:99px;white-space:nowrap;">${isFullAdmin ? '全権限' : '管理者'}</span>
+      <span style="font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(selfAdmin.username)}</span>
+    </span>` : '';
+
+  // ===== システム状態ミニウィジェット（実測値のみ。詳細は/settings/statusへ） =====
+  const statusRows = [
+    { label: 'システム稼働', ok: true },
+    { label: 'データベース', ok: dbHealthOk },
+    { label: 'メンテナンスモード', ok: !maintenanceOn, okLabel: 'OFF', ngLabel: '稼働中' },
+  ].map(s => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;">
+      <span style="font-size:12px;color:#475569;">${escHtml(s.label)}</span>
+      <span style="font-size:11px;font-weight:700;color:${s.ok ? '#16a34a' : '#b91c1c'};display:flex;align-items:center;gap:4px;">
+        <span style="width:6px;height:6px;border-radius:50%;background:${s.ok ? '#22c55e' : '#dc2626'};display:inline-block;"></span>
+        ${escHtml(s.ok ? (s.okLabel ?? '正常') : (s.ngLabel ?? '異常'))}
+      </span>
+    </div>`).join('');
 
   const content = `
 <style>
   .hm { font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; }
   .hm-sec-title { font-size:12px; font-weight:700; color:#94a3b8; letter-spacing:.08em; margin:0 2px 10px; }
   /* サマリーカード */
-  .hm-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:26px; }
+  .hm-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:10px; }
   .hm-stat { display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #e8edf3; border-radius:12px; padding:18px 20px; text-decoration:none; transition:border-color .15s, box-shadow .15s; }
   a.hm-stat:hover { border-color:#c3d3e4; box-shadow:0 4px 14px rgba(26,58,92,.08); }
   .hm-stat-label { font-size:12px; color:#64748b; font-weight:600; letter-spacing:.03em; }
@@ -457,7 +530,7 @@ app.get('/', async (c) => {
   .hm-quick:hover { background:#f4f8fc; border-color:#c3d3e4; border-left-color:#2d6a9f; box-shadow:0 3px 10px rgba(26,58,92,.08); }
   /* 分析カード */
   .hm-ana { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
-  .hm-ana3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:26px; }
+  .hm-ana4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:14px; margin-bottom:26px; }
   .hm-card { background:#fff; border:1px solid #e8edf3; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
   .hm-card-link { text-decoration:none; transition:border-color .15s, box-shadow .15s; }
   .hm-card-link:hover { border-color:#c3d3e4; box-shadow:0 4px 14px rgba(26,58,92,.08); }
@@ -485,48 +558,25 @@ app.get('/', async (c) => {
   .hm-kpi-row { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:10px; }
   .hm-kpi-note { font-size:11px; color:#64748b; }
   /* 下段リスト */
-  .hm-lists { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+  .hm-lists { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:26px; }
   @media (max-width: 900px) {
-    .hm-stats { grid-template-columns:repeat(2,1fr); }
+    .hm-stats { grid-template-columns:1fr; }
     .hm-ana, .hm-lists { grid-template-columns:1fr; }
-    .hm-ana3 { grid-template-columns:1fr; }
+    .hm-ana4 { grid-template-columns:1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    .hm-ana4 { grid-template-columns:1fr; }
   }
 </style>
 <div class="hm">
 
-  <!-- サマリーカード -->
+  <!-- 今日の対応 -->
+  <div class="hm-sec-title">今日の対応</div>
   <div class="hm-stats">
     ${statCards}
   </div>
 
-  <!-- クイックアクセス -->
-  <div class="hm-sec-title">クイックアクセス</div>
-  <div class="hm-quicks">
-    ${quickHtml}
-  </div>
-
-  <!-- データ分析 -->
-  <div class="hm-sec-title">データ分析（直近6ヶ月）</div>
-  <div class="hm-ana">
-    <div class="hm-card">
-      <div class="hm-card-head"><span class="hm-card-title">入社人数の推移</span><span class="hm-card-sub">合計 ${hireTotal6}名</span></div>
-      <div class="hm-card-body">${barChart(hireSeries, '#2d6a9f')}</div>
-    </div>
-    <div class="hm-card">
-      <div class="hm-card-head"><span class="hm-card-title">報告件数の推移</span><span class="hm-card-sub">全報告合算 ${reportTotal6}件</span></div>
-      <div class="hm-card-body">${barChart(reportSeries, '#b45309')}</div>
-    </div>
-  </div>
-  <div class="hm-ana3">
-    <div class="hm-card">
-      <div class="hm-card-head"><span class="hm-card-title">課別の在籍構成</span><span class="hm-card-sub">在籍 ${empCount.cnt}名</span></div>
-      <div class="hm-card-body">${divisionHtml}</div>
-    </div>
-    ${salesCardHtml}
-    ${lineCardHtml}
-  </div>
-
-  <!-- 要対応リスト -->
+  <!-- 今日の対応の詳細 -->
   <div class="hm-lists">
     <div class="hm-card">
       <div class="hm-card-head">
@@ -544,6 +594,40 @@ app.get('/', async (c) => {
     </div>
   </div>
 
+  <!-- よく使う操作 -->
+  <div class="hm-sec-title">よく使う操作</div>
+  <div class="hm-quicks">
+    ${quickHtml}
+  </div>
+
+  <!-- 今月の状況 -->
+  <div class="hm-sec-title">今月の状況（直近6ヶ月の推移）</div>
+  <div class="hm-ana">
+    <div class="hm-card">
+      <div class="hm-card-head"><span class="hm-card-title">入社人数の推移</span><span class="hm-card-sub">合計 ${hireTotal6}名・在籍 ${empCount.cnt}名（研修中${trainingCount.cnt}／配属済${regularCount.cnt}）</span></div>
+      <div class="hm-card-body">${barChart(hireSeries, '#2d6a9f')}</div>
+    </div>
+    <div class="hm-card">
+      <div class="hm-card-head"><span class="hm-card-title">報告件数の推移</span><span class="hm-card-sub">全報告合算 ${reportTotal6}件</span></div>
+      <div class="hm-card-body">${barChart(reportSeries, '#b45309')}</div>
+    </div>
+  </div>
+  <div class="hm-ana4">
+    <div class="hm-card">
+      <div class="hm-card-head"><span class="hm-card-title">課別の在籍構成</span><span class="hm-card-sub">在籍 ${empCount.cnt}名</span></div>
+      <div class="hm-card-body">${divisionHtml}</div>
+    </div>
+    ${salesCardHtml}
+    ${lineCardHtml}
+    <div class="hm-card hm-card-link" style="cursor:default;">
+      <div class="hm-card-head"><span class="hm-card-title">システム状態</span><span class="hm-card-sub">${statusCheckedAt}時点</span></div>
+      <div class="hm-card-body">
+        ${statusRows}
+        <a href="${ADMIN_PATH}/settings/status" style="display:block;margin-top:8px;font-size:11px;color:#2563eb;text-decoration:none;">詳細を見る →</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ログイン履歴 -->
   <div class="hm-card" style="padding:0 20px 12px;">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 10px;">
@@ -555,41 +639,55 @@ app.get('/', async (c) => {
 
 </div>`;
 
-  return c.html(layout('ホーム', content, 'home'));
+  return c.html(layout('ホーム', content, 'home', headerExtra));
 });
 
 // ===== ログイン履歴 =====
 app.get('/login-logs', async (c) => {
   const logs = await c.env.DB.prepare(
-    'SELECT * FROM login_logs ORDER BY logged_at DESC LIMIT 200'
-  ).all<{ id: number; ip: string; country: string; city: string; latitude: string; longitude: string; timezone: string; user_agent: string; logged_at: string }>();
+    `SELECT *, CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', logged_at) AS INTEGER) AS diff_sec
+     FROM login_logs ORDER BY logged_at DESC LIMIT 200`
+  ).all<{ id: number; ip: string; country: string; city: string; latitude: string; longitude: string; timezone: string; user_agent: string; logged_at: string; diff_sec: number | null }>();
+
+  const todayJst = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  let lastDateLabel = '';
 
   const rows = (logs.results ?? []).map(l => {
     const loc = [l.city, l.country].filter(Boolean).join(' / ') || '不明';
     const coords = (l.latitude && l.longitude)
       ? `<a href="https://www.google.com/maps?q=${l.latitude},${l.longitude}" target="_blank" style="color:#2563eb;">📍地図</a>`
-      : '—';
-    return `<tr class="hover:bg-gray-50">
+      : '<span style="color:#d1d5db;">—</span>';
+    const dateTimeJst = formatJst(l.logged_at, true);
+    const [datePart, timePart] = dateTimeJst.split(' ');
+    const isToday = datePart.slice(0, 10) === todayJst;
+    const dateSep = datePart !== lastDateLabel
+      ? `<tr><td colspan="6" style="padding:10px 12px 4px;font-size:11px;font-weight:700;color:#94a3b8;background:#f9fafb;border-bottom:1px solid #f1f5f9;">${escHtml(datePart)}${isToday ? '<span style="margin-left:6px;color:#2563eb;">今日</span>' : ''}</td></tr>`
+      : '';
+    lastDateLabel = datePart;
+    return `${dateSep}<tr style="border-bottom:1px solid #f3f4f6;">
+      <td class="px-3 py-2 text-sm border-b" style="white-space:nowrap;">
+        <span style="font-weight:700;color:#1e293b;font-variant-numeric:tabular-nums;">${escHtml(timePart)}</span>
+        <span style="font-size:11px;color:#9ca3af;margin-left:6px;">${escHtml(agoLabel(l.diff_sec))}</span>
+      </td>
       <td class="px-3 py-2 text-sm font-mono text-gray-700 border-b">${escHtml(l.ip ?? '—')}</td>
       <td class="px-3 py-2 text-sm text-gray-600 border-b">${escHtml(loc)}</td>
       <td class="px-3 py-2 text-xs text-gray-500 border-b">${escHtml(l.timezone ?? '—')}</td>
       <td class="px-3 py-2 text-xs border-b">${coords}</td>
-      <td class="px-3 py-2 text-xs text-gray-400 border-b" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(l.user_agent ?? '')}">${escHtml((l.user_agent ?? '').slice(0, 40))}</td>
-      <td class="px-3 py-2 text-xs text-gray-500 border-b">${escHtml(l.logged_at?.slice(0,16) ?? '')}</td>
+      <td class="px-3 py-2 text-xs text-gray-400 border-b" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(l.user_agent ?? '')}">${escHtml((l.user_agent ?? '').slice(0, 50))}</td>
     </tr>`;
   }).join('');
 
   const content = `
     <div class="bg-white rounded-xl shadow overflow-auto">
-      <table class="w-full">
-        <thead class="bg-gray-50">
+      <table class="w-full" style="border-collapse:collapse;">
+        <thead style="background:#f9fafb;position:sticky;top:0;z-index:1;">
           <tr>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">日時</th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">IPアドレス</th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">場所</th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">タイムゾーン</th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">座標</th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">ブラウザ</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 border-b">日時</th>
           </tr>
         </thead>
         <tbody>${rows || '<tr><td colspan="6" class="px-4 py-8 text-center text-gray-400">記録なし</td></tr>'}</tbody>
@@ -656,11 +754,13 @@ app.get('/shift', async (c) => {
 app.get('/newcomers', (c) => {
   const ADMIN = ADMIN_PATH;
   const items = [
+    { href: `${ADMIN}/shift`,      title: '新人シフト管理',   desc: '研修シフトの作成・班長/コーチの割当' },
     { href: `${ADMIN}/employees`,  title: '新人リスト',       desc: '在籍新人の登録・ステータス・面談フラグ管理' },
     { href: `${ADMIN}/info`,       title: '新卒Info',          desc: '新卒社員の個人情報・趣味・メンタル状態' },
     { href: `${ADMIN}/followup`,   title: 'フォローリスト',   desc: '要フォロー社員の一覧確認' },
     { href: `${ADMIN}/interviews`, title: '面談管理',          desc: '面談記録・次回面談予定日の管理' },
     { href: `${ADMIN}/sales`,      title: '売上管理',          desc: '月次営業収入・乗車回数・走行距離の集計' },
+    { href: `${ADMIN}/events`,     title: '嫌なこと報告一覧', desc: '新人からの報告一覧・対応メモの管理' },
   ];
   const cards = items.map(item => `
     <a href="${item.href}" style="display:flex;align-items:center;gap:16px;background:white;border-radius:12px;padding:20px 22px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid #e5e7eb;transition:box-shadow 0.15s;"
@@ -687,7 +787,6 @@ app.get('/shift/export', async (c) => {
   if (!year || !month) return c.text('パラメータ不足', 400);
 
   const periodCfgExp = await getPeriodSettings(c.env.DB);
-  const { start: periodStart, end: periodEnd } = getPeriodRange(year, month, periodCfgExp);
   const { dates } = getShiftDisplayRange(year, month, periodCfgExp);
 
   const [employeesRes, shiftsRes, coachesRes2] = await Promise.all([
@@ -780,7 +879,6 @@ app.get('/shift/print/:empId', async (c) => {
     const day = dt.getUTCDate();
     const dow = dt.getUTCDay();
     const isWeekend = dow === 0 || dow === 6;
-    const isHoliday = false;
     const dayColor = dow === 0 ? 'color:#dc2626;' : dow === 6 ? 'color:#2563eb;' : '';
     const bgRow = isWeekend ? 'background:#fafafa;' : '';
     const shift = shiftByDate[d] ?? { main: '', sub: '' };
@@ -904,10 +1002,12 @@ app.get('/settings', (c) => {
       { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
       { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },
       { href: `${ADMIN}/settings/benten`,         perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理' },
+      { href: `${ADMIN}/settings/kancho`,         perm: 'settings.kancho settings.kancho-roster settings.kancho-wish', title: '班長関連', desc: '班長リスト（社員番号・内勤）、希望休フォームの設定' },
     ]},
     { heading: 'LINE関連', cards: [
       { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理',     desc: '新人招待コード発行・紐付け状況' },
       { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定', desc: '朝レポート・報告アラート・ベンテン/班長通知の時刻とON/OFF' },
+      { href: `${ADMIN}/usage`,                  perm: 'settings.line-usage',    title: 'LINE利用状況', desc: 'トーク・LIFF操作のユーザー別利用集計（フル権限adminのみ）' },
     ]},
     { heading: 'マスタ管理', cards: [
       { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所',              desc: '各営業所の電話番号・住所の管理' },
@@ -1317,8 +1417,6 @@ app.get('/settings/notifications', async (c) => {
 
   const rows = (settingsRes.results ?? []).map((s: any) => {
     const info = TYPE_LABELS[s.type] ?? { label: s.type, desc: '', dest: '' };
-    const hh = String(s.send_hour).padStart(2, '0');
-    const mm = String(s.send_minute).padStart(2, '0');
     return `
     <div style="background:white;border-radius:10px;border:1px solid #e5e7eb;padding:18px 20px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
@@ -1585,7 +1683,7 @@ app.get('/settings/tutorial', (c) => {
   <!-- 表紙 -->
   <div class="tut-cover">
     <div style="font-size:11px;color:#9ca3af;letter-spacing:0.15em;margin-bottom:16px;">STAFF MANAGEMENT SYSTEM</div>
-    <div class="tut-cover-title">Benten管理システム<br>使い方ガイド</div>
+    <div class="tut-cover-title">ホシコン<br>使い方ガイド</div>
     <div style="margin:16px auto;width:48px;height:3px;background:#1e3a5f;border-radius:2px;"></div>
     <div class="tut-cover-sub">管理者・現場スタッフ 共通マニュアル</div>
     <div class="tut-cover-sub" style="margin-top:6px;font-size:12px;">最終更新: 2026年7月</div>
@@ -1595,25 +1693,25 @@ app.get('/settings/tutorial', (c) => {
   <div class="tut-toc">
     <h3>目次</h3>
     <div class="tut-toc-section">第1章 — 管理者向け機能</div>
-    <a href="#dash">1-1. ダッシュボード — 全体状況の確認</a>
-    <a href="#emp">1-2. 社員管理 — 登録・編集・ステータス管理</a>
-    <a href="#shift">1-3. シフト管理 — 研修スケジュール入力</a>
-    <a href="#info">1-4. 新卒Info — 新卒社員の個人情報管理</a>
-    <a href="#follow">1-5. フォローリスト — 要フォロー社員の確認</a>
-    <a href="#interview">1-6. 面談管理 — 面談記録・次回予定</a>
-    <a href="#sales">1-7. 売上管理 — 月次売上の記録と確認</a>
-    <a href="#events">1-8. 報告一覧 — 嫌なこと報告の確認・対応</a>
-    <a href="#announce">1-9. お知らせ配信 — LINEで一斉送信</a>
-    <a href="#vehicle">1-10. 車両検索 — 無線番号・ナンバーで車両照会</a>
-    <a href="#line">1-11. LINE管理 — ユーザー連携状況</a>
-    <a href="#settings">1-12. 設定 — 各種マスタ管理</a>
-    <a href="#kancho">1-13. 班長シフト — 班長・指導者の月間シフト</a>
-    <a href="#staff-search">1-14. 社員絞り込み検索 — 条件を組み合わせた検索</a>
-    <a href="#inspection">1-15. 点検管理 — 車両点検スケジュール</a>
-    <a href="#manual-bot">1-16. マニュアルBot — AIチャットで質問</a>
-    <a href="#report-center">1-17. 報告センター — 忘れ物・事故・違反・一般報告</a>
-    <a href="#benten-shift">1-18. ベンテンクラブ シフト</a>
-    <a href="#line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
+    <a href="#dash" data-perm-key="home">1-1. ダッシュボード — 全体状況の確認</a>
+    <a href="#emp" data-perm-key="staff">1-2. 社員管理 — 登録・編集・ステータス管理</a>
+    <a href="#shift" data-perm-key="shift">1-3. シフト管理 — 研修スケジュール入力</a>
+    <a href="#info" data-perm-key="newcomers">1-4. 新卒Info — 新卒社員の個人情報管理</a>
+    <a href="#follow" data-perm-key="newcomers">1-5. フォローリスト — 要フォロー社員の確認</a>
+    <a href="#interview" data-perm-key="newcomers">1-6. 面談管理 — 面談記録・次回予定</a>
+    <a href="#sales" data-perm-key="staff">1-7. 売上管理 — 月次売上の記録と確認</a>
+    <a href="#events" data-perm-key="events">1-8. 報告一覧 — 嫌なこと報告の確認・対応</a>
+    <a href="#announce" data-perm-key="announcements">1-9. お知らせ配信 — LINEで一斉送信</a>
+    <a href="#vehicle" data-perm-key="vehicles">1-10. 車両検索 — 無線番号・ナンバーで車両照会</a>
+    <a href="#line" data-perm-key="line">1-11. LINE管理 — ユーザー連携状況</a>
+    <a href="#settings" data-perm-key="settings">1-12. 設定 — 各種マスタ管理</a>
+    <a href="#kancho" data-perm-key="kancho-shift">1-13. 班長シフト — 班長・指導者の月間シフト</a>
+    <a href="#staff-search" data-perm-key="staff">1-14. 社員絞り込み検索 — 条件を組み合わせた検索</a>
+    <a href="#inspection" data-perm-key="inspection">1-15. 点検管理 — 車両点検スケジュール</a>
+    <a href="#manual-bot" data-perm-key="manual-chat">1-16. マニュアルBot — AIチャットで質問</a>
+    <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">1-17. 報告センター — 忘れ物・事故・違反・一般報告</a>
+    <a href="#benten-shift" data-perm-key="settings.benten">1-18. ベンテンクラブ シフト</a>
+    <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
     <div class="tut-toc-section" style="margin-top:12px;">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
     <a href="#veh-what">2-1. 車番検索でできること</a>
     <a href="#veh-how">2-2. 検索の方法</a>
@@ -1633,7 +1731,7 @@ app.get('/settings/tutorial', (c) => {
   <p style="font-size:13px;color:#6b7280;margin-top:8px;">このシステムへは管理者専用URLからアクセスします。ログイン後、左のナビゲーションから各機能に移動できます。</p>
 
   <!-- 1-1 ダッシュボード -->
-  <div class="tut-section" id="dash">
+  <div class="tut-section" id="dash" data-perm-key="home">
     <h3><span class="num">1</span>ダッシュボード — 全体状況の確認</h3>
     <p style="font-size:13px;">ログイン直後に表示されるトップページです。現在の新人状況が一目で確認できます。</p>
     <table class="tut-table">
@@ -1649,7 +1747,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-2 社員管理 -->
-  <div class="tut-section" id="emp">
+  <div class="tut-section" id="emp" data-perm-key="staff">
     <h3><span class="num">2</span>社員管理 — 登録・編集・ステータス管理</h3>
     <p style="font-size:13px;">新人社員の登録・情報更新・退職処理を行います。</p>
 
@@ -1701,7 +1799,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-3 シフト管理 -->
-  <div class="tut-section" id="shift">
+  <div class="tut-section" id="shift" data-perm-key="shift">
     <h3><span class="num">3</span>シフト管理 — 研修スケジュール入力</h3>
     <p style="font-size:13px;">社員ごとの日別研修内容（午前・午後・研修担当）を入力する月別シフト表です。</p>
 
@@ -1728,7 +1826,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-4 新卒Info -->
-  <div class="tut-section" id="info">
+  <div class="tut-section" id="info" data-perm-key="newcomers">
     <h3><span class="num">4</span>新卒Info — 新卒社員の個人情報管理</h3>
     <p style="font-size:13px;">新卒社員の趣味・食の好み・飲酒状況・運転技能・メンタル状態などを記録します。面談や日常ケアの参考として活用できます。</p>
     <table class="tut-table">
@@ -1741,7 +1839,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-5 フォローリスト -->
-  <div class="tut-section" id="follow">
+  <div class="tut-section" id="follow" data-perm-key="newcomers">
     <h3><span class="num">5</span>フォローリスト — 要フォロー社員の確認</h3>
     <p style="font-size:13px;">以下の条件に該当する社員が自動でリストアップされます。定期的に確認して声かけや面談を行いましょう。</p>
     <table class="tut-table">
@@ -1753,7 +1851,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-6 面談管理 -->
-  <div class="tut-section" id="interview">
+  <div class="tut-section" id="interview" data-perm-key="newcomers">
     <h3><span class="num">6</span>面談管理 — 面談記録・次回予定</h3>
     <p style="font-size:13px;">社員との面談内容・実施日・次回予定日を記録します。</p>
     <ol class="tut-steps">
@@ -1765,7 +1863,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-7 売上管理 -->
-  <div class="tut-section" id="sales">
+  <div class="tut-section" id="sales" data-perm-key="staff">
     <h3><span class="num">7</span>売上管理 — 月次売上の記録と確認</h3>
     <p style="font-size:13px;">社員ごとの日別営業収入・乗車回数・走行距離を記録・集計します。</p>
     <ol class="tut-steps">
@@ -1777,7 +1875,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-8 報告一覧 -->
-  <div class="tut-section" id="events">
+  <div class="tut-section" id="events" data-perm-key="events">
     <h3><span class="num">8</span>報告一覧 — 嫌なこと報告の確認・対応</h3>
     <p style="font-size:13px;">社員がLINEから送信した「嫌なこと・困ったこと」の報告が一覧で確認できます。</p>
     <table class="tut-table">
@@ -1796,7 +1894,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-9 お知らせ配信 -->
-  <div class="tut-section" id="announce">
+  <div class="tut-section" id="announce" data-perm-key="announcements">
     <h3><span class="num">9</span>お知らせ配信 — LINEで一斉送信</h3>
     <p style="font-size:13px;">社員のLINEアカウントにお知らせやアンケートを一斉送信できます。</p>
     <ol class="tut-steps">
@@ -1815,7 +1913,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-10 車両検索 -->
-  <div class="tut-section" id="vehicle">
+  <div class="tut-section" id="vehicle" data-perm-key="vehicles">
     <h3><span class="num">10</span>車両検索 — 無線番号・ナンバーで車両照会</h3>
     <p style="font-size:13px;">4桁の無線番号またはナンバープレート末尾4桁を入力して、車両情報を検索できます。</p>
 
@@ -1846,7 +1944,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-11 LINE管理 -->
-  <div class="tut-section" id="line">
+  <div class="tut-section" id="line" data-perm-key="line">
     <h3><span class="num">11</span>LINE管理 — ユーザー連携状況</h3>
     <p style="font-size:13px;">社員のLINEアカウントと本システムの紐付け状況を管理します。</p>
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍招待コードの発行と連携手順</p>
@@ -1860,7 +1958,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-12 設定 -->
-  <div class="tut-section" id="settings">
+  <div class="tut-section" id="settings" data-perm-key="settings">
     <h3><span class="num">12</span>設定 — 各種マスタ管理</h3>
     <p style="font-size:13px;">設定ページは次の6グループに分かれています。アカウントに権限のない項目は表示されません。</p>
 
@@ -1912,7 +2010,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-13 班長シフト -->
-  <div class="tut-section" id="kancho">
+  <div class="tut-section" id="kancho" data-perm-key="kancho-shift">
     <h3><span class="num">13</span>班長シフト — 班長・指導者の月間シフト</h3>
     <p style="font-size:13px;">班長・指導者の月間シフト表をWebで管理します。紙のExcel運用の置き換えです。</p>
     <ol class="tut-steps">
@@ -1931,19 +2029,19 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-14 社員絞り込み検索 -->
-  <div class="tut-section" id="staff-search">
+  <div class="tut-section" id="staff-search" data-perm-key="staff">
     <h3><span class="num">14</span>社員絞り込み検索 — 条件を組み合わせた検索</h3>
-    <p style="font-size:13px;">名前・社員番号のキーワードに加えて、課・班・勤務形態・在籍状態・入社区分・入社日/退職日の期間・年齢・車種などの条件を組み合わせて社員を検索できます。</p>
+    <p style="font-size:13px;">名前・社員番号のキーワードに加えて、課・班・勤務形態・在籍状態・入社区分・入社日/退職日の期間・年齢・車種などの条件を組み合わせて社員を検索できます。「社員管理」ページ内の「詳細検索」に統合されています。</p>
     <ol class="tut-steps">
-      <li>左メニュー「社員絞り込み検索」を開く</li>
-      <li>条件を選んで「検索」— 条件は複数選択できます</li>
-      <li>結果の氏名をクリックすると社員詳細ページへ移動</li>
+      <li>左メニュー「社員管理」を開く</li>
+      <li>フィルターの下にある「詳細検索」を開き、条件を選んで「絞り込む」— 条件は複数選択できます</li>
+      <li>該当する社員の行をクリックすると社員詳細ページへ移動</li>
     </ol>
-    <div class="tut-tip">ふりがな（カタカナ）でも検索できます。条件をやり直すときは「リセット」を押してください。</div>
+    <div class="tut-tip">ふりがな（カタカナ）でも検索できます。条件をやり直すときは「詳細条件をリセット」を押してください。</div>
   </div>
 
   <!-- 1-15 点検管理 -->
-  <div class="tut-section" id="inspection">
+  <div class="tut-section" id="inspection" data-perm-key="inspection">
     <h3><span class="num">15</span>点検管理 — 車両点検スケジュール</h3>
     <p style="font-size:13px;">課ごとの車両点検予定（車番・点検種別・出発時刻）を月表で管理します。</p>
     <ol class="tut-steps">
@@ -1955,7 +2053,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-16 マニュアルBot -->
-  <div class="tut-section" id="manual-bot">
+  <div class="tut-section" id="manual-bot" data-perm-key="manual-chat">
     <h3><span class="num">16</span>マニュアルBot — AIチャットで質問</h3>
     <p style="font-size:13px;">登録済みのマニュアル（S.RIDE・決済・チケット・メーター操作など）をもとに、AIがチャット形式で質問に答えます。</p>
     <ol class="tut-steps">
@@ -1967,7 +2065,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-17 報告センター -->
-  <div class="tut-section" id="report-center">
+  <div class="tut-section" id="report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">
     <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反・一般報告</h3>
     <p style="font-size:13px;">乗務員や管理者がLINE（LIFF）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告タブ）で確認・管理します。</p>
     <ol class="tut-steps">
@@ -1986,7 +2084,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-18 ベンテンクラブ シフト -->
-  <div class="tut-section" id="benten-shift">
+  <div class="tut-section" id="benten-shift" data-perm-key="settings.benten">
     <h3><span class="num">18</span>ベンテンクラブ シフト</h3>
     <p style="font-size:13px;">ベンテンクラブ会員のシフトを管理し、LINEグループへ毎日自動送信します。</p>
     <table class="tut-table">
@@ -2000,7 +2098,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-19 LINE利用状況 -->
-  <div class="tut-section" id="line-usage">
+  <div class="tut-section" id="line-usage" data-perm-key="settings.line-usage">
     <h3><span class="num">19</span>LINE利用状況 — 操作ログの確認</h3>
     <p style="font-size:13px;">LINE連携ユーザーが「いつ・どの機能を使ったか」を確認できます。今日・7日間・30日間の利用者数と、ユーザーごとの利用回数・最終利用日時が一覧になります。</p>
     <div class="tut-note">このページはフル権限の管理者（admin）だけが見られます。</div>
@@ -2119,7 +2217,7 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <div style="margin-top:40px;padding-top:20px;border-top:2px solid #e5e7eb;text-align:center;font-size:11px;color:#9ca3af;">
-    Benten管理システム 使い方ガイド &nbsp;|&nbsp; 2026年7月版 &nbsp;|&nbsp; ご不明な点は事務所スタッフまでお問い合わせください
+    ホシコン 使い方ガイド &nbsp;|&nbsp; 2026年7月版 &nbsp;|&nbsp; ご不明な点は事務所スタッフまでお問い合わせください
   </div>
 </div>`;
 
@@ -2172,8 +2270,6 @@ app.get('/employees', async (c) => {
     const ss = STATUS_STYLE[st] ?? STATUS_STYLE.training;
     const itTarget = !!e.interview_target;
     // 研修中 → 研修終了 → 未配属 → 研修中 のサイクル
-    const cycleMap: Record<string, string> = { training: 'completed', completed: 'unassigned', unassigned: 'training' };
-    const nextStatus = cycleMap[st] ?? 'completed';
     const nextLabels: Record<string, string> = { training: '→研修終了', completed: '→未配属', unassigned: '→研修中' };
     const nextLabel  = nextLabels[st] ?? '→研修終了';
     const C = 'padding:7px 8px;border-bottom:1px solid #f3f4f6;vertical-align:middle;overflow:hidden;';
@@ -3011,6 +3107,25 @@ app.post('/settings/status/maintenance', async (c) => {
   return c.json({ ok: true, enabled });
 });
 
+// マニュアルBot稼働状態（ステータスページ表示用）
+app.get('/settings/status/manual-bot', async (c) => {
+  return c.json({ enabled: await getManualBotEnabled(c.env.DB) });
+});
+
+// マニュアルBot稼働ON/OFF切替
+app.post('/settings/status/manual-bot', async (c) => {
+  let enabled: boolean;
+  try {
+    const body = await c.req.json<{ enabled?: unknown }>();
+    if (typeof body.enabled !== 'boolean') throw new Error('invalid');
+    enabled = body.enabled;
+  } catch {
+    return c.json({ error: 'enabled は true / false で指定してください' }, 400);
+  }
+  await setManualBotEnabled(c.env.DB, enabled);
+  return c.json({ ok: true, enabled });
+});
+
 app.get('/settings/status', async (c) => {
   const adminLoginUrl = `https://bentenclub.com${ADMIN_PATH}/login`;
 
@@ -3035,6 +3150,7 @@ app.get('/settings/status', async (c) => {
   const adminId = c.get('adminId');
   const isAdmin = adminId ? await isAdminAccount(c.env.DB, adminId) : false;
   const maintenanceOn = await getMaintenanceMode(c.env.DB);
+  const manualBotOn = await getManualBotEnabled(c.env.DB);
 
   // ===== 実データ収集（利用状況・DB統計・直近アクティビティ） =====
   const [usageStats, featureTop, dailyUsage, dbCounts, recentActivity, loginStats] = await Promise.all([
@@ -3182,6 +3298,28 @@ app.get('/settings/status', async (c) => {
         </div>
       </div>` : '';
 
+  // マニュアルBot制御カード
+  const manualBotCard = `
+      <div class="sys-panel">
+        <div class="sys-ph"><span class="sys-pt mono">MANUAL BOT CONTROL</span></div>
+        <div class="sys-pb">
+          <div class="sys-row" style="flex-wrap:wrap;">
+            <div style="flex:1;min-width:240px;">
+              <div style="font-size:14px;font-weight:700;color:#1e3a5f;">マニュアルBot（革命AI）</div>
+              <div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.7;">
+                OFFにすると管理画面「マニュアルBot」チャットとLINEの「？質問」への応答を停止します。<br>
+                チケット専用Bot（券種・決済の質問）はこの設定の影響を受けず稼働し続けます。
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <span id="mbot-state" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.1em;color:${manualBotOn ? '#16a34a' : '#d97706'};">${manualBotOn ? 'RUNNING' : 'STOPPED'}</span>
+              <label class="sw"><input type="checkbox" id="mbot-toggle" ${manualBotOn ? 'checked' : ''} onchange="toggleManualBot(this)"><span class="tr"></span></label>
+            </div>
+          </div>
+          <div id="mbot-msg" style="font-size:11px;color:#94a3b8;margin-top:8px;"></div>
+        </div>
+      </div>`;
+
   const html = settingsSubHeader('システムステータス') + `
     <style>
       .sysc{max-width:880px;}
@@ -3241,6 +3379,7 @@ app.get('/settings/status', async (c) => {
         &#9888; メンテナンスモード稼働中 &mdash; admin 以外のアクセスにはメンテナンス画面が表示されています
       </div>
       ${maintenanceCard}
+      ${manualBotCard}
 
       <!-- サーバー・DB（サーバーサイド確認済み） -->
       <div class="sys-panel">
@@ -3455,6 +3594,28 @@ app.get('/settings/status', async (c) => {
         if (bn) { bn.style.display = on ? 'block' : 'none'; }
         var msg = document.getElementById('maint-msg');
         if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
+      }
+
+      // ---- マニュアルBot稼働切替 ----
+      function toggleManualBot(el) {
+        var on = el.checked;
+        el.disabled = true;
+        fetch(ADMIN_PATH + '/settings/status/manual-bot', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: on })
+        }).then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          el.disabled = false;
+          if (!res.ok) { el.checked = !on; alert(res.j.error || '切替に失敗しました'); return; }
+          var st = document.getElementById('mbot-state');
+          if (st) { st.textContent = res.j.enabled ? 'RUNNING' : 'STOPPED'; st.style.color = res.j.enabled ? '#16a34a' : '#d97706'; }
+          var msg = document.getElementById('mbot-msg');
+          if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
+        }).catch(function() {
+          el.disabled = false; el.checked = !on;
+          alert('通信エラーで切り替えできませんでした');
+        });
       }
 
       // ---- QRコード ----

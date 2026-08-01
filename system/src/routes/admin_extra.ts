@@ -5,7 +5,6 @@ import { layout, escHtml, safeJson } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { salesPage, salesDetailPage } from '../html/sales';
 import { getPeriodRange } from '../auth';
-import { generateInviteCode } from '../auth';
 import type { Env } from '../auth';
 import type { SalesSummary, DailySale } from '../html/sales';
 import type { InterviewRecord } from './api/interviews';
@@ -446,23 +445,6 @@ const CHK_LABEL: Record<string, { section: string; label: string; icon: string }
 };
 const CHK_KEYS = Object.keys(CHK_LABEL);
 
-function chkLabel(val: number | null): string {
-  if (val === 3) return '<span style="color:#166534;font-weight:700;font-size:16px;">○</span>';
-  if (val === 2) return '<span style="color:#854d0e;font-weight:700;font-size:16px;">△</span>';
-  if (val === 1) return '<span style="color:#991b1b;font-weight:700;font-size:16px;">×</span>';
-  return '<span style="color:#d1d5db;font-size:13px;">—</span>';
-}
-function chkBg(val: number | null): string {
-  if (val === 3) return '#f0fdf4';
-  if (val === 2) return '#fefce8';
-  if (val === 1) return '#fef2f2';
-  return '#fafafa';
-}
-function scoreColor(bad: number, total: number): string {
-  if (bad === 0) return '#166534';
-  if (bad / total < 0.3) return '#854d0e';
-  return '#991b1b';
-}
 
 // ===== 面談一覧（社員別ステータス） =====
 app.get('/interviews', async (c) => {
@@ -652,10 +634,6 @@ function interviewForm(
         ${itemRows}
       </div>`;
   }).join('');
-
-  const action = isNew
-    ? `${ADMIN_PATH}/interviews/${emp.id}/new`
-    : `${ADMIN_PATH}/interviews/record/${record?.id}/edit`;
 
   return `
 <div style="max-width:720px;font-family:'Hiragino Sans','Meiryo',sans-serif;">

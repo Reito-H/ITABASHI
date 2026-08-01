@@ -5,7 +5,7 @@
 import { getPeriod, getPeriodRange } from './auth';
 import type { Env } from './auth';
 import { getRichMenuForRole } from './routes/admin_liff';
-import { queryManual } from './utils/manual_search';
+import { queryManual, getManualBotEnabled, MANUAL_BOT_DISABLED_MESSAGE } from './utils/manual_search';
 import { isTicketQuestion, queryTicket } from './utils/ticket_bot';
 import { logLineActivity } from './utils/activity_log';
 import { setBentenConfig, linkBentenMember, BENTEN_MASTER_ROLES } from './benten';
@@ -131,19 +131,6 @@ const textWithQuickReply = (msg: string, items: { label: string; text: string }[
   }
 });
 
-// URIタップで直接LIFF/外部URLへ遷移するクイックリプライ（ブラウザ中継ページを挟まず、タップ1回でLIFFの
-// ネイティブ表示に入れる。忘れ物対応・事故報告の既存リッチメニューボタンと同じuriアクション方式）
-const textWithUriQuickReply = (msg: string, items: { label: string; uri: string }[]) => ({
-  type: 'text',
-  text: msg,
-  quickReply: {
-    items: items.map(i => ({
-      type: 'action',
-      action: { type: 'uri', label: i.label, uri: i.uri }
-    }))
-  }
-});
-
 async function assignRichMenu(userId: string, richMenuId: string, accessToken: string): Promise<void> {
   if (!richMenuId) return;
   const res = await fetch(`https://api.line.me/v2/bot/user/${userId}/richmenu/${richMenuId}`, {
@@ -229,7 +216,7 @@ function classifyBotFeature(inputText: string, state: string): string {
   if (inputText === '忘れ物対応' || inputText === '忘れ物') return '忘れ物対応';
   if (inputText === '事故報告' || inputText === '事故') return '事故報告';
   if (inputText === '違反報告' || inputText === '違反') return '違反報告';
-  if (inputText === '一般報告') return '一般報告';
+  if (inputText === '一般報告' || inputText === '一般') return '一般報告';
   if (inputText === '嫌なこと報告') return '嫌なこと報告';
   if (inputText === '報告') return '報告メニュー';
   if (inputText === 'シフト確認') return 'シフト確認';
@@ -239,6 +226,7 @@ function classifyBotFeature(inputText: string, state: string): string {
   if (inputText === 'れんけいかいじょ') return '連携解除';
   if (inputText === '車番検索') return '車番検索';
   if (inputText === 'マイカレ') return 'マイカレ';
+  if (inputText === '⭐カレ' || inputText === 'スターカレ' || inputText === 'ほしかれ') return '⭐カレ';
   if (inputText === 'AI') return 'AI';
   if (inputText === 'キャンセル' || inputText === 'cancel') return 'キャンセル';
   return 'その他';
@@ -368,6 +356,10 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
     if (isTicketQuestion(question)) {
       const answer = await queryTicket(env.DB, (env as any).GROQ_API_KEY, question, 'line', lineUid);
       await reply(replyToken, at, [text(`🎫 革命AI\n\n${answer}`)]);
+      return;
+    }
+    if (!(await getManualBotEnabled(env.DB))) {
+      await reply(replyToken, at, [text(MANUAL_BOT_DISABLED_MESSAGE)]);
       return;
     }
     const answer = await queryManual(env.DB, (env as any).GROQ_API_KEY, question, 'line', lineUid);
@@ -750,58 +742,24 @@ async function handleOperationsUser(
     return;
   }
 
-  // 忘れ物対応 → LIFF URLを送信
-  if (inputText === '忘れ物対応' || inputText === '忘れ物') {
-    const liffId = env.LIFF_ID_LOST_ITEM ?? '';
+  // ⭐カレ（班長個人の縦型カレンダー）→ LIFF URLを送信
+  if (inputText === '⭐カレ' || inputText === 'スターカレ' || inputText === 'ほしかれ') {
+    const liffId = env.LIFF_ID_KANCHO_CALENDAR ?? '';
     const url = liffId ? `https://liff.line.me/${liffId}` : '';
     if (url) {
-      await reply(replyToken, at, [text(`📦 忘れ物対応フォーム\n\n下をタップして開いてください:\n${url}`)]);
+      await reply(replyToken, at, [text(`⭐カレ\n\n下をタップして開いてください:\n${url}`)]);
     }
     return;
   }
 
-  // 事故報告 → LIFF URLを送信
-  if (inputText === '事故報告' || inputText === '事故') {
-    const liffId = env.LIFF_ID_ACCIDENT ?? '';
+  // 報告（忘れ物・事故・違反・一般） → 統合報告LIFF（正式採用・env var名はreport2のまま）のURLを送信
+  // 個別4LIFF（忘れ物対応/事故報告/違反報告/一般報告）とクイックリプライ選択メニューは廃止。
+  // 1本のLIFF内に種類選択（セグメントコントロール）を持つため、テキスト種別を問わず同じURLを返す。
+  if (['報告', '忘れ物対応', '忘れ物', '事故報告', '事故', '違反報告', '違反', '一般報告', '一般'].includes(inputText)) {
+    const liffId = env.LIFF_ID_REPORT2 ?? '';
     const url = liffId ? `https://liff.line.me/${liffId}` : '';
     if (url) {
-      await reply(replyToken, at, [text(`🚨 事故報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
-    }
-    return;
-  }
-
-  // 報告 → 忘れ物対応・事故報告・違反報告への直接リンクをクイックリプライで提示
-  // （中継ページを挟まずタップ1回でLIFFのネイティブ表示に入る）
-  if (inputText === '報告') {
-    const items: { label: string; uri: string }[] = [];
-    const lostItemLiffId = env.LIFF_ID_LOST_ITEM ?? '';
-    if (lostItemLiffId) items.push({ label: '📦 忘れ物対応', uri: `https://liff.line.me/${lostItemLiffId}` });
-    const accidentLiffId = env.LIFF_ID_ACCIDENT ?? '';
-    if (accidentLiffId) items.push({ label: '🚨 事故報告', uri: `https://liff.line.me/${accidentLiffId}` });
-    const violationLiffId = env.LIFF_ID_VIOLATION ?? '';
-    if (violationLiffId) items.push({ label: '⚠️ 違反報告', uri: `https://liff.line.me/${violationLiffId}` });
-    const generalReportLiffId = env.LIFF_ID_GENERAL_REPORT ?? '';
-    if (generalReportLiffId) items.push({ label: '📝 一般報告', uri: `https://liff.line.me/${generalReportLiffId}` });
-    await reply(replyToken, at, [textWithUriQuickReply('報告する内容を選んでください。', items)]);
-    return;
-  }
-
-  // 違反報告 → LIFF URLを送信
-  if (inputText === '違反報告' || inputText === '違反') {
-    const liffId = env.LIFF_ID_VIOLATION ?? '';
-    const url = liffId ? `https://liff.line.me/${liffId}` : '';
-    if (url) {
-      await reply(replyToken, at, [text(`⚠️ 違反報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
-    }
-    return;
-  }
-
-  // 一般報告（事故・違反に当てはまらない単純な報告）→ LIFF URLを送信
-  if (inputText === '一般報告') {
-    const liffId = env.LIFF_ID_GENERAL_REPORT ?? '';
-    const url = liffId ? `https://liff.line.me/${liffId}` : '';
-    if (url) {
-      await reply(replyToken, at, [text(`📝 報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
+      await reply(replyToken, at, [text(`📋 報告フォーム\n\n下をタップして開いてください:\n${url}`)]);
     }
     return;
   }

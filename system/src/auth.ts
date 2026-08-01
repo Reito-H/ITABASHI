@@ -3,7 +3,6 @@
 export type Env = {
   DB: D1Database;
   SETUP_KEY?: string;
-  QR_TICKET_SECRET?: string; // QR実績確認PDFの署名付き一時チケット用
   LINE_CHANNEL_SECRET?: string;
   LINE_CHANNEL_ACCESS_TOKEN?: string;
   // PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
@@ -18,6 +17,8 @@ export type Env = {
   LIFF_ID_OTHER_FEATURES?: string;
   LIFF_ID_VIOLATION?: string;
   LIFF_ID_GENERAL_REPORT?: string;
+  // 報告2（忘れ物・事故・違反・一般報告を1本のLIFFに統合し、最上部の種類選択で切り替えるUI・試験運用）
+  LIFF_ID_REPORT2?: string;
   // 登録パスワード（wrangler secret put で設定）
   LINE_REG_PWD_VEHICLE?: string;    // 車番管理者
   LINE_REG_PWD_OPERATIONS?: string; // 運行管理者
@@ -26,6 +27,8 @@ export type Env = {
   LINE_REG_PWD_BENTEN_MASTER?: string;  // ベンテンクラブシフトマスター
   // 班長シフト（管理者公休予定表）
   LIFF_ID_KANCHO_SHIFT?: string;
+  // ⭐カレ（班長個人の縦型カレンダー）
+  LIFF_ID_KANCHO_CALENDAR?: string;
   // ベンテンクラブ シフト
   LIFF_ID_BENTEN_SHIFT?: string;
   RICHMENU_ID_BENTEN?: string;

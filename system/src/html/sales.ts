@@ -161,7 +161,6 @@ export function salesDetailPage(
   for (const r of records) byDate[r.date] = r;
 
   const dates: string[] = [];
-  const cur = new Date(`${year}-${String(month).padStart(2, '0')}-01`);
   // periodStart = 前月18日
   let sm = month - 1, sy = year;
   if (sm < 1) { sm = 12; sy--; }

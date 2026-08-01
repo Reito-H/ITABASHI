@@ -69,7 +69,7 @@ export function maintenancePage(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
-  <title>メンテナンス中 | Benten管理システム</title>
+  <title>メンテナンス中 | ホシコン</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -114,7 +114,7 @@ export function maintenancePage(): string {
     <h1>ただいまメンテナンス中です</h1>
     <p>システム改良、セキュリティ保守のためのメンテナンスを行っております。<br>ご不便をおかけしますが、終了までしばらくお待ちください。</p>
     <span class="tag"><span class="dot"></span>MAINTENANCE IN PROGRESS</span>
-    <div class="footer">Benten管理システム</div>
+    <div class="footer">ホシコン</div>
   </div>
 </body>
 </html>`;

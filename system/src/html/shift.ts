@@ -1,4 +1,4 @@
-import { escHtml } from './layout';
+import { escHtml, saveToastHtml, saveToastScript } from './layout';
 import { ADMIN_PATH } from '../config';
 
 export type Employee = {
@@ -350,7 +350,7 @@ export function shiftPage(
 </div>
 
 <!-- 保存成功トースト -->
-<div id="save-toast" style="display:none;position:fixed;bottom:24px;right:24px;background:#166534;color:white;padding:12px 20px;border-radius:8px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.25);"></div>
+${saveToastHtml()}
 
 <style>
   .btn-nav { padding:6px 14px;background:#4b6cb7;color:white;border-radius:6px;text-decoration:none;font-size:13px; }
@@ -568,34 +568,37 @@ function showLockBar(msg) {
   el.style.display = 'block';
 }
 
-function showToast(msg) {
-  var el = sel('#save-toast');
-  el.textContent = msg;
-  el.style.display = 'block';
-  setTimeout(function() { el.style.display = 'none'; }, 3000);
-}
+${saveToastScript()}
 
 // ロック状態のポーリング（30秒ごと、編集モード外のみ）
+// タブが非アクティブな間は通信を止め、再度アクティブになった時点で即座に確認する
+function _checkLockStatus() {
+  if (_isEditMode) return;
+  fetch('/api/shift/lock?year=' + _year + '&month=' + _month)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var bar = sel('#lock-status-bar');
+      var startBtn = sel('#edit-start-btn');
+      if (d.locked) {
+        bar.textContent = escH(d.admin_name) + ' さんが編集中です';
+        bar.style.display = 'block';
+        startBtn.disabled = true;
+      } else {
+        bar.style.display = 'none';
+        startBtn.disabled = false;
+      }
+    }).catch(function() {});
+}
 function _startLockCheckPolling() {
   clearInterval(_lockCheckTimer);
   _lockCheckTimer = setInterval(function() {
-    if (_isEditMode) return;
-    fetch('/api/shift/lock?year=' + _year + '&month=' + _month)
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        var bar = sel('#lock-status-bar');
-        var startBtn = sel('#edit-start-btn');
-        if (d.locked) {
-          bar.textContent = escH(d.admin_name) + ' さんが編集中です';
-          bar.style.display = 'block';
-          startBtn.disabled = true;
-        } else {
-          bar.style.display = 'none';
-          startBtn.disabled = false;
-        }
-      }).catch(function() {});
+    if (document.hidden) return;
+    _checkLockStatus();
   }, 30 * 1000);
 }
+document.addEventListener('visibilitychange', function() {
+  if (!document.hidden) _checkLockStatus();
+});
 _startLockCheckPolling();
 
 // ===== セル編集 =====

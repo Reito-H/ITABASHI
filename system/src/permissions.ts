@@ -8,8 +8,11 @@
 //   migration_031 で既存の制限付きアカウントには全キーの .edit を付与済み。
 
 // 権限キー一覧
-//   サイドバー: home / shift / newcomers / staff / staff-search / events /
+//   サイドバー: home / kancho-shift / handover / crew-portal / newcomers / staff /
 //               vehicles / inspection / manual-chat / settings / announcements / line
+//   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
+//   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
+//   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
 //   設定カード: settings.liff / settings.lost-items / settings.accidents /
 //               settings.violations / settings.violation-types /
 //               settings.general-reports /
@@ -39,6 +42,10 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
   [/^\/settings\/tutorial/,             'settings.tutorial'],
   [/^\/settings\/status/,               'settings.status'],
+  [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
+  [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
+  [/^\/settings\/kancho-slots/,         'settings.kancho-slots'],
+  [/^\/settings\/kancho$/,              'settings.kancho'],
   [/^\/settings/,                       'settings'],
   // 設定配下のAPI
   [/^\/api\/accounts/,                  'settings.accounts'],
@@ -50,18 +57,28 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/liff\/violation-reports/,   'settings.violations'],
   [/^\/api\/liff\/general-reports/,     'settings.general-reports'],
   [/^\/api\/violation-types/,           'settings.violation-types'],
+  [/^\/api\/kancho-wish-settings/,      'settings.kancho-wish'],
+  [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   // 各ページ
   [/^\/kancho-shift/, 'kancho-shift'],
   [/^\/api\/kancho/,  'kancho-shift'],
+  [/^\/handover/,     'handover'],
+  [/^\/api\/handover/, 'handover'],
   [/^\/tantosha/,     'tantosha'],
   [/^\/api\/tantosha/, 'tantosha'],
+  [/^\/crew-portal/,  'crew-portal'],
+  [/^\/crew-shift/,        'crew-shift'],
+  [/^\/summer-report/,     'crew-shift'],
+  [/^\/api\/crew-shift/,   'crew-shift'],
+  [/^\/api\/summer-report/, 'crew-shift'],
+  [/^\/utilization-report/,      'crew-shift'],
+  [/^\/api\/utilization-report/, 'crew-shift'],
   [/^\/shift/,        'shift'],
   [/^\/newcomers/,    'newcomers'],
   [/^\/employees/,    'newcomers'],
   [/^\/followup/,     'newcomers'],
   [/^\/interviews/,   'newcomers'],
   [/^\/info/,         'newcomers'],
-  [/^\/staff\/search/, 'staff-search'],
   [/^\/staff/,        'staff'],
   [/^\/sales/,        'staff'],
   [/^\/events/,       'events'],
@@ -149,10 +166,12 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'home',          label: 'ホーム' },
     { key: 'shift',         label: '新人シフト管理' },
     { key: 'kancho-shift',  label: '班長シフト' },
+    { key: 'handover',      label: '引き継ぎシート' },
+    { key: 'crew-portal',   label: '乗務員ポータル（個人データ参照）' },
     { key: 'tantosha',      label: '担当車表' },
+    { key: 'crew-shift',    label: '乗務員シフト・夏季稼働' },
     { key: 'newcomers',     label: '総合新人管理' },
-    { key: 'staff',         label: '社員管理' },
-    { key: 'staff-search',  label: '社員絞り込み検索' },
+    { key: 'staff',         label: '社員管理（詳細検索含む）' },
     { key: 'events',        label: '報告一覧' },
     { key: 'vehicles',      label: '車両検索' },
     { key: 'inspection',    label: '点検管理' },
@@ -180,11 +199,15 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
     { key: 'settings.tutorial',             label: 'チュートリアル' },
     { key: 'settings.status',               label: 'システムステータス' },
+    { key: 'settings.kancho',               label: '班長関連（ハブ）' },
+    { key: 'settings.kancho-slots',         label: '枠設定（班長シフトの枠・当直禁忌ペア）' },
+    { key: 'settings.kancho-roster',        label: '班長リスト（班長登録の解除のみ編集可）' },
+    { key: 'settings.kancho-wish',          label: '希望休フォーム' },
   ]},
 ];
 
-// HTMLレスポンスから権限のないメニュー・設定カードを除去
-// layout.ts のナビ（data-nav-id）と設定トップのカード（data-perm-key）が対象
+// HTMLレスポンスから権限のないメニュー・設定カード・マニュアル章を除去
+// layout.ts のナビ（data-nav-id）、設定トップのカードとチュートリアルの目次・章（data-perm-key、a/div両対応）が対象
 // data-perm-key はスペース区切りで複数指定可（いずれか1つでも権限があれば表示）
 export function filterHtmlByPermissions(res: Response, perms: string[]): Response {
   const remover = (attr: string) => ({
@@ -196,5 +219,6 @@ export function filterHtmlByPermissions(res: Response, perms: string[]): Respons
   return new HTMLRewriter()
     .on('a[data-nav-id]', remover('data-nav-id'))
     .on('a[data-perm-key]', remover('data-perm-key'))
+    .on('div[data-perm-key]', remover('data-perm-key'))
     .transform(res);
 }

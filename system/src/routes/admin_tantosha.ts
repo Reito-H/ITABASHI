@@ -8,6 +8,7 @@ import {
   tantoshaPage, tantoshaPrintPage,
   type TantoshaGroup, type TantoshaRow, type TantoshaSide, type TantoshaGroupData,
 } from '../html/tantosha';
+import { crewPortalSubNav } from '../html/crew_portal_nav';
 import { getAdminPermissions } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -40,7 +41,7 @@ async function loadGroups(db: D1Database): Promise<TantoshaGroupData[]> {
 app.get('/tantosha', async (c) => {
   const groups = await loadGroups(c.env.DB);
   const editable = await canEdit(c);
-  return c.html(layout('担当車表', tantoshaPage(groups, editable), 'tantosha'));
+  return c.html(layout('担当車表', crewPortalSubNav('tantosha') + tantoshaPage(groups, editable), 'crew-portal'));
 });
 
 app.get('/tantosha/print', async (c) => {

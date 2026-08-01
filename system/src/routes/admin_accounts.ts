@@ -48,7 +48,10 @@ app.get('/settings/accounts', async (c) => {
       <div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">＋ 新規アカウント作成</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <input id="new-username" type="text" placeholder="ユーザー名（半角英数）" autocomplete="off" style="width:170px;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;">
-        <input id="new-password" type="text" placeholder="パスワード（8文字以上）" autocomplete="off" style="width:190px;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;">
+        <div style="position:relative;display:inline-block;">
+          <input id="new-password" type="password" placeholder="パスワード（8文字以上）" autocomplete="new-password" style="width:190px;border:1px solid #d1d5db;border-radius:6px;padding:8px 46px 8px 8px;font-size:13px;">
+          <button type="button" id="new-password-toggle" onclick="toggleNewPasswordVisibility()" aria-label="パスワードを表示する" title="表示する" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:#6b7280;font-size:11px;font-weight:600;cursor:pointer;padding:4px 6px;">表示</button>
+        </div>
         <button onclick="createAccount()" style="padding:8px 18px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">作成して権限を設定</button>
       </div>
       <div style="font-size:11px;color:#9ca3af;margin-top:6px;">作成直後は権限なしの状態です。続けて表示される画面で権限を設定してください。</div>
@@ -66,6 +69,11 @@ app.get('/settings/accounts', async (c) => {
         <input type="checkbox" id="perm-full" onchange="toggleFullPerm()">
         <span style="font-size:13px;font-weight:700;color:#1d4ed8;">全権限（制限なし・統括管理者向け）</span>
       </label>
+      <div id="perm-bulk-row" style="display:flex;gap:8px;margin-bottom:8px;">
+        <button type="button" onclick="selectAllPerm(true)" style="padding:5px 12px;background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:6px;font-size:12px;cursor:pointer;">すべて選択</button>
+        <button type="button" onclick="selectAllPerm(false)" style="padding:5px 12px;background:#f9fafb;border:1px solid #e5e7eb;color:#6b7280;border-radius:6px;font-size:12px;cursor:pointer;">すべて解除</button>
+        <div style="font-size:11px;color:#9ca3af;align-self:center;">まず「すべて選択」してから、外したい項目だけ解除すると早く設定できます</div>
+      </div>
       <div id="perm-grid"></div>
       <div id="perm-error" style="display:none;color:#dc2626;font-size:12px;margin-top:8px;"></div>
       <div style="display:flex;gap:8px;margin-top:14px;">
@@ -108,8 +116,15 @@ app.get('/settings/accounts', async (c) => {
   renderList();
 
   function toggleFullPerm() {
-    sel('#perm-grid').style.opacity = sel('#perm-full').checked ? '0.35' : '1';
-    sel('#perm-grid').style.pointerEvents = sel('#perm-full').checked ? 'none' : 'auto';
+    var full = sel('#perm-full').checked;
+    sel('#perm-grid').style.opacity = full ? '0.35' : '1';
+    sel('#perm-grid').style.pointerEvents = full ? 'none' : 'auto';
+    sel('#perm-bulk-row').style.opacity = full ? '0.35' : '1';
+    sel('#perm-bulk-row').style.pointerEvents = full ? 'none' : 'auto';
+  }
+
+  function selectAllPerm(checked) {
+    document.querySelectorAll('#perm-grid .perm-view, #perm-grid .perm-edit').forEach(function(cb) { cb.checked = checked; });
   }
 
   function openPerm(id) {
@@ -161,6 +176,16 @@ app.get('/settings/accounts', async (c) => {
       sel('#perm-error').style.display = 'block';
       btn.disabled = false; btn.textContent = '保存';
     }
+  }
+
+  function toggleNewPasswordVisibility() {
+    var input = sel('#new-password');
+    var btn = sel('#new-password-toggle');
+    var showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    btn.textContent = showing ? '表示' : '隠す';
+    btn.setAttribute('aria-label', showing ? 'パスワードを表示する' : 'パスワードを隠す');
+    btn.title = showing ? '表示する' : '隠す';
   }
 
   async function createAccount() {

@@ -1,4 +1,4 @@
-// Benten管理システム: 社員管理（総合）
+// ホシコン: 社員管理（総合）
 import { Hono } from 'hono';
 import { layout, escHtml } from '../html/layout';
 import { ADMIN_PATH } from '../config';
@@ -74,6 +74,15 @@ const ENROLLMENT_TEXT_COLORS: Record<string, string> = {
   '長欠': '#6b21a8',
 };
 
+// 詳細検索パネル用の部品（チップ=複数選択、セグメント=単一選択）
+function advChip(name: string, value: string, label: string, checked: boolean) {
+  return `<label class="as-chip"><input type="checkbox" name="${name}" value="${escHtml(value)}"${checked ? ' checked' : ''}><span>${escHtml(label)}</span></label>`;
+}
+function advSeg(name: string, opts: [string, string][], cur: string) {
+  return `<div class="as-seg">${opts.map(([v, l]) =>
+    `<label><input type="radio" name="${name}" value="${v}"${cur === v ? ' checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
+}
+
 // ===== 社員一覧 =====
 app.get('/staff', async (c) => {
   const q = (c.req.query('q') ?? '').trim();
@@ -88,6 +97,24 @@ app.get('/staff', async (c) => {
   const in30Days = new Date(nowJST.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   const filterRetirement = c.req.query('retire') ?? '';
+
+  // 詳細検索（旧「社員絞り込み検索」ページから統合）
+  const tmin = c.req.query('tmin') ?? '';
+  const tmax = c.req.query('tmax') ?? '';
+  const wsArr = c.req.queries('ws') ?? [];
+  const stArr = c.req.queries('st') ?? [];
+  const whtArr = c.req.queries('wht') ?? [];
+  const nw = c.req.query('nw') ?? 'all';
+  const hc = c.req.query('hc') ?? 'all';
+  const ca = c.req.query('ca') ?? '';
+  const sfu = c.req.query('sfu') ?? '';
+  const car = c.req.query('car') ?? 'all';
+  const ami = c.req.query('ami') ?? '';
+  const ama = c.req.query('ama') ?? '';
+  const hf = c.req.query('hf') ?? '';
+  const ht = c.req.query('ht') ?? '';
+  const rf = c.req.query('rf') ?? '';
+  const rt = c.req.query('rt') ?? '';
 
   if (filterRetirement === 'candidate') {
     // 退職候補 = 在籍中だが長欠、または退職日が既に経過している人（除外フラグなし）
@@ -122,12 +149,50 @@ app.get('/staff', async (c) => {
     }
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,car_no,enrollment_status,retirement_date,is_caution,is_active,status,exclude_retirement_candidate,is_hanchyo FROM employees ${where} ORDER BY division, team, seq_no, id`);
+  if (tmin && !isNaN(parseInt(tmin))) { conditions.push('team >= ?'); params.push(parseInt(tmin)); }
+  if (tmax && !isNaN(parseInt(tmax))) { conditions.push('team <= ?'); params.push(parseInt(tmax)); }
+  if (wsArr.length > 0) {
+    const valid = wsArr.filter(w => ['a', 'b', 'B', 'D', 'H'].includes(w));
+    if (valid.length > 0) { conditions.push(`work_schedule IN (${valid.map(() => '?').join(',')})`); params.push(...valid); }
+  }
+  if (stArr.length > 0) {
+    const valid = stArr.filter(t => ALL_TIMES.includes(t));
+    if (valid.length > 0) { conditions.push(`start_time IN (${valid.map(() => '?').join(',')})`); params.push(...valid); }
+  }
+  if (whtArr.length > 0) {
+    const valid = whtArr.filter(w => ['労フル', '労短'].includes(w));
+    if (valid.length > 0) { conditions.push(`work_hours_type IN (${valid.map(() => '?').join(',')})`); params.push(...valid); }
+  }
+  if (nw === '1') conditions.push("(status = 'training' OR (status IS NULL AND status != 'completed'))");
+  else if (nw === '0') conditions.push("status = 'completed'");
+  if (hc === '1') conditions.push('is_hanchyo = 1');
+  else if (hc === '0') conditions.push('is_hanchyo = 0');
+  if (ca === '1') conditions.push('is_caution = 1');
+  if (sfu === '1') conditions.push('is_sales_followup = 1');
+  if (car === '1') conditions.push("car_no IS NOT NULL AND car_no != ''");
+  else if (car === '0') conditions.push("(car_no IS NULL OR car_no = '')");
+  if (hf) { conditions.push('hire_date >= ?'); params.push(hf); }
+  if (ht) { conditions.push('hire_date <= ?'); params.push(ht); }
+  if (rf) { conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date >= ?"); params.push(rf); }
+  if (rt) { conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date <= ?"); params.push(rt); }
+  const advAgeExpr = `CAST((strftime('%Y','now','+9 hours') - strftime('%Y',birth_date) - (strftime('%m-%d','now','+9 hours') < strftime('%m-%d',birth_date))) AS INTEGER)`;
+  if (ami && !isNaN(parseInt(ami))) { conditions.push(`(birth_date IS NOT NULL AND birth_date != '' AND ${advAgeExpr} >= ?)`); params.push(parseInt(ami)); }
+  if (ama && !isNaN(parseInt(ama))) { conditions.push(`(birth_date IS NOT NULL AND birth_date != '' AND ${advAgeExpr} <= ?)`); params.push(parseInt(ama)); }
 
-  // staffRows と退職クエリを並列実行
-  const [staffRows, upcomingRetirements] = await Promise.all([
-    (params.length ? baseStmt.bind(...params) : baseStmt).all<StaffRow>(),
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // サーバーサイドページング（全件を一度にDOMへ展開しない）
+  const PAGE_SIZE = 50;
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1') || 1);
+  const offset = (page - 1) * PAGE_SIZE;
+
+  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,car_no,enrollment_status,retirement_date,is_caution,is_active,status,exclude_retirement_candidate,is_hanchyo FROM employees ${where} ORDER BY division, team, seq_no, id LIMIT ? OFFSET ?`);
+  const countStmt = c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM employees ${where}`);
+
+  // staffRows・件数・退職クエリを並列実行
+  const [staffRows, totalRow, upcomingRetirements] = await Promise.all([
+    baseStmt.bind(...params, PAGE_SIZE, offset).all<StaffRow>(),
+    (params.length ? countStmt.bind(...params) : countStmt).first<{ cnt: number }>(),
     c.env.DB.prepare(`
     SELECT id, name, retirement_date
     FROM employees
@@ -139,6 +204,13 @@ app.get('/staff', async (c) => {
     ORDER BY retirement_date ASC
   `).bind(todayStr, in30Days).all<{ id: number; name: string; retirement_date: string }>(),
   ]);
+  const totalCount = totalRow?.cnt ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const pageLinkQs = (p: number) => {
+    const sp = new URLSearchParams(new URL(c.req.url).search);
+    sp.set('page', String(p));
+    return sp.toString();
+  };
 
   const retirementBanner = (() => {
     const list = upcomingRetirements.results ?? [];
@@ -185,6 +257,21 @@ app.get('/staff', async (c) => {
     `<a href="${ADMIN_PATH}/staff?${makeFilter('retire', v, base)}" style="padding:4px 10px;border-radius:4px;font-size:12px;text-decoration:none;${filterRetirement === v ? 'background:#92400e;color:white;' : v === 'candidate' ? 'background:#fee2e2;color:#dc2626;' : 'background:#f3f4f6;color:#374151;'}">${l}</a>`
   ).join('');
 
+  // 詳細検索: 何件の条件が有効か（バッジ表示・自動展開の判定用）
+  const advActiveCount = [
+    tmin, tmax, ami, ama, hf, ht, rf, rt,
+    ...wsArr, ...stArr, ...whtArr,
+  ].filter(Boolean).length
+    + (nw !== 'all' ? 1 : 0) + (hc !== 'all' ? 1 : 0) + (car !== 'all' ? 1 : 0)
+    + (ca === '1' ? 1 : 0) + (sfu === '1' ? 1 : 0);
+  const resetAdvParams = new URLSearchParams();
+  if (q) resetAdvParams.set('q', q);
+  if (filterDiv !== 'all') resetAdvParams.set('div', filterDiv);
+  if (filterStatus !== 'all') resetAdvParams.set('enrollment', filterStatus);
+  if (filterActive !== '1') resetAdvParams.set('active', filterActive);
+  if (filterRetirement) resetAdvParams.set('retire', filterRetirement);
+  const resetAdvQs = resetAdvParams.toString();
+
   const TH = 'padding:8px 10px;text-align:left;font-size:11px;color:#6b7280;border-bottom:1px solid #e5e7eb;white-space:nowrap;user-select:none;';
   const THS = TH + 'cursor:pointer;';
   const C = 'padding:8px 10px;border-bottom:1px solid #f3f4f6;vertical-align:middle;';
@@ -208,12 +295,15 @@ app.get('/staff', async (c) => {
       onmouseover="if(!this.classList.contains('sel'))this.style.background='${rowHover}'"
       onmouseout="if(!this.classList.contains('sel'))this.style.background='${rowBg}'"
       onclick="rowClick(event,${e.id})">
-      <td style="${C}width:36px;text-align:center;" onclick="event.stopPropagation()">
-        <input type="checkbox" class="row-cb" value="${e.id}" onchange="onCbChange(this)">
+      <td data-cell="cb" style="${C}width:36px;text-align:center;" onclick="event.stopPropagation()">
+        <input type="checkbox" class="row-cb" value="${e.id}" onchange="onCbChange(this)" aria-label="社員番号${escHtml(e.emp_no)}（${escHtml(e.name)}）を選択">
       </td>
-      <td style="${C}font-size:12px;font-family:monospace;color:#6b7280;white-space:nowrap;" data-val="${escHtml(e.emp_no)}">${escHtml(e.emp_no)}</td>
-      <td style="${C}" data-val="${escHtml(e.name)}">
-        <div style="font-size:13px;font-weight:600;color:#1f2937;">${escHtml(e.name)}</div>
+      <td data-cell="empno" data-label="社員番号" style="${C}font-size:12px;font-family:monospace;color:#6b7280;white-space:nowrap;" data-val="${escHtml(e.emp_no)}">${escHtml(e.emp_no)}</td>
+      <td data-cell="name" data-label="氏名" style="${C}" data-val="${escHtml(e.name)}">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="font-size:13px;font-weight:600;color:#1f2937;">${escHtml(e.name)}</span>
+          <span data-cell="enrollment-inline" style="background:${bg};color:${tc};padding:1px 7px;border-radius:4px;font-size:11px;font-weight:600;">${escHtml(enStatus)}</span>
+        </div>
         ${e.name_kana ? `<div style="font-size:11px;color:#9ca3af;">${escHtml(e.name_kana)}</div>` : ''}
         <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
           ${e.is_hanchyo ? '<span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">班長</span>' : ''}
@@ -221,22 +311,22 @@ app.get('/staff', async (c) => {
           ${e.exclude_retirement_candidate ? '<span style="background:#f3f4f6;color:#6b7280;padding:1px 5px;border-radius:3px;font-size:10px;">候補除外</span>' : ''}
         </div>
       </td>
-      <td style="${C}font-size:12px;color:#6b7280;white-space:nowrap;" data-val="${String(e.division ?? 99).padStart(2,'0')}${String(e.team ?? 99).padStart(2,'0')}">${e.division ? e.division + '課' : ''}${e.team ? ' ' + e.team + '班' : ''}${!e.division && !e.team ? '—' : ''}</td>
-      <td style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.work_schedule ?? ''}">${e.work_schedule ?? '—'}</td>
-      <td style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.start_time ?? ''}">${e.start_time ?? '—'}</td>
-      <td style="${C}font-size:12px;white-space:nowrap;" data-val="${escHtml(e.car_no ?? '')}">
+      <td data-cell="dept" data-label="課・班" style="${C}font-size:12px;color:#6b7280;white-space:nowrap;" data-val="${String(e.division ?? 99).padStart(2,'0')}${String(e.team ?? 99).padStart(2,'0')}">${e.division ? e.division + '課' : ''}${e.team ? ' ' + e.team + '班' : ''}${!e.division && !e.team ? '—' : ''}</td>
+      <td data-cell="schedule" data-label="勤務体系" style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.work_schedule ?? ''}">${e.work_schedule ?? '—'}</td>
+      <td data-cell="start" data-label="出勤" style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.start_time ?? ''}">${e.start_time ?? '—'}</td>
+      <td data-cell="car" data-label="車番" style="${C}font-size:12px;white-space:nowrap;" data-val="${escHtml(e.car_no ?? '')}">
         ${e.car_no ? `<span style="font-family:monospace;">${escHtml(e.car_no)}</span>` : '—'}
       </td>
-      <td style="${C}white-space:nowrap;" data-val="${escHtml(enStatus)}">
+      <td data-cell="enrollment" data-label="在籍状態" style="${C}white-space:nowrap;" data-val="${escHtml(enStatus)}">
         <span style="background:${bg};color:${tc};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;">${escHtml(enStatus)}</span>
       </td>
-      <td style="${C}white-space:nowrap;" data-val="${retDateVal}">
+      <td data-cell="retire" data-label="退職予定日" style="${C}white-space:nowrap;" data-val="${retDateVal}">
         ${retDateVal
           ? `<span style="font-size:12px;color:${isRetiringSoon ? '#b45309' : '#6b7280'};">${escHtml(retDateVal)}</span>
              ${isRetiringSoon ? '<span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;margin-left:3px;">予定</span>' : ''}`
           : '<span style="color:#d1d5db;font-size:11px;">—</span>'}
       </td>
-      <td style="${C}white-space:nowrap;text-align:center;" data-val="${e.is_caution ? '1' : '0'}">
+      <td data-cell="caution" data-label="要注意" style="${C}white-space:nowrap;text-align:center;" data-val="${e.is_caution ? '1' : '0'}">
         ${e.is_caution ? '<span style="background:#fecaca;color:#991b1b;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;">注意</span>' : '—'}
       </td>
     </tr>`;
@@ -273,12 +363,102 @@ app.get('/staff', async (c) => {
         <span style="font-size:11px;color:#9ca3af;width:42px;">退職</span>${retireBtns}
       </div>
     </div>
+
+    <!-- 詳細検索（旧・社員絞り込み検索を統合） -->
+    <details class="as-adv"${advActiveCount > 0 ? ' open' : ''}>
+      <summary>詳細検索${advActiveCount > 0 ? `<span class="as-badge">${advActiveCount}</span>` : ''}</summary>
+      <form method="get" class="as-body">
+        <input type="hidden" name="q" value="${escHtml(q)}">
+        <input type="hidden" name="div" value="${escHtml(filterDiv)}">
+        <input type="hidden" name="enrollment" value="${escHtml(filterStatus)}">
+        <input type="hidden" name="active" value="${escHtml(filterActive)}">
+        <input type="hidden" name="retire" value="${escHtml(filterRetirement)}">
+
+        <div class="as-row">
+          <span class="as-label">班番号</span>
+          <input type="number" name="tmin" value="${escHtml(tmin)}" min="1" max="99" placeholder="最小" class="as-num">
+          <span class="as-sep">〜</span>
+          <input type="number" name="tmax" value="${escHtml(tmax)}" min="1" max="99" placeholder="最大" class="as-num">
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">勤務体系</span>
+          <div class="as-chips">${['a', 'b', 'B', 'D', 'H'].map(w => advChip('ws', w, w, wsArr.includes(w))).join('')}</div>
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">出勤時間</span>
+          <div class="as-chips">${ALL_TIMES.map(t => advChip('st', t, t, stArr.includes(t))).join('')}</div>
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">労働区分</span>
+          <div class="as-chips">
+            ${advChip('wht', '労フル', '労フル', whtArr.includes('労フル'))}
+            ${advChip('wht', '労短', '労短', whtArr.includes('労短'))}
+          </div>
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">新人</span>
+          ${advSeg('nw', [['all', '問わない'], ['1', '新人のみ'], ['0', '一般社員']], nw)}
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">班長</span>
+          ${advSeg('hc', [['all', '問わない'], ['1', '班長のみ'], ['0', '班長以外']], hc)}
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">担当車番</span>
+          ${advSeg('car', [['all', '問わない'], ['1', 'あり'], ['0', 'なし']], car)}
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">フラグ</span>
+          <div class="as-chips">
+            ${advChip('ca', '1', '要注意のみ', ca === '1')}
+            ${advChip('sfu', '1', '売上要後追いのみ', sfu === '1')}
+          </div>
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">年齢</span>
+          <input type="number" name="ami" value="${escHtml(ami)}" min="18" max="99" placeholder="最小" class="as-num">
+          <span class="as-sep">〜</span>
+          <input type="number" name="ama" value="${escHtml(ama)}" min="18" max="99" placeholder="最大" class="as-num">
+          <span class="as-sep">歳</span>
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">入社日</span>
+          <input type="date" name="hf" value="${escHtml(hf)}" class="as-date">
+          <span class="as-sep">〜</span>
+          <input type="date" name="ht" value="${escHtml(ht)}" class="as-date">
+        </div>
+
+        <div class="as-row">
+          <span class="as-label">退職日</span>
+          <input type="date" name="rf" value="${escHtml(rf)}" class="as-date">
+          <span class="as-sep">〜</span>
+          <input type="date" name="rt" value="${escHtml(rt)}" class="as-date">
+        </div>
+
+        <div class="as-actions">
+          <button type="submit" class="as-submit">絞り込む</button>
+          ${advActiveCount > 0 ? `<a href="${ADMIN_PATH}/staff${resetAdvQs ? '?' + resetAdvQs : ''}" class="as-reset">詳細条件をリセット</a>` : ''}
+        </div>
+      </form>
+    </details>
   </div>
 
   <!-- ヘッダー -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
     <div style="display:flex;align-items:center;gap:10px;position:relative;">
-      <span style="font-size:13px;color:#6b7280;" id="staff-count">${(staffRows.results ?? []).length}名</span>
+      <span style="font-size:13px;color:#6b7280;" id="staff-count">
+        検索結果 <b style="color:#1f2937;">${totalCount}</b>名
+        ${totalCount > 0 ? `<span style="color:#9ca3af;margin-left:4px;">(${offset + 1}〜${Math.min(offset + PAGE_SIZE, totalCount)}件目を表示)</span>` : ''}
+      </span>
       <div style="position:relative;display:inline-block;">
         <button onclick="toggleSelMenu()" id="sel-menu-btn" style="padding:5px 10px;background:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px;">
           条件選択 <span style="font-size:10px;">▼</span>
@@ -308,9 +488,9 @@ app.get('/staff', async (c) => {
 
   <!-- CSVインポートパネル -->
   <div id="csv-import-panel" style="display:none;background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-    <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
+    <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
       CSV インポート
-    </h3>
+    </h2>
     <p style="font-size:12px;color:#6b7280;margin:0 0 14px;">
       出庫データCSV（Shift-JIS）を選択してください。社員番号をキーに既存社員は更新、未登録社員は新規追加します。
     </p>
@@ -370,13 +550,14 @@ app.get('/staff', async (c) => {
     <div id="csv-result" style="display:none;"></div>
   </div>
 
-  <!-- テーブル -->
-  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow-x:auto;margin-bottom:80px;">
+  <!-- テーブル（スマホ幅ではCSSでカード表示に切り替え。data-label属性はスマホ表示用） -->
+  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow-x:auto;">
     <table id="staff-table" style="width:100%;border-collapse:collapse;min-width:900px;">
+      <caption class="sr-only">社員一覧（${totalCount}名中 ${offset + 1}〜${Math.min(offset + PAGE_SIZE, totalCount)}件目を表示）。行をクリックすると詳細を表示します。</caption>
       <thead style="background:#f9fafb;">
         <tr>
           <th style="${TH}width:36px;text-align:center;">
-            <input type="checkbox" id="cb-all" onchange="toggleAll(this)" title="全選択">
+            <input type="checkbox" id="cb-all" onchange="toggleAll(this)" title="全選択" aria-label="表示中の社員をすべて選択">
           </th>
           <th style="${THS}" onclick="sortTable(1)">社員番号 <span class="si">↕</span></th>
           <th style="${THS}" onclick="sortTable(2)">氏名 <span class="si">↕</span></th>
@@ -395,6 +576,21 @@ app.get('/staff', async (c) => {
     </table>
   </div>
 
+  <!-- ページング -->
+  ${totalPages > 1 ? `
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:10px 16px;margin-top:10px;margin-bottom:80px;flex-wrap:wrap;">
+    <span style="font-size:12px;color:#6b7280;">${offset + 1}-${Math.min(offset + PAGE_SIZE, totalCount)} / ${totalCount}名</span>
+    <div style="display:flex;align-items:center;gap:10px;">
+      ${page > 1
+        ? `<a href="${ADMIN_PATH}/staff?${pageLinkQs(page - 1)}" style="padding:6px 14px;background:#f3f4f6;color:#374151;border-radius:6px;font-size:13px;text-decoration:none;">前へ</a>`
+        : `<span style="padding:6px 14px;background:#f9fafb;color:#d1d5db;border-radius:6px;font-size:13px;">前へ</span>`}
+      <span style="font-size:13px;color:#374151;font-weight:600;">${page} / ${totalPages}</span>
+      ${page < totalPages
+        ? `<a href="${ADMIN_PATH}/staff?${pageLinkQs(page + 1)}" style="padding:6px 14px;background:#1a3a5c;color:white;border-radius:6px;font-size:13px;text-decoration:none;">次へ</a>`
+        : `<span style="padding:6px 14px;background:#f9fafb;color:#d1d5db;border-radius:6px;font-size:13px;">次へ</span>`}
+    </div>
+  </div>` : `<div style="margin-bottom:80px;"></div>`}
+
   <!-- 一括操作バー（選択時に浮上） -->
   <div id="bulk-bar" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a3a5c;color:white;border-radius:12px;padding:12px 20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:none;align-items:center;gap:12px;z-index:100;white-space:nowrap;">
     <span id="bulk-count" style="font-size:13px;font-weight:600;"></span>
@@ -407,6 +603,62 @@ app.get('/staff', async (c) => {
 <style>
 .sel-opt{display:block;width:100%;padding:8px 14px;background:none;border:none;text-align:left;font-size:13px;color:#374151;cursor:pointer;}
 .sel-opt:hover{background:#f3f4f6;}
+/* 詳細検索パネル */
+.as-adv{border-top:1px solid #eef1f5;margin-top:12px;padding-top:2px;}
+.as-adv summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 0;font-size:12.5px;font-weight:600;color:#4b5563;user-select:none;}
+.as-adv summary::-webkit-details-marker{display:none;}
+.as-adv summary::before{content:'';width:7px;height:7px;border-right:1.5px solid #94a3b8;border-bottom:1.5px solid #94a3b8;transform:rotate(45deg);transition:transform .15s;}
+.as-adv[open] summary::before{transform:rotate(-135deg);}
+.as-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:#1a3a5c;color:#fff;border-radius:999px;font-size:10.5px;font-weight:700;}
+.as-body{padding:6px 0 4px;}
+.as-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;}
+.as-label{font-size:11px;color:#9ca3af;width:56px;flex-shrink:0;}
+.as-num{width:64px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;}
+.as-date{border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;}
+.as-sep{font-size:11px;color:#9ca3af;}
+.as-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.as-chip{position:relative;cursor:pointer;}
+.as-chip input{position:absolute;opacity:0;pointer-events:none;}
+.as-chip span{display:inline-flex;align-items:center;padding:4px 11px;border:1px solid #d1d5db;border-radius:999px;font-size:12px;color:#4b5563;background:#fff;transition:all .13s;user-select:none;}
+.as-chip:hover span{border-color:#2d6a9f;color:#1a3a5c;}
+.as-chip input:checked+span{background:#1a3a5c;border-color:#1a3a5c;color:#fff;font-weight:600;}
+.as-seg{display:inline-flex;background:#eef1f5;border-radius:8px;padding:3px;}
+.as-seg label{position:relative;cursor:pointer;}
+.as-seg input{position:absolute;opacity:0;pointer-events:none;}
+.as-seg span{display:block;text-align:center;font-size:11.5px;padding:5px 10px;border-radius:6px;color:#64748b;transition:all .13s;user-select:none;white-space:nowrap;}
+.as-seg input:checked+span{background:#fff;color:#1a3a5c;font-weight:700;box-shadow:0 1px 3px rgba(16,42,67,.18);}
+.as-actions{display:flex;align-items:center;gap:12px;padding-top:4px;}
+.as-submit{padding:8px 20px;background:#1a3a5c;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;}
+.as-submit:hover{background:#2d6a9f;}
+.as-reset{font-size:12px;color:#94a3b8;text-decoration:none;}
+.as-reset:hover{color:#dc2626;text-decoration:underline;}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+[data-cell="enrollment-inline"]{display:none;}
+
+/* スマホ幅: 横長テーブルではなく1人1枚のカード表示に切り替える */
+@media (max-width: 760px) {
+  #staff-table{min-width:0;}
+  #staff-table thead{display:none;}
+  #staff-table, #staff-table tbody{display:block;width:100%;}
+  #staff-table tr{
+    display:flex;flex-direction:column;
+    background:#fff;border:1px solid #e8edf3;border-radius:12px;
+    margin:0 0 10px;padding:12px 14px 12px 40px;position:relative;
+  }
+  #staff-table td{display:block;width:auto;border-bottom:none!important;padding:2px 0!important;}
+  #staff-table td[data-cell="cb"]{position:absolute;left:10px;top:14px;padding:0!important;}
+  #staff-table td[data-cell="name"]{order:-5;padding-bottom:4px!important;}
+  [data-cell="enrollment-inline"]{display:inline-flex;}
+  #staff-table td[data-cell="empno"]{order:-4;font-size:11px!important;color:#9ca3af!important;}
+  #staff-table td[data-cell="dept"]{order:-3;}
+  #staff-table td[data-cell="schedule"]{order:-2;}
+  #staff-table td[data-cell="start"]{order:-1;}
+  #staff-table td[data-cell="car"], #staff-table td[data-cell="enrollment"],
+  #staff-table td[data-cell="retire"], #staff-table td[data-cell="caution"]{display:none;}
+  #staff-table td[data-label]:not([data-cell="name"])::before{
+    content:attr(data-label) '： ';color:#9ca3af;font-size:11px;
+  }
+}
 </style>
 <script>
 // ===== テーブル ソート・選択 =====
@@ -980,487 +1232,23 @@ app.get('/staff/new', (c) => {
 });
 
 
-// ===== 社員絞り込み検索 =====
-app.get('/staff/search', async (c) => {
-  const submitted = c.req.query('s') === '1';
-  const q = (c.req.query('q') ?? '').trim();
-  const divArr   = c.req.queries('div') ?? [];
-  const wsArr    = c.req.queries('ws')  ?? [];
-  const stArr    = c.req.queries('st')  ?? [];
-  const enArr    = c.req.queries('en')  ?? [];
-  const whtArr   = c.req.queries('wht') ?? [];
-  const act   = c.req.query('act')  ?? 'all';
-  const nw    = c.req.query('nw')   ?? 'all';
-  const hc    = c.req.query('hc')   ?? 'all';
-  const ca    = c.req.query('ca')   ?? '';
-  const sfu   = c.req.query('sfu')  ?? '';
-  const hf    = c.req.query('hf')   ?? '';
-  const ht    = c.req.query('ht')   ?? '';
-  const rf    = c.req.query('rf')   ?? '';
-  const rt    = c.req.query('rt')   ?? '';
-  const ami   = c.req.query('ami')  ?? '';
-  const ama   = c.req.query('ama')  ?? '';
-  const car   = c.req.query('car')  ?? 'all';
-  const tmin  = c.req.query('tmin') ?? '';
-  const tmax  = c.req.query('tmax') ?? '';
-
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (q) {
-    const qk = toKatakana(q);
-    const p = `%${q}%`, pk = `%${qk}%`;
-    if (q !== qk) {
-      conditions.push('(name LIKE ? OR name_kana LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
-      params.push(p, p, pk, p);
-    } else {
-      conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
-      params.push(p, p, p);
-    }
+// ===== 社員絞り込み検索（詳細検索として /staff に統合済み） =====
+// 旧URLを踏んだ場合は /staff に条件を引き継いでリダイレクト
+app.get('/staff/search', (c) => {
+  const src = new URL(c.req.url).searchParams;
+  const dest = new URLSearchParams();
+  const q = src.get('q'); if (q) dest.set('q', q);
+  const div = src.getAll('div')[0]; if (div) dest.set('div', div);
+  const act = src.get('act'); if (act) dest.set('active', act);
+  const en = src.getAll('en')[0]; if (en) dest.set('enrollment', en);
+  for (const key of ['ws', 'st', 'wht']) {
+    for (const v of src.getAll(key)) dest.append(key, v);
   }
-  if (act === '1') conditions.push('is_active = 1');
-  else if (act === '0') conditions.push('is_active = 0');
-
-  if (divArr.length > 0) {
-    const valid = divArr.filter(d => ['1','2','3','4'].includes(d)).map(Number);
-    if (valid.length > 0) {
-      conditions.push(`division IN (${valid.map(() => '?').join(',')})`);
-      params.push(...valid);
-    }
+  for (const key of ['tmin', 'tmax', 'nw', 'hc', 'ca', 'sfu', 'car', 'ami', 'ama', 'hf', 'ht', 'rf', 'rt']) {
+    const v = src.get(key); if (v) dest.set(key, v);
   }
-  if (tmin && !isNaN(parseInt(tmin))) { conditions.push('team >= ?'); params.push(parseInt(tmin)); }
-  if (tmax && !isNaN(parseInt(tmax))) { conditions.push('team <= ?'); params.push(parseInt(tmax)); }
-
-  if (wsArr.length > 0) {
-    const valid = wsArr.filter(w => ['a','b','B','D','H'].includes(w));
-    if (valid.length > 0) {
-      conditions.push(`work_schedule IN (${valid.map(() => '?').join(',')})`);
-      params.push(...valid);
-    }
-  }
-  if (stArr.length > 0) {
-    const valid = stArr.filter(t => ALL_TIMES.includes(t));
-    if (valid.length > 0) {
-      conditions.push(`start_time IN (${valid.map(() => '?').join(',')})`);
-      params.push(...valid);
-    }
-  }
-  if (enArr.length > 0) {
-    const valid = enArr.filter(e => ['通常','育休','病欠','傷病','長欠'].includes(e));
-    if (valid.length > 0) {
-      conditions.push(`enrollment_status IN (${valid.map(() => '?').join(',')})`);
-      params.push(...valid);
-    }
-  }
-  if (whtArr.length > 0) {
-    const valid = whtArr.filter(w => ['労フル','労短'].includes(w));
-    if (valid.length > 0) {
-      conditions.push(`work_hours_type IN (${valid.map(() => '?').join(',')})`);
-      params.push(...valid);
-    }
-  }
-  if (nw === '1') {
-    conditions.push("(status = 'training' OR (status IS NULL AND status != 'completed'))");
-  } else if (nw === '0') {
-    conditions.push("status = 'completed'");
-  }
-  if (hc === '1') conditions.push('is_hanchyo = 1');
-  else if (hc === '0') conditions.push('is_hanchyo = 0');
-  if (ca === '1') conditions.push('is_caution = 1');
-  if (sfu === '1') conditions.push('is_sales_followup = 1');
-  if (hf) { conditions.push('hire_date >= ?'); params.push(hf); }
-  if (ht) { conditions.push('hire_date <= ?'); params.push(ht); }
-  if (rf) { conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date >= ?"); params.push(rf); }
-  if (rt) { conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date <= ?"); params.push(rt); }
-  if (car === '1') conditions.push("car_no IS NOT NULL AND car_no != ''");
-  else if (car === '0') conditions.push("(car_no IS NULL OR car_no = '')");
-
-  const ageExpr = `CAST((strftime('%Y','now','+9 hours') - strftime('%Y',birth_date) - (strftime('%m-%d','now','+9 hours') < strftime('%m-%d',birth_date))) AS INTEGER)`;
-  if (ami && !isNaN(parseInt(ami))) {
-    conditions.push(`(birth_date IS NOT NULL AND birth_date != '' AND ${ageExpr} >= ?)`);
-    params.push(parseInt(ami));
-  }
-  if (ama && !isNaN(parseInt(ama))) {
-    conditions.push(`(birth_date IS NOT NULL AND birth_date != '' AND ${ageExpr} <= ?)`);
-    params.push(parseInt(ama));
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  let staffRows: StaffRow[] = [];
-  if (submitted) {
-    const stmt = c.env.DB.prepare(
-      `SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,work_hours_type,enrollment_status,hire_date,retirement_date,birth_date,car_no,avg_return_time,is_caution,is_sales_followup,is_hanchyo,status,is_active FROM employees ${where} ORDER BY division, team, seq_no, id`
-    );
-    const result = params.length ? await stmt.bind(...params).all<StaffRow>() : await stmt.all<StaffRow>();
-    staffRows = result.results ?? [];
-  }
-
-  const chip = (name: string, value: string, label: string, checked: boolean) =>
-    `<label class="ss-chip"><input type="checkbox" name="${name}" value="${escHtml(value)}"${checked ? ' checked' : ''}><span>${escHtml(label)}</span></label>`;
-  const seg = (name: string, opts: [string, string][], cur: string) =>
-    `<div class="ss-seg">${opts.map(([v, l]) =>
-      `<label><input type="radio" name="${name}" value="${v}"${cur === v ? ' checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
-
-  const resultRows = submitted ? staffRows.map(e => {
-    const enStatus = e.enrollment_status ?? '通常';
-    const bg = ENROLLMENT_COLORS[enStatus] ?? '#f3f4f6';
-    const tc = ENROLLMENT_TEXT_COLORS[enStatus] ?? '#374151';
-    const age = calcAge(e.birth_date);
-    const isNewcomerFlag = e.status === 'training' || (e.status !== 'completed' && !e.status);
-    return `
-    <tr class="ss-row" onclick="location.href='${ADMIN_PATH}/staff/${e.id}'">
-      <td class="ss-td ss-mono">${escHtml(e.emp_no)}</td>
-      <td class="ss-td">
-        <div class="ss-name">${escHtml(e.name)}</div>
-        ${e.name_kana ? `<div class="ss-kana">${escHtml(e.name_kana)}</div>` : ''}
-        ${e.is_hanchyo || isNewcomerFlag ? `<div class="ss-tags">
-          ${e.is_hanchyo ? '<span class="ss-tag ss-tag-h">班長</span>' : ''}
-          ${isNewcomerFlag ? '<span class="ss-tag ss-tag-n">新人</span>' : ''}
-        </div>` : ''}
-      </td>
-      <td class="ss-td ss-sub ss-nowrap">${e.division ? e.division+'課' : ''}${e.team ? ' '+e.team+'班' : ''}${!e.division&&!e.team?'—':''}</td>
-      <td class="ss-td ss-c ss-nowrap">${e.work_schedule ?? '—'}</td>
-      <td class="ss-td ss-c ss-nowrap">${e.start_time ?? '—'}</td>
-      <td class="ss-td ss-c ss-nowrap">${e.work_hours_type ?? '—'}</td>
-      <td class="ss-td ss-nowrap"><span class="ss-en" style="background:${bg};color:${tc};">${escHtml(enStatus)}</span></td>
-      <td class="ss-td ss-sub ss-nowrap">${e.hire_date ? escHtml(e.hire_date) : '—'}</td>
-      <td class="ss-td ss-c ss-nowrap">${age !== null ? age+'歳' : '—'}</td>
-      <td class="ss-td ss-c ss-nowrap">${e.car_no ? `<span class="ss-mono2">${escHtml(e.car_no)}</span>` : '—'}</td>
-      <td class="ss-td ss-c">${e.is_caution ? '<span class="ss-tag ss-tag-c">注意</span>' : '<span class="ss-dim">—</span>'}</td>
-      <td class="ss-td ss-c">${e.is_sales_followup ? '<span class="ss-tag ss-tag-h">要</span>' : '<span class="ss-dim">—</span>'}</td>
-    </tr>`;
-  }).join('') : '';
-
-  const activeCount = conditions.length;
-
-  const advAge  = (ami || ama) ? ' open' : '';
-  const advHire = (hf || ht) ? ' open' : '';
-  const advRet  = (rf || rt) ? ' open' : '';
-
-  const content = `
-<style>
-  .ss-page{font-family:'Hiragino Sans','Meiryo',sans-serif;}
-  .ss-head{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
-  .ss-title{font-size:17px;font-weight:700;color:#1a3a5c;margin:0 0 3px;letter-spacing:0.02em;}
-  .ss-title-sub{font-size:12px;color:#8494a7;}
-  .ss-back{font-size:12px;color:#2d6a9f;text-decoration:none;padding:6px 10px;border-radius:6px;transition:background .15s;}
-  .ss-back:hover{background:#e8eef5;}
-  .ss-wrap{display:flex;gap:18px;align-items:flex-start;}
-  /* ---- 絞り込みパネル ---- */
-  .ss-panel{width:280px;flex-shrink:0;position:sticky;top:70px;}
-  .ss-card{background:#fff;border-radius:12px;box-shadow:0 1px 2px rgba(16,42,67,.06),0 4px 16px rgba(16,42,67,.07);display:flex;flex-direction:column;max-height:calc(100vh - 90px);overflow:hidden;}
-  .ss-card-accent{height:3px;background:linear-gradient(90deg,#1a3a5c,#2d6a9f 55%,#7cb3d8);flex-shrink:0;}
-  .ss-card-head{display:flex;justify-content:space-between;align-items:center;padding:13px 16px 11px;border-bottom:1px solid #eef1f5;flex-shrink:0;}
-  .ss-card-head b{font-size:13px;color:#1a3a5c;letter-spacing:.03em;}
-  .ss-reset{font-size:11px;color:#94a3b8;text-decoration:none;}
-  .ss-reset:hover{color:#dc2626;text-decoration:underline;}
-  .ss-body{padding:14px 16px 4px;overflow-y:auto;flex:1;}
-  .ss-sec{margin-bottom:17px;}
-  .ss-sec-label{font-size:10px;font-weight:700;color:#8494a7;display:block;margin-bottom:7px;letter-spacing:.09em;}
-  .ss-input,.ss-num,.ss-date{border:1px solid #d5dbe3;border-radius:7px;padding:7px 10px;font-size:12px;color:#1e293b;background:#f8fafc;outline:none;transition:border-color .15s,box-shadow .15s,background .15s;font-family:inherit;box-sizing:border-box;}
-  .ss-input:focus,.ss-num:focus,.ss-date:focus{border-color:#2d6a9f;box-shadow:0 0 0 3px rgba(45,106,159,.12);background:#fff;}
-  .ss-input{width:100%;}
-  .ss-num{width:64px;}
-  .ss-date{flex:1;min-width:0;}
-  .ss-range{display:flex;align-items:center;gap:6px;}
-  .ss-range-sep{font-size:11px;color:#94a3b8;flex-shrink:0;}
-  /* チップ（複数選択） */
-  .ss-chips{display:flex;flex-wrap:wrap;gap:6px;}
-  .ss-chip{position:relative;cursor:pointer;}
-  .ss-chip input{position:absolute;opacity:0;pointer-events:none;}
-  .ss-chip span{display:inline-flex;align-items:center;padding:5px 12px;border:1px solid #d5dbe3;border-radius:999px;font-size:12px;color:#4b5563;background:#fff;transition:all .13s;user-select:none;line-height:1.4;}
-  .ss-chip:hover span{border-color:#2d6a9f;color:#1a3a5c;}
-  .ss-chip input:checked+span{background:#1a3a5c;border-color:#1a3a5c;color:#fff;font-weight:600;box-shadow:0 1px 4px rgba(26,58,92,.3);}
-  .ss-chip input:focus-visible+span{box-shadow:0 0 0 3px rgba(45,106,159,.3);}
-  /* セグメント切替（単一選択） */
-  .ss-seg{display:flex;background:#eef1f5;border-radius:8px;padding:3px;}
-  .ss-seg label{flex:1;position:relative;cursor:pointer;}
-  .ss-seg input{position:absolute;opacity:0;pointer-events:none;}
-  .ss-seg span{display:block;text-align:center;font-size:11.5px;padding:6px 2px;border-radius:6px;color:#64748b;transition:all .13s;user-select:none;white-space:nowrap;}
-  .ss-seg label:hover span{color:#1a3a5c;}
-  .ss-seg input:checked+span{background:#fff;color:#1a3a5c;font-weight:700;box-shadow:0 1px 3px rgba(16,42,67,.18);}
-  .ss-sub-label{font-size:10px;color:#94a3b8;margin-bottom:4px;}
-  .ss-hint{font-size:10px;color:#b6c0cc;margin-top:5px;}
-  /* 折りたたみ詳細条件 */
-  .ss-adv{border-top:1px solid #eef1f5;margin:0 -16px;padding:0 16px;}
-  .ss-adv summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:11px 0;font-size:12px;font-weight:600;color:#4b5563;user-select:none;}
-  .ss-adv summary::-webkit-details-marker{display:none;}
-  .ss-adv summary::after{content:'';width:7px;height:7px;border-right:1.5px solid #94a3b8;border-bottom:1.5px solid #94a3b8;transform:rotate(45deg);transition:transform .15s;margin-right:2px;}
-  .ss-adv[open] summary::after{transform:rotate(-135deg);}
-  .ss-adv-body{padding-bottom:14px;}
-  /* 検索ボタン */
-  .ss-actions{padding:12px 16px;border-top:1px solid #eef1f5;background:#fff;flex-shrink:0;}
-  .ss-submit{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;padding:11px;background:#1a3a5c;color:#fff;border:none;border-radius:8px;font-size:13.5px;font-weight:700;letter-spacing:.06em;cursor:pointer;transition:background .15s,transform .05s;font-family:inherit;}
-  .ss-submit:hover{background:#2d6a9f;}
-  .ss-submit:active{transform:scale(.98);}
-  .ss-cnt{display:none;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;background:rgba(255,255,255,.22);border-radius:999px;font-size:11px;font-weight:700;}
-  /* ---- 検索結果 ---- */
-  .ss-result{flex:1;min-width:0;}
-  .ss-empty{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(16,42,67,.07);padding:70px 24px;text-align:center;}
-  .ss-empty-title{font-size:14px;font-weight:700;color:#374151;margin:14px 0 6px;}
-  .ss-empty-sub{font-size:12px;color:#94a3b8;line-height:1.7;max-width:340px;margin:0 auto;}
-  .ss-result-head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px;margin-bottom:10px;padding:0 2px;}
-  .ss-count{font-size:24px;font-weight:800;color:#1a3a5c;}
-  .ss-count-unit{font-size:13px;color:#4b5563;margin-left:3px;font-weight:600;}
-  .ss-count-sub{font-size:12px;color:#94a3b8;margin-left:8px;}
-  .ss-cond-note{font-size:11px;color:#94a3b8;}
-  .ss-tablewrap{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(16,42,67,.07);overflow-x:auto;margin-bottom:40px;}
-  .ss-table{width:100%;border-collapse:collapse;min-width:920px;}
-  .ss-th{padding:10px 12px;text-align:left;font-size:10.5px;font-weight:700;color:#8494a7;letter-spacing:.06em;border-bottom:2px solid #e8edf3;white-space:nowrap;background:#f8fafc;}
-  .ss-td{padding:9px 12px;border-bottom:1px solid #f1f4f8;vertical-align:middle;font-size:12.5px;color:#374151;}
-  .ss-c{text-align:center;}
-  .ss-nowrap{white-space:nowrap;}
-  .ss-row{cursor:pointer;transition:background .1s;}
-  .ss-row:nth-child(even){background:#fbfcfe;}
-  .ss-row:hover{background:#edf4fb;}
-  .ss-row:hover .ss-name{color:#2d6a9f;}
-  .ss-mono{font-family:ui-monospace,monospace;color:#94a3b8;font-size:11.5px;}
-  .ss-mono2{font-family:ui-monospace,monospace;}
-  .ss-name{font-weight:600;color:#1f2937;transition:color .1s;}
-  .ss-kana{font-size:10.5px;color:#9ca3af;margin-top:1px;}
-  .ss-tags{display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;}
-  .ss-tag{padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;white-space:nowrap;}
-  .ss-tag-h{background:#fef3c7;color:#92400e;}
-  .ss-tag-n{background:#dbeafe;color:#1e40af;}
-  .ss-tag-c{background:#fecaca;color:#991b1b;}
-  .ss-en{padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600;white-space:nowrap;}
-  .ss-sub{color:#6b7280;}
-  .ss-dim{color:#d1d5db;}
-  .ss-noresult{padding:60px 24px;text-align:center;}
-  .ss-noresult-title{font-size:13px;font-weight:600;color:#4b5563;margin-bottom:6px;}
-  .ss-noresult-sub{font-size:11.5px;color:#94a3b8;}
-  @media (max-width:900px){
-    .ss-wrap{flex-direction:column;}
-    .ss-panel{width:100%;position:static;}
-    .ss-card{max-height:none;}
-    .ss-body{overflow-y:visible;}
-  }
-</style>
-<div class="ss-page">
-  <!-- ページヘッダー -->
-  <div class="ss-head">
-    <div>
-      <h2 class="ss-title">社員絞り込み検索</h2>
-      <div class="ss-title-sub">複数条件を組み合わせて社員を絞り込みます</div>
-    </div>
-    <a href="${ADMIN_PATH}/staff" class="ss-back">← 社員名簿に戻る</a>
-  </div>
-
-  <div class="ss-wrap">
-
-    <!-- 検索フォーム（左パネル） -->
-    <div class="ss-panel">
-      <form method="get" action="${ADMIN_PATH}/staff/search" id="search-form">
-        <input type="hidden" name="s" value="1">
-        <div class="ss-card">
-          <div class="ss-card-accent"></div>
-          <div class="ss-card-head">
-            <b>絞り込み条件</b>
-            <a href="${ADMIN_PATH}/staff/search" class="ss-reset">リセット</a>
-          </div>
-          <div class="ss-body">
-
-            <!-- キーワード -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">キーワード</label>
-              <input type="text" name="q" value="${escHtml(q)}" placeholder="氏名・フリガナ・社員番号" class="ss-input">
-            </div>
-
-            <!-- 在籍区分 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">在籍区分</label>
-              ${seg('act', [['all','全員'],['1','在籍中'],['0','退職済']], act)}
-            </div>
-
-            <!-- 課 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">課</label>
-              <div class="ss-chips">
-                ${[1,2,3,4].map(n => chip('div', String(n), n + '課', divArr.includes(String(n)))).join('')}
-              </div>
-            </div>
-
-            <!-- 班番号 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">班番号</label>
-              <div class="ss-range">
-                <input type="number" name="tmin" value="${escHtml(tmin)}" min="1" max="99" placeholder="最小" class="ss-num">
-                <span class="ss-range-sep">〜</span>
-                <input type="number" name="tmax" value="${escHtml(tmax)}" min="1" max="99" placeholder="最大" class="ss-num">
-              </div>
-            </div>
-
-            <!-- 勤務体系 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">勤務体系</label>
-              <div class="ss-chips">
-                ${['a','b','B','D','H'].map(w => chip('ws', w, w, wsArr.includes(w))).join('')}
-              </div>
-              <div class="ss-hint">a/B:早番 ・ b:夜番 ・ D:日勤 ・ H:半夜</div>
-            </div>
-
-            <!-- 出勤時間 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">出勤時間</label>
-              <div class="ss-chips">
-                ${ALL_TIMES.map(t => chip('st', t, t, stArr.includes(t))).join('')}
-              </div>
-            </div>
-
-            <!-- 在籍状態 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">在籍状態</label>
-              <div class="ss-chips">
-                ${['通常','育休','病欠','傷病','長欠'].map(e => chip('en', e, e, enArr.includes(e))).join('')}
-              </div>
-            </div>
-
-            <!-- 労働時間区分 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">労働時間区分</label>
-              <div class="ss-chips">
-                ${chip('wht', '労フル', '労フル', whtArr.includes('労フル'))}
-                ${chip('wht', '労短', '労短', whtArr.includes('労短'))}
-              </div>
-            </div>
-
-            <!-- 新人・班長 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">社員属性</label>
-              <div class="ss-sub-label">新人</div>
-              <div style="margin-bottom:8px;">
-                ${seg('nw', [['all','問わない'],['1','新人のみ'],['0','一般社員']], nw)}
-              </div>
-              <div class="ss-sub-label">班長</div>
-              ${seg('hc', [['all','問わない'],['1','班長のみ'],['0','班長以外']], hc)}
-            </div>
-
-            <!-- フラグ -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">フラグ</label>
-              <div class="ss-chips">
-                ${chip('ca', '1', '要注意のみ', ca === '1')}
-                ${chip('sfu', '1', '売上要後追いのみ', sfu === '1')}
-              </div>
-            </div>
-
-            <!-- 担当車番 -->
-            <div class="ss-sec">
-              <label class="ss-sec-label">担当車番</label>
-              ${seg('car', [['all','問わない'],['1','あり'],['0','なし']], car)}
-            </div>
-
-            <!-- 詳細条件（折りたたみ） -->
-            <details class="ss-adv"${advAge}>
-              <summary>年齢で絞り込む</summary>
-              <div class="ss-adv-body">
-                <div class="ss-range">
-                  <input type="number" name="ami" value="${escHtml(ami)}" min="18" max="99" placeholder="最小" class="ss-num">
-                  <span class="ss-range-sep">〜</span>
-                  <input type="number" name="ama" value="${escHtml(ama)}" min="18" max="99" placeholder="最大" class="ss-num">
-                  <span class="ss-range-sep">歳</span>
-                </div>
-              </div>
-            </details>
-
-            <details class="ss-adv"${advHire}>
-              <summary>入社日で絞り込む</summary>
-              <div class="ss-adv-body">
-                <div class="ss-range">
-                  <input type="date" name="hf" value="${escHtml(hf)}" class="ss-date">
-                  <span class="ss-range-sep">〜</span>
-                  <input type="date" name="ht" value="${escHtml(ht)}" class="ss-date">
-                </div>
-              </div>
-            </details>
-
-            <details class="ss-adv"${advRet}>
-              <summary>退職日で絞り込む</summary>
-              <div class="ss-adv-body">
-                <div class="ss-range">
-                  <input type="date" name="rf" value="${escHtml(rf)}" class="ss-date">
-                  <span class="ss-range-sep">〜</span>
-                  <input type="date" name="rt" value="${escHtml(rt)}" class="ss-date">
-                </div>
-              </div>
-            </details>
-
-          </div>
-          <div class="ss-actions">
-            <button type="submit" class="ss-submit">検索<span class="ss-cnt" id="ss-cnt"></span></button>
-          </div>
-        </div>
-      </form>
-    </div>
-
-    <!-- 検索結果（右パネル） -->
-    <div class="ss-result">
-      ${!submitted ? `
-      <div class="ss-empty">
-        <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#c3d0de" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
-        <div class="ss-empty-title">条件を設定して検索</div>
-        <div class="ss-empty-sub">左のパネルで絞り込み条件を選び、「検索」ボタンを押すと該当する社員が一覧表示されます</div>
-      </div>
-      ` : `
-      <div class="ss-result-head">
-        <div><span class="ss-count">${staffRows.length}</span><span class="ss-count-unit">名</span><span class="ss-count-sub">が該当しました</span></div>
-        ${activeCount > 0 ? `<span class="ss-cond-note">${activeCount}件の条件で絞り込み中</span>` : ''}
-      </div>
-      <div class="ss-tablewrap">
-        ${staffRows.length > 0 ? `
-        <table class="ss-table">
-          <thead>
-            <tr>
-              <th class="ss-th">社員番号</th>
-              <th class="ss-th">氏名</th>
-              <th class="ss-th">課・班</th>
-              <th class="ss-th ss-c">体系</th>
-              <th class="ss-th ss-c">出勤時間</th>
-              <th class="ss-th ss-c">労働区分</th>
-              <th class="ss-th">在籍状態</th>
-              <th class="ss-th">入社日</th>
-              <th class="ss-th ss-c">年齢</th>
-              <th class="ss-th ss-c">車番</th>
-              <th class="ss-th ss-c">要注意</th>
-              <th class="ss-th ss-c">後追い</th>
-            </tr>
-          </thead>
-          <tbody>${resultRows}</tbody>
-        </table>
-        ` : `
-        <div class="ss-noresult">
-          <div class="ss-noresult-title">条件に一致する社員が見つかりませんでした</div>
-          <div class="ss-noresult-sub">条件を減らすか、キーワードを変えて再検索してください</div>
-        </div>
-        `}
-      </div>
-      `}
-    </div>
-  </div>
-</div>
-<script>
-(function(){
-  var f = document.getElementById('search-form');
-  var c = document.getElementById('ss-cnt');
-  if (!f || !c) return;
-  function calc(){
-    var n = 0;
-    f.querySelectorAll('input').forEach(function(i){
-      if (i.type === 'hidden') return;
-      if (i.type === 'checkbox') { if (i.checked) n++; }
-      else if (i.type === 'radio') { if (i.checked && i.value !== 'all') n++; }
-      else if (i.value && i.value.trim()) n++;
-    });
-    c.textContent = n;
-    c.style.display = n > 0 ? 'inline-flex' : 'none';
-  }
-  f.addEventListener('input', calc);
-  f.addEventListener('change', calc);
-  calc();
-})();
-</script>`;
-
-  return c.html(layout('社員絞り込み検索', content, 'staff-search'));
+  const qs = dest.toString();
+  return c.redirect(`${ADMIN_PATH}/staff${qs ? '?' + qs : ''}`, 301);
 });
 
 // ===== 社員詳細・編集 =====
@@ -1614,9 +1402,8 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
   ${!emp?.is_active && emp ? `<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;">この社員は退職済みです。退職日: ${escHtml(emp.retirement_date ?? '—')}</div>` : ''}
 
   ${!isNew ? `
-  <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:2px solid #e5e7eb;">
-    <button type="button" onclick="switchStaffTab('basic')" id="tabbtn-basic" style="padding:10px 20px;background:none;border:none;border-bottom:2px solid #1a3a5c;margin-bottom:-2px;font-size:13px;font-weight:700;color:#1a3a5c;cursor:pointer;">基本情報</button>
-    <button type="button" onclick="switchStaffTab('sales')" id="tabbtn-sales" style="padding:10px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:13px;font-weight:700;color:#9ca3af;cursor:pointer;">売上分析</button>
+  <div style="margin-bottom:16px;">
+    <a href="${ADMIN_PATH}/crew-portal/employee/${emp!.id}" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">売上分析・日別明細を見る（乗務員ポータル）→</a>
   </div>
   ` : ''}
 
@@ -1625,7 +1412,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
 
     <!-- セクション: 基本情報 -->
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-      <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">基本情報</h3>
+      <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">基本情報</h2>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
 
         <div>
@@ -1694,7 +1481,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
 
     <!-- セクション: 勤務情報 -->
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-      <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">勤務情報</h3>
+      <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">勤務情報</h2>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
 
         <div>
@@ -1744,7 +1531,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
 
     <!-- セクション: フラグ -->
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-      <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">フラグ設定</h3>
+      <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">フラグ設定</h2>
       <div style="display:flex;gap:24px;flex-wrap:wrap;">
 
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px 18px;border:1.5px solid #d1d5db;border-radius:8px;min-width:160px;">
@@ -1770,7 +1557,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
 
     <!-- セクション: 問題行動記録 -->
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-      <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">問題行動記録</h3>
+      <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">問題行動記録</h2>
       ${problemNotesHtml}
       <div style="display:flex;gap:8px;align-items:flex-start;">
         <textarea id="f-new-note" rows="3" placeholder="新しい記録を追記（追記ボタンで現在の記録に追加されます）"
@@ -1790,40 +1577,6 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
   </form>
   </div>
 
-  ${!isNew ? `
-  <div id="tab-content-sales" style="display:none;">
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-        <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0;">売上分析 — ${escHtml(emp!.name)}</h3>
-        <select id="sales-months" onchange="loadSalesAnalytics()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
-          <option value="3">直近3ヶ月</option>
-          <option value="6" selected>直近6ヶ月</option>
-          <option value="12">直近12ヶ月</option>
-          <option value="24">直近24ヶ月</option>
-        </select>
-      </div>
-      <div id="sales-loading" style="color:#9ca3af;font-size:13px;">読み込み中…</div>
-      <div id="sales-content" style="display:none;">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;padding:12px 14px;background:#f9fafb;border-radius:8px;">
-          <span style="font-size:12px;color:#6b7280;">月度PDF（勤務実績・売上表）:</span>
-          <select id="pdf-month-select" style="border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:12px;"></select>
-          <button type="button" onclick="downloadShiftSalesPdf()" style="padding:5px 14px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;">PDFダウンロード</button>
-        </div>
-        <div style="position:relative;height:240px;margin-bottom:24px;"><canvas id="sales-monthly-chart"></canvas></div>
-        <div style="position:relative;height:240px;margin-bottom:24px;"><canvas id="sales-weekday-chart"></canvas></div>
-        <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">暦要因別の営収差（この社員の平均日商との比較）</h4>
-        <table style="width:100%;border-collapse:collapse;font-size:12px;">
-          <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
-            <th style="padding:6px 8px;">要因</th><th style="padding:6px 8px;">該当日平均</th><th style="padding:6px 8px;">非該当日平均</th><th style="padding:6px 8px;">差分</th><th style="padding:6px 8px;">件数</th>
-          </tr></thead>
-          <tbody id="sales-factor-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  ` : ''}
-
-${!isNew ? `<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>` : ''}
 <script>
 const IS_NEW = ${isNew};
 const STAFF_ID = ${emp?.id ?? 'null'};
@@ -2007,88 +1760,6 @@ async function toggleExcludeRetirement(id, currentVal, name) {
 // 初期化時に時間選択肢を更新
 updateStartTimes();
 
-// ===== 売上分析タブ =====
-let salesAnalyticsLoaded = false;
-let salesMonthlyChart = null, salesWeekdayChart = null;
-
-function switchStaffTab(tab) {
-  const isBasic = tab === 'basic';
-  document.getElementById('tab-content-basic').style.display = isBasic ? '' : 'none';
-  document.getElementById('tab-content-sales').style.display = isBasic ? 'none' : '';
-  document.getElementById('tabbtn-basic').style.borderBottomColor = isBasic ? '#1a3a5c' : 'transparent';
-  document.getElementById('tabbtn-basic').style.color = isBasic ? '#1a3a5c' : '#9ca3af';
-  document.getElementById('tabbtn-sales').style.borderBottomColor = isBasic ? 'transparent' : '#1a3a5c';
-  document.getElementById('tabbtn-sales').style.color = isBasic ? '#9ca3af' : '#1a3a5c';
-  if (!isBasic && !salesAnalyticsLoaded) {
-    salesAnalyticsLoaded = true;
-    loadSalesAnalytics();
-  }
-}
-
-function downloadShiftSalesPdf() {
-  const val = document.getElementById('pdf-month-select').value;
-  if (!val) { alert('対象月度がありません（売上データがまだ登録されていません）'); return; }
-  const [year, month] = val.split('-');
-  window.open('/api/sales-analytics/employee/' + STAFF_ID + '/pdf?year=' + year + '&month=' + month, '_blank');
-}
-
-async function loadSalesAnalytics() {
-  const months = document.getElementById('sales-months').value;
-  document.getElementById('sales-loading').style.display = '';
-  document.getElementById('sales-content').style.display = 'none';
-  try {
-    const res = await fetch('/api/sales-analytics/employee/' + STAFF_ID + '?months=' + months);
-    const json = await res.json();
-    if (!res.ok) { document.getElementById('sales-loading').textContent = json.error || '読み込みに失敗しました'; return; }
-
-    if (!json.monthly.length) {
-      document.getElementById('sales-loading').textContent = 'この期間の売上データがありません（CSVインポートまたはLINE売上記録で登録されると表示されます）';
-      return;
-    }
-
-    document.getElementById('sales-loading').style.display = 'none';
-    document.getElementById('sales-content').style.display = '';
-
-    const pdfSelect = document.getElementById('pdf-month-select');
-    pdfSelect.innerHTML = json.monthly.slice().reverse().map(m =>
-      '<option value="' + m.year + '-' + m.month + '">' + m.year + '年' + m.month + '月度</option>'
-    ).join('');
-
-    const monthLabels = json.monthly.map(m => m.year + '年' + m.month + '月度');
-    const monthTotals = json.monthly.map(m => m.total);
-    if (salesMonthlyChart) salesMonthlyChart.destroy();
-    salesMonthlyChart = new Chart(document.getElementById('sales-monthly-chart').getContext('2d'), {
-      type: 'bar',
-      data: { labels: monthLabels, datasets: [{ label: '月度売上合計(円)', data: monthTotals, backgroundColor: 'rgba(37,99,235,0.7)', borderRadius: 4 }] },
-      options: { responsive: true, plugins: { title: { display: true, text: '月度売上推移' } }, scales: { y: { beginAtZero: true } } }
-    });
-
-    const wdLabels = json.weekdayBreakdown.map(w => w.label);
-    const wdAvgs = json.weekdayBreakdown.map(w => w.avg || 0);
-    if (salesWeekdayChart) salesWeekdayChart.destroy();
-    salesWeekdayChart = new Chart(document.getElementById('sales-weekday-chart').getContext('2d'), {
-      type: 'bar',
-      data: { labels: wdLabels, datasets: [{ label: '曜日別平均売上(円)', data: wdAvgs, backgroundColor: 'rgba(5,150,105,0.7)', borderRadius: 4 }] },
-      options: { responsive: true, plugins: { title: { display: true, text: '曜日別 平均売上' } }, scales: { y: { beginAtZero: true } } }
-    });
-
-    const tbody = document.getElementById('sales-factor-tbody');
-    tbody.innerHTML = json.factorBreakdown.map(f => {
-      if (f.countTrue === 0) return '';
-      const diffColor = f.diffPct === null ? '#9ca3af' : (f.diffPct >= 0 ? '#059669' : '#dc2626');
-      const diffText = f.diffPct === null ? '—' : (f.diffPct >= 0 ? '+' : '') + f.diffPct + '%';
-      return '<tr style="border-bottom:1px solid #f3f4f6;">' +
-        '<td style="padding:7px 8px;font-weight:600;">' + f.label + '</td>' +
-        '<td style="padding:7px 8px;">' + (f.avgTrue !== null ? f.avgTrue.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
-        '<td style="padding:7px 8px;">' + (f.avgFalse !== null ? f.avgFalse.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
-        '<td style="padding:7px 8px;font-weight:700;color:' + diffColor + ';">' + diffText + '</td>' +
-        '<td style="padding:7px 8px;color:#9ca3af;">' + f.countTrue + '件</td>' +
-        '</tr>';
-    }).join('');
-  } catch (err) {
-    document.getElementById('sales-loading').textContent = '通信エラーが発生しました';
-  }
-}
 </script>`;
 }
 

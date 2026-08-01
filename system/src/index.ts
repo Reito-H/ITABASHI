@@ -5,6 +5,7 @@ import adminRoutes from './routes/admin';
 import adminExtraRoutes from './routes/admin_extra';
 import adminStaffRoutes from './routes/admin_staff';
 import adminSalesAnalyticsRoutes from './routes/admin_sales_analytics';
+import adminCrewPortalRoutes from './routes/admin_crew_portal';
 import shiftApi from './routes/api/shift';
 import employeesApi from './routes/api/employees';
 import salesAnalyticsApi from './routes/api/sales_analytics';
@@ -33,17 +34,34 @@ import inspectionApi from './routes/api/inspection';
 import adminManualRoutes from './routes/admin_manual';
 import manualChatApi from './routes/api/manual_chat';
 import adminKanchoRoutes from './routes/admin_kancho';
+import adminKanchoWishRoutes from './routes/admin_kancho_wish';
+import adminKanchoRosterRoutes from './routes/admin_kancho_roster';
 import adminAccountsRoutes from './routes/admin_accounts';
 import adminDiaRoutes from './routes/admin_dia';
 import diaApi from './routes/api/dia';
 import adminTantoshaRoutes from './routes/admin_tantosha';
+import adminCrewShiftRoutes from './routes/admin_crew_shift';
+import adminHandoverRoutes from './routes/admin_handover';
 import liffKanchoRoutes from './routes/liff_kancho';
+import liffKanchoCalendarRoutes from './routes/liff_kancho_calendar';
+import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { getMaintenanceMode, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
 import { ADMIN_PATH, SECRET } from './config';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
+
+// 管理画面配下で認証・メンテナンス・権限チェックを免除してよいサブパス（login/logout/setupの本体のみ。
+// 前方一致にすると "login-logs" のように "login" で始まる無関係なパスまで巻き込むため、必ずセグメント単位で判定する）
+function isPublicAdminSubPath(subPath: string): boolean {
+  return (
+    subPath === '/login' || subPath.startsWith('/login/') ||
+    subPath === '/login-bg.jpg' ||
+    subPath === '/logout' || subPath.startsWith('/logout/') ||
+    subPath === '/setup' || subPath.startsWith('/setup/')
+  );
+}
 
 // =====================
 // セキュリティミドルウェア
@@ -104,7 +122,7 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path === '/' || path === '/robots.txt' || path === '/api/line/webhook') return next();
-  if (new RegExp(`^\\/${SECRET}\\/admin\\/(login|logout|setup)`).test(path)) return next();
+  if (path.startsWith(`/${SECRET}/admin`) && isPublicAdminSubPath(path.slice(`/${SECRET}/admin`.length) || '/')) return next();
 
   if (!(await getMaintenanceMode(c.env.DB))) return next();
 
@@ -130,22 +148,21 @@ app.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /\n'));
 // =====================
 app.use(`/${SECRET}/admin/*`, async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  const re = new RegExp(`^\\/${SECRET}\\/admin\\/(login|logout|setup)`);
-  if (re.test(path)) return next();
+  const subPath = path.slice(`/${SECRET}/admin`.length) || '/';
+  if (isPublicAdminSubPath(subPath)) return next();
   return requireAuth(c, next);
 });
 
 // アカウント別ページ権限（admins.permissions が NULL のアカウントは全ページ可）
 app.use(`/${SECRET}/admin/*`, async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  const re = new RegExp(`^\\/${SECRET}\\/admin\\/(login|logout|setup)`);
-  if (re.test(path)) return next();
+  const subPath = path.slice(`/${SECRET}/admin`.length) || '/';
+  if (isPublicAdminSubPath(subPath)) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
   if (!perms) return next(); // 全権限アカウント
 
-  const subPath = path.replace(`/${SECRET}/admin`, '') || '/';
   if (!isPathAllowed(perms, subPath, c.req.method)) {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
@@ -168,15 +185,20 @@ app.route(`/${SECRET}/admin`, adminRoutes);
 app.route(`/${SECRET}/admin`, adminExtraRoutes);
 app.route(`/${SECRET}/admin`, adminStaffRoutes);
 app.route(`/${SECRET}/admin`, adminSalesAnalyticsRoutes);
+app.route(`/${SECRET}/admin`, adminCrewPortalRoutes);
 app.route(`/${SECRET}/admin`, adminLiffRoutes);
 app.route(`/${SECRET}/admin`, adminLineUsageRoutes);
 app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminManualRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
+app.route(`/${SECRET}/admin`, adminKanchoWishRoutes);
+app.route(`/${SECRET}/admin`, adminKanchoRosterRoutes);
 app.route(`/${SECRET}/admin`, adminAccountsRoutes);
 app.route(`/${SECRET}/admin`, adminDiaRoutes);
 app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
+app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
+app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 
 // =====================
 // API（認証必須）
@@ -186,6 +208,7 @@ app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path === '/api/line/webhook') return next(); // Webhook は署名検証
   if (path.startsWith('/api/liff/')) return next(); // LIFF API は LINE UID検証
+  if (path.startsWith('/api/public/')) return next(); // 完全公開API（希望休フォーム等・書き込み範囲は各ルート側で厳しく限定）
   if (path === '/api/manual-chat') return next(); // LINEからも呼ぶため認証スキップ（内部APIキー等で保護）
   return requireAuth(c, next);
 });
@@ -195,6 +218,7 @@ app.use('/api/*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path === '/api/line/webhook') return next();
   if (path.startsWith('/api/liff/')) return next();
+  if (path.startsWith('/api/public/')) return next();
   if (path === '/api/manual-chat') return next();
 
   const adminId = c.get('adminId');
@@ -268,6 +292,10 @@ app.route('', liffRoutes);
 app.route('', liffBentenRoutes);
 app.route('', liffSalesRoutes);
 app.route('', liffKanchoRoutes);
+app.route('', liffKanchoCalendarRoutes);
+
+// 完全公開ページ（ログイン不要・LINEログインも不要）
+app.route('', publicKanchoWishRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

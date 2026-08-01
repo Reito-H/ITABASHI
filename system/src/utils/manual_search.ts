@@ -2,6 +2,29 @@ import type { D1Database } from '@cloudflare/workers-types';
 
 type Chunk = { id: number; section: string; content: string };
 
+// マニュアルBotの稼働ON/OFF（system_settings.manual_bot_enabled）
+// 読み取り失敗時はフェイルオープン（稼働扱い）。未設定時も稼働扱い。
+export async function getManualBotEnabled(db: D1Database): Promise<boolean> {
+  try {
+    const row = await db.prepare("SELECT value FROM system_settings WHERE key = 'manual_bot_enabled'")
+      .first<{ value: string }>();
+    return row?.value !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export async function setManualBotEnabled(db: D1Database, enabled: boolean): Promise<void> {
+  await db.prepare(`
+    INSERT INTO system_settings (key, value, updated_at)
+    VALUES ('manual_bot_enabled', ?, datetime('now', 'localtime'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).bind(enabled ? '1' : '0').run();
+}
+
+export const MANUAL_BOT_DISABLED_MESSAGE =
+  'マニュアルBotはただいま一時停止中です。ご不便をおかけしますが、しばらくお待ちください。';
+
 export async function queryManual(
   db: D1Database,
   apiKey: string,

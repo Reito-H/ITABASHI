@@ -11,8 +11,8 @@ database_id = "b50865b1-be1d-411c-bf71-fc9a7da3c5e0"
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
 RICHMENU_ID_PATTERN1 = "richmenu-7ddc3e80e06b72a49103d5237a89a4ee"
-RICHMENU_ID_PATTERN2 = "richmenu-610455a3eb2e552d4d0f7c800044d5a3"
-RICHMENU_ID_PATTERN3 = "richmenu-610455a3eb2e552d4d0f7c800044d5a3"
+RICHMENU_ID_PATTERN2 = "richmenu-a0d86ecebbaea07d6127552e5528c115"
+RICHMENU_ID_PATTERN3 = "richmenu-a0d86ecebbaea07d6127552e5528c115"
 # LIFFアプリID（LINE Developers で作成後に設定）
 LIFF_ID_LOST_ITEM = "2010598812-y7oZBhGe"
 LIFF_ID_ACCIDENT = "2010598812-PaLPe9HP"
@@ -23,6 +23,8 @@ LIFF_ID_OTHER_FEATURES = "2010598812-C477DCKE"
 LIFF_ID_VIOLATION = "2010598812-GNdHG7J6"
 # 一般報告 LIFF（エンドポイントURL: https://bentenclub.com/liff/general-report）
 LIFF_ID_GENERAL_REPORT = "2010598812-HftZFUKb"
+# 報告2 LIFF（忘れ物・事故・違反・一般報告を1本に統合、試験運用。エンドポイントURL: https://bentenclub.com/liff/report2）
+LIFF_ID_REPORT2 = "2010598812-TkOArc17"
 # ベンテンクラブ シフト（LINE Developers で LIFF作成後に設定）
 LIFF_ID_BENTEN_SHIFT = "2010598812-yt0r1ZAW"
 # ベンテン会員・シフトマスター用リッチメニュー（未作成なら空のまま=メニューなし）
@@ -33,6 +35,8 @@ RICHMENU_ID_CREW_MEMBER = "richmenu-1d8eaed8df2c9c29ca0f712ef01cf82d"
 LIFF_ID_SALES = "2010598812-deTtkaIz"
 # 班長シフト閲覧 LIFF（エンドポイントURL: https://bentenclub.com/liff/kancho-shift。LINE Developers で LIFF作成後に設定）
 LIFF_ID_KANCHO_SHIFT = ""
+# ⭐カレ（班長個人の縦型カレンダー）LIFF（エンドポイントURL: https://bentenclub.com/liff/kancho-calendar。LINE Developers で LIFF作成後に設定）
+LIFF_ID_KANCHO_CALENDAR = "2010598812-CuLH5N67"
 # 権限不明者（友達追加直後）用リッチメニュー。「LINE連携」ボタン→ステータス選択の入口（未作成なら空のまま=メニューなし）
 RICHMENU_ID_UNKNOWN = "richmenu-0b1281b87a1f1bf195ec5b3d4910fa3a"
 # シフト表PDF用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）
@@ -70,6 +74,10 @@ zone_name = "bentenclub.com"
 
 [[routes]]
 pattern = "bentenclub.com/form*"
+zone_name = "bentenclub.com"
+
+[[routes]]
+pattern = "bentenclub.com/kw-dea54792603559b9bb0e74ebb70188b4*"
 zone_name = "bentenclub.com"
 
 [[routes]]
