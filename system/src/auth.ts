@@ -41,6 +41,8 @@ export type Env = {
   LIFF_ID_SALES?: string;
   // 権限不明者（友達追加直後・未登録）用リッチメニュー。「LINE連携」ボタンでステータス選択を起動
   RICHMENU_ID_UNKNOWN?: string;
+  // 資料センター（マニュアルPDF・就業規則等のファイル保管）
+  DOCUMENTS_BUCKET: R2Bucket;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

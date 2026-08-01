@@ -7,6 +7,11 @@ binding = "DB"
 database_name = "staff-db"
 database_id = "b50865b1-be1d-411c-bf71-fc9a7da3c5e0"
 
+# 資料センター（マニュアルPDF・就業規則等のファイル保管）
+[[r2_buckets]]
+binding = "DOCUMENTS_BUCKET"
+bucket_name = "benten-documents"
+
 [vars]
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者

@@ -13,7 +13,6 @@ import type {
 import { ADMIN_PATH } from '../config';
 import qrcode from 'qrcode-generator';
 import { getMaintenanceMode, setMaintenanceMode, isAdminAccount } from '../utils/maintenance';
-import { getManualBotEnabled, setManualBotEnabled } from '../utils/manual_search';
 import { agoLabel } from './admin_line_usage';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
 
@@ -1014,6 +1013,7 @@ app.get('/settings', (c) => {
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
     ]},
     { heading: 'ガイド・システム', cards: [
+      { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: '資料センター',       desc: 'マニュアルPDF・就業規則などの資料を保存・共有' },
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
       { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド',     desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
       { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・通信状態・利用統計・DB統計・アクセスQRコード' },
@@ -1708,7 +1708,7 @@ app.get('/settings/tutorial', (c) => {
     <a href="#kancho" data-perm-key="kancho-shift">1-13. 班長シフト — 班長・指導者の月間シフト</a>
     <a href="#staff-search" data-perm-key="staff">1-14. 社員絞り込み検索 — 条件を組み合わせた検索</a>
     <a href="#inspection" data-perm-key="inspection">1-15. 点検管理 — 車両点検スケジュール</a>
-    <a href="#manual-bot" data-perm-key="manual-chat">1-16. マニュアルBot — AIチャットで質問</a>
+    <a href="#document-center" data-perm-key="settings.documents">1-16. 資料センター — マニュアル・就業規則の保管</a>
     <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">1-17. 報告センター — 忘れ物・事故・違反・一般報告</a>
     <a href="#benten-shift" data-perm-key="settings.benten">1-18. ベンテンクラブ シフト</a>
     <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
@@ -2002,6 +2002,7 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍ガイド・システム</p>
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
+      <tr><td>資料センター</td><td>マニュアルPDF・就業規則などの資料を保存・共有</td></tr>
       <tr><td>チュートリアル</td><td>このマニュアル（印刷・PDF出力対応）</td></tr>
       <tr><td>車番検索ガイド</td><td>班長・指導者向けLINE車番検索の使い方ページ（印刷・配布用）</td></tr>
       <tr><td>システムステータス</td><td>サーバー・DB・APIの稼働状態確認。管理画面アクセスQRコードの表示・ダウンロードもここから</td></tr>
@@ -2052,16 +2053,16 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-warn">写真のAI読み取りは日付ズレなどの誤読が起きることがあります。取り込んだ後は必ず紙の原本と目で照合してください。</div>
   </div>
 
-  <!-- 1-16 マニュアルBot -->
-  <div class="tut-section" id="manual-bot" data-perm-key="manual-chat">
-    <h3><span class="num">16</span>マニュアルBot — AIチャットで質問</h3>
-    <p style="font-size:13px;">登録済みのマニュアル（S.RIDE・決済・チケット・メーター操作など）をもとに、AIがチャット形式で質問に答えます。</p>
+  <!-- 1-16 資料センター -->
+  <div class="tut-section" id="document-center" data-perm-key="settings.documents">
+    <h3><span class="num">16</span>資料センター — マニュアル・就業規則の保管</h3>
+    <p style="font-size:13px;">マニュアルPDF・就業規則・その他の資料をアップロードし、カテゴリで分類して保管・閲覧できます。</p>
     <ol class="tut-steps">
-      <li>左メニュー「マニュアルBot」を開く</li>
-      <li>カテゴリボタンを押すか、入力欄に質問を書いて送信</li>
-      <li>回答の根拠になったマニュアル名も表示されます</li>
+      <li>設定 →「資料センター」を開く</li>
+      <li>「資料を追加」からタイトル・カテゴリを入力してファイルをアップロード</li>
+      <li>カテゴリで絞り込んで一覧から資料を開く・ダウンロードできます</li>
     </ol>
-    <div class="tut-note">AIはマニュアルに書かれていないことには答えられません。回答が「わからない」の場合は事務所に確認してください。</div>
+    <div class="tut-note">PDF・Word・Excel・画像などのファイルに対応しています。</div>
   </div>
 
   <!-- 1-17 報告センター -->
@@ -3107,25 +3108,6 @@ app.post('/settings/status/maintenance', async (c) => {
   return c.json({ ok: true, enabled });
 });
 
-// マニュアルBot稼働状態（ステータスページ表示用）
-app.get('/settings/status/manual-bot', async (c) => {
-  return c.json({ enabled: await getManualBotEnabled(c.env.DB) });
-});
-
-// マニュアルBot稼働ON/OFF切替
-app.post('/settings/status/manual-bot', async (c) => {
-  let enabled: boolean;
-  try {
-    const body = await c.req.json<{ enabled?: unknown }>();
-    if (typeof body.enabled !== 'boolean') throw new Error('invalid');
-    enabled = body.enabled;
-  } catch {
-    return c.json({ error: 'enabled は true / false で指定してください' }, 400);
-  }
-  await setManualBotEnabled(c.env.DB, enabled);
-  return c.json({ ok: true, enabled });
-});
-
 app.get('/settings/status', async (c) => {
   const adminLoginUrl = `https://bentenclub.com${ADMIN_PATH}/login`;
 
@@ -3150,7 +3132,6 @@ app.get('/settings/status', async (c) => {
   const adminId = c.get('adminId');
   const isAdmin = adminId ? await isAdminAccount(c.env.DB, adminId) : false;
   const maintenanceOn = await getMaintenanceMode(c.env.DB);
-  const manualBotOn = await getManualBotEnabled(c.env.DB);
 
   // ===== 実データ収集（利用状況・DB統計・直近アクティビティ） =====
   const [usageStats, featureTop, dailyUsage, dbCounts, recentActivity, loginStats] = await Promise.all([
@@ -3192,7 +3173,7 @@ app.get('/settings/status', async (c) => {
                               + (SELECT COUNT(*) FROM accident_reports)
                               + (SELECT COUNT(*) FROM violation_reports)
                               + (SELECT COUNT(*) FROM general_reports) AS cnt`],
-        ['chat_logs',      'SELECT COUNT(*) AS cnt FROM manual_chat_logs'],
+        ['documents',      'SELECT COUNT(*) AS cnt FROM resources'],
         ['sessions',       'SELECT COUNT(*) AS cnt FROM sessions'],
         ['login_logs',     'SELECT COUNT(*) AS cnt FROM login_logs'],
       ];
@@ -3255,7 +3236,7 @@ app.get('/settings/status', async (c) => {
     ['liff_users',     'LIFF利用者'],
     ['line_logs',      'LINE操作ログ'],
     ['reports',        '各種報告（累計）'],
-    ['chat_logs',      'マニュアルBot質問'],
+    ['documents',      '資料センター登録数'],
     ['sessions',       '有効セッション'],
     ['login_logs',     'ログイン記録'],
   ];
@@ -3297,28 +3278,6 @@ app.get('/settings/status', async (c) => {
           <div id="maint-msg" style="font-size:11px;color:#94a3b8;margin-top:8px;"></div>
         </div>
       </div>` : '';
-
-  // マニュアルBot制御カード
-  const manualBotCard = `
-      <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">MANUAL BOT CONTROL</span></div>
-        <div class="sys-pb">
-          <div class="sys-row" style="flex-wrap:wrap;">
-            <div style="flex:1;min-width:240px;">
-              <div style="font-size:14px;font-weight:700;color:#1e3a5f;">マニュアルBot（革命AI）</div>
-              <div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.7;">
-                OFFにすると管理画面「マニュアルBot」チャットとLINEの「？質問」への応答を停止します。<br>
-                チケット専用Bot（券種・決済の質問）はこの設定の影響を受けず稼働し続けます。
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:12px;">
-              <span id="mbot-state" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.1em;color:${manualBotOn ? '#16a34a' : '#d97706'};">${manualBotOn ? 'RUNNING' : 'STOPPED'}</span>
-              <label class="sw"><input type="checkbox" id="mbot-toggle" ${manualBotOn ? 'checked' : ''} onchange="toggleManualBot(this)"><span class="tr"></span></label>
-            </div>
-          </div>
-          <div id="mbot-msg" style="font-size:11px;color:#94a3b8;margin-top:8px;"></div>
-        </div>
-      </div>`;
 
   const html = settingsSubHeader('システムステータス') + `
     <style>
@@ -3379,7 +3338,6 @@ app.get('/settings/status', async (c) => {
         &#9888; メンテナンスモード稼働中 &mdash; admin 以外のアクセスにはメンテナンス画面が表示されています
       </div>
       ${maintenanceCard}
-      ${manualBotCard}
 
       <!-- サーバー・DB（サーバーサイド確認済み） -->
       <div class="sys-panel">
@@ -3594,28 +3552,6 @@ app.get('/settings/status', async (c) => {
         if (bn) { bn.style.display = on ? 'block' : 'none'; }
         var msg = document.getElementById('maint-msg');
         if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
-      }
-
-      // ---- マニュアルBot稼働切替 ----
-      function toggleManualBot(el) {
-        var on = el.checked;
-        el.disabled = true;
-        fetch(ADMIN_PATH + '/settings/status/manual-bot', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: on })
-        }).then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
-        .then(function(res) {
-          el.disabled = false;
-          if (!res.ok) { el.checked = !on; alert(res.j.error || '切替に失敗しました'); return; }
-          var st = document.getElementById('mbot-state');
-          if (st) { st.textContent = res.j.enabled ? 'RUNNING' : 'STOPPED'; st.style.color = res.j.enabled ? '#16a34a' : '#d97706'; }
-          var msg = document.getElementById('mbot-msg');
-          if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
-        }).catch(function() {
-          el.disabled = false; el.checked = !on;
-          alert('通信エラーで切り替えできませんでした');
-        });
       }
 
       // ---- QRコード ----

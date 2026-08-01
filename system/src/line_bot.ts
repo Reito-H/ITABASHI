@@ -5,8 +5,6 @@
 import { getPeriod, getPeriodRange } from './auth';
 import type { Env } from './auth';
 import { getRichMenuForRole } from './routes/admin_liff';
-import { queryManual, getManualBotEnabled, MANUAL_BOT_DISABLED_MESSAGE } from './utils/manual_search';
-import { isTicketQuestion, queryTicket } from './utils/ticket_bot';
 import { logLineActivity } from './utils/activity_log';
 import { setBentenConfig, linkBentenMember, BENTEN_MASTER_ROLES } from './benten';
 import { getTantoshaShiftMap, tantoshaShiftLabel, isItabashi } from './utils/tantosha_lookup';
@@ -209,8 +207,6 @@ function classifyBotFeature(inputText: string, state: string): string {
   if (state.startsWith('event_')) return '嫌なこと報告';
   if (inputText === 'uid' || inputText === 'UID') return 'UID確認';
   if (/^\d{1,6}$/.test(inputText)) return '車番検索';
-  const qMatch = inputText.match(/^[?？]\s*(.+)/s);
-  if (qMatch) return isTicketQuestion(qMatch[1].trim()) ? 'チケットAI' : 'マニュアルAI';
   if (inputText === '売上記録' || inputText === '売上を記録') return '売上記録';
   if (inputText === 'ODO') return 'ODO記録';
   if (inputText === '忘れ物対応' || inputText === '忘れ物') return '忘れ物対応';
@@ -344,26 +340,6 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
     await reply(replyToken, at, [text(
       '🤖 AI\n\nただいま準備中です。\n近日公開予定ですので、もうしばらくお待ちください！'
     )]);
-    return;
-  }
-
-  // ===== マニュアル検索（全登録ユーザー共通）=====
-  // 「？ 質問」または「?質問」で始まるメッセージはマニュアルBotへ
-  const manualMatch = inputText.match(/^[?？]\s*(.+)/s);
-  if (manualMatch && (env as any).GROQ_API_KEY) {
-    const question = manualMatch[1].trim();
-    // チケット関連の質問は専用Bot（知識ベース全量埋め込み）で回答
-    if (isTicketQuestion(question)) {
-      const answer = await queryTicket(env.DB, (env as any).GROQ_API_KEY, question, 'line', lineUid);
-      await reply(replyToken, at, [text(`🎫 革命AI\n\n${answer}`)]);
-      return;
-    }
-    if (!(await getManualBotEnabled(env.DB))) {
-      await reply(replyToken, at, [text(MANUAL_BOT_DISABLED_MESSAGE)]);
-      return;
-    }
-    const answer = await queryManual(env.DB, (env as any).GROQ_API_KEY, question, 'line', lineUid);
-    await reply(replyToken, at, [text(`📖 革命AI\n\n${answer}`)]);
     return;
   }
 

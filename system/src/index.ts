@@ -31,8 +31,8 @@ import adminLineUsageRoutes from './routes/admin_line_usage';
 import adminBentenRoutes from './routes/admin_benten';
 import adminInspectionRoutes from './routes/admin_inspection';
 import inspectionApi from './routes/api/inspection';
-import adminManualRoutes from './routes/admin_manual';
-import manualChatApi from './routes/api/manual_chat';
+import adminDocumentsRoutes from './routes/admin_documents';
+import documentsApi from './routes/api/documents';
 import adminKanchoRoutes from './routes/admin_kancho';
 import adminKanchoWishRoutes from './routes/admin_kancho_wish';
 import adminKanchoRosterRoutes from './routes/admin_kancho_roster';
@@ -190,7 +190,7 @@ app.route(`/${SECRET}/admin`, adminLiffRoutes);
 app.route(`/${SECRET}/admin`, adminLineUsageRoutes);
 app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
-app.route(`/${SECRET}/admin`, adminManualRoutes);
+app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoWishRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRosterRoutes);
@@ -209,7 +209,6 @@ app.use('/api/*', async (c, next) => {
   if (path === '/api/line/webhook') return next(); // Webhook は署名検証
   if (path.startsWith('/api/liff/')) return next(); // LIFF API は LINE UID検証
   if (path.startsWith('/api/public/')) return next(); // 完全公開API（希望休フォーム等・書き込み範囲は各ルート側で厳しく限定）
-  if (path === '/api/manual-chat') return next(); // LINEからも呼ぶため認証スキップ（内部APIキー等で保護）
   return requireAuth(c, next);
 });
 
@@ -219,7 +218,6 @@ app.use('/api/*', async (c, next) => {
   if (path === '/api/line/webhook') return next();
   if (path.startsWith('/api/liff/')) return next();
   if (path.startsWith('/api/public/')) return next();
-  if (path === '/api/manual-chat') return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -246,7 +244,7 @@ app.route('/api/notifications', notificationsApi);
 app.route('/api/instructor-invite', instructorInviteApi);
 app.route('/api/inspection', inspectionApi);
 app.route('/api/dia', diaApi);
-app.route('/api', manualChatApi);
+app.route('/api/documents', documentsApi);
 
 // =====================
 // LINE Webhook（署名検証あり・認証不要）

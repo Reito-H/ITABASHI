@@ -9,7 +9,7 @@
 
 // 権限キー一覧
 //   サイドバー: home / kancho-shift / handover / crew-portal / newcomers / staff /
-//               vehicles / inspection / manual-chat / settings / announcements / line
+//               vehicles / inspection / settings / announcements / line
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
 //   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
@@ -18,7 +18,7 @@
 //               settings.general-reports /
 //               settings.benten / settings.schedule-types / settings.dia / settings.coaches /
 //               settings.instructors / settings.periods / settings.notifications /
-//               settings.offices / settings.vehicle-search-guide /
+//               settings.offices / settings.vehicle-search-guide / settings.documents /
 //               settings.tutorial / settings.status
 
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
@@ -40,6 +40,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/notifications/,        'settings.notifications'],
   [/^\/settings\/offices/,              'settings.offices'],
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
+  [/^\/settings\/documents/,            'settings.documents'],
   [/^\/settings\/tutorial/,             'settings.tutorial'],
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
@@ -84,7 +85,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/events/,       'events'],
   [/^\/vehicles/,     'vehicles'],
   [/^\/inspection/,   'inspection'],
-  [/^\/manual-chat/,  'manual-chat'],
   [/^\/announcements/, 'announcements'],
   [/^\/line/,         'line'],
   [/^\/login-logs/,   'home'],
@@ -139,6 +139,7 @@ const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
   [/^\/api\/period-settings/,     ['settings.periods']],
   [/^\/api\/notifications/,       ['settings.notifications']],
   [/^\/api\/inspection/,          ['inspection']],
+  [/^\/api\/documents/,           ['settings.documents']],
 ];
 
 // 制限アカウントによるルートAPIへの書き込みを判定（GET/HEAD/OPTIONSは常に許可）
@@ -175,7 +176,6 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'events',        label: '報告一覧' },
     { key: 'vehicles',      label: '車両検索' },
     { key: 'inspection',    label: '点検管理' },
-    { key: 'manual-chat',   label: 'マニュアルBot' },
     { key: 'announcements', label: 'お知らせ配信' },
     { key: 'line',          label: 'LINE管理' },
     { key: 'settings',      label: '設定（トップ）' },
@@ -197,6 +197,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.notifications',        label: 'LINE通知設定' },
     { key: 'settings.offices',              label: '営業所' },
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
+    { key: 'settings.documents',            label: '資料センター' },
     { key: 'settings.tutorial',             label: 'チュートリアル' },
     { key: 'settings.status',               label: 'システムステータス' },
     { key: 'settings.kancho',               label: '班長関連（ハブ）' },
