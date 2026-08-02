@@ -43,6 +43,8 @@ export type Env = {
   RICHMENU_ID_UNKNOWN?: string;
   // 資料センター（マニュアルPDF・就業規則等のファイル保管）
   DOCUMENTS_BUCKET: R2Bucket;
+  // LINE連携統合ページ: 氏名入力+QR読取での登録LIFF
+  LIFF_ID_REGISTER?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回
@@ -171,6 +173,17 @@ export function generateInviteCode(): string {
     code += chars[b % chars.length];
   }
   return code;
+}
+
+// LINE登録QR用トークン生成（QRスキャン前提のため長め・REGQR-プレフィックス付き）
+export function generateRegQrToken(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let token = '';
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  for (const b of bytes) {
+    token += chars[b % chars.length];
+  }
+  return `REGQR-${token}`;
 }
 
 // 月度設定の型

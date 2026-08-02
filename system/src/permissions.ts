@@ -140,6 +140,7 @@ const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
   [/^\/api\/notifications/,       ['settings.notifications']],
   [/^\/api\/inspection/,          ['inspection']],
   [/^\/api\/documents/,           ['settings.documents']],
+  [/^\/api\/line-reg/,            ['settings.liff']],
 ];
 
 // 制限アカウントによるルートAPIへの書き込みを判定（GET/HEAD/OPTIONSは常に許可）
@@ -182,7 +183,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
   ]},
   { group: '設定サブページ', items: [
     { key: 'settings.accounts',             label: 'アカウント権限管理' },
-    { key: 'settings.liff',                 label: 'LINEリフ権限管理' },
+    { key: 'settings.liff',                 label: 'LINE連携' },
     { key: 'settings.lost-items',           label: '忘れ物報告一覧' },
     { key: 'settings.accidents',            label: '事故報告一覧' },
     { key: 'settings.violations',           label: '違反報告一覧' },

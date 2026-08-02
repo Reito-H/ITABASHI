@@ -246,46 +246,11 @@ app.get('/events/export', async (c) => {
 
 // ===== LINE管理 =====
 app.get('/line', async (c) => {
-  const codes = await c.env.DB.prepare(`
-    SELECT i.code, i.is_used, i.expires_at, i.created_at, i.used_at,
-      e.name, e.emp_no
-    FROM invite_codes i
-    LEFT JOIN employees e ON i.emp_id = e.id
-    ORDER BY i.created_at DESC
-    LIMIT 50
-  `).all<{
-    code: string; is_used: number; expires_at: string; created_at: string;
-    used_at: string; name: string; emp_no: string;
-  }>();
-
   const linked = await c.env.DB.prepare(`
     SELECT l.line_uid, l.linked_at, e.name, e.emp_no, e.division
     FROM line_users l JOIN employees e ON l.emp_id = e.id
     ORDER BY l.linked_at DESC
   `).all<{ line_uid: string; linked_at: string; name: string; emp_no: string; division: number }>();
-
-  const employees = await c.env.DB.prepare(
-    'SELECT id, name, emp_no FROM employees WHERE is_active = 1 ORDER BY seq_no, id'
-  ).all<{ id: number; name: string; emp_no: string }>();
-
-  const codeRows = (codes.results ?? []).map(c => {
-    const now = new Date().toISOString();
-    const expired = c.expires_at < now;
-    return `
-      <tr>
-        <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-family:monospace;font-size:14px;font-weight:bold;letter-spacing:2px;">${escHtml(c.code)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(c.name ?? '—')}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;">
-          ${c.is_used ? '<span style="background:#bbf7d0;padding:2px 8px;border-radius:4px;font-size:12px;">使用済</span>'
-            : expired ? '<span style="background:#fee2e2;padding:2px 8px;border-radius:4px;font-size:12px;">期限切れ</span>'
-            : '<span style="background:#fef9c3;padding:2px 8px;border-radius:4px;font-size:12px;">有効</span>'}
-        </td>
-        <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;">${c.expires_at.slice(0, 16)}</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;">
-          <button onclick="deleteCode('${escHtml(c.code)}')" style="padding:2px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;">削除</button>
-        </td>
-      </tr>`;
-  }).join('');
 
   const linkedRows = (linked.results ?? []).map(l =>
     `<tr>
@@ -296,31 +261,19 @@ app.get('/line', async (c) => {
     </tr>`
   ).join('');
 
-  const empOptions = (employees.results ?? []).map(e =>
-    `<option value="${e.id}">${escHtml(e.name)}（${escHtml(e.emp_no)}）</option>`
-  ).join('');
-
   const content = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
 
-      <!-- 招待コード発行 -->
-      <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:20px;">
-        <h3 style="font-size:15px;font-weight:bold;color:#1e3a5f;margin-bottom:16px;">招待コード発行</h3>
-        <div style="margin-bottom:12px;">
-          <label style="font-size:13px;color:#6b7280;display:block;margin-bottom:6px;">対象社員を選択</label>
-          <select id="emp-select" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px;font-size:13px;">
-            <option value="">選択してください...</option>
-            ${empOptions}
-          </select>
-        </div>
-        <button onclick="issueCode()" style="width:100%;padding:10px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">
-          招待コードを発行する
-        </button>
-        <div id="code-result" style="display:none;margin-top:16px;padding:16px;background:#f0f9ff;border-radius:8px;text-align:center;">
-          <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">招待コード（有効期限7日）</div>
-          <div id="code-display" style="font-size:32px;font-weight:bold;letter-spacing:6px;color:#1e3a5f;font-family:monospace;"></div>
-          <div style="font-size:12px;color:#6b7280;margin-top:8px;">このコードをLINEリフに送るよう新人に伝えてください</div>
-        </div>
+      <!-- LINE連携ページへの案内 -->
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:20px;display:flex;flex-direction:column;justify-content:center;">
+        <h3 style="font-size:15px;font-weight:bold;color:#1e3a5f;margin-bottom:10px;">新人・運行管理者などの登録</h3>
+        <p style="font-size:13px;color:#1e40af;line-height:1.7;margin-bottom:14px;">
+          新人・運行管理者・車番管理者などのLINE登録は「設定 &gt; LINE連携」ページに統合されました。
+          QRコードを発行して本人に読み取ってもらうだけで登録できます。
+        </p>
+        <a href="${ADMIN_PATH}/settings/liff" style="display:inline-block;text-align:center;padding:10px;background:#2563eb;color:white;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;">
+          LINE連携ページを開く →
+        </a>
       </div>
 
       <!-- アンケート配信 -->
@@ -342,25 +295,6 @@ app.get('/line', async (c) => {
       </div>
     </div>
 
-    <!-- 招待コード一覧 -->
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);margin-top:20px;overflow:hidden;">
-      <div style="padding:16px 20px;border-bottom:1px solid #f3f4f6;">
-        <h3 style="font-size:15px;font-weight:bold;color:#1e3a5f;">発行済み招待コード</h3>
-      </div>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead style="background:#f9fafb;">
-          <tr>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">コード</th>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">対象社員</th>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">状態</th>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">有効期限</th>
-            <th style="padding:8px 12px;"></th>
-          </tr>
-        </thead>
-        <tbody>${codeRows || '<tr><td colspan="5" style="padding:20px;text-align:center;color:#9ca3af;">コードがありません</td></tr>'}</tbody>
-      </table>
-    </div>
-
     <!-- LINE紐付け済みユーザー -->
     <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);margin-top:20px;overflow:hidden;">
       <div style="padding:16px 20px;border-bottom:1px solid #f3f4f6;">
@@ -380,23 +314,6 @@ app.get('/line', async (c) => {
     </div>
 
     <script>
-    async function issueCode() {
-      const empId = document.getElementById('emp-select').value;
-      if (!empId) { alert('社員を選択してください'); return; }
-      const res = await fetch('/api/line/invite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emp_id: parseInt(empId) })
-      });
-      const json = await res.json();
-      if (res.ok) {
-        document.getElementById('code-display').textContent = json.code;
-        document.getElementById('code-result').style.display = 'block';
-      } else {
-        alert('発行に失敗しました: ' + json.error);
-      }
-    }
-
     async function sendSurvey() {
       const title = document.getElementById('survey-title').value.trim();
       const url = document.getElementById('survey-url').value.trim();
@@ -409,13 +326,6 @@ app.get('/line', async (c) => {
       });
       if (res.ok) alert('配信しました！');
       else alert('配信に失敗しました');
-    }
-
-    async function deleteCode(code) {
-      if (!confirm('招待コード「' + code + '」を削除しますか？')) return;
-      const res = await fetch('/api/line/invite/' + code, { method: 'DELETE' });
-      if (res.ok) { location.reload(); }
-      else { alert('削除に失敗しました。'); }
     }
     </script>
   `;

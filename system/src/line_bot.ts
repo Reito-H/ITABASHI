@@ -156,7 +156,7 @@ function todayJST(): string {
 // 登録・リッチメニュー割り当て
 // ===================================================
 
-async function registerLiffUser(
+export async function registerLiffUser(
   db: D1Database,
   lineUid: string,
   name: string,

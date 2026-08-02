@@ -42,8 +42,10 @@ LIFF_ID_SALES = "2010598812-deTtkaIz"
 LIFF_ID_KANCHO_SHIFT = ""
 # ⭐カレ（班長個人の縦型カレンダー）LIFF（エンドポイントURL: https://bentenclub.com/liff/kancho-calendar。LINE Developers で LIFF作成後に設定）
 LIFF_ID_KANCHO_CALENDAR = "2010598812-CuLH5N67"
-# 権限不明者（友達追加直後）用リッチメニュー。「LINE連携」ボタン→ステータス選択の入口（未作成なら空のまま=メニューなし）
-RICHMENU_ID_UNKNOWN = "richmenu-0b1281b87a1f1bf195ec5b3d4910fa3a"
+# 権限不明者（友達追加直後）用リッチメニュー。「登録はこちら」→ LIFF_ID_REGISTER の入口（未作成なら空のまま=メニューなし）
+RICHMENU_ID_UNKNOWN = "richmenu-ac5365723768242e0e61331f7e63f121"
+# LINE連携登録 LIFF（氏名入力+QR読み取りで新人・運行管理者などを登録。エンドポイントURL: https://bentenclub.com/liff/register。LINE Developers で LIFF作成後に設定）
+LIFF_ID_REGISTER = "2010598812-B8nxU525"
 # シフト表PDF用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）
 # R2を使う場合は下の [[r2_buckets]] を有効化してフォントをアップロードする（R2が優先）
 BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/master/fonts/NotoSansCJKjp-Regular.ttf"

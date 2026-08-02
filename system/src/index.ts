@@ -21,6 +21,8 @@ import instructorsApi from './routes/api/instructors';
 import periodSettingsApi from './routes/api/period_settings';
 import notificationsApi from './routes/api/notifications';
 import instructorInviteApi from './routes/api/instructor_invite';
+import lineRegApi from './routes/api/line_reg';
+import liffRegisterRoutes from './routes/liff_register';
 import { handleLineEvent } from './line_bot';
 import { handleCron } from './cron';
 import liffRoutes from './routes/liff';
@@ -242,6 +244,7 @@ app.route('/api/instructors', instructorsApi);
 app.route('/api/period-settings', periodSettingsApi);
 app.route('/api/notifications', notificationsApi);
 app.route('/api/instructor-invite', instructorInviteApi);
+app.route('/api/line-reg', lineRegApi);
 app.route('/api/inspection', inspectionApi);
 app.route('/api/dia', diaApi);
 app.route('/api/documents', documentsApi);
@@ -289,6 +292,7 @@ app.post('/api/line/webhook', async (c) => {
 app.route('', liffRoutes);
 app.route('', liffBentenRoutes);
 app.route('', liffSalesRoutes);
+app.route('', liffRegisterRoutes);
 app.route('', liffKanchoRoutes);
 app.route('', liffKanchoCalendarRoutes);
 

@@ -992,7 +992,7 @@ app.get('/settings', (c) => {
     ]},
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
-      { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINEリフ権限管理',   desc: '統括/運行/車番管理者の権限割り当て・ユーザー一覧', highlight: true },
+      { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINE連携',   desc: 'QRコード発行での新人・運行管理者等の登録・連携済みユーザー管理', highlight: true },
     ]},
     { heading: 'シフト関連の設定', cards: [
       { href: `${ADMIN}/settings/schedule-types`, perm: 'settings.schedule-types', title: 'シフト区分',   desc: 'プリセットボタンの区分名・色・目標回数' },
@@ -1252,7 +1252,7 @@ app.get('/settings/instructors', async (c) => {
       ? `<span style="color:#059669;font-size:11px;font-weight:600;">連携済</span>
          <button onclick="unlinkLine(${inst.id},'${escHtml(inst.name)}')" style="padding:2px 6px;background:#fee2e2;color:#991b1b;border:none;border-radius:3px;font-size:11px;cursor:pointer;">解除</button>`
       : `<span style="color:#9ca3af;font-size:11px;">未連携</span>
-         <button onclick="genCode(${inst.id})" style="padding:2px 8px;background:#dbeafe;color:#1d4ed8;border:none;border-radius:3px;font-size:11px;cursor:pointer;white-space:nowrap;">招待コード</button>`;
+         <a href="${ADMIN_PATH}/settings/liff" style="padding:2px 8px;background:#dbeafe;color:#1d4ed8;border-radius:3px;font-size:11px;text-decoration:none;white-space:nowrap;">LINE連携ページでQR発行</a>`;
     return `
     <tr style="opacity:${inst.is_active ? 1 : 0.4}">
       <td class="px-3 py-2 border-b">
@@ -1329,13 +1329,6 @@ app.get('/settings/instructors', async (c) => {
       var res = await fetch('/api/instructors', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,role:role||null}) });
       if (res.ok) location.reload();
       else { var j = await res.json(); alert(j.error ?? '追加に失敗しました'); }
-    }
-    async function genCode(id) {
-      var res = await fetch('/api/instructor-invite', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({instructor_id:id}) });
-      if (!res.ok) { alert('招待コードの発行に失敗しました'); return; }
-      var j = await res.json();
-      try { await navigator.clipboard.writeText(j.code); } catch(_) {}
-      alert('招待コード: ' + j.code + '\\n（クリップボードにコピーしました）\\n\\n有効期限: 24時間\\nLINEでこのコードを送信してもらってください。');
     }
     async function unlinkLine(id, name) {
       if (!confirm(name + ' のLINE連携を解除しますか？')) return;
@@ -1972,7 +1965,7 @@ app.get('/settings/tutorial', (c) => {
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>アカウント権限管理</td><td>管理画面アカウントの作成と、機能ごとの閲覧/編集権限の設定</td></tr>
-      <tr><td>LINEリフ権限管理</td><td>統括管理者・運行管理者・車番管理者などLINE側の権限割り当てとユーザー一覧</td></tr>
+      <tr><td>LINE連携</td><td>QRコード発行での新人・統括管理者・運行管理者・車番管理者などの登録と連携済みユーザー管理</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍シフト関連の設定</p>

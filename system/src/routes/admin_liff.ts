@@ -452,6 +452,24 @@ app.get('/settings/liff', async (c) => {
 
   const all = users.results ?? [];
 
+  const instructorsRes = await c.env.DB.prepare(
+    'SELECT id, name, line_uid FROM instructors WHERE is_active = 1 ORDER BY sort_order, id'
+  ).all<{ id: number; name: string; line_uid: string | null }>();
+  const instructors = instructorsRes.results ?? [];
+
+  const regCodesRes = await c.env.DB.prepare(`
+    SELECT q.token, q.target_type, q.role, q.instructor_id, q.is_used, q.expires_at, q.created_at,
+           i.name AS instructor_name
+    FROM line_reg_qrcodes q
+    LEFT JOIN instructors i ON i.id = q.instructor_id
+    ORDER BY q.created_at DESC
+    LIMIT 50
+  `).all<{
+    token: string; target_type: string; role: string | null; instructor_id: number | null;
+    is_used: number; expires_at: string; created_at: string; instructor_name: string | null;
+  }>();
+  const regCodes = regCodesRes.results ?? [];
+
   // 統計
   const stats: Record<string, number> = {};
   for (const u of all) { stats[u.role] = (stats[u.role] ?? 0) + 1; }
@@ -473,7 +491,8 @@ app.get('/settings/liff', async (c) => {
     const options = Object.entries(ROLE_LABELS).map(([r, l]) =>
       `<option value="${r}" ${r === role ? 'selected' : ''}>${escHtml(l)}</option>`
     ).join('');
-    return `<tr id="row-${u.id}">
+    const searchBlob = `${(u.name ?? '')} ${(u.emp_no ?? '')}`.toLowerCase();
+    return `<tr id="row-${u.id}" data-role="${role}" data-search="${escHtml(searchBlob)}" data-linked="${u.emp_id ? '1' : '0'}">
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
         <div onclick="openLinkModal(${u.id})" title="タップして氏名修正・社員紐付け" style="font-size:14px;font-weight:600;color:#111827;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;">${escHtml(u.name ?? '（名前未設定）')}</div>
         ${empInfo ? `<div style="font-size:11px;color:#6b7280;margin-top:2px;">${escHtml(empInfo)}</div>` : '<div style="font-size:11px;color:#d97706;margin-top:2px;">社員未紐付け</div>'}
@@ -503,32 +522,145 @@ app.get('/settings/liff', async (c) => {
     </tr>`;
   }).join('');
 
+  const roleOptionsForIssue = Object.entries(ROLE_LABELS)
+    .filter(([r]) => r !== 'unknown')
+    .map(([r, l]) => `<option value="${r}">${escHtml(l)}</option>`).join('');
+
+  const instructorOptions = instructors.map(i =>
+    `<option value="${i.id}">${escHtml(i.name)}${i.line_uid ? '（連携済み）' : ''}</option>`
+  ).join('');
+
+  const nowIso = new Date().toISOString();
+  const regCodeRows = regCodes.map(q => {
+    const expired = q.expires_at < nowIso;
+    const label = q.target_type === 'instructor'
+      ? `班長・指導者: ${escHtml(q.instructor_name ?? '')}`
+      : escHtml(ROLE_LABELS[q.role ?? ''] ?? q.role ?? '');
+    const statusHtml = (q.target_type === 'instructor' && q.is_used)
+      ? '<span style="background:#bbf7d0;padding:2px 8px;border-radius:4px;font-size:12px;">使用済</span>'
+      : expired
+        ? '<span style="background:#fee2e2;padding:2px 8px;border-radius:4px;font-size:12px;">期限切れ</span>'
+        : '<span style="background:#fef9c3;padding:2px 8px;border-radius:4px;font-size:12px;">有効</span>';
+    return `<tr id="reg-row-${escHtml(q.token)}">
+      <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${label}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;">${statusHtml}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;">${q.expires_at.slice(0, 16)}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;">
+        <button onclick="revokeCode('${escHtml(q.token)}')" style="padding:2px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;">失効</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const instructorLinkRows = instructors.map(i => `
+    <tr>
+      <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(i.name)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;">
+        ${i.line_uid
+          ? '<span style="background:#bbf7d0;padding:2px 8px;border-radius:4px;font-size:12px;">連携済み</span>'
+          : '<span style="background:#f3f4f6;color:#9ca3af;padding:2px 8px;border-radius:4px;font-size:12px;">未連携</span>'}
+      </td>
+    </tr>`).join('');
+
   const content = `
-    ${subHeader('LINEリフ 権限管理')}
+    ${subHeader('LINE連携')}
 
-    <!-- 統計カード -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:20px;">
-      ${statCards}
+    <!-- タブ -->
+    <div style="display:flex;gap:8px;margin-bottom:20px;">
+      <button id="tab-btn-issue" onclick="switchTab('issue')" style="padding:10px 20px;border:none;border-radius:8px 8px 0 0;font-size:14px;font-weight:700;cursor:pointer;background:#1e3a5f;color:white;">QRコード発行</button>
+      <button id="tab-btn-users" onclick="switchTab('users')" style="padding:10px 20px;border:none;border-radius:8px 8px 0 0;font-size:14px;font-weight:700;cursor:pointer;background:#e5e7eb;color:#6b7280;">連携済みユーザー管理</button>
     </div>
 
-    <!-- 登録方法ガイド -->
-    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;font-size:13px;color:#1e40af;">
-      <div style="font-weight:700;margin-bottom:8px;">登録コマンド（LINEで送信）</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-        <div><strong>「統括管理者登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
-        <div><strong>「運行管理者登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
-        <div><strong>「車番連携」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
-        <div><strong>「ベンテン会員登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
-        <div><strong>「シフトマスター登録」</strong><br><span style="font-size:11px;color:#3b82f6;">→ パスワード入力 → 登録</span></div>
+    <!-- タブA: QRコード発行 -->
+    <div id="tab-issue">
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px 18px;margin-bottom:20px;font-size:13px;color:#1e40af;">
+        リッチメニューの「登録はこちら」から氏名入力＋QR読み取り画面が開きます。ここで発行したQRコードを本人に見せて読み取ってもらってください。
       </div>
-      <div style="margin-top:8px;font-size:11px;color:#6b7280;">※各パスワードは <code>wrangler secret put</code> で設定してください</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+        <!-- ロール指定QR -->
+        <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+          <h3 style="font-size:15px;font-weight:bold;color:#1e3a5f;margin-bottom:16px;">ロール指定QR発行</h3>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:13px;color:#6b7280;display:block;margin-bottom:6px;">ロール（新人を含む）</label>
+            <select id="issue-role" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px;font-size:13px;">
+              ${roleOptionsForIssue}
+            </select>
+          </div>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:13px;color:#6b7280;display:block;margin-bottom:6px;">有効期限</label>
+            <select id="issue-role-hours" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px;font-size:13px;">
+              <option value="24">24時間</option>
+              <option value="1">1時間</option>
+              <option value="72">3日間</option>
+              <option value="168">7日間</option>
+            </select>
+          </div>
+          <div style="font-size:12px;color:#9ca3af;margin-bottom:12px;">期限内であれば複数人が同じQRで登録できます</div>
+          <button onclick="issueRoleQr()" style="width:100%;padding:10px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">QRコードを発行する</button>
+          <div id="role-qr-result" style="display:none;margin-top:16px;padding:16px;background:#f0f9ff;border-radius:8px;text-align:center;"></div>
+        </div>
+
+        <!-- 班長・指導者 個別QR -->
+        <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+          <h3 style="font-size:15px;font-weight:bold;color:#1e3a5f;margin-bottom:16px;">班長・指導者 個別QR発行</h3>
+          <div style="margin-bottom:12px;">
+            <label style="font-size:13px;color:#6b7280;display:block;margin-bottom:6px;">対象者を選択</label>
+            <select id="issue-instructor" style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px;font-size:13px;">
+              <option value="">選択してください...</option>
+              ${instructorOptions}
+            </select>
+          </div>
+          <div style="font-size:12px;color:#9ca3af;margin-bottom:12px;">有効期限24時間・1回使用すると失効します</div>
+          <button onclick="issueInstructorQr()" style="width:100%;padding:10px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">QRコードを発行する</button>
+          <div id="instructor-qr-result" style="display:none;margin-top:16px;padding:16px;background:#f0f9ff;border-radius:8px;text-align:center;"></div>
+        </div>
+      </div>
+
+      <!-- 発行済みQR一覧 -->
+      <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
+        <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:15px;font-weight:700;color:#1e3a5f;">発行済みQRコード</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">対象</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">状態</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">有効期限</th>
+              <th style="padding:8px 12px;"></th>
+            </tr>
+          </thead>
+          <tbody id="reg-code-tbody">${regCodeRows || '<tr><td colspan="4" style="padding:20px;text-align:center;color:#9ca3af;">発行済みのQRコードはありません</td></tr>'}</tbody>
+        </table>
+      </div>
     </div>
 
-    <!-- ユーザー一覧 -->
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">
-        <div style="font-size:15px;font-weight:700;color:#1e3a5f;">登録ユーザー（${all.length}名）</div>
+    <!-- タブB: 連携済みユーザー管理 -->
+    <div id="tab-users" style="display:none;">
+      <!-- 統計カード -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:20px;">
+        ${statCards}
       </div>
+
+      <!-- 検索・絞り込み -->
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+        <input id="user-search" type="text" placeholder="氏名・社員番号で検索…" oninput="filterUsers()" style="flex:1;min-width:200px;border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:13px;box-sizing:border-box;">
+        <select id="role-filter" onchange="filterUsers()" style="border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:13px;background:white;">
+          <option value="">すべてのロール</option>
+          ${Object.entries(ROLE_LABELS).map(([r, l]) => `<option value="${r}">${escHtml(l)}</option>`).join('')}
+        </select>
+        <select id="link-filter" onchange="filterUsers()" style="border:1px solid #d1d5db;border-radius:8px;padding:9px 12px;font-size:13px;background:white;">
+          <option value="">紐付け状況すべて</option>
+          <option value="1">社員紐付け済み</option>
+          <option value="0">未紐付け</option>
+        </select>
+      </div>
+
+      <!-- ユーザー一覧 -->
+      <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;margin-bottom:20px;">
+        <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-size:15px;font-weight:700;color:#1e3a5f;" id="user-count-label">登録ユーザー（${all.length}名）</div>
+        </div>
       <div style="overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;min-width:600px;">
           <thead style="background:#f9fafb;">
@@ -541,9 +673,26 @@ app.get('/settings/liff', async (c) => {
               <th style="padding:8px 12px;"></th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="user-tbody">
             ${rows || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">登録ユーザーがいません</td></tr>'}
           </tbody>
+        </table>
+      </div>
+      </div>
+
+      <!-- 班長・指導者の連携状況 -->
+      <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
+        <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
+          <div style="font-size:15px;font-weight:700;color:#1e3a5f;">班長・指導者の連携状況</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">氏名</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;">連携状況</th>
+            </tr>
+          </thead>
+          <tbody>${instructorLinkRows || '<tr><td colspan="2" style="padding:20px;text-align:center;color:#9ca3af;">班長・指導者が登録されていません</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -574,8 +723,90 @@ app.get('/settings/liff', async (c) => {
     <script>
     const ADMIN_PATH = '${ADMIN_PATH}';
     var LINK_USERS = ${safeJson(all.map(u => ({ id: u.id, name: u.name, emp_id: u.emp_id, emp_no: u.emp_no, division: u.division, team: u.team })))};
+    var ROLE_LABELS_JS = ${safeJson(ROLE_LABELS)};
     var _linkId = null;
     var _linkSelectedEmpId = null;
+
+    function switchTab(tab) {
+      document.getElementById('tab-issue').style.display = tab === 'issue' ? 'block' : 'none';
+      document.getElementById('tab-users').style.display = tab === 'users' ? 'block' : 'none';
+      document.getElementById('tab-btn-issue').style.background = tab === 'issue' ? '#1e3a5f' : '#e5e7eb';
+      document.getElementById('tab-btn-issue').style.color = tab === 'issue' ? 'white' : '#6b7280';
+      document.getElementById('tab-btn-users').style.background = tab === 'users' ? '#1e3a5f' : '#e5e7eb';
+      document.getElementById('tab-btn-users').style.color = tab === 'users' ? 'white' : '#6b7280';
+    }
+
+    function filterUsers() {
+      var q = document.getElementById('user-search').value.trim().toLowerCase();
+      var role = document.getElementById('role-filter').value;
+      var linked = document.getElementById('link-filter').value;
+      var rowsEl = document.querySelectorAll('#user-tbody tr[data-role]');
+      var visible = 0;
+      rowsEl.forEach(function(tr) {
+        var matchQ = !q || (tr.getAttribute('data-search') || '').indexOf(q) !== -1;
+        var matchRole = !role || tr.getAttribute('data-role') === role;
+        var matchLinked = !linked || tr.getAttribute('data-linked') === linked;
+        var show = matchQ && matchRole && matchLinked;
+        tr.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      document.getElementById('user-count-label').textContent = '登録ユーザー（' + visible + ' / ${all.length}名）';
+    }
+
+    async function issueRoleQr() {
+      var role = document.getElementById('issue-role').value;
+      var hours = parseInt(document.getElementById('issue-role-hours').value);
+      var res = await fetch('/api/line-reg/issue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_type: 'role', role: role, hours: hours }),
+      });
+      var j = await res.json();
+      if (!res.ok) { alert('発行に失敗しました: ' + (j.error || '')); return; }
+      var el = document.getElementById('role-qr-result');
+      el.innerHTML = j.qr_svg + '<div style="font-size:12px;color:#6b7280;margin-top:8px;">有効期限: ' + j.expires_at.slice(0, 16) + '</div>';
+      el.style.display = 'block';
+      prependRegRow(j, role, null);
+    }
+
+    async function issueInstructorQr() {
+      var instructorId = document.getElementById('issue-instructor').value;
+      if (!instructorId) { alert('対象者を選択してください'); return; }
+      var res = await fetch('/api/line-reg/issue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_type: 'instructor', instructor_id: parseInt(instructorId) }),
+      });
+      var j = await res.json();
+      if (!res.ok) { alert('発行に失敗しました: ' + (j.error || '')); return; }
+      var el = document.getElementById('instructor-qr-result');
+      el.innerHTML = j.qr_svg + '<div style="font-size:12px;color:#6b7280;margin-top:8px;">有効期限: ' + j.expires_at.slice(0, 16) + '</div>';
+      el.style.display = 'block';
+      var name = document.getElementById('issue-instructor').selectedOptions[0].textContent;
+      prependRegRow(j, null, name);
+    }
+
+    function prependRegRow(j, role, instructorName) {
+      var tbody = document.getElementById('reg-code-tbody');
+      var label = instructorName ? ('班長・指導者: ' + instructorName) : (ROLE_LABELS_JS[role] || role);
+      var tr = document.createElement('tr');
+      tr.id = 'reg-row-' + j.token;
+      tr.innerHTML = '<td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">' + label + '</td>'
+        + '<td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;"><span style="background:#fef9c3;padding:2px 8px;border-radius:4px;font-size:12px;">有効</span></td>'
+        + '<td style="padding:6px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;">' + j.expires_at.slice(0, 16) + '</td>'
+        + '<td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;"><button onclick="revokeCode(\\'' + j.token + '\\')" style="padding:2px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;">失効</button></td>';
+      if (tbody.children.length === 1 && tbody.children[0].children.length === 1) tbody.innerHTML = '';
+      tbody.insertBefore(tr, tbody.firstChild);
+    }
+
+    async function revokeCode(token) {
+      if (!confirm('このQRコードを失効させますか？')) return;
+      var res = await fetch('/api/line-reg/' + encodeURIComponent(token), { method: 'DELETE' });
+      if (res.ok) {
+        var row = document.getElementById('reg-row-' + token);
+        if (row) row.remove();
+      } else {
+        alert('失効に失敗しました');
+      }
+    }
 
     function closeLinkModal() { document.getElementById('link-modal').style.display = 'none'; }
 
@@ -678,7 +909,7 @@ app.get('/settings/liff', async (c) => {
     </script>
   `;
 
-  return c.html(layout('LINEリフ権限管理', content, 'settings'));
+  return c.html(layout('LINE連携', content, 'settings'));
 });
 
 // ===================================================
