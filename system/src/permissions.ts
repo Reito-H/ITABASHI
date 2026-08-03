@@ -9,7 +9,7 @@
 
 // 権限キー一覧
 //   サイドバー: home / kancho-shift / handover / crew-portal / newcomers / staff /
-//               vehicles / inspection / settings / announcements / line
+//               vehicles / inspection / settings / announcements / line / requests
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
 //   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
@@ -87,6 +87,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/inspection/,   'inspection'],
   [/^\/announcements/, 'announcements'],
   [/^\/line/,         'line'],
+  [/^\/requests/,     'requests'],
   [/^\/login-logs/,   'home'],
   [/^\/?$/,           'home'],
 ];
@@ -141,6 +142,7 @@ const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
   [/^\/api\/inspection/,          ['inspection']],
   [/^\/api\/documents/,           ['settings.documents']],
   [/^\/api\/line-reg/,            ['settings.liff']],
+  [/^\/api\/requests/,            ['requests']],
 ];
 
 // 制限アカウントによるルートAPIへの書き込みを判定（GET/HEAD/OPTIONSは常に許可）
@@ -179,6 +181,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'inspection',    label: '点検管理' },
     { key: 'announcements', label: 'お知らせ配信' },
     { key: 'line',          label: 'LINE管理' },
+    { key: 'requests',      label: '要望欄（投稿）' },
     { key: 'settings',      label: '設定（トップ）' },
   ]},
   { group: '設定サブページ', items: [

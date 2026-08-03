@@ -46,16 +46,15 @@ export function handoverPage(editable: boolean): string {
 .ho-btn-add{flex-shrink:0;padding:5px 10px;border-radius:16px;border:1px dashed #bbb;font-size:12px;color:#666;background:#fff;cursor:pointer;}
 
 .ho-doc{background:#fff;border:2px solid var(--border);}
-.ho-grid{display:grid;grid-template-columns:1fr;}
+.ho-grid{display:flex;flex-direction:column;}
+.ho-col-left,.ho-col-right{display:flex;flex-direction:column;}
+/* 左列（メインシート）と右列（当欠・事故車など）は高さを連動させない。
+   一方の内容が伸びても他方の枠が引っ張られて伸びないよう、独立した縦積みコンテナに分ける。 */
 @media(min-width:800px){
-  .ho-grid{grid-template-columns:1fr 360px;grid-template-rows:auto 1fr 1fr minmax(70px,auto) 1.3fr 1fr;min-height:640px;}
-  .ho-top{grid-column:1;grid-row:1;border-right:1.5px solid var(--border);}
-  .ho-main{grid-column:1;grid-row:2/7;border-right:1.5px solid var(--border);}
-  .ho-toka{grid-column:2;grid-row:1/3;}
-  .ho-jiko{grid-column:2;grid-row:3;}
-  .ho-tenken{grid-column:2;grid-row:4;}
-  .ho-joshu{grid-column:2;grid-row:5;}
-  .ho-jomu{grid-column:2;grid-row:6;}
+  .ho-grid{flex-direction:row;align-items:flex-start;min-height:640px;}
+  .ho-col-left{flex:1;border-right:1.5px solid var(--border);}
+  .ho-col-right{width:360px;flex-shrink:0;}
+  .ho-sec.ho-main{min-height:520px;}
 }
 .ho-top{display:flex;align-items:center;gap:10px;padding:6px 12px;flex-wrap:wrap;border-bottom:1.5px solid var(--border);}
 .ho-date-txt{font-size:20px;font-weight:800;color:var(--navy);}
@@ -129,10 +128,35 @@ export function handoverPage(editable: boolean): string {
                 font-weight:700;color:#555;cursor:pointer;}
 .ho-fontset-btn.active{background:var(--navy);border-color:var(--navy);color:#fff;}
 .ho-fontset-btn.disabled{cursor:default;opacity:.5;}
+
+.ho-toolrow{display:flex;justify-content:flex-end;margin-bottom:8px;}
+.ho-tokasum-btn{border:1px solid #ccc;background:#fff;color:#374151;border-radius:16px;padding:5px 12px;
+                font-size:12px;font-weight:700;cursor:pointer;}
+#ho-tokasum-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
+                    align-items:center;justify-content:center;}
+#ho-tokasum-overlay.show{display:flex;}
+#ho-tokasum-modal{background:#fff;border-radius:10px;padding:18px 20px;width:400px;max-width:92vw;
+                  max-height:82vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+.ho-tokasum-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
+                 color:var(--navy);margin-bottom:10px;flex-shrink:0;}
+#ho-tokasum-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
+.ho-tokasum-monthbar{display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:10px;flex-shrink:0;}
+.ho-tokasum-monthbtn{border:1px solid #ccc;background:#fafafa;border-radius:6px;padding:4px 10px;font-size:13px;
+                     font-weight:800;cursor:pointer;color:#333;}
+.ho-tokasum-monthlbl{font-size:15px;font-weight:800;color:var(--navy);min-width:96px;text-align:center;}
+.ho-tokasum-count{text-align:center;font-size:13px;color:#333;margin-bottom:10px;flex-shrink:0;}
+.ho-tokasum-count b{font-size:20px;color:var(--red);margin:0 3px;}
+.ho-tokasum-list{overflow-y:auto;flex:1;border-top:1px solid #eee;}
+.ho-tokasum-row{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid #f0f0f0;font-size:13px;}
+.ho-tokasum-row-date{color:var(--muted);flex-shrink:0;width:76px;}
+.ho-tokasum-row-name{flex:1;color:#111;font-weight:700;}
+.ho-tokasum-row-val{color:var(--red);font-weight:800;}
+.ho-tokasum-empty{text-align:center;color:var(--muted);font-size:13px;padding:24px 0;}
 </style>
 
 <div id="ho-root">
   <div class="ho-tabs-h" id="ho-tabs-m"></div>
+  <div class="ho-toolrow"><button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button></div>
   <div class="ho-date-bar" id="ho-date-bar"></div>
   <div id="ho-sheet-wrap"></div>
 </div>
@@ -156,6 +180,18 @@ export function handoverPage(editable: boolean): string {
     <div class="ho-fontset-head"><span>文字サイズ設定</span><button type="button" id="ho-fontset-close">×</button></div>
     <div class="ho-fontset-desc">課ごとに引き継ぎシート本文の文字サイズを設定します。</div>
     <div id="ho-fontset-rows"></div>
+  </div>
+</div>
+<div id="ho-tokasum-overlay">
+  <div id="ho-tokasum-modal">
+    <div class="ho-tokasum-head"><span>当欠記録</span><button type="button" id="ho-tokasum-close">×</button></div>
+    <div class="ho-tokasum-monthbar">
+      <button type="button" class="ho-tokasum-monthbtn" id="ho-tokasum-prev">‹前月</button>
+      <span class="ho-tokasum-monthlbl" id="ho-tokasum-monthlbl"></span>
+      <button type="button" class="ho-tokasum-monthbtn" id="ho-tokasum-next">翌月›</button>
+    </div>
+    <div class="ho-tokasum-count" id="ho-tokasum-count"></div>
+    <div class="ho-tokasum-list" id="ho-tokasum-list"></div>
   </div>
 </div>
 
@@ -296,7 +332,12 @@ function attachNameSuggest(ta, field, opts){
       catch(e){ return; }
       if (document.activeElement !== ta) return;
       const rect = getTextareaCaretRect(ta);
-      showSuggestList(data.names || [], rect, (name) => {
+      let names = data.names || [];
+      if (opts.extraNames){
+        const q = info.text.trim();
+        names = names.concat(opts.extraNames.filter(n => n.includes(q) && !names.includes(n)));
+      }
+      showSuggestList(names, rect, (name) => {
         const cur = ta.value;
         ta.value = cur.slice(0, info.lineStart) + name + cur.slice(info.pos);
         const newPos = info.lineStart + name.length;
@@ -485,6 +526,68 @@ if (hoTitleEl){
   hoTitleEl.addEventListener('click', openFontSettings);
 }
 
+// ===== 当欠記録（月間集計）=====
+function currentYm(){
+  const t = today();
+  return t.slice(0, 7);
+}
+function addMonth(ym, delta){
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
+}
+function fmtYm(ym){
+  const [y, m] = ym.split('-');
+  return y + '年' + parseInt(m, 10) + '月';
+}
+function fmtMd(dateStr){
+  const [, m, d] = dateStr.split('-');
+  const w = ['日','月','火','水','木','金','土'][new Date(dateStr+'T00:00:00+09:00').getDay()];
+  return m+'/'+d+'('+w+')';
+}
+async function loadTokaSummary(){
+  document.getElementById('ho-tokasum-monthlbl').textContent = fmtYm(H.tokaSumMonth);
+  const listEl = document.getElementById('ho-tokasum-list');
+  const countEl = document.getElementById('ho-tokasum-count');
+  listEl.innerHTML = '<div class="ho-tokasum-empty">読み込み中…</div>';
+  try {
+    const data = await api('GET', '/'+H.division+'/toka-summary?month='+H.tokaSumMonth);
+    countEl.innerHTML = '板橋'+H.division+'課 当欠数：<b>'+data.count+'</b>件';
+    if (!data.entries.length){
+      listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
+      return;
+    }
+    listEl.innerHTML = data.entries.map(e =>
+      '<div class="ho-tokasum-row"><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
+      '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'+
+      '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span></div>'
+    ).join('');
+  } catch(e){
+    listEl.innerHTML = '<div class="ho-tokasum-empty">読み込みエラー: '+esc(e.message)+'</div>';
+  }
+}
+function openTokaSummary(){
+  if (!H.tokaSumMonth) H.tokaSumMonth = currentYm();
+  document.getElementById('ho-tokasum-overlay').classList.add('show');
+  loadTokaSummary();
+}
+function closeTokaSummary(){
+  document.getElementById('ho-tokasum-overlay').classList.remove('show');
+}
+document.getElementById('ho-tokasum-btn').addEventListener('click', openTokaSummary);
+document.getElementById('ho-tokasum-close').addEventListener('click', closeTokaSummary);
+document.getElementById('ho-tokasum-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'ho-tokasum-overlay') closeTokaSummary();
+});
+document.getElementById('ho-tokasum-prev').addEventListener('click', () => {
+  H.tokaSumMonth = addMonth(H.tokaSumMonth, -1);
+  loadTokaSummary();
+});
+document.getElementById('ho-tokasum-next').addEventListener('click', () => {
+  H.tokaSumMonth = addMonth(H.tokaSumMonth, 1);
+  loadTokaSummary();
+});
+
 // ===== 日付バー =====
 function renderDateBar(){
   const bar = document.getElementById('ho-date-bar');
@@ -540,25 +643,29 @@ function renderSheet(sheet, date){
 
   el.innerHTML =
     '<div class="ho-doc"><div class="ho-grid">' +
-    '<div class="ho-top">' +
-      '<span class="ho-date-txt">'+fmtDate(date)+'</span>' +
-      (date===t ? '<span class="ho-today-chip">今日</span>' : '') +
-      '<div class="ho-kabu">' +
-        '<div class="ho-kabu-item"><span class="ho-kabu-lbl">予定</span>' +
-          '<input class="ho-kabu-inp" id="ho-kabu-y" type="number" step="0.5" min="0" max="999" value="'+safeNum(sheet?.kabu_yotei)+'"'+ro+'></div>' +
-        '<div class="ho-kabu-item"><span class="ho-kabu-lbl">実績</span>' +
-          '<input class="ho-kabu-inp" id="ho-kabu-j" type="number" step="0.5" min="0" max="999" value="'+safeNum(sheet?.kabu_jisseki)+'"'+ro+'></div>' +
-        '<div class="ho-kabu-item"><span class="ho-kabu-lbl">動態</span>' +
-          '<button class="ho-douta-btn'+doutaCls+'" id="ho-douta-btn"'+(EDITABLE?'':' disabled')+'>'+douta+'</button></div>' +
+    '<div class="ho-col-left">' +
+      '<div class="ho-top">' +
+        '<span class="ho-date-txt">'+fmtDate(date)+'</span>' +
+        (date===t ? '<span class="ho-today-chip">今日</span>' : '') +
+        '<div class="ho-kabu">' +
+          '<div class="ho-kabu-item"><span class="ho-kabu-lbl">予定</span>' +
+            '<input class="ho-kabu-inp" id="ho-kabu-y" type="number" step="0.5" min="0" max="999" value="'+safeNum(sheet?.kabu_yotei)+'"'+ro+'></div>' +
+          '<div class="ho-kabu-item"><span class="ho-kabu-lbl">実績</span>' +
+            '<input class="ho-kabu-inp" id="ho-kabu-j" type="number" step="0.5" min="0" max="999" value="'+safeNum(sheet?.kabu_jisseki)+'"'+ro+'></div>' +
+          '<div class="ho-kabu-item"><span class="ho-kabu-lbl">動態</span>' +
+            '<button class="ho-douta-btn'+doutaCls+'" id="ho-douta-btn"'+(EDITABLE?'':' disabled')+'>'+douta+'</button></div>' +
+        '</div>' +
+        (EDITABLE ? '<button class="ho-del-btn" id="ho-del-btn" title="このシートを削除">🗑</button>' : '') +
       '</div>' +
-      (EDITABLE ? '<button class="ho-del-btn" id="ho-del-btn" title="このシートを削除">🗑</button>' : '') +
+      '<div class="ho-sec ho-main"><div class="ho-ce" id="ho-main-c" contenteditable="'+ce+'">'+safeHtml(sheet?.main_content)+'</div></div>' +
     '</div>' +
-    '<div class="ho-sec ho-main"><textarea class="ho-ta" id="ho-main-c"'+ro+'>'+esc(sheet?.main_content||'')+'</textarea></div>' +
-    '<div class="ho-sec ho-toka"><div class="ho-lbl">当欠・理由</div><textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea></div>' +
-    '<div class="ho-sec ho-jiko"><div class="ho-lbl red">事故車</div><div class="ho-ce" id="ho-jiko-c" contenteditable="'+ce+'">'+safeHtml(sheet?.jiko_content)+'</div></div>' +
-    '<div class="ho-sec ho-tenken"><div class="ho-lbl">点検・車検・リコール</div><div class="ho-ce" id="ho-tenken-c" contenteditable="'+ce+'">'+safeHtml(sheet?.tenken_content)+'</div></div>' +
-    '<div class="ho-sec ho-joshu"><div class="ho-lbl">車両異常・修理予定</div><div class="ho-ce" id="ho-joshu-c" contenteditable="'+ce+'">'+safeHtml(sheet?.joshu_content)+'</div></div>' +
-    '<div class="ho-sec ho-jomu"><div class="ho-lbl">乗務希望</div><textarea class="ho-ta" id="ho-jomu-c"'+ro+'>'+esc(sheet?.jomu_content||'')+'</textarea></div>' +
+    '<div class="ho-col-right">' +
+      '<div class="ho-sec ho-toka"><div class="ho-lbl">当欠・理由</div><textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea></div>' +
+      '<div class="ho-sec ho-jiko"><div class="ho-lbl red">事故車</div><div class="ho-ce" id="ho-jiko-c" contenteditable="'+ce+'">'+safeHtml(sheet?.jiko_content)+'</div></div>' +
+      '<div class="ho-sec ho-tenken"><div class="ho-lbl">点検・車検・リコール</div><div class="ho-ce" id="ho-tenken-c" contenteditable="'+ce+'">'+safeHtml(sheet?.tenken_content)+'</div></div>' +
+      '<div class="ho-sec ho-joshu"><div class="ho-lbl">車両異常・修理予定</div><div class="ho-ce" id="ho-joshu-c" contenteditable="'+ce+'">'+safeHtml(sheet?.joshu_content)+'</div></div>' +
+      '<div class="ho-sec ho-jomu"><div class="ho-lbl">乗務希望</div><textarea class="ho-ta" id="ho-jomu-c"'+ro+'>'+esc(sheet?.jomu_content||'')+'</textarea></div>' +
+    '</div>' +
     '</div></div>';
 
   if (EDITABLE){
@@ -574,16 +681,12 @@ function renderSheet(sheet, date){
       document.getElementById('ho-save-dot').className = 'saving';
       saveField('douta', H.division, H.date, fieldValue('douta'));
     });
-    const mainEl = document.getElementById('ho-main-c');
-    if (mainEl){
-      mainEl.addEventListener('input', () => scheduleSave('main_content'));
-      attachHankaku(mainEl);
-    }
     const tokaEl = document.getElementById('ho-toka-c');
     if (tokaEl){
       attachNameSuggest(tokaEl, 'toka_content', {
         onInput: recalcJisseki,
         skipIfDone: (text) => /[+\\-](0\\.5|1\\.0)\\s*$/.test(text),
+        extraNames: ['不明', '入力ミス'],
         afterPick: (ta, newPos) => {
           const numRect = getTextareaCaretRect(ta);
           showNumpick(numRect, (signed) => {
@@ -605,7 +708,7 @@ function renderSheet(sheet, date){
       attachNameSuggest(jomuEl, 'jomu_content');
       attachHankaku(jomuEl);
     }
-    ['ho-jiko-c','ho-tenken-c','ho-joshu-c'].forEach(id => {
+    ['ho-main-c','ho-jiko-c','ho-tenken-c','ho-joshu-c'].forEach(id => {
       const c2 = document.getElementById(id);
       if (!c2) return;
       c2.addEventListener('input', () => scheduleSave(FIELD_BY_ID[id]));
@@ -666,7 +769,7 @@ function fieldValue(field){
     case 'kabu_yotei': return parseFloat(document.getElementById('ho-kabu-y')?.value) || null;
     case 'kabu_jisseki': return parseFloat(document.getElementById('ho-kabu-j')?.value) || null;
     case 'douta': return document.getElementById('ho-douta-btn')?.textContent || '未';
-    case 'main_content': return document.getElementById('ho-main-c')?.value || '';
+    case 'main_content': return document.getElementById('ho-main-c')?.innerHTML || '';
     case 'toka_content': return document.getElementById('ho-toka-c')?.value || '';
     case 'jiko_content': return document.getElementById('ho-jiko-c')?.innerHTML || '';
     case 'tenken_content': return document.getElementById('ho-tenken-c')?.innerHTML || '';

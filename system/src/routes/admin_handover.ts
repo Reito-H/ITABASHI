@@ -24,6 +24,9 @@ function isValidDivision(v: string): boolean {
 function isValidDate(v: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
+function isValidMonth(v: string): boolean {
+  return /^\d{4}-\d{2}$/.test(v);
+}
 
 function addDays(date: string, days: number): string {
   const [y, m, d] = date.split('-').map(Number);
@@ -105,6 +108,32 @@ app.get('/api/handover/:division/dates', async (c) => {
     'SELECT date FROM handover_sheets WHERE division = ? ORDER BY date DESC LIMIT 90'
   ).bind(parseInt(division, 10)).all<{ date: string }>();
   return c.json({ dates: (rows.results ?? []).map(r => r.date) });
+});
+
+// 当欠・理由欄の月間集計（記録ページ用）。「名前 -0.5」「名前 -1.0」のように
+// 候補選択で正しく入力された行だけを当欠数として数える（自由記述の理由行や+の行は対象外）。
+app.get('/api/handover/:division/toka-summary', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const month = c.req.query('month') || '';
+  if (!isValidMonth(month)) return c.json({ error: '月の指定が不正です' }, 400);
+
+  const rows = await c.env.DB.prepare(
+    'SELECT date, toka_content FROM handover_sheets WHERE division = ? AND date LIKE ? ORDER BY date'
+  ).bind(parseInt(division, 10), `${month}%`).all<{ date: string; toka_content: string }>();
+
+  const entries: { date: string; name: string; value: number }[] = [];
+  for (const row of rows.results ?? []) {
+    for (const rawLine of (row.toka_content || '').split('\n')) {
+      const line = rawLine.trim();
+      const m = line.match(/^(.*?)\s*-(0\.5|1\.0)\s*$/);
+      if (!m) continue;
+      const name = m[1].trim();
+      if (!name) continue;
+      entries.push({ date: row.date, name, value: -parseFloat(m[2]) });
+    }
+  }
+  return c.json({ entries, count: entries.length });
 });
 
 // 当欠欄オートコンプリート用: 課内の在籍社員名を部分一致検索

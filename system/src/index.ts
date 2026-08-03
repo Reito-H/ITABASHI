@@ -44,6 +44,8 @@ import diaApi from './routes/api/dia';
 import adminTantoshaRoutes from './routes/admin_tantosha';
 import adminCrewShiftRoutes from './routes/admin_crew_shift';
 import adminHandoverRoutes from './routes/admin_handover';
+import adminRequestsRoutes from './routes/admin_requests';
+import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import liffKanchoCalendarRoutes from './routes/liff_kancho_calendar';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -201,6 +203,7 @@ app.route(`/${SECRET}/admin`, adminDiaRoutes);
 app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
 app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
+app.route(`/${SECRET}/admin`, adminRequestsRoutes);
 
 // =====================
 // API（認証必須）
@@ -248,6 +251,7 @@ app.route('/api/line-reg', lineRegApi);
 app.route('/api/inspection', inspectionApi);
 app.route('/api/dia', diaApi);
 app.route('/api/documents', documentsApi);
+app.route('/api/requests', requestsApi);
 
 // =====================
 // LINE Webhook（署名検証あり・認証不要）
