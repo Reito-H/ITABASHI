@@ -97,7 +97,9 @@ async function logAction(c: { env: Env; get: (k: 'adminId') => number }, action:
 // ===== ページ =====
 app.get('/handover', async (c) => {
   const editable = await canEdit(c);
-  return c.html(layout('引き継ぎシート', handoverPage(editable), 'handover', handoverHeaderTabs()));
+  const row = await c.env.DB.prepare('SELECT division FROM admins WHERE id = ?')
+    .bind(c.get('adminId')).first<{ division: string | null }>();
+  return c.html(layout('引き継ぎシート', handoverPage(editable, row?.division ?? null), 'handover', handoverHeaderTabs()));
 });
 
 // ===== API =====

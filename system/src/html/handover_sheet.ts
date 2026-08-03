@@ -10,7 +10,7 @@ export function handoverHeaderTabs(): string {
   return `<div class="ho-tabs-h" id="ho-tabs"></div>`;
 }
 
-export function handoverPage(editable: boolean): string {
+export function handoverPage(editable: boolean, myDivision: string | null = null): string {
   return `
 <style>
 *,*::before,*::after{box-sizing:border-box;}
@@ -68,8 +68,34 @@ export function handoverPage(editable: boolean): string {
               background:#fafafa;color:#888;}
 .ho-douta-btn.ok{border-color:#4caf50;background:#f0fff4;color:#2e7d32;}
 .ho-douta-btn:disabled{cursor:default;}
-.ho-del-btn{background:none;border:none;font-size:15px;cursor:pointer;color:#ccc;margin-left:auto;padding:2px 4px;}
+.ho-del-btn{background:none;border:none;font-size:15px;cursor:pointer;color:#ccc;padding:2px 4px;}
 .ho-del-btn:hover{color:var(--red);}
+.ho-limit-btn{margin-left:auto;border:1px solid #ccc;background:#fff;color:#374151;border-radius:14px;
+              padding:3px 11px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+.ho-limit-btn:hover{border-color:#999;}
+
+#ho-limit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
+                  align-items:center;justify-content:center;}
+#ho-limit-overlay.show{display:flex;}
+#ho-limit-modal{background:#fff;border-radius:10px;padding:18px 20px;width:400px;max-width:92vw;
+                max-height:82vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+.ho-limit-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
+               color:var(--navy);margin-bottom:4px;flex-shrink:0;}
+#ho-limit-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
+.ho-limit-desc{font-size:12px;color:var(--muted);margin-bottom:10px;flex-shrink:0;}
+.ho-limit-list{overflow-y:auto;flex:1;margin-bottom:10px;}
+.ho-limit-row{display:flex;align-items:center;gap:8px;padding:8px 2px;border-bottom:1px solid #f0f0f0;font-size:13px;}
+.ho-limit-time{color:var(--red);font-weight:800;flex-shrink:0;}
+.ho-limit-task{flex:1;color:#111;word-break:break-all;}
+.ho-limit-del{border:1px solid #fca5a5;background:#fef2f2;color:#dc2626;border-radius:6px;padding:3px 9px;
+              font-size:11px;cursor:pointer;flex-shrink:0;}
+.ho-limit-empty{text-align:center;color:var(--muted);font-size:13px;padding:20px 0;}
+#ho-limit-form-wrap{border-top:1px solid #eee;padding-top:10px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;}
+#ho-limit-task-inp{width:100%;border:1px solid #ccc;border-radius:6px;padding:7px 9px;font-size:13px;font-family:inherit;}
+.ho-limit-form-row{display:flex;gap:8px;align-items:center;}
+#ho-limit-time-inp{border:1px solid #ccc;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;}
+#ho-limit-add-btn{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:13px;
+                  font-weight:700;cursor:pointer;margin-left:auto;}
 
 .ho-sec{padding:8px 10px;border-bottom:1px solid #ddd;display:flex;flex-direction:column;min-height:120px;}
 .ho-sec:last-child{border-bottom:none;}
@@ -182,6 +208,20 @@ export function handoverPage(editable: boolean): string {
     <div id="ho-fontset-rows"></div>
   </div>
 </div>
+<div id="ho-limit-overlay">
+  <div id="ho-limit-modal">
+    <div class="ho-limit-head"><span>リミット設定</span><button type="button" id="ho-limit-close">×</button></div>
+    <div class="ho-limit-desc">この日のシートに、何時までにやるべきタスクを設定します。時刻になると全ページに通知が表示されます。</div>
+    <div class="ho-limit-list" id="ho-limit-list"></div>
+    <div id="ho-limit-form-wrap">
+      <input type="text" id="ho-limit-task-inp" placeholder="タスク内容（例: ○○車の点検手配）" maxlength="200">
+      <div class="ho-limit-form-row">
+        <input type="time" id="ho-limit-time-inp">
+        <button type="button" id="ho-limit-add-btn">設定</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div id="ho-tokasum-overlay">
   <div id="ho-tokasum-modal">
     <div class="ho-tokasum-head"><span>当欠記録</span><button type="button" id="ho-tokasum-close">×</button></div>
@@ -199,13 +239,18 @@ export function handoverPage(editable: boolean): string {
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
 const EDITABLE = ${editable ? 'true' : 'false'};
+const MY_DIVISION = ${safeJson(myDivision)};
 function lastDivision(){
   const v = parseInt(localStorage.getItem('ho_last_division'), 10);
   return (v >= 1 && v <= 4) ? v : 1;
 }
+function initialDivision(){
+  const md = parseInt(MY_DIVISION, 10);
+  return (md >= 1 && md <= 4) ? md : lastDivision();
+}
 const H = {
-  division: lastDivision(), date: null, dates: [], updatedAt: null, fieldTimers: {}, savedRange: null,
-  numpickApply: null, fontSizes: { 1: 14, 2: 14, 3: 14, 4: 14 },
+  division: initialDivision(), date: null, dates: [], updatedAt: null, fieldTimers: {}, savedRange: null,
+  numpickApply: null, fontSizes: { 1: 14, 2: 14, 3: 14, 4: 14 }, limits: [],
 };
 // DOM要素id → DBカラム名（項目単位の部分保存で使用）
 const FIELD_BY_ID = {
@@ -588,6 +633,74 @@ document.getElementById('ho-tokasum-next').addEventListener('click', () => {
   loadTokaSummary();
 });
 
+// ===== リミット（何時までにやるべきタスク）=====
+async function loadLimits(){
+  if (!H.date){ H.limits = []; renderLimitBtn(); return; }
+  try {
+    const data = await api('GET', '/'+H.division+'/'+H.date+'/limits');
+    H.limits = data.limits || [];
+  } catch(e){ H.limits = []; }
+  renderLimitBtn();
+  if (document.getElementById('ho-limit-overlay')?.classList.contains('show')) renderLimitList();
+}
+function renderLimitBtn(){
+  const btn = document.getElementById('ho-limit-btn');
+  if (!btn) return;
+  btn.textContent = H.limits.length ? ('⏰ リミット ('+H.limits.length+')') : '⏰ リミット';
+}
+function renderLimitList(){
+  const listEl = document.getElementById('ho-limit-list');
+  if (!H.limits.length){
+    listEl.innerHTML = '<div class="ho-limit-empty">設定中のリミットはありません</div>';
+  } else {
+    listEl.innerHTML = H.limits.map(l =>
+      '<div class="ho-limit-row"><span class="ho-limit-time">'+esc(l.limit_time)+'</span>'+
+      '<span class="ho-limit-task">'+esc(l.task)+'</span>'+
+      (EDITABLE ? '<button type="button" class="ho-limit-del" data-id="'+l.id+'">取消</button>' : '') +
+      '</div>'
+    ).join('');
+    if (EDITABLE){
+      listEl.querySelectorAll('.ho-limit-del').forEach(b => b.addEventListener('click', () => deleteLimit(parseInt(b.dataset.id, 10))));
+    }
+  }
+}
+function openLimitModal(){
+  document.getElementById('ho-limit-form-wrap').style.display = EDITABLE ? '' : 'none';
+  renderLimitList();
+  document.getElementById('ho-limit-overlay').classList.add('show');
+}
+function closeLimitModal(){
+  document.getElementById('ho-limit-overlay').classList.remove('show');
+}
+async function createLimit(){
+  const taskEl = document.getElementById('ho-limit-task-inp');
+  const timeEl = document.getElementById('ho-limit-time-inp');
+  const task = taskEl.value.trim();
+  const limitTime = timeEl.value;
+  if (!task){ toast('タスク内容を入力してください', 2000); return; }
+  if (!limitTime){ toast('時刻を選択してください', 2000); return; }
+  try {
+    await api('POST', '/'+H.division+'/'+H.date+'/limits', { task: task, limit_time: limitTime });
+    taskEl.value = ''; timeEl.value = '';
+    await loadLimits();
+    renderLimitList();
+    toast('リミットを設定しました');
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+async function deleteLimit(id){
+  if (!confirm('このリミットを取り消しますか？')) return;
+  try {
+    await api('DELETE', '/'+H.division+'/'+H.date+'/limits/'+id);
+    await loadLimits();
+    renderLimitList();
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+document.getElementById('ho-limit-close').addEventListener('click', closeLimitModal);
+document.getElementById('ho-limit-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'ho-limit-overlay') closeLimitModal();
+});
+document.getElementById('ho-limit-add-btn').addEventListener('click', createLimit);
+
 // ===== 日付バー =====
 function renderDateBar(){
   const bar = document.getElementById('ho-date-bar');
@@ -655,6 +768,7 @@ function renderSheet(sheet, date){
           '<div class="ho-kabu-item"><span class="ho-kabu-lbl">動態</span>' +
             '<button class="ho-douta-btn'+doutaCls+'" id="ho-douta-btn"'+(EDITABLE?'':' disabled')+'>'+douta+'</button></div>' +
         '</div>' +
+        '<button type="button" class="ho-limit-btn" id="ho-limit-btn">⏰ リミット</button>' +
         (EDITABLE ? '<button class="ho-del-btn" id="ho-del-btn" title="このシートを削除">🗑</button>' : '') +
       '</div>' +
       '<div class="ho-sec ho-main"><div class="ho-ce" id="ho-main-c" contenteditable="'+ce+'">'+safeHtml(sheet?.main_content)+'</div></div>' +
@@ -667,6 +781,9 @@ function renderSheet(sheet, date){
       '<div class="ho-sec ho-jomu"><div class="ho-lbl">乗務希望</div><textarea class="ho-ta" id="ho-jomu-c"'+ro+'>'+esc(sheet?.jomu_content||'')+'</textarea></div>' +
     '</div>' +
     '</div></div>';
+
+  document.getElementById('ho-limit-btn')?.addEventListener('click', openLimitModal);
+  loadLimits();
 
   if (EDITABLE){
     document.getElementById('ho-kabu-y')?.addEventListener('input', () => { recalcJisseki(); scheduleSave('kabu_yotei'); });

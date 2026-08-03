@@ -10,7 +10,9 @@ import { PERMISSION_CATALOG, parsePermissions } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
-type AdminRow = { id: number; username: string; permissions: string | null; created_at: string };
+type AdminRow = { id: number; username: string; permissions: string | null; division: string | null; created_at: string };
+
+const VALID_DIVISIONS = new Set(['1', '2', '3', '4', 'all']);
 
 // 全権限アカウント（permissions NULL）の数
 async function countFullAccounts(db: D1Database): Promise<number> {
@@ -21,12 +23,13 @@ async function countFullAccounts(db: D1Database): Promise<number> {
 // ===== ページ =====
 app.get('/settings/accounts', async (c) => {
   const rows = await c.env.DB.prepare(
-    'SELECT id, username, permissions, created_at FROM admins ORDER BY id'
+    'SELECT id, username, permissions, division, created_at FROM admins ORDER BY id'
   ).all<AdminRow>();
   const accounts = (rows.results ?? []).map(a => ({
     id: a.id,
     username: a.username,
     permissions: parsePermissions(a.permissions),  // null = 全権限
+    division: a.division,  // null=未設定 / '1'〜'4' / 'all'=全所属（リミット通知先の判定に使用）
     created_at: a.created_at,
   }));
   const selfId = c.get('adminId');
@@ -52,6 +55,14 @@ app.get('/settings/accounts', async (c) => {
           <input id="new-password" type="password" placeholder="パスワード（8文字以上）" autocomplete="new-password" style="width:190px;border:1px solid #d1d5db;border-radius:6px;padding:8px 46px 8px 8px;font-size:13px;">
           <button type="button" id="new-password-toggle" onclick="toggleNewPasswordVisibility()" aria-label="パスワードを表示する" title="表示する" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:#6b7280;font-size:11px;font-weight:600;cursor:pointer;padding:4px 6px;">表示</button>
         </div>
+        <select id="new-division" style="border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;">
+          <option value="">所属課: 未設定</option>
+          <option value="1">1課</option>
+          <option value="2">2課</option>
+          <option value="3">3課</option>
+          <option value="4">4課</option>
+          <option value="all">全所属</option>
+        </select>
         <button onclick="createAccount()" style="padding:8px 18px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">作成して権限を設定</button>
       </div>
       <div style="font-size:11px;color:#9ca3af;margin-top:6px;">作成直後は権限なしの状態です。続けて表示される画面で権限を設定してください。</div>
@@ -101,11 +112,37 @@ app.get('/settings/accounts', async (c) => {
     return '<span style="background:#f0fdf4;color:#166534;padding:2px 10px;border-radius:99px;font-size:11px;">閲覧 ' + view + '件 / 編集 ' + edit + '件</span>';
   }
 
+  var DIVISION_OPTIONS = [
+    { v: '', label: '所属課: 未設定' },
+    { v: '1', label: '1課' },
+    { v: '2', label: '2課' },
+    { v: '3', label: '3課' },
+    { v: '4', label: '4課' },
+    { v: 'all', label: '全所属' },
+  ];
+  function divisionSelectHtml(a) {
+    var cur = a.division || '';
+    var opts = DIVISION_OPTIONS.map(function(o) {
+      return '<option value="' + o.v + '"' + (o.v === cur ? ' selected' : '') + '>' + o.label + '</option>';
+    }).join('');
+    return '<select onchange="changeDivision(' + a.id + ', this.value)" style="border:1px solid #d1d5db;border-radius:6px;padding:4px 6px;font-size:12px;">' + opts + '</select>';
+  }
+  async function changeDivision(id, value) {
+    var res = await fetch(API + '/' + id, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ division: value || null })
+    });
+    var d = await res.json().catch(function() { return {}; });
+    if (!res.ok) { alert(d.error || '変更に失敗しました'); return; }
+    var a = _accounts.find(function(x) { return x.id === id; });
+    if (a) a.division = value || null;
+  }
   function renderList() {
     sel('#account-list').innerHTML = _accounts.map(function(a) {
       return '<div style="display:flex;align-items:center;gap:10px;background:white;border:1px solid #e5e7eb;border-radius:10px;padding:12px 16px;flex-wrap:wrap;">'
         + '<div style="font-size:14px;font-weight:700;color:#1e3a5f;min-width:110px;">' + escH(a.username) + (a.id === SELF_ID ? ' <span style="font-size:10px;color:#9ca3af;">(自分)</span>' : '') + '</div>'
         + '<div>' + permSummary(a.permissions) + '</div>'
+        + '<div>' + divisionSelectHtml(a) + '</div>'
         + '<div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">'
         + '<button onclick="openPerm(' + a.id + ')" style="padding:6px 12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:6px;font-size:12px;cursor:pointer;">権限編集</button>'
         + '<button onclick="resetPassword(' + a.id + ')" style="padding:6px 12px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:6px;font-size:12px;cursor:pointer;">パスワード再設定</button>'
@@ -191,10 +228,11 @@ app.get('/settings/accounts', async (c) => {
   async function createAccount() {
     var username = sel('#new-username').value.trim();
     var password = sel('#new-password').value;
+    var division = sel('#new-division').value || null;
     if (!username || !password) { alert('ユーザー名とパスワードを入力してください'); return; }
     var res = await fetch(API, {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ username: username, password: password })
+      body: JSON.stringify({ username: username, password: password, division: division })
     });
     var d = await res.json().catch(function() { return {}; });
     if (!res.ok) { alert(d.error || '作成に失敗しました'); return; }
@@ -229,19 +267,20 @@ app.get('/settings/accounts', async (c) => {
 // ===== API =====
 
 app.post('/api/accounts', async (c) => {
-  const b = await c.req.json<{ username?: string; password?: string }>();
+  const b = await c.req.json<{ username?: string; password?: string; division?: string | null }>();
   const username = (b.username ?? '').trim();
   const password = b.password ?? '';
   if (!/^[a-zA-Z0-9_-]{3,32}$/.test(username)) {
     return c.json({ error: 'ユーザー名は3〜32文字の半角英数（-_可）で入力してください' }, 400);
   }
   if (password.length < 8) return c.json({ error: 'パスワードは8文字以上にしてください' }, 400);
+  if (b.division != null && !VALID_DIVISIONS.has(b.division)) return c.json({ error: '所属課の指定が不正です' }, 400);
   const exists = await c.env.DB.prepare('SELECT id FROM admins WHERE username = ?').bind(username).first();
   if (exists) return c.json({ error: 'このユーザー名は既に使われています' }, 400);
   const hash = await hashPassword(password);
   // 作成直後は権限なし（空配列）。全権限にするのは明示操作のみ
-  await c.env.DB.prepare('INSERT INTO admins (username, password, permissions) VALUES (?, ?, ?)')
-    .bind(username, hash, '[]').run();
+  await c.env.DB.prepare('INSERT INTO admins (username, password, permissions, division) VALUES (?, ?, ?, ?)')
+    .bind(username, hash, '[]', b.division ?? null).run();
   return c.json({ ok: true });
 });
 
@@ -251,12 +290,17 @@ app.put('/api/accounts/:id', async (c) => {
     .bind(id).first<AdminRow>();
   if (!target) return c.json({ error: 'アカウントが見つかりません' }, 404);
 
-  const b = await c.req.json<{ permissions?: string[] | null; password?: string }>();
+  const b = await c.req.json<{ permissions?: string[] | null; password?: string; division?: string | null }>();
 
   if (b.password !== undefined) {
     if (b.password.length < 8) return c.json({ error: 'パスワードは8文字以上にしてください' }, 400);
     const hash = await hashPassword(b.password);
     await c.env.DB.prepare('UPDATE admins SET password = ? WHERE id = ?').bind(hash, id).run();
+  }
+
+  if (b.division !== undefined) {
+    if (b.division !== null && !VALID_DIVISIONS.has(b.division)) return c.json({ error: '所属課の指定が不正です' }, 400);
+    await c.env.DB.prepare('UPDATE admins SET division = ? WHERE id = ?').bind(b.division, id).run();
   }
 
   if (b.permissions !== undefined) {

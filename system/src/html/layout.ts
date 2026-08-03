@@ -41,6 +41,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/inspection`,   label: '点検管理',        id: 'inspection' },
     { href: `${ADMIN_PATH}/announcements`, label: 'お知らせ配信',   id: 'announcements' },
     { href: `${ADMIN_PATH}/requests`,     label: '要望欄',          id: 'requests' },
+    { href: `${ADMIN_PATH}/toll-calc`,    label: '高速料金計算',    id: 'toll-calc' },
     { href: `${ADMIN_PATH}/settings`,     label: '設定',            id: 'settings' },
   ];
 
@@ -218,6 +219,18 @@ export function layout(title: string, content: string, activePage: string = '', 
     </div>
   </div>
 
+  <!-- リミット到達ポップアップ（引き継ぎシートで設定した締切タスクの通知。全ページ共通・所属課ベースでサーバ側フィルタ済み） -->
+  <div id="limit-alert-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;align-items:center;justify-content:center;padding:16px;">
+    <div style="background:#fff;border-radius:16px;padding:26px 24px;width:100%;max-width:480px;max-height:82vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+        <span style="font-size:28px;line-height:1;">⏰</span>
+        <span style="font-size:19px;font-weight:800;color:#dc2626;">リミット到達</span>
+      </div>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">設定した時刻になりました。対応が終わったタスクは「完了」を押してください。</div>
+      <div id="limit-alert-list"></div>
+    </div>
+  </div>
+
   ${showReportFab ? `
   <div id="report-fab-wrap" style="position:fixed;right:20px;bottom:20px;z-index:60;">
     <div id="report-fab-menu" style="display:none;position:absolute;bottom:64px;right:0;background:white;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.22);min-width:170px;overflow:hidden;border:1px solid #e5e7eb;">
@@ -254,6 +267,39 @@ export function layout(title: string, content: string, activePage: string = '', 
     }
     updateTime();
     setInterval(updateTime, 60000);
+
+    function escLimitText(s) {
+      return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function renderLimitAlerts(items) {
+      var wrap = document.getElementById('limit-alert-overlay');
+      var list = document.getElementById('limit-alert-list');
+      if (!items || !items.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+      list.innerHTML = items.map(function (l) {
+        return '<div style="display:flex;align-items:flex-start;gap:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 14px;margin-bottom:10px;">'
+          + '<div style="flex:1;min-width:0;">'
+          + '<div style="font-size:13px;font-weight:800;color:#7f1d1d;">板橋' + l.division + '課・' + escLimitText(l.limit_time) + 'まで</div>'
+          + '<div style="font-size:14px;color:#111;margin-top:4px;word-break:break-all;">' + escLimitText(l.task) + '</div>'
+          + '</div>'
+          + '<button onclick="dismissLimitAlert(' + l.id + ')" style="flex-shrink:0;background:#16a34a;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;">完了</button>'
+          + '</div>';
+      }).join('');
+      wrap.style.display = 'flex';
+    }
+    async function checkLimits() {
+      try {
+        var res = await fetch('${ADMIN_PATH}/api/limits/pending');
+        if (!res.ok) return;
+        var data = await res.json();
+        renderLimitAlerts(data.limits || []);
+      } catch (e) { /* 通信エラー時は次回ポーリングに委ねる */ }
+    }
+    async function dismissLimitAlert(id) {
+      try { await fetch('${ADMIN_PATH}/api/limits/' + id + '/dismiss', { method: 'POST' }); } catch (e) {}
+      checkLimits();
+    }
+    checkLimits();
+    setInterval(checkLimits, 20000);
 
     function toggleReportFab() {
       const menu = document.getElementById('report-fab-menu');

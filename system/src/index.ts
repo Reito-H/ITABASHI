@@ -44,8 +44,11 @@ import diaApi from './routes/api/dia';
 import adminTantoshaRoutes from './routes/admin_tantosha';
 import adminCrewShiftRoutes from './routes/admin_crew_shift';
 import adminHandoverRoutes from './routes/admin_handover';
+import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
 import adminRequestsRoutes from './routes/admin_requests';
 import requestsApi from './routes/api/requests';
+import adminTollCalcRoutes from './routes/admin_toll_calc';
+import tollCalcApi from './routes/api/toll_calc';
 import liffKanchoRoutes from './routes/liff_kancho';
 import liffKanchoCalendarRoutes from './routes/liff_kancho_calendar';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -162,6 +165,8 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   const path = new URL(c.req.url).pathname;
   const subPath = path.slice(`/${SECRET}/admin`.length) || '/';
   if (isPublicAdminSubPath(subPath)) return next();
+  // リミット機能のグローバル通知は所属課だけで判定するため、ページ権限(handover等)の有無に関わらず全アカウントが利用できる
+  if (subPath.startsWith('/api/limits/')) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -203,7 +208,9 @@ app.route(`/${SECRET}/admin`, adminDiaRoutes);
 app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
 app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
+app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
+app.route(`/${SECRET}/admin`, adminTollCalcRoutes);
 
 // =====================
 // API（認証必須）
@@ -252,6 +259,7 @@ app.route('/api/inspection', inspectionApi);
 app.route('/api/dia', diaApi);
 app.route('/api/documents', documentsApi);
 app.route('/api/requests', requestsApi);
+app.route('/api/toll-calc', tollCalcApi);
 
 // =====================
 // LINE Webhook（署名検証あり・認証不要）

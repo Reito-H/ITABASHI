@@ -9,7 +9,7 @@
 
 // 権限キー一覧
 //   サイドバー: home / kancho-shift / handover / crew-portal / newcomers / staff /
-//               vehicles / inspection / settings / announcements / line / requests
+//               vehicles / inspection / settings / announcements / line / requests / toll_calc
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
 //   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
@@ -67,6 +67,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/handover/, 'handover'],
   [/^\/tantosha/,     'tantosha'],
   [/^\/api\/tantosha/, 'tantosha'],
+  [/^\/toll-calc/,    'toll_calc'],
   [/^\/crew-portal/,  'crew-portal'],
   [/^\/crew-shift/,        'crew-shift'],
   [/^\/summer-report/,     'crew-shift'],
@@ -143,6 +144,7 @@ const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
   [/^\/api\/documents/,           ['settings.documents']],
   [/^\/api\/line-reg/,            ['settings.liff']],
   [/^\/api\/requests/,            ['requests']],
+  [/^\/api\/toll-calc/,           ['toll_calc']],
 ];
 
 // 制限アカウントによるルートAPIへの書き込みを判定（GET/HEAD/OPTIONSは常に許可）
@@ -173,6 +175,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'handover',      label: '引き継ぎシート' },
     { key: 'crew-portal',   label: '乗務員ポータル（個人データ参照）' },
     { key: 'tantosha',      label: '担当車表' },
+    { key: 'toll_calc',     label: '高速料金計算' },
     { key: 'crew-shift',    label: '乗務員シフト・夏季稼働' },
     { key: 'newcomers',     label: '総合新人管理' },
     { key: 'staff',         label: '社員管理（詳細検索含む）' },
