@@ -24,12 +24,19 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 
 /* 課タブ：タイトル行右側（headerExtra）に表示。スペース確保のため本文中の
    タブは廃止し、headerExtraが出ない狭幅画面（layout.tsの.desktop-header非表示時）
-   のみ本文側の#ho-tabs-mを表示するフォールバックを用意する。 */
-.ho-tabs-h{display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;align-items:center;height:24px;}
-.ho-tab-h{flex-shrink:0;box-sizing:border-box;height:24px;display:inline-flex;align-items:center;padding:0 12px;
-          border-radius:12px;border:1px solid #d1d5db;background:#f3f4f6;cursor:pointer;font-size:12px;
-          font-weight:700;color:#374151;white-space:nowrap;line-height:1;}
-.ho-tab-h.active{background:var(--navy);color:#fff;border-color:var(--navy);}
+   のみ本文側の#ho-tabs-mを表示するフォールバックを用意する。
+   全課を並べず、今開いている課のボタン1つだけ表示し、押すと他の課がドロップダウンで出る形式。 */
+.ho-tabs-h{display:flex;align-items:center;height:24px;}
+.ho-tab-wrap{position:relative;}
+.ho-tab-cur{box-sizing:border-box;height:24px;display:inline-flex;align-items:center;gap:4px;padding:0 12px;
+          border-radius:12px;border:1px solid var(--navy);background:var(--navy);cursor:pointer;font-size:12px;
+          font-weight:700;color:#fff;white-space:nowrap;line-height:1;}
+.ho-tab-arrow{font-size:9px;}
+.ho-tab-menu{display:none;position:absolute;top:28px;left:0;background:#fff;border:1px solid #d1d5db;
+          border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.18);min-width:96px;z-index:500;overflow:hidden;}
+.ho-tab-menu.open{display:block;}
+.ho-tab-opt{padding:7px 14px;font-size:12px;font-weight:700;color:#374151;cursor:pointer;white-space:nowrap;}
+.ho-tab-opt:hover{background:#f3f4f6;}
 #ho-tabs-m{display:none;}
 @media (max-width:768px){
   #ho-tabs-m{display:flex;margin-bottom:8px;}
@@ -48,11 +55,15 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-doc{background:#fff;border:2px solid var(--border);}
 .ho-grid{display:flex;flex-direction:column;}
 .ho-col-left,.ho-col-right{display:flex;flex-direction:column;}
+.ho-divider{display:none;}
 /* 左列（メインシート）と右列（当欠・事故車など）は高さを連動させない。
-   一方の内容が伸びても他方の枠が引っ張られて伸びないよう、独立した縦積みコンテナに分ける。 */
+   一方の内容が伸びても他方の枠が引っ張られて伸びないよう、独立した縦積みコンテナに分ける。
+   区切り線(.ho-divider)だけはalign-self:stretchで例外的に高い方の列に合わせて伸ばし、
+   右列が左列より長くなっても境界線が途中で途切れないようにする。 */
 @media(min-width:800px){
   .ho-grid{flex-direction:row;align-items:flex-start;min-height:640px;}
-  .ho-col-left{flex:1;border-right:1.5px solid var(--border);}
+  .ho-col-left{flex:1;}
+  .ho-divider{display:block;width:1.5px;background:var(--border);align-self:stretch;flex-shrink:0;}
   .ho-col-right{width:360px;flex-shrink:0;}
   .ho-sec.ho-main{min-height:520px;}
 }
@@ -106,7 +117,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-lbl{font-size:var(--ho-fs,14px);font-weight:800;color:var(--navy);text-decoration:underline;text-underline-offset:2px;margin-bottom:4px;flex-shrink:0;}
 .ho-lbl.red{color:var(--red);}
 .ho-ta{width:100%;border:none;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;resize:none;font-family:inherit;
-       background:transparent;color:#111;flex:1;min-height:100px;}
+       background:transparent;color:#111;flex:1 1 auto;min-height:100px;overflow-y:hidden;}
 .ho-ta[readonly]{color:#555;}
 .ho-ce{width:100%;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;word-break:break-all;white-space:pre-wrap;color:#111;flex:1;}
 .ho-ce[contenteditable="false"]{color:#555;}
@@ -321,6 +332,7 @@ function showNumpick(rect, onApply){
 document.addEventListener('mousedown', (e) => {
   if (!e.target.closest('#ho-suggest')) hideSuggest();
   if (!e.target.closest('#ho-numpick')) hideNumpick();
+  if (!e.target.closest('.ho-tab-wrap')) closeTabMenus();
 });
 document.querySelectorAll('#ho-numpick .ho-num-btn').forEach(b => b.addEventListener('mousedown', (e) => {
   e.preventDefault(); e.stopPropagation();
@@ -361,6 +373,18 @@ function currentLineText(ta){
 // テキストエリアに「入力中の行から社員名簿を検索して候補を出す」処理を付与する（当欠・乗務希望で共用）。
 // opts.skipIfDone: この行はもう入力確定済みとみなして候補を出さない判定（当欠の±数値行など）
 // opts.afterPick: 名前確定後の追加処理（当欠は続けて±数値ピッカーを出す）。無ければ通常保存のみ。
+// textareaは中身が増えても高さが自動で伸びないため、scrollHeightに合わせて
+// 都度style.heightを再計算し、枠(.ho-sec)ごと下へ伸びるようにする（当欠・乗務希望で使用）。
+function autoGrowTa(ta){
+  if (!ta) return;
+  ta.style.height = 'auto';
+  ta.style.height = ta.scrollHeight + 'px';
+}
+function attachAutoGrow(ta){
+  if (!ta) return;
+  ta.addEventListener('input', () => autoGrowTa(ta));
+  autoGrowTa(ta);
+}
 function attachNameSuggest(ta, field, opts){
   if (!ta) return;
   opts = opts || {};
@@ -388,6 +412,7 @@ function attachNameSuggest(ta, field, opts){
         const newPos = info.lineStart + name.length;
         ta.focus(); ta.setSelectionRange(newPos, newPos);
         hideSuggest();
+        autoGrowTa(ta);
         if (opts.afterPick) opts.afterPick(ta, newPos);
         else scheduleSave(field);
       });
@@ -497,15 +522,34 @@ function convertEl(el){
 // ===== 課タブ =====
 // タイトル行右側（headerExtra側の#ho-tabs）とモバイル用フォールバック（本文側の#ho-tabs-m）の
 // 両方に同じ内容を描画する。
+function closeTabMenus(){
+  document.querySelectorAll('.ho-tab-menu.open').forEach(m => m.classList.remove('open'));
+}
 function renderTabs(){
-  const html = [1,2,3,4].map(d =>
-    '<div class="ho-tab-h'+(d===H.division?' active':'')+'" data-d="'+d+'">板橋'+d+'課</div>'
-  ).join('');
+  const others = [1,2,3,4].filter(d => d !== H.division);
+  const html =
+    '<div class="ho-tab-wrap">' +
+      '<button type="button" class="ho-tab-cur">板橋'+H.division+'課<span class="ho-tab-arrow">▾</span></button>' +
+      '<div class="ho-tab-menu">' +
+        others.map(d => '<div class="ho-tab-opt" data-d="'+d+'">板橋'+d+'課</div>').join('') +
+      '</div>' +
+    '</div>';
   ['ho-tabs','ho-tabs-m'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.innerHTML = html;
-    el.querySelectorAll('.ho-tab-h').forEach(t => t.addEventListener('click', () => switchDivision(parseInt(t.dataset.d))));
+    const menu = el.querySelector('.ho-tab-menu');
+    el.querySelector('.ho-tab-cur').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpen = menu.classList.contains('open');
+      closeTabMenus();
+      if (!wasOpen) menu.classList.add('open');
+    });
+    menu.querySelectorAll('.ho-tab-opt').forEach(opt => opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeTabMenus();
+      switchDivision(parseInt(opt.dataset.d, 10));
+    }));
   });
 }
 async function switchDivision(d){
@@ -547,7 +591,11 @@ async function setFontSize(division, size){
     await api('PUT', '/'+division+'/font-size', { size });
     H.fontSizes[division] = size;
     renderFontSettingsRows();
-    if (division === H.division) applyFontSize();
+    if (division === H.division){
+      applyFontSize();
+      autoGrowTa(document.getElementById('ho-toka-c'));
+      autoGrowTa(document.getElementById('ho-jomu-c'));
+    }
     toast('文字サイズを変更しました');
   } catch(e){ toast('エラー: '+e.message, 2500); }
 }
@@ -562,6 +610,7 @@ document.getElementById('ho-fontset-close').addEventListener('click', closeFontS
 document.getElementById('ho-fontset-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'ho-fontset-overlay') closeFontSettings();
 });
+
 // ヘッダー行の「引き継ぎシート」タイトルをクリックすると文字サイズ設定を開く
 const hoTitleEl = document.querySelector('.desktop-header h1');
 if (hoTitleEl){
@@ -773,6 +822,7 @@ function renderSheet(sheet, date){
       '</div>' +
       '<div class="ho-sec ho-main"><div class="ho-ce" id="ho-main-c" contenteditable="'+ce+'">'+safeHtml(sheet?.main_content)+'</div></div>' +
     '</div>' +
+    '<div class="ho-divider"></div>' +
     '<div class="ho-col-right">' +
       '<div class="ho-sec ho-toka"><div class="ho-lbl">当欠・理由</div><textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea></div>' +
       '<div class="ho-sec ho-jiko"><div class="ho-lbl red">事故車</div><div class="ho-ce" id="ho-jiko-c" contenteditable="'+ce+'">'+safeHtml(sheet?.jiko_content)+'</div></div>' +
@@ -813,17 +863,20 @@ function renderSheet(sheet, date){
             const finalPos = newPos + insert.length;
             ta.focus(); ta.setSelectionRange(finalPos, finalPos);
             hideNumpick();
+            autoGrowTa(ta);
             scheduleSave('toka_content');
             recalcJisseki();
           });
         },
       });
       attachHankaku(tokaEl);
+      attachAutoGrow(tokaEl);
     }
     const jomuEl = document.getElementById('ho-jomu-c');
     if (jomuEl){
       attachNameSuggest(jomuEl, 'jomu_content');
       attachHankaku(jomuEl);
+      attachAutoGrow(jomuEl);
     }
     ['ho-main-c','ho-jiko-c','ho-tenken-c','ho-joshu-c'].forEach(id => {
       const c2 = document.getElementById(id);

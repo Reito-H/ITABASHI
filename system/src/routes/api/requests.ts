@@ -21,6 +21,22 @@ async function getUsername(db: D1Database, adminId: number): Promise<string> {
   return row?.username ?? `id:${adminId}`;
 }
 
+// 統括管理者への即時通知
+async function notifyGeneralManagers(env: Env, text: string): Promise<void> {
+  const token = env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) return;
+  const rows = await env.DB.prepare(
+    "SELECT line_uid FROM line_liff_users WHERE role = 'general_manager'"
+  ).all<{ line_uid: string }>();
+  const uids = (rows.results ?? []).map(r => r.line_uid).slice(0, 500);
+  if (uids.length === 0) return;
+  await fetch('https://api.line.me/v2/bot/message/multicast', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ to: uids, messages: [{ type: 'text', text }] }),
+  });
+}
+
 // 一覧: フル権限adminは全件、制限付きアカウントは自分の投稿のみ
 app.get('/', async (c) => {
   const adminId = c.get('adminId');
@@ -45,6 +61,9 @@ app.post('/', async (c) => {
   await c.env.DB.prepare(
     'INSERT INTO feature_requests (admin_id, admin_name, category, content) VALUES (?, ?, ?, ?)'
   ).bind(adminId, adminName, category, content).run();
+
+  const text = `【要望】${category}\n投稿者: ${adminName}\n\n${content}`;
+  c.executionCtx.waitUntil(notifyGeneralManagers(c.env, text));
 
   return c.json({ ok: true });
 });
