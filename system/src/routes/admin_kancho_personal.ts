@@ -297,6 +297,7 @@ app.get('/kancho-shift/personal', (c) => {
     function saveAsImage() {
       if (!_cache) { alert('先に対象の班長を表示してください'); return; }
       var el = document.getElementById('capture-area');
+      if (!el) { alert('表示エリアが見つかりませんでした'); return; }
       if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
       var btn = document.getElementById('image-save-btn');
       btn.disabled = true; btn.textContent = '画像を生成中...';
@@ -309,12 +310,26 @@ app.get('/kancho-shift/personal', (c) => {
         scale: 2, backgroundColor: '#ffffff', useCORS: true,
         height: el.scrollHeight, windowHeight: el.scrollHeight
       }).then(function(canvas) {
-        var link = document.createElement('a');
-        link.download = '班長シフト_個人別確認_' + _cache.member.name + '_' + _cache.year + _cache.month + '.png';
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-      }).catch(function() {
-        alert('画像の生成に失敗しました');
+        return new Promise(function(resolve, reject) {
+          canvas.toBlob(function(blob) {
+            if (!blob) { reject(new Error('画像データの生成に失敗しました')); return; }
+            // data:URLの直接ダウンロードはブラウザによって無反応になることがあるため、
+            // Blob + ObjectURL 方式にし、リンクをDOMに一時追加してからクリックする
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement('a');
+            link.download = '班長シフト_個人別確認_' + _cache.member.name + '_' + _cache.year + _cache.month + '.png';
+            link.href = url;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
+            resolve();
+          }, 'image/png');
+        });
+      }).catch(function(err) {
+        console.error('画像保存に失敗', err);
+        alert('画像の生成に失敗しました: ' + (err && err.message ? err.message : String(err)));
       }).finally(function() {
         noteInputs.forEach(function(inp, i) { inp.placeholder = origPlaceholders[i]; });
         btn.disabled = false; btn.textContent = '🖼️ 画像で保存(PNG)';
