@@ -310,6 +310,7 @@ export function kanchoShiftPage(
   return `
 <div style="font-family:'Hiragino Sans','Meiryo',sans-serif;">
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+    <a href="${ADMIN_PATH}/kancho-shift/personal" class="btn-secondary" style="text-decoration:none;">👤 個人別確認</a>
     <a href="${ADMIN_PATH}/kancho-shift/print?year=${year}&month=${month}" target="_blank" class="btn-secondary">🖨️ 印刷</a>
     <button onclick="openWarnings()" id="warnings-btn" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">⚠ 警告チェック</button>
     ${canEdit ? `<button onclick="openWishes()" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">希望休</button>` : ''}

@@ -222,7 +222,6 @@ function classifyBotFeature(inputText: string, state: string): string {
   if (inputText === 'れんけいかいじょ') return '連携解除';
   if (inputText === '車番検索') return '車番検索';
   if (inputText === 'マイカレ') return 'マイカレ';
-  if (inputText === '⭐カレ' || inputText === 'スターカレ' || inputText === 'ほしかれ') return '⭐カレ';
   if (inputText === 'AI') return 'AI';
   if (inputText === 'キャンセル' || inputText === 'cancel') return 'キャンセル';
   return 'その他';
@@ -715,16 +714,6 @@ async function handleOperationsUser(
     const shiftMap = vehicles.some(v => isItabashi(v.office, v.office2))
       ? await getTantoshaShiftMap(env.DB) : undefined;
     await reply(replyToken, at, [text(formatVehicleResults(inputText, vehicles, shiftMap))]);
-    return;
-  }
-
-  // ⭐カレ（班長個人の縦型カレンダー）→ LIFF URLを送信
-  if (inputText === '⭐カレ' || inputText === 'スターカレ' || inputText === 'ほしかれ') {
-    const liffId = env.LIFF_ID_KANCHO_CALENDAR ?? '';
-    const url = liffId ? `https://liff.line.me/${liffId}` : '';
-    if (url) {
-      await reply(replyToken, at, [text(`⭐カレ\n\n下をタップして開いてください:\n${url}`)]);
-    }
     return;
   }
 

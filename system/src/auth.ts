@@ -27,8 +27,6 @@ export type Env = {
   LINE_REG_PWD_BENTEN_MASTER?: string;  // ベンテンクラブシフトマスター
   // 班長シフト（管理者公休予定表）
   LIFF_ID_KANCHO_SHIFT?: string;
-  // ⭐カレ（班長個人の縦型カレンダー）
-  LIFF_ID_KANCHO_CALENDAR?: string;
   // ベンテンクラブ シフト
   LIFF_ID_BENTEN_SHIFT?: string;
   RICHMENU_ID_BENTEN?: string;

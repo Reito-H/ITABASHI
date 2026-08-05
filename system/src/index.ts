@@ -38,6 +38,7 @@ import documentsApi from './routes/api/documents';
 import adminKanchoRoutes from './routes/admin_kancho';
 import adminKanchoWishRoutes from './routes/admin_kancho_wish';
 import adminKanchoRosterRoutes from './routes/admin_kancho_roster';
+import adminKanchoPersonalRoutes from './routes/admin_kancho_personal';
 import adminAccountsRoutes from './routes/admin_accounts';
 import adminDiaRoutes from './routes/admin_dia';
 import diaApi from './routes/api/dia';
@@ -50,7 +51,6 @@ import requestsApi from './routes/api/requests';
 import adminTollCalcRoutes from './routes/admin_toll_calc';
 import tollCalcApi from './routes/api/toll_calc';
 import liffKanchoRoutes from './routes/liff_kancho';
-import liffKanchoCalendarRoutes from './routes/liff_kancho_calendar';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
@@ -167,6 +167,9 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   if (isPublicAdminSubPath(subPath)) return next();
   // リミット機能のグローバル通知は所属課だけで判定するため、ページ権限(handover等)の有無に関わらず全アカウントが利用できる
   if (subPath.startsWith('/api/limits/')) return next();
+  // 班長個人別確認: 書き込み(その他メモ保存)も含めて閲覧権限(kancho-shift)だけで利用可能にする
+  // （<key>.edit を要求する既定ルールを外し、ルート側で kancho-shift の有無だけをチェックする）
+  if (subPath.startsWith('/api/kancho-personal/')) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -203,6 +206,7 @@ app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoWishRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRosterRoutes);
+app.route(`/${SECRET}/admin`, adminKanchoPersonalRoutes);
 app.route(`/${SECRET}/admin`, adminAccountsRoutes);
 app.route(`/${SECRET}/admin`, adminDiaRoutes);
 app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
@@ -306,7 +310,6 @@ app.route('', liffBentenRoutes);
 app.route('', liffSalesRoutes);
 app.route('', liffRegisterRoutes);
 app.route('', liffKanchoRoutes);
-app.route('', liffKanchoCalendarRoutes);
 
 // 完全公開ページ（ログイン不要・LINEログインも不要）
 app.route('', publicKanchoWishRoutes);

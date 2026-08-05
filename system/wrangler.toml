@@ -40,8 +40,6 @@ RICHMENU_ID_CREW_MEMBER = "richmenu-1d8eaed8df2c9c29ca0f712ef01cf82d"
 LIFF_ID_SALES = "2010598812-deTtkaIz"
 # 班長シフト閲覧 LIFF（エンドポイントURL: https://bentenclub.com/liff/kancho-shift。LINE Developers で LIFF作成後に設定）
 LIFF_ID_KANCHO_SHIFT = ""
-# ⭐カレ（班長個人の縦型カレンダー）LIFF（エンドポイントURL: https://bentenclub.com/liff/kancho-calendar。LINE Developers で LIFF作成後に設定）
-LIFF_ID_KANCHO_CALENDAR = "2010598812-CuLH5N67"
 # 権限不明者（友達追加直後）用リッチメニュー。「登録はこちら」→ LIFF_ID_REGISTER の入口（未作成なら空のまま=メニューなし）
 RICHMENU_ID_UNKNOWN = "richmenu-ac5365723768242e0e61331f7e63f121"
 # LINE連携登録 LIFF（氏名入力+QR読み取りで新人・運行管理者などを登録。エンドポイントURL: https://bentenclub.com/liff/register。LINE Developers で LIFF作成後に設定）
