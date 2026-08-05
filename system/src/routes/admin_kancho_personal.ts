@@ -76,11 +76,12 @@ app.get('/api/kancho-personal/calendar', async (c) => {
   const { start: periodStart, end: periodEnd } = getPeriodRange(year, month, periodCfg);
   const dates = dateRange(periodStart, periodEnd);
 
-  // 内勤(kancho_shifts)は色マス(記号なし+cell_color)=早日勤の判定にcell_colorが要るが、
-  // 乗務(kancho_crew_schedules)にはcell_color列が無いため個別にSELECT列を分ける
+  // 内勤(kancho_shifts)は色マス(記号なし+cell_color)=早日勤の判定にcell_colorが、
+  // 斜体表示の判定にis_diagonalが要るが、乗務(kancho_crew_schedules)にはどちらの列も無いため
+  // 個別にSELECT列を分ける
   const entriesQuery = member.is_indoor
-    ? c.env.DB.prepare(`SELECT date, code, cell_color FROM kancho_shifts WHERE member_id = ? AND date BETWEEN ? AND ?`)
-        .bind(memberId, periodStart, periodEnd).all<{ date: string; code: string; cell_color: string | null }>()
+    ? c.env.DB.prepare(`SELECT date, code, cell_color, is_diagonal FROM kancho_shifts WHERE member_id = ? AND date BETWEEN ? AND ?`)
+        .bind(memberId, periodStart, periodEnd).all<{ date: string; code: string; cell_color: string | null; is_diagonal: number }>()
     : c.env.DB.prepare(`SELECT date, code FROM kancho_crew_schedules WHERE member_id = ? AND date BETWEEN ? AND ?`)
         .bind(memberId, periodStart, periodEnd).all<{ date: string; code: string }>();
 
@@ -255,17 +256,19 @@ app.get('/kancho-shift/personal', (c) => {
         var code = e ? (e.code || '') : '';
         var note = nmap[dt] || '';
         var dowColor = dow === 0 ? '#dc2626' : dow === 6 ? '#2563eb' : '#6b7280';
-        var stampBg, stampLabel;
+        var stampBg, stampLabel, stampItalic = false;
         if (code) {
           // 通常の記号（直・非・遅・早番・公 等）。「非」は「明け」表記で統一
+          // 「直」がis_diagonal=1の場合は斜め直（14:00〜翌8:00）→斜体表示
           var dispCode = LABEL_OVERRIDE[code] || code;
           var subLabel = LABEL_OVERRIDE[code] ? '' : (labelMap[code] ? ' <span style="font-weight:400;color:#6b7280;">(' + escH(labelMap[code]) + ')</span>' : '');
+          if (code === '直' && e && e.is_diagonal) { stampItalic = true; subLabel = ' <span style="font-weight:400;color:#6b7280;">(斜め直 14:00〜翌8:00)</span>'; }
           stampBg = colorMap[code] || '#e5e7eb';
           stampLabel = escH(dispCode) + subLabel;
         } else if (e && e.cell_color) {
           // 記号なし+色マス = 早日勤（7:30〜16:30）
           stampBg = e.cell_color;
-          stampLabel = '早日勤';
+          stampLabel = '早日勤 <span style="font-weight:400;color:#6b7280;">(7:30〜16:30)</span>';
         } else {
           stampBg = '#f9fafb';
           stampLabel = '<span style="color:#c1c7d0;">―</span>';
@@ -274,7 +277,7 @@ app.get('/kancho-shift/personal', (c) => {
         return '<tr' + (isToday ? ' style="background:#eff6ff;"' : '') + '>'
           + '<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-weight:700;color:#1e3a5f;">' + (t.getMonth()+1) + '/' + t.getDate() + '</td>'
           + '<td style="padding:8px 6px;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-weight:700;color:' + dowColor + ';">' + WD[dow] + '</td>'
-          + '<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap;"><span style="display:inline-block;padding:4px 12px;border-radius:6px;background:' + stampBg + ';font-size:13px;font-weight:700;">' + stampLabel + '</span></td>'
+          + '<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap;"><span style="display:inline-block;padding:4px 12px;border-radius:6px;background:' + stampBg + ';font-size:13px;font-weight:700;' + (stampItalic ? 'font-style:italic;' : '') + '">' + stampLabel + '</span></td>'
           + '<td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">'
           + '<input type="text" class="note-input" data-date="' + dt + '" value="' + escH(note) + '" placeholder="その他（自由記入）" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 9px;font-size:13px;box-sizing:border-box;" onblur="saveNote(this)" onkeydown="if(event.key===\\'Enter\\'){this.blur();}">'
           + '</td>'
