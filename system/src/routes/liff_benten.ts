@@ -175,6 +175,105 @@ app.put('/api/liff/benten/shift', async (c) => {
 });
 
 // ===================================================
+// API: シフト一括登録・更新（カレンダー入力タブ：スタンプ方式の一括保存）
+// body: { member_id, entries: [{ date, shift_type_id | null, is_ake }] }
+// shift_type_id=null & is_ake=false のエントリは「消去」＝DELETE扱い
+// ===================================================
+const BENTEN_BATCH_MAX = 62; // 2ヶ月分程度を上限に
+
+app.put('/api/liff/benten/shifts/batch', async (c) => {
+  const auth = await bentenAuth(c);
+  if (!auth) return c.json({ error: 'forbidden' }, 403);
+  const canEditAll = BENTEN_MASTER_ROLES.includes(auth.role);
+
+  const body = await c.req.json<{
+    member_id: number;
+    entries: Array<{ date: string; shift_type_id: number | null; is_ake: boolean }>;
+  }>();
+  if (!body.member_id || !Array.isArray(body.entries)) return c.json({ error: 'bad request' }, 400);
+  if (body.entries.length === 0) return c.json({ ok: true, saved: 0 });
+  if (body.entries.length > BENTEN_BATCH_MAX) {
+    return c.json({ error: `一度に保存できるのは${BENTEN_BATCH_MAX}件までです` }, 400);
+  }
+  for (const e of body.entries) {
+    if (!DATE_RE.test(e.date ?? '')) return c.json({ error: 'bad request' }, 400);
+  }
+
+  const member = await c.env.DB.prepare(
+    'SELECT id, line_uid, auto_ake, allowed_codes FROM benten_members WHERE id = ? AND is_active = 1'
+  ).bind(body.member_id).first<BentenMember>();
+  if (!member) return c.json({ error: 'member not found' }, 404);
+
+  // 権限: マスター・統括は全員 / 会員は自分のみ
+  if (!canEditAll && member.line_uid !== auth.uid) return c.json({ error: 'forbidden' }, 403);
+
+  const typeRows = await c.env.DB.prepare('SELECT id, code, triggers_ake FROM benten_shift_types')
+    .all<{ id: number; code: string; triggers_ake: number }>();
+  const typeById = new Map((typeRows.results ?? []).map((t) => [t.id, t]));
+
+  let allowedCodes: string[] | null = null;
+  if (!canEditAll && member.allowed_codes) {
+    const parsed: string[] = JSON.parse(member.allowed_codes);
+    if (parsed.length > 0) allowedCodes = parsed;
+  }
+
+  const explicitDates = new Set(body.entries.map((e) => e.date));
+  const stmts = [];
+
+  for (const e of body.entries) {
+    const isClear = !e.is_ake && e.shift_type_id == null;
+    if (isClear) {
+      stmts.push(c.env.DB.prepare('DELETE FROM benten_shifts WHERE member_id = ? AND date = ?').bind(body.member_id, e.date));
+      continue;
+    }
+    let shiftTypeId: number | null = null;
+    if (!e.is_ake) {
+      const type = typeById.get(e.shift_type_id as number);
+      if (!type) return c.json({ error: 'shift type not found' }, 404);
+      // 会員は入力可能種別の制限を受ける（マスター・統括は制限なし）
+      if (allowedCodes && !allowedCodes.includes(type.code)) {
+        return c.json({ error: 'この種別は入力できません' }, 403);
+      }
+      shiftTypeId = type.id;
+    }
+    stmts.push(c.env.DB.prepare(`
+      INSERT INTO benten_shifts (member_id, date, shift_type_id, is_ake, input_by_uid, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now', 'localtime'))
+      ON CONFLICT(member_id, date) DO UPDATE SET
+        shift_type_id = excluded.shift_type_id, is_ake = excluded.is_ake,
+        input_by_uid = excluded.input_by_uid, updated_at = excluded.updated_at
+    `).bind(body.member_id, e.date, shiftTypeId, e.is_ake ? 1 : 0, auth.uid));
+  }
+
+  // 明け自動設定: 会員のauto_ake × 種別のtriggers_ake。
+  // 翌日がこのバッチ内で明示操作されておらず、既存データも無い場合のみサーバー側で確定させる
+  if (member.auto_ake === 1) {
+    for (const e of body.entries) {
+      if (e.is_ake || e.shift_type_id == null) continue;
+      const type = typeById.get(e.shift_type_id);
+      if (!type || type.triggers_ake !== 1) continue;
+      const next = addDays(e.date, 1);
+      if (explicitDates.has(next)) continue;
+      const existing = await c.env.DB.prepare(
+        'SELECT member_id FROM benten_shifts WHERE member_id = ? AND date = ?'
+      ).bind(body.member_id, next).first();
+      if (existing) continue;
+      stmts.push(c.env.DB.prepare(`
+        INSERT INTO benten_shifts (member_id, date, shift_type_id, is_ake, input_by_uid, updated_at)
+        VALUES (?, ?, NULL, 1, ?, datetime('now', 'localtime'))
+      `).bind(body.member_id, next, auth.uid));
+    }
+  }
+
+  await c.env.DB.batch(stmts);
+
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'ベンテンシフト一括入力',
+    `${body.entries.length}件 member:${body.member_id}`);
+
+  return c.json({ ok: true, saved: body.entries.length });
+});
+
+// ===================================================
 // API: シフト削除（会員は自分のみ / マスター・統括は全員）
 // ===================================================
 app.delete('/api/liff/benten/shift', async (c) => {
@@ -235,9 +334,21 @@ function bentenShiftPage(liffId: string): string {
     .tab.active { color: #1e3a5f; border-bottom-color: #1e3a5f; }
 
     /* ===== カレンダー入力 ===== */
-    #view-input { padding: 12px 12px 190px; max-width: 520px; margin: 0 auto; }
+    #view-input { padding: 12px 12px 84px; max-width: 520px; margin: 0 auto; }
     .member-sel { margin-bottom: 10px; }
     .member-sel select { width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 15px; background: white; -webkit-appearance: none; }
+
+    /* 種別スタンプバー（上部・選択式） */
+    .stamp-bar { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 10px 10px 12px; margin-bottom: 10px; }
+    .stamp-info { font-size: 12px; color: #6b7280; margin-bottom: 8px; text-align: center; }
+    .stamp-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .stamp { border: 2px solid transparent; border-radius: 10px; padding: 10px 0; width: calc(25% - 6px); font-size: 14px; font-weight: 700; cursor: pointer; opacity: 0.55; }
+    .stamp.active { opacity: 1; border-color: #1e3a5f; box-shadow: 0 0 0 2px rgba(30,58,95,0.15); }
+    .stamp.ake { background: #e5e7eb; color: #374151; }
+    .stamp.del { background: white; color: #991b1b; border-color: #fca5a5; opacity: 1; }
+    .stamp.del.active { border-color: #991b1b; }
+    #sheet .stamp { opacity: 1; }
+
     .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
     .cal-nav button { border: 1px solid #d1d5db; background: white; border-radius: 8px; padding: 8px 18px; font-size: 16px; cursor: pointer; }
     .cal-nav .ym { font-size: 16px; font-weight: 700; color: #1e3a5f; }
@@ -250,20 +361,20 @@ function bentenShiftPage(liffId: string): string {
     .cal-day { min-height: 52px; border-bottom: 1px solid #f3f4f6; border-right: 1px solid #f3f4f6; padding: 3px 2px; text-align: center; cursor: pointer; position: relative; }
     .cal-day.out { background: #fafafa; }
     .cal-day.sel { outline: 2px solid #1e3a5f; outline-offset: -2px; border-radius: 4px; z-index: 1; }
+    .cal-day.dirty { outline: 2px dashed #d97706; outline-offset: -2px; border-radius: 4px; z-index: 1; }
+    .cal-day.dirty::after { content: ''; position: absolute; top: 3px; right: 3px; width: 6px; height: 6px; border-radius: 50%; background: #d97706; }
     .cal-day .dnum { font-size: 12px; color: #374151; }
     .cal-day.sun .dnum { color: #dc2626; }
     .cal-day.sat .dnum { color: #2563eb; }
     .cal-day.out .dnum { color: #c4c8ce; }
     .chip { display: inline-block; margin-top: 2px; padding: 1px 5px; border-radius: 5px; font-size: 11px; font-weight: 700; min-width: 20px; }
     .chip.ake { background: #e5e7eb; color: #6b7280; }
+    .chip.preview { opacity: 0.55; }
 
-    /* スタンプパネル */
-    .stamp-panel { position: fixed; left: 0; right: 0; bottom: 0; background: white; border-top: 1px solid #e5e7eb; box-shadow: 0 -4px 16px rgba(0,0,0,0.08); padding: 10px 12px calc(12px + env(safe-area-inset-bottom)); z-index: 20; }
-    .stamp-info { font-size: 12px; color: #6b7280; margin-bottom: 8px; text-align: center; }
-    .stamp-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 520px; margin: 0 auto; }
-    .stamp { border: none; border-radius: 10px; padding: 12px 0; width: calc(25% - 6px); font-size: 15px; font-weight: 700; cursor: pointer; }
-    .stamp.ake { background: #e5e7eb; color: #374151; }
-    .stamp.del { background: white; color: #991b1b; border: 1px solid #fca5a5; }
+    /* 保存バー（下部固定） */
+    .save-bar { position: fixed; left: 0; right: 0; bottom: 0; background: white; border-top: 1px solid #e5e7eb; box-shadow: 0 -4px 16px rgba(0,0,0,0.08); padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); z-index: 20; }
+    .save-bar .save-btn { display: block; width: 100%; max-width: 520px; margin: 0 auto; border: none; border-radius: 10px; padding: 13px 0; font-size: 15px; font-weight: 700; color: white; background: #1e3a5f; cursor: pointer; }
+    .save-bar .save-btn:disabled { background: #9ca3af; cursor: default; }
 
     /* ===== シフト表 ===== */
     #view-table { display: none; }
@@ -318,6 +429,10 @@ function bentenShiftPage(liffId: string): string {
       <div class="member-sel" id="member-sel-wrap" style="display:none;">
         <select id="member-sel" onchange="onMemberChange()"></select>
       </div>
+      <div class="stamp-bar" id="stamp-bar">
+        <div class="stamp-info" id="stamp-info">種別を選んで日付をタップしてください</div>
+        <div class="stamp-grid" id="stamp-grid"></div>
+      </div>
       <div class="cal-nav">
         <button onclick="moveMonth(-1)">‹</button>
         <div class="ym" id="cal-ym"></div>
@@ -328,9 +443,8 @@ function bentenShiftPage(liffId: string): string {
         <div class="cal-grid" id="cal-grid"></div>
       </div>
     </div>
-    <div class="stamp-panel" id="stamp-panel">
-      <div class="stamp-info" id="stamp-info">日付を選んでシフトをタップ</div>
-      <div class="stamp-grid" id="stamp-grid"></div>
+    <div class="save-bar" id="save-bar" style="display:none;">
+      <button class="save-btn" id="save-btn" onclick="savePending()">保存</button>
     </div>
 
     <!-- シフト表 -->
@@ -368,9 +482,14 @@ function bentenShiftPage(liffId: string): string {
   var ORDERED_MEMBERS = [];
   var targetMemberId = null;  // カレンダーで入力中の会員
   var calY = 0, calM = 0;     // 表示中の年月（Mは1-12）
-  var selDate = null;
+  var lastTapDate = null;     // 直近タップ日（見た目のフォーカス表示用）
   var zoom = 100;
   var sheetCtx = null;        // {memberId, date}
+
+  // ===== スタンプ方式・一括保存用の状態 =====
+  var currentStamp = null;    // 上部バーで選択中の種別: shift_type_id | 'ake' | 'del' | null
+  var pending = {};           // date -> {t, a} 未保存の編集（targetMemberId分のみ）
+  var previewAke = {};        // date -> true（隔日勤務タップ翌日の「明け」プレビュー・保存対象外）
 
   liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
     .then(function() {
@@ -384,7 +503,7 @@ function bentenShiftPage(liffId: string): string {
       buildOrderedMembers();
       var today = jstToday();
       calY = parseInt(today.slice(0, 4)); calM = parseInt(today.slice(5, 7));
-      selDate = today;
+      lastTapDate = today;
       targetMemberId = boot.myMemberId || (boot.canEditAll && ORDERED_MEMBERS.length > 0 ? ORDERED_MEMBERS[0].id : null);
       setupMemberSelector();
       document.getElementById('role-label').textContent = roleLabel(boot.role);
@@ -469,19 +588,23 @@ function bentenShiftPage(liffId: string): string {
     return api('/api/liff/benten/shifts?from=' + span.from + '&to=' + span.to).then(function(rows) {
       SHIFTS = {};
       rows.forEach(function(s) { SHIFTS[s.member_id + ':' + s.date] = { t: s.shift_type_id, a: s.is_ake }; });
+      recomputeAkePreview();
       renderCalendar();
-      renderStampPanel();
+      renderStampBar();
       renderTable();
+      updateSaveBar();
     });
   }
 
   // ===== タブ =====
   function switchTab(tab) {
+    if (tab === 'table' && !confirmDiscard()) return;
+    if (tab === 'table') { pending = {}; previewAke = {}; renderCalendar(); }
     document.getElementById('tab-input').className = 'tab' + (tab === 'input' ? ' active' : '');
     document.getElementById('tab-table').className = 'tab' + (tab === 'table' ? ' active' : '');
     document.getElementById('view-input').style.display = tab === 'input' ? 'block' : 'none';
-    document.getElementById('stamp-panel').style.display = tab === 'input' ? 'block' : 'none';
     document.getElementById('view-table').style.display = tab === 'table' ? 'block' : 'none';
+    updateSaveBar();
   }
 
   // ===== メンバー選択（マスター・統括のみ） =====
@@ -499,25 +622,47 @@ function bentenShiftPage(liffId: string): string {
     sel.innerHTML = html;
   }
   function onMemberChange() {
-    targetMemberId = parseInt(document.getElementById('member-sel').value);
+    var sel = document.getElementById('member-sel');
+    if (!confirmDiscard()) { sel.value = targetMemberId; return; }
+    pending = {}; previewAke = {};
+    targetMemberId = parseInt(sel.value);
+    currentStamp = null;
     renderCalendar();
-    renderStampPanel();
+    renderStampBar();
+    updateSaveBar();
+  }
+
+  // ===== 未保存編集の破棄確認 =====
+  function hasPending() { return Object.keys(pending).length > 0; }
+  function confirmDiscard() {
+    if (!hasPending()) return true;
+    return confirm('保存していない変更があります。破棄しますか？');
   }
 
   // ===== カレンダー =====
   function moveMonth(n) {
+    if (!confirmDiscard()) return;
+    pending = {}; previewAke = {};
     calM += n;
     if (calM < 1) { calM = 12; calY--; }
     if (calM > 12) { calM = 1; calY++; }
     reloadShifts();
   }
+  function effectiveShift(memberId, date) {
+    if (memberId === targetMemberId) {
+      if (pending[date]) return pending[date];
+      if (previewAke[date]) return { t: null, a: true };
+    }
+    return SHIFTS[memberId + ':' + date];
+  }
   function chipHtml(memberId, date) {
-    var s = SHIFTS[memberId + ':' + date];
+    var s = effectiveShift(memberId, date);
     if (!s) return '';
-    if (s.a) return '<span class="chip ake">明</span>';
+    var isPreview = memberId === targetMemberId && !pending[date] && previewAke[date] ? ' preview' : '';
+    if (s.a) return '<span class="chip ake' + isPreview + '">明</span>';
     var t = TYPE_BY_ID[s.t];
     if (!t) return '';
-    return '<span class="chip" style="background:' + esc(t.color) + ';color:' + esc(t.text_color) + ';">' + esc(t.code) + '</span>';
+    return '<span class="chip' + isPreview + '" style="background:' + esc(t.color) + ';color:' + esc(t.text_color) + ';">' + esc(t.code) + '</span>';
   }
   function renderCalendar() {
     document.getElementById('cal-ym').textContent = calY + '年' + calM + '月';
@@ -529,26 +674,62 @@ function bentenShiftPage(liffId: string): string {
       var d = addDaysStr(gridStart, i);
       var inMonth = d.slice(0, 7) === (calY + '-' + pad2(calM));
       var w = dow(d);
-      var cls = 'cal-day' + (inMonth ? '' : ' out') + (d === selDate ? ' sel' : '') + (w === 0 ? ' sun' : w === 6 ? ' sat' : '');
-      html += '<div class="' + cls + '" onclick="selectDate(\\'' + d + '\\')">'
+      var cls = 'cal-day' + (inMonth ? '' : ' out') + (d === lastTapDate ? ' sel' : '') + (pending[d] ? ' dirty' : '') + (w === 0 ? ' sun' : w === 6 ? ' sat' : '');
+      html += '<div class="' + cls + '" onclick="tapDate(\\'' + d + '\\')">'
         + '<div class="dnum">' + parseInt(d.slice(8)) + '</div>'
         + (targetMemberId ? chipHtml(targetMemberId, d) : '')
         + '</div>';
     }
     document.getElementById('cal-grid').innerHTML = html;
   }
-  function selectDate(d) {
-    selDate = d;
-    if (d.slice(0, 7) !== (calY + '-' + pad2(calM))) {
+  function sameShift(a, b) { return a.t === b.t && !!a.a === !!b.a; }
+  function tapDate(d) {
+    var inMonth = d.slice(0, 7) === (calY + '-' + pad2(calM));
+    if (!inMonth) {
+      if (!confirmDiscard()) return;
+      pending = {}; previewAke = {};
       calY = parseInt(d.slice(0, 4)); calM = parseInt(d.slice(5, 7));
       reloadShifts();
-    } else {
-      renderCalendar();
-      renderStampPanel();
+      return;
     }
+    if (!targetMemberId || !canEdit(targetMemberId)) return;
+    if (currentStamp === null) { toast('まず上のバーで種別を選んでください'); return; }
+
+    lastTapDate = d;
+    var val = currentStamp === 'del' ? { t: null, a: false }
+      : currentStamp === 'ake' ? { t: null, a: true }
+      : { t: currentStamp, a: false };
+    var saved = SHIFTS[targetMemberId + ':' + d];
+    var savedVal = saved ? { t: saved.t, a: saved.a } : { t: null, a: false };
+    if (sameShift(val, savedVal)) {
+      delete pending[d];
+    } else {
+      pending[d] = val;
+    }
+    recomputeAkePreview();
+    renderCalendar();
+    updateSaveBar();
   }
 
-  // ===== スタンプパネル =====
+  // ===== 明けカスケードのプレビュー（表示のみ・確定計算はサーバー側で再判定） =====
+  function recomputeAkePreview() {
+    previewAke = {};
+    if (!targetMemberId) return;
+    var m = MEMBER_BY_ID[targetMemberId];
+    if (!m || m.auto_ake !== 1) return;
+    Object.keys(pending).forEach(function(d) {
+      var v = pending[d];
+      if (v.a || v.t == null) return;
+      var type = TYPE_BY_ID[v.t];
+      if (!type || type.triggers_ake !== 1) return;
+      var next = addDaysStr(d, 1);
+      if (pending[next]) return; // 翌日を明示操作済みなら上書きしない
+      if (SHIFTS[targetMemberId + ':' + next]) return; // 翌日に既存データがあれば上書きしない
+      previewAke[next] = true;
+    });
+  }
+
+  // ===== スタンプバー（種別選択） =====
   function typesForMember(memberId) {
     var m = MEMBER_BY_ID[memberId];
     var list = BOOT.shiftTypes;
@@ -562,16 +743,17 @@ function bentenShiftPage(liffId: string): string {
     }
     return list;
   }
-  function stampButtons(memberId, onclickName) {
+  function stampButtons(memberId, onclickName, activeVal) {
     var html = '';
     typesForMember(memberId).forEach(function(t) {
-      html += '<button class="stamp" style="background:' + esc(t.color) + ';color:' + esc(t.text_color) + ';" onclick="' + onclickName + '(' + t.id + ')">' + esc(t.label) + '</button>';
+      var active = activeVal !== undefined && activeVal !== null && String(activeVal) === String(t.id);
+      html += '<button class="stamp' + (active ? ' active' : '') + '" style="background:' + esc(t.color) + ';color:' + esc(t.text_color) + ';" onclick="' + onclickName + '(' + t.id + ')">' + esc(t.label) + '</button>';
     });
-    html += '<button class="stamp ake" onclick="' + onclickName + '(\\'ake\\')">明け</button>';
-    html += '<button class="stamp del" onclick="' + onclickName + '(\\'del\\')">消</button>';
+    html += '<button class="stamp ake' + (activeVal === 'ake' ? ' active' : '') + '" onclick="' + onclickName + '(\\'ake\\')">明け</button>';
+    html += '<button class="stamp del' + (activeVal === 'del' ? ' active' : '') + '" onclick="' + onclickName + '(\\'del\\')">消</button>';
     return html;
   }
-  function renderStampPanel() {
+  function renderStampBar() {
     var info = document.getElementById('stamp-info');
     var grid = document.getElementById('stamp-grid');
     if (!targetMemberId) {
@@ -584,14 +766,49 @@ function bentenShiftPage(liffId: string): string {
       grid.innerHTML = '';
       return;
     }
-    var m = MEMBER_BY_ID[targetMemberId];
-    info.textContent = (BOOT.canEditAll ? esc(m ? m.name : '') + ' / ' : '') + selDate.slice(5).replace('-', '/') + '（' + '日月火水木金土'[dow(selDate)] + '）のシフトを選択';
-    grid.innerHTML = stampButtons(targetMemberId, 'stampInput');
+    info.textContent = '種別を選んで日付をタップしてください';
+    grid.innerHTML = stampButtons(targetMemberId, 'selectStamp', currentStamp);
   }
-  function stampInput(v) { saveShift(targetMemberId, selDate, v, true); }
+  function selectStamp(v) {
+    currentStamp = (currentStamp !== null && String(currentStamp) === String(v)) ? null : v;
+    renderStampBar();
+  }
 
-  // ===== 保存 =====
-  function saveShift(memberId, date, v, advance) {
+  // ===== 一括保存 =====
+  function updateSaveBar() {
+    var bar = document.getElementById('save-bar');
+    var btn = document.getElementById('save-btn');
+    var n = Object.keys(pending).length;
+    var onInputTab = document.getElementById('view-input').style.display !== 'none';
+    bar.style.display = (onInputTab && n > 0) ? 'block' : 'none';
+    btn.textContent = n > 0 ? '保存（' + n + '件）' : '保存';
+  }
+  function savePending() {
+    var entries = Object.keys(pending).map(function(d) {
+      var v = pending[d];
+      return { date: d, shift_type_id: v.t, is_ake: !!v.a };
+    });
+    if (entries.length === 0) return;
+    var btn = document.getElementById('save-btn');
+    btn.disabled = true;
+    api('/api/liff/benten/shifts/batch', {
+      method: 'PUT',
+      body: JSON.stringify({ member_id: targetMemberId, entries: entries }),
+    }).then(function(r) {
+      pending = {}; previewAke = {};
+      toast('保存しました（' + (r && r.saved != null ? r.saved : entries.length) + '件）');
+      return reloadShifts();
+    }).then(function() {
+      btn.disabled = false;
+    }).catch(function(e) {
+      btn.disabled = false;
+      updateSaveBar();
+      toast(e.message || '保存に失敗しました');
+    });
+  }
+
+  // ===== 単発保存（シフト表タブのボトムシート用） =====
+  function saveShift(memberId, date, v) {
     var p;
     if (v === 'del') {
       p = api('/api/liff/benten/shift?member_id=' + memberId + '&date=' + date, { method: 'DELETE' });
@@ -606,14 +823,6 @@ function bentenShiftPage(liffId: string): string {
       });
     }
     return p.then(function() {
-      if (advance) {
-        // カーソルを翌日へ（月をまたいだら翌月に切替）
-        var next = addDaysStr(date, 1);
-        selDate = next;
-        if (next.slice(0, 7) !== (calY + '-' + pad2(calM))) {
-          calY = parseInt(next.slice(0, 4)); calM = parseInt(next.slice(5, 7));
-        }
-      }
       return reloadShifts();
     }).catch(function(e) {
       toast(e.message || '保存に失敗しました');
@@ -690,7 +899,7 @@ function bentenShiftPage(liffId: string): string {
     if (!sheetCtx) return;
     var ctx = sheetCtx;
     closeSheet();
-    saveShift(ctx.memberId, ctx.date, v, false);
+    saveShift(ctx.memberId, ctx.date, v);
   }
 
   // ===== PDF =====
