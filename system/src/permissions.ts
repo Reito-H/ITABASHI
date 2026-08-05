@@ -215,7 +215,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
 ];
 
 // HTMLレスポンスから権限のないメニュー・設定カード・マニュアル章を除去
-// layout.ts のナビ（data-nav-id）、設定トップのカードとチュートリアルの目次・章（data-perm-key、a/div両対応）が対象
+// layout.ts のナビ（data-nav-id）、設定トップのカードとチュートリアルの目次・章（data-perm-key、a/div/hr対応）が対象
 // data-perm-key はスペース区切りで複数指定可（いずれか1つでも権限があれば表示）
 export function filterHtmlByPermissions(res: Response, perms: string[]): Response {
   const remover = (attr: string) => ({
@@ -228,5 +228,6 @@ export function filterHtmlByPermissions(res: Response, perms: string[]): Respons
     .on('a[data-nav-id]', remover('data-nav-id'))
     .on('a[data-perm-key]', remover('data-perm-key'))
     .on('div[data-perm-key]', remover('data-perm-key'))
+    .on('hr[data-perm-key]', remover('data-perm-key'))
     .transform(res);
 }

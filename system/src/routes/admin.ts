@@ -1680,7 +1680,7 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-cover-title">ホシコン<br>使い方ガイド</div>
     <div style="margin:16px auto;width:48px;height:3px;background:#1e3a5f;border-radius:2px;"></div>
     <div class="tut-cover-sub">管理者・現場スタッフ 共通マニュアル</div>
-    <div class="tut-cover-sub" style="margin-top:6px;font-size:12px;">最終更新: 2026年7月</div>
+    <div class="tut-cover-sub" style="margin-top:6px;font-size:12px;">最終更新: 2026年8月</div>
   </div>
 
   <!-- 目次 -->
@@ -1706,10 +1706,11 @@ app.get('/settings/tutorial', (c) => {
     <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">1-17. 報告センター — 忘れ物・事故・違反・一般報告</a>
     <a href="#benten-shift" data-perm-key="settings.benten">1-18. ベンテンクラブ シフト</a>
     <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
-    <div class="tut-toc-section" style="margin-top:12px;">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
-    <a href="#veh-what">2-1. 車番検索でできること</a>
-    <a href="#veh-how">2-2. 検索の方法</a>
-    <a href="#veh-result">2-3. 検索結果の見方</a>
+    <a href="#handover" data-perm-key="handover">1-20. 引き継ぎシート — 課の申し送り事項</a>
+    <a href="#crew-portal" data-perm-key="crew-portal">1-21. 乗務員ポータル — 個人データ・シフト・売上・担当車表</a>
+    <a href="#toll-calc" data-perm-key="toll_calc">1-22. 高速料金計算</a>
+    <div class="tut-toc-section" style="margin-top:12px;" data-perm-key="settings.vehicle-search-guide">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
+    <a href="#veh-guide" data-perm-key="settings.vehicle-search-guide">2-1. LINE車番検索ガイド（詳細は専用ページへ）</a>
     <div class="tut-toc-section" style="margin-top:12px;">第3章 — 現場スタッフ向け（LINE利用ガイド）</div>
     <a href="#line-what">3-1. LINEでできること</a>
     <a href="#line-link">3-2. 初回連携の方法</a>
@@ -1893,15 +1894,15 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;">社員のLINEアカウントにお知らせやアンケートを一斉送信できます。</p>
     <ol class="tut-steps">
       <li>「＋ 新規配信」をクリック</li>
-      <li>タイトル・本文を入力し、送信対象（全員 / 課指定 / 入社月指定）を選択</li>
-      <li>「送信」をクリック — 対象者のLINEに即時配信されます</li>
+      <li>タイトル・本文を入力し、配信対象（LINE連携者 / 全員 / 入社月 / 個別指定）を選択</li>
+      <li>「配信する」をクリック — 対象者のLINEに即時配信されます</li>
     </ol>
     <table class="tut-table">
-      <tr><th>送信対象</th><th>内容</th></tr>
+      <tr><th>配信対象</th><th>内容</th></tr>
+      <tr><td>LINE連携者</td><td>（既定）LINE Botに登録済みの連携者から、役割チップ・名前検索で絞り込んで選択</td></tr>
       <tr><td>全員</td><td>LINEを連携済みの全社員</td></tr>
-      <tr><td>課指定</td><td>選択した課（1〜4課）の社員</td></tr>
-      <tr><td>入社月指定</td><td>特定の月に入社した社員のみ</td></tr>
-      <tr><td>LINE連携者</td><td>LINE Botに登録済みの連携者（統括管理者・運行管理者・車番管理者など）から名前で選択</td></tr>
+      <tr><td>入社月</td><td>特定の月に入社した社員のみ</td></tr>
+      <tr><td>個別指定</td><td>名前・社員番号で検索して個別に選択</td></tr>
     </table>
     <div class="tut-note">LINEを未連携の社員には届きません。LINE管理ページで連携状況を確認できます。</div>
   </div>
@@ -1941,14 +1942,13 @@ app.get('/settings/tutorial', (c) => {
   <div class="tut-section" id="line" data-perm-key="line">
     <h3><span class="num">11</span>LINE管理 — ユーザー連携状況</h3>
     <p style="font-size:13px;">社員のLINEアカウントと本システムの紐付け状況を管理します。</p>
-    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍招待コードの発行と連携手順</p>
-    <ol class="tut-steps">
-      <li>社員の行にある「招待コード発行」をクリック</li>
-      <li>発行された6桁のコードを社員に口頭または紙で渡す</li>
-      <li>社員が公式LINEアカウントに「コード: XXXXXX」と送信</li>
-      <li>連携完了 — 以降、LINEから報告や確認が利用可能になります</li>
-    </ol>
-    <div class="tut-note">招待コードの有効期限は発行から7日間です。期限切れの場合は再発行してください。</div>
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍新人・運行管理者などの登録</p>
+    <p style="font-size:13px;">招待コード方式は廃止され、「設定 → LINE連携」ページに統合されました。QRコードを発行して本人に読み取ってもらうだけで登録できます。</p>
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍アンケート配信</p>
+    <p style="font-size:13px;">タイトルとGoogle FormsのURLを入力して送信すると、LINE連携済みの全社員にアンケートリンクが配信されます。</p>
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍LINE紐付け済み一覧</p>
+    <p style="font-size:13px;">氏名・社員番号・紐付け日時・LINE UIDの一覧が確認できます。</p>
+    <div class="tut-note">お知らせの一斉配信・個別配信は「お知らせ配信」ページで行います。</div>
   </div>
 
   <!-- 1-12 設定 -->
@@ -1973,10 +1973,12 @@ app.get('/settings/tutorial', (c) => {
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>シフト区分</td><td>実研・公休・座学などの区分名・背景色・月間目標回数を追加・編集</td></tr>
+      <tr><td>勤務ダイヤ・サイクル</td><td>ダイヤマスター（勤務時間帯・指導基準）とサイクル一覧表の管理</td></tr>
       <tr><td>研修担当</td><td>シフト入力時に選択できるコーチ（研修担当者）の名前を登録</td></tr>
-      <tr><td>班長・指導者</td><td>シフト表下部の指導者スケジュール欄を管理。LINE連携の招待コード発行も可能</td></tr>
+      <tr><td>班長・指導者</td><td>シフト表下部の指導者スケジュール欄を管理</td></tr>
       <tr><td>月度設定</td><td>各月の締め日・開始日を設定（例：17日締め 18日開始）</td></tr>
       <tr><td>ベンテンクラブ シフト</td><td>ベンテンクラブの会員・グループ・シフト種別・LINE自動送信の管理（詳細は 1-18）</td></tr>
+      <tr><td>班長関連</td><td>班長リスト（社員番号・内勤）、希望休フォームの設定</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍LINE関連</p>
@@ -1999,9 +2001,11 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>資料センター</td><td>マニュアルPDF・就業規則などの資料を保存・共有</td></tr>
       <tr><td>チュートリアル</td><td>このマニュアル（印刷・PDF出力対応）</td></tr>
       <tr><td>車番検索ガイド</td><td>班長・指導者向けLINE車番検索の使い方ページ（印刷・配布用）</td></tr>
-      <tr><td>システムステータス</td><td>サーバー・DB・APIの稼働状態確認。管理画面アクセスQRコードの表示・ダウンロードもここから</td></tr>
+      <tr><td>システムステータス</td><td>サーバー・DB・APIの稼働状態確認、利用統計・DB統計、管理画面アクセスQRコードの表示・ダウンロード。フル権限adminはメンテナンスモードのON/OFFもここから行えます</td></tr>
+      <tr><td>要望欄（収集一覧）</td><td>サイドバー「要望欄」から寄せられた要望・意見の一覧（フル権限adminのみ）</td></tr>
     </table>
     <div class="tut-note">車番検索の権限は、本人がLINEで「車番連携」と送信して自己申請する方式です（管理画面からの手動登録は廃止）。</div>
+    <div class="tut-warn">メンテナンスモードをONにすると、LINE Botの応答も含め全ユーザーにメンテナンス中の画面が表示されます。作業前後の切り忘れに注意してください。</div>
   </div>
 
   <!-- 1-13 班長シフト -->
@@ -2019,6 +2023,7 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>メモ</td><td>日付ごとの申し送りメモを残せる</td></tr>
       <tr><td>印刷</td><td>印刷用ページからA4で出力可能</td></tr>
       <tr><td>0時LINE通知</td><td>毎日0時に「本日の出勤者」を通知（設定 → LINE通知設定 でも管理可）</td></tr>
+      <tr><td>⭐カレ（LINE）</td><td>統括管理者・運行管理者が公式LINEに「⭐カレ」と送信すると、自分・他班長の月間シフトを縦型カレンダーで確認・編集できるLIFFのリンクが届く</td></tr>
     </table>
     <div class="tut-tip">閲覧だけできる人と編集できる人は、アカウント権限管理で分けられます。</div>
   </div>
@@ -2062,7 +2067,7 @@ app.get('/settings/tutorial', (c) => {
   <!-- 1-17 報告センター -->
   <div class="tut-section" id="report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">
     <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反・一般報告</h3>
-    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告タブ）で確認・管理します。</p>
+    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF「報告」）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告タブ）で確認・管理します。</p>
     <ol class="tut-steps">
       <li>設定 → 「忘れ物報告」「事故報告」「違反報告」「一般報告」のいずれかを開く（上部タブで切り替え）</li>
       <li>「対応中」「解決済」ボタンで絞り込み</li>
@@ -2074,6 +2079,7 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>対応者</td><td>「解決済にする」を押した管理画面アカウントと日時</td></tr>
       <tr><td>履歴ボタン</td><td>この報告に対する解決・再開・削除の全操作と操作者を表示</td></tr>
     </table>
+    <div class="tut-tip">各タブの「新規登録」から、管理画面のブラウザ上で直接報告を登録することもできます（電話や口頭で受けた報告の記録用）。この場合、報告者欄には対応した管理者名が「〇〇（管理画面）」の形で表示されます。</div>
     <div class="tut-tip">ダッシュボードの「対応中の現場報告」に未対応件数が表示されます。0でない場合は早めに確認してください。</div>
     <div class="tut-note">報告を削除してもデータ上の履歴には「誰が・いつ・何を削除したか」が残ります。</div>
   </div>
@@ -2099,59 +2105,51 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">このページはフル権限の管理者（admin）だけが見られます。</div>
   </div>
 
+  <!-- 1-20 引き継ぎシート -->
+  <div class="tut-section" id="handover" data-perm-key="handover">
+    <h3><span class="num">20</span>引き継ぎシート — 課の申し送り事項</h3>
+    <p style="font-size:13px;">課ごとの当日・翌日の引き継ぎ事項（事故車・車両異常・乗務希望・点検車検リコールなど）を項目単位で入力・保存します。</p>
+    <table class="tut-table">
+      <tr><th>機能</th><th>内容</th></tr>
+      <tr><td>項目単位で保存</td><td>各項目を入力するとその場で自動保存（一括保存は不要）</td></tr>
+      <tr><td>点検車検リコール</td><td>点検管理の点検車検表から対象日の内容が自動で反映される</td></tr>
+      <tr><td>翌日シート作成</td><td>「翌日分を作成」で事故車・車両異常・乗務希望を当日分からコピーして下書きを作れる</td></tr>
+      <tr><td>文字サイズ設定</td><td>課ごとに本文の表示文字サイズを変更できる</td></tr>
+    </table>
+  </div>
+
+  <!-- 1-21 乗務員ポータル -->
+  <div class="tut-section" id="crew-portal" data-perm-key="crew-portal">
+    <h3><span class="num">21</span>乗務員ポータル — 個人データ・シフト・売上・担当車表</h3>
+    <p style="font-size:13px;">乗務員ごとの日別明細・売上分析や、乗務員シフト、全社の売上分析、担当車表を4つのタブで切り替えて確認できます。</p>
+    <table class="tut-table">
+      <tr><th>タブ</th><th>内容</th></tr>
+      <tr><td>個人データ参照</td><td>社員を選んで日別明細・月度売上推移・曜日別平均売上などを表示</td></tr>
+      <tr><td>乗務員シフト</td><td>月間勤務予定表のWeb版。夏季稼働計画対実績の確認も可能</td></tr>
+      <tr><td>売上分析（全社）</td><td>全社員横断の売上分析</td></tr>
+      <tr><td>担当車表</td><td>3班・4班の担当者一覧表。Webで編集・印刷できる（板橋のみ）</td></tr>
+    </table>
+  </div>
+
+  <!-- 1-22 高速料金計算 -->
+  <div class="tut-section" id="toll-calc" data-perm-key="toll_calc">
+    <h3><span class="num">22</span>高速料金計算</h3>
+    <p style="font-size:13px;">利用した高速道路の区間を選択すると、料金を自動で計算できます。</p>
+  </div>
+
   <hr class="tut-divider">
 
   <!-- 第2章 -->
-  <div class="tut-chapter" id="chap2">
+  <div class="tut-chapter" id="chap2" data-perm-key="settings.vehicle-search-guide">
     <div class="tut-chapter-label">Chapter 2</div>
     <h2>班長・指導者向け（LINE車番検索ガイド）</h2>
   </div>
-  <p style="font-size:13px;color:#6b7280;margin-top:8px;">管理者から車番検索の権限を付与された班長・指導者は、<strong>LINE</strong> から車両情報を検索できます。</p>
-
-  <!-- 2-1 車番検索でできること -->
-  <div class="tut-section" id="veh-what">
-    <h3><span class="num">1</span>車番検索でできること</h3>
-    <table class="tut-table">
-      <tr><th>検索キー</th><th>内容</th></tr>
-      <tr><td>無線番号（4桁）</td><td>無線番号が完全一致する車両を表示</td></tr>
-      <tr><td>ナンバー末尾（4桁）</td><td>ナンバープレート末尾の数字が一致する車両を表示</td></tr>
-    </table>
-    <div class="tut-note">この機能は管理者から権限を付与されたLINEアカウントのみ利用できます。権限がない場合は通常の社員向けメニューが表示されます。</div>
+  <div class="tut-section" id="veh-guide" data-perm-key="settings.vehicle-search-guide">
+    <p style="font-size:13px;">班長・指導者は、LINEで「<strong>車番連携</strong>」と送信して自己申請することで、無線番号・ナンバー末尾から車両情報を検索できるようになります。初回設定の手順・検索方法・結果の見方・連携解除のコマンドなど詳しい使い方は、配布用の専用ガイドにまとめてあります。</p>
+    <a href="${ADMIN_PATH}/settings/vehicle-search-guide" style="display:inline-block;margin-top:4px;padding:8px 20px;background:#1e3a5f;color:#fff;border-radius:6px;font-size:13px;font-weight:600;text-decoration:none;">→ 車番検索ガイドを開く</a>
   </div>
 
-  <!-- 2-2 検索の方法 -->
-  <div class="tut-section" id="veh-how">
-    <h3><span class="num">2</span>検索の方法</h3>
-    <ol class="tut-steps">
-      <li>弁天クラブ公式LINEのトーク画面を開く</li>
-      <li>調べたい<strong>4桁の数字</strong>を入力して送信（例：「1988」）</li>
-      <li>数秒で検索結果がLINEに返ってきます</li>
-    </ol>
-    <div class="tut-tip">自分のLINE UIDを確認したい場合は「uid」と送信してください。</div>
-  </div>
-
-  <!-- 2-3 検索結果の見方 -->
-  <div class="tut-section" id="veh-result">
-    <h3><span class="num">3</span>検索結果の見方</h3>
-    <p style="font-size:13px;">検索結果は以下の形式で返ってきます。</p>
-    <div style="background:#f1f5f9;border-radius:8px;padding:14px 16px;font-size:12px;font-family:monospace;line-height:1.8;margin:10px 0;">
-      🔍 「1988」の検索結果（1件）<br><br>
-      ━━ 【無線番号一致】 ━━<br>
-      無線番号: 1988<br>
-      車両番号: 品川502あ1988<br>
-      車種: JPN TAXI<br>
-      営業所: 板橋営業所<br>
-      課: 板橋2課
-    </div>
-    <table class="tut-table">
-      <tr><th>表示</th><th>意味</th></tr>
-      <tr><td>【無線番号一致】</td><td>入力した数字が無線番号と一致した車両</td></tr>
-      <tr><td>【ナンバー一致】</td><td>入力した数字がナンバープレート末尾と一致した車両</td></tr>
-    </table>
-    <div class="tut-note">同じ数字で無線番号とナンバーの両方に該当する場合、無線番号一致が先に表示されます。</div>
-  </div>
-
-  <hr class="tut-divider">
+  <hr class="tut-divider" data-perm-key="settings.vehicle-search-guide">
 
   <!-- 第3章 -->
   <div class="tut-chapter" id="chap3">
