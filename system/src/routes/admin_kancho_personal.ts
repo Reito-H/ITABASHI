@@ -76,14 +76,19 @@ app.get('/api/kancho-personal/calendar', async (c) => {
   const { start: periodStart, end: periodEnd } = getPeriodRange(year, month, periodCfg);
   const dates = dateRange(periodStart, periodEnd);
 
-  const entryTable = member.is_indoor ? 'kancho_shifts' : 'kancho_crew_schedules';
+  // 内勤(kancho_shifts)は色マス(記号なし+cell_color)=早日勤の判定にcell_colorが要るが、
+  // 乗務(kancho_crew_schedules)にはcell_color列が無いため個別にSELECT列を分ける
+  const entriesQuery = member.is_indoor
+    ? c.env.DB.prepare(`SELECT date, code, cell_color FROM kancho_shifts WHERE member_id = ? AND date BETWEEN ? AND ?`)
+        .bind(memberId, periodStart, periodEnd).all<{ date: string; code: string; cell_color: string | null }>()
+    : c.env.DB.prepare(`SELECT date, code FROM kancho_crew_schedules WHERE member_id = ? AND date BETWEEN ? AND ?`)
+        .bind(memberId, periodStart, periodEnd).all<{ date: string; code: string }>();
+
   const [types, entries, notes] = await Promise.all([
     c.env.DB.prepare(
       `SELECT code, label, color FROM kancho_shift_types WHERE year = ? AND month = ?`
     ).bind(year, month).all<{ code: string; label: string; color: string }>(),
-    c.env.DB.prepare(
-      `SELECT date, code FROM ${entryTable} WHERE member_id = ? AND date BETWEEN ? AND ?`
-    ).bind(memberId, periodStart, periodEnd).all<{ date: string; code: string }>(),
+    entriesQuery,
     c.env.DB.prepare(
       `SELECT date, note FROM kancho_calendar_notes WHERE member_id = ? AND date BETWEEN ? AND ?`
     ).bind(memberId, periodStart, periodEnd).all<{ date: string; note: string }>(),
@@ -157,18 +162,22 @@ app.get('/kancho-shift/personal', (c) => {
     </div>
 
     <div id="step-calendar" style="display:none;background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px;max-width:820px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-        <div>
+      <div class="no-print" style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:10px;">
+        <button onclick="saveAsImage()" id="image-save-btn" style="padding:7px 16px;background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">🖼️ 画像で保存(PNG)</button>
+        <button onclick="backToLookup()" style="padding:7px 16px;background:#f3f4f6;color:#374151;border:none;border-radius:6px;font-size:12px;cursor:pointer;">別の人を見る</button>
+      </div>
+      <div id="capture-area" style="background:white;">
+        <div style="margin-bottom:14px;">
           <div id="cal-name" style="font-size:16px;font-weight:700;color:#1e3a5f;"></div>
           <div id="cal-period" style="font-size:12px;color:#9ca3af;"></div>
         </div>
-        <button onclick="backToLookup()" style="padding:7px 16px;background:#f3f4f6;color:#374151;border:none;border-radius:6px;font-size:12px;cursor:pointer;">別の人を見る</button>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">「勤務」は班長シフト表のデータをそのまま表示しています（ここからは変更できません）。「その他」欄のみ自由に入力・保存できます。</div>
+        <div id="cal-body">読み込み中...</div>
       </div>
-      <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">「勤務」は班長シフト表のデータをそのまま表示しています（ここからは変更できません）。「その他」欄のみ自由に入力・保存できます。</div>
-      <div id="cal-body">読み込み中...</div>
     </div>
     ${saveToastHtml()}
 
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script>
     ${saveToastScript()}
     function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -231,20 +240,36 @@ app.get('/kancho-shift/personal', (c) => {
       var d = _cache;
       document.getElementById('cal-name').textContent = d.member.name + ' さん' + (d.member.role ? '（' + d.member.role + '）' : '') + (d.member.is_indoor ? '' : '（乗務）');
       document.getElementById('cal-period').textContent = d.year + '年' + d.month + '月度（' + d.periodStart + ' 〜 ' + d.periodEnd + '）';
-      var emap = {}; d.entries.forEach(function(e) { emap[e.date] = e.code; });
+      var emap = {}; d.entries.forEach(function(e) { emap[e.date] = e; });
       var nmap = {}; d.notes.forEach(function(n) { nmap[n.date] = n.note; });
       var colorMap = {}; d.types.forEach(function(t) { colorMap[t.code] = t.color; });
+      // 表示ラベルの上書き: 「非」は制度上つねに「明け」を意味する（記号マスタ上の「非番」表記とは別）
       var labelMap = {}; d.types.forEach(function(t) { labelMap[t.code] = t.label; });
+      var LABEL_OVERRIDE = { '非': '明け' };
       var today = new Date(Date.now() + 9*3600*1000).toISOString().slice(0,10);
 
       var rows = d.dates.map(function(dt) {
         var t = new Date(dt + 'T00:00:00');
         var dow = t.getDay();
-        var code = emap[dt] || '';
+        var e = emap[dt];
+        var code = e ? (e.code || '') : '';
         var note = nmap[dt] || '';
         var dowColor = dow === 0 ? '#dc2626' : dow === 6 ? '#2563eb' : '#6b7280';
-        var stampBg = code ? (colorMap[code] || '#e5e7eb') : '#f9fafb';
-        var stampLabel = code ? (escH(code) + (labelMap[code] ? ' <span style="font-weight:400;color:#6b7280;">(' + escH(labelMap[code]) + ')</span>' : '')) : '<span style="color:#c1c7d0;">―</span>';
+        var stampBg, stampLabel;
+        if (code) {
+          // 通常の記号（直・非・遅・早番・公 等）。「非」は「明け」表記で統一
+          var dispCode = LABEL_OVERRIDE[code] || code;
+          var subLabel = LABEL_OVERRIDE[code] ? '' : (labelMap[code] ? ' <span style="font-weight:400;color:#6b7280;">(' + escH(labelMap[code]) + ')</span>' : '');
+          stampBg = colorMap[code] || '#e5e7eb';
+          stampLabel = escH(dispCode) + subLabel;
+        } else if (e && e.cell_color) {
+          // 記号なし+色マス = 早日勤（7:30〜16:30）
+          stampBg = e.cell_color;
+          stampLabel = '早日勤';
+        } else {
+          stampBg = '#f9fafb';
+          stampLabel = '<span style="color:#c1c7d0;">―</span>';
+        }
         var isToday = dt === today;
         return '<tr' + (isToday ? ' style="background:#eff6ff;"' : '') + '>'
           + '<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-weight:700;color:#1e3a5f;">' + (t.getMonth()+1) + '/' + t.getDate() + '</td>'
@@ -264,6 +289,24 @@ app.get('/kancho-shift/personal', (c) => {
         + '<th style="padding:7px 10px;text-align:left;border-bottom:2px solid #e5e7eb;">勤務</th>'
         + '<th style="padding:7px 10px;text-align:left;border-bottom:2px solid #e5e7eb;">その他</th>'
         + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+
+    function saveAsImage() {
+      if (!_cache) { alert('先に対象の班長を表示してください'); return; }
+      var el = document.getElementById('capture-area');
+      if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
+      var btn = document.getElementById('image-save-btn');
+      btn.disabled = true; btn.textContent = '画像を生成中...';
+      html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+        var link = document.createElement('a');
+        link.download = '班長シフト_個人別確認_' + _cache.member.name + '_' + _cache.year + _cache.month + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      }).catch(function() {
+        alert('画像の生成に失敗しました');
+      }).finally(function() {
+        btn.disabled = false; btn.textContent = '🖼️ 画像で保存(PNG)';
+      });
     }
 
     var _noteSaving = {};
