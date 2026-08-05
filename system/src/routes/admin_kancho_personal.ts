@@ -239,7 +239,7 @@ app.get('/kancho-shift/personal', (c) => {
     var WD = ['日','月','火','水','木','金','土'];
     function renderCalendar() {
       var d = _cache;
-      document.getElementById('cal-name').textContent = d.member.name + ' さん' + (d.member.role ? '（' + d.member.role + '）' : '') + (d.member.is_indoor ? '' : '（乗務）');
+      document.getElementById('cal-name').textContent = d.member.name + ' 班長シフト表';
       document.getElementById('cal-period').textContent = d.year + '年' + d.month + '月度（' + d.periodStart + ' 〜 ' + d.periodEnd + '）';
       var emap = {}; d.entries.forEach(function(e) { emap[e.date] = e; });
       var nmap = {}; d.notes.forEach(function(n) { nmap[n.date] = n.note; });
@@ -300,7 +300,15 @@ app.get('/kancho-shift/personal', (c) => {
       if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
       var btn = document.getElementById('image-save-btn');
       btn.disabled = true; btn.textContent = '画像を生成中...';
-      html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+      // html2canvasは空inputのplaceholderをそのまま文字として描画してしまうため、
+      // 画像化の間だけ一時的に外す（キャプチャ後に元に戻す）
+      var noteInputs = el.querySelectorAll('.note-input');
+      var origPlaceholders = [];
+      noteInputs.forEach(function(inp, i) { origPlaceholders[i] = inp.placeholder; inp.placeholder = ''; });
+      html2canvas(el, {
+        scale: 2, backgroundColor: '#ffffff', useCORS: true,
+        height: el.scrollHeight, windowHeight: el.scrollHeight
+      }).then(function(canvas) {
         var link = document.createElement('a');
         link.download = '班長シフト_個人別確認_' + _cache.member.name + '_' + _cache.year + _cache.month + '.png';
         link.href = canvas.toDataURL('image/png');
@@ -308,6 +316,7 @@ app.get('/kancho-shift/personal', (c) => {
       }).catch(function() {
         alert('画像の生成に失敗しました');
       }).finally(function() {
+        noteInputs.forEach(function(inp, i) { inp.placeholder = origPlaceholders[i]; });
         btn.disabled = false; btn.textContent = '🖼️ 画像で保存(PNG)';
       });
     }
