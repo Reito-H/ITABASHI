@@ -47,6 +47,7 @@ import adminCrewShiftRoutes from './routes/admin_crew_shift';
 import adminHandoverRoutes from './routes/admin_handover';
 import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
 import adminRequestsRoutes from './routes/admin_requests';
+import adminCcListRoutes from './routes/admin_cc_list';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -173,7 +174,11 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
   if (!perms) return next(); // 全権限アカウント
 
-  if (!isPathAllowed(perms, subPath, c.req.method)) {
+  // CC名簿: ページ権限は使わず全アカウント共通でアクセス可（代わりに専用パスワード(5931)でガードする）。
+  // ただし他のメニュー項目のフィルタは通常通り効かせたいため、権限チェックだけを免除しawait next()以降は共通処理に合流させる
+  const isCcList = subPath.startsWith('/cc-list') || subPath.startsWith('/api/cc-list');
+
+  if (!isCcList && !isPathAllowed(perms, subPath, c.req.method)) {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
@@ -212,6 +217,7 @@ app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
+app.route(`/${SECRET}/admin`, adminCcListRoutes);
 
 // =====================
 // API（認証必須）

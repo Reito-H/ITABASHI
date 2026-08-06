@@ -113,22 +113,39 @@ app.get('/api/handover/:division/dates', async (c) => {
 });
 
 // 当欠・理由欄のパーサー。「名前 -0.5」「名前 -1.0」のように候補選択で正しく入力された
-// 行だけを当欠として扱う（+の代走行は対象外）。±数値ピッカーで確定すると自動で改行が
+// 行を当欠として扱う（+の代走行は対象外）。±数値ピッカーで確定すると自動で改行が
 // 入り理由は次の行に続けて書く形になるため、当欠行の直後の行が別の当欠行でなければ
 // それを理由として扱う（例:「山田 -1.0」の次の行が「通院」ならreason="通院"）。
+//
+// 値の後ろに文字が続く行（同じ行に理由や注記を続けて書いた場合。例:「井出 -1.0 8/6-8特休」
+// 「岩崎 -0.5（B→a）」）は、以前は行全体が当欠行として認識されず該当者が丸ごと集計から
+// 消えていた。名前と値の間に空白が最低1つあれば当欠行とみなし、値より後ろの文字列は
+// そのまま同じ行の理由として扱う（日付表記「8/6-8」等を誤って当欠行として拾わないよう、
+// 名前と値の間の空白は必須にしている）。値も±数値ピッカーの0.5/1.0限定ではなく、
+// 手入力された任意の小数（例:「入力ミス-2.5」）まで対象にし、誤入力の記録も
+// 当欠記録に表示されて気づけるようにする。
 // toka-summary/toka-detailで共用する。
+const TOKA_ENTRY_RE = /^(.+?)\s+-(\d+(?:\.\d+)?)(.*)$/;
 function parseTokaLines(content: string): { name: string; value: number; reason: string }[] {
   const lines = (content || '').split('\n');
-  const isEntryLine = (s: string) => /^(.*?)\s*-(0\.5|1\.0)\s*$/.test(s.trim());
+  const isEntryLine = (s: string) => TOKA_ENTRY_RE.test(s.trim());
   const entries: { name: string; value: number; reason: string }[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].trim().match(/^(.*?)\s*-(0\.5|1\.0)\s*$/);
+    const line = lines[i].trim();
+    if (!line) continue;
+    const m = line.match(TOKA_ENTRY_RE);
     if (!m) continue;
     const name = m[1].trim();
     if (!name) continue;
-    const nextLine = (lines[i + 1] || '').trim();
-    const reason = (nextLine && !isEntryLine(nextLine)) ? nextLine : '';
-    entries.push({ name, value: -parseFloat(m[2]), reason });
+    const value = parseFloat(m[2]);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    const sameLineReason = m[3].trim();
+    let reason = sameLineReason;
+    if (!reason) {
+      const nextLine = (lines[i + 1] || '').trim();
+      reason = (nextLine && !isEntryLine(nextLine)) ? nextLine : '';
+    }
+    entries.push({ name, value: -value, reason });
   }
   return entries;
 }
@@ -406,8 +423,26 @@ app.patch('/api/handover/:division/:date/section-content/:sectionId', async (c) 
     ON CONFLICT(section_id, date) DO UPDATE SET
       content = excluded.content, updated_at = excluded.updated_at, updated_by = excluded.updated_by
   `).bind(sectionId, date, value, updatedBy).run();
-  return c.json({ ok: true });
+  const saved = await c.env.DB.prepare(
+    'SELECT updated_at FROM handover_section_content WHERE section_id = ? AND date = ?'
+  ).bind(sectionId, date).first<{ updated_at: string }>();
+  return c.json({ ok: true, updated_at: saved?.updated_at ?? null });
 });
+
+// このシート（メイン項目＋カスタム枠の内容）の中で最も新しい更新時刻を1つの値にまとめて返す。
+// 他端末での更新を検知するためのポーリング比較に使う（フルデータより軽量）。
+async function sheetVersion(db: D1Database, divNum: number, date: string): Promise<string | null> {
+  const row = await db.prepare(`
+    SELECT MAX(v) AS version FROM (
+      SELECT updated_at AS v FROM handover_sheets WHERE division = ? AND date = ?
+      UNION ALL
+      SELECT c.updated_at AS v FROM handover_section_content c
+        JOIN handover_sections s ON s.id = c.section_id
+        WHERE s.division = ? AND c.date = ?
+    )
+  `).bind(divNum, date, divNum, date).first<{ version: string | null }>();
+  return row?.version ?? null;
+}
 
 app.get('/api/handover/:division/:date', async (c) => {
   const division = c.req.param('division');
@@ -424,7 +459,17 @@ app.get('/api/handover/:division/:date', async (c) => {
      WHERE s.division = ? AND s.kind = 'custom' AND s.is_active = 1`
   ).bind(date, divNum).all<{ sectionId: number; content: string | null }>();
   const customContent = (customRows.results ?? []).map(r => ({ sectionId: r.sectionId, content: r.content ?? '' }));
-  return c.json({ sheet: sheet ?? null, customContent });
+  const version = await sheetVersion(c.env.DB, divNum, date);
+  return c.json({ sheet: sheet ?? null, customContent, version });
+});
+
+// 他端末での更新検知用の軽量ポーリングエンドポイント（フルデータを含まない）
+app.get('/api/handover/:division/:date/version', async (c) => {
+  const division = c.req.param('division');
+  const date = c.req.param('date');
+  if (!isValidDivision(division) || !isValidDate(date)) return c.json({ error: '指定が不正です' }, 400);
+  const version = await sheetVersion(c.env.DB, parseInt(division, 10), date);
+  return c.json({ version });
 });
 
 app.put('/api/handover/:division/:date', async (c) => {

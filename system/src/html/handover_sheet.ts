@@ -104,6 +104,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-limit-form-wrap{border-top:1px solid #eee;padding-top:10px;flex-shrink:0;display:flex;flex-direction:column;gap:8px;}
 #ho-limit-task-inp{width:100%;border:1px solid #ccc;border-radius:6px;padding:7px 9px;font-size:13px;font-family:inherit;}
 .ho-limit-form-row{display:flex;gap:8px;align-items:center;}
+#ho-limit-days-inp{border:1px solid #ccc;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;}
 #ho-limit-time-inp{border:1px solid #ccc;border-radius:6px;padding:6px 8px;font-size:13px;font-family:inherit;}
 #ho-limit-add-btn{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:13px;
                   font-weight:700;cursor:pointer;margin-left:auto;}
@@ -135,6 +136,13 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
           font-size:12px;font-weight:700;padding:8px 18px;border-radius:18px;z-index:700;opacity:0;transition:opacity .25s;
           pointer-events:none;white-space:nowrap;}
 #ho-toast.show{opacity:1;}
+
+#ho-stale-banner{position:fixed;top:56px;right:16px;z-index:900;display:none;align-items:center;gap:8px;
+                 background:#dc2626;color:#fff;font-size:12px;font-weight:700;padding:9px 14px;border-radius:20px;
+                 box-shadow:0 6px 18px rgba(220,38,38,.4);cursor:pointer;border:none;white-space:nowrap;}
+#ho-stale-banner:hover{background:#b91c1c;}
+#ho-stale-banner.show{display:flex;}
+@media (max-width:768px){ #ho-stale-banner{top:auto;bottom:64px;right:12px;} }
 
 #ho-suggest{position:fixed;z-index:650;background:#fff;border:1px solid #ccc;border-radius:6px;
             box-shadow:0 6px 18px rgba(0,0,0,.18);max-height:180px;overflow-y:auto;display:none;min-width:110px;}
@@ -195,6 +203,11 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-tokasum-overlay.show{display:flex;}
 #ho-tokasum-modal{background:#fff;border-radius:10px;padding:18px 20px;width:400px;max-width:92vw;
                   max-height:82vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+@media (min-width:769px){
+  /* PCでは当欠記録の枠を大きくし、円グラフ＋凡例を横並びで見せられるようにする */
+  #ho-tokasum-modal{width:760px;max-width:90vw;max-height:88vh;padding:24px 28px;}
+  .ho-tokasum-head{font-size:17px;}
+}
 .ho-tokasum-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
                  color:var(--navy);margin-bottom:10px;flex-shrink:0;}
 #ho-tokasum-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
@@ -230,6 +243,24 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-tokasum-bar-fill{height:100%;background:var(--navy);border-radius:4px;}
 .ho-tokasum-bar-val{width:24px;flex-shrink:0;text-align:right;color:#333;font-weight:700;}
 .ho-tokasum-reason-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid #f5f5f5;}
+
+/* 円グラフ（人別構成・理由内訳の共通コンポーネント。conic-gradientのみで実装、外部ライブラリ不使用） */
+.ho-pie-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:6px 2px 14px;}
+.ho-pie{width:132px;height:132px;flex-shrink:0;border-radius:50%;position:relative;}
+.ho-pie-hole{position:absolute;inset:20px;background:#fff;border-radius:50%;
+             display:flex;flex-direction:column;align-items:center;justify-content:center;
+             box-shadow:0 0 0 1px rgba(0,0,0,.05) inset;}
+.ho-pie-total{font-size:19px;font-weight:800;color:var(--navy);line-height:1.1;}
+.ho-pie-total-lbl{font-size:10px;color:var(--muted);}
+.ho-pie-legend{flex:1;min-width:150px;}
+.ho-pie-legend-row{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12px;}
+.ho-pie-swatch{width:10px;height:10px;border-radius:2px;flex-shrink:0;}
+.ho-pie-legend-label{flex:1;color:#111;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ho-pie-legend-val{color:#555;flex-shrink:0;}
+.ho-tokasum-months-bar{display:flex;justify-content:center;gap:6px;margin:2px 0 4px;}
+.ho-tokasum-months-btn{border:1px solid #ccc;background:#fafafa;border-radius:12px;padding:3px 11px;
+                       font-size:11px;font-weight:700;color:#555;cursor:pointer;}
+.ho-tokasum-months-btn.active{background:var(--navy);border-color:var(--navy);color:#fff;}
 </style>
 
 <div id="ho-root">
@@ -253,6 +284,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 </div>
 <div id="ho-save-dot"></div>
 <div id="ho-toast"></div>
+<button type="button" id="ho-stale-banner">⚠ 他の端末で更新されています。クリックして更新</button>
 <div id="ho-fontset-overlay">
   <div id="ho-fontset-modal">
     <div class="ho-fontset-head"><span id="ho-fontset-title">課の設定</span><button type="button" id="ho-fontset-close">×</button></div>
@@ -277,6 +309,15 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     <div id="ho-limit-form-wrap">
       <input type="text" id="ho-limit-task-inp" placeholder="タスク内容（例: ○○車の点検手配）" maxlength="200">
       <div class="ho-limit-form-row">
+        <select id="ho-limit-days-inp" title="通知日">
+          <option value="0">当日</option>
+          <option value="1">1日後</option>
+          <option value="2">2日後</option>
+          <option value="3">3日後</option>
+          <option value="4">4日後</option>
+          <option value="5">5日後</option>
+          <option value="7">1週間後</option>
+        </select>
         <input type="time" id="ho-limit-time-inp">
         <button type="button" id="ho-limit-add-btn">設定</button>
       </div>
@@ -482,12 +523,14 @@ function attachNameSuggest(ta, field, opts){
   });
 }
 
-// 当欠欄の「名前 ±数値」行（後ろに理由が続いていてもよい）を集計し、
-// 稼働予定が入力済みなら稼働実績へ自動反映
+// 当欠欄の「名前 ±数値」行（後ろに理由や注記が続いていてもよい）を集計し、
+// 稼働予定が入力済みなら稼働実績へ自動反映。値の直後が別の数字でなければ拾う
+// （以前は値の直後が空白/行末以外だと無視していたため「-0.5（B→a）」のような
+// 注記付き行が集計から漏れていた）。
 function calcTokaDelta(text){
   let sum = 0;
   (text || '').split('\\n').forEach(line => {
-    const m = line.trim().match(/([+\\-])(0\\.5|1\\.0)(?:\\s|$)/);
+    const m = line.trim().match(/([+\\-])(0\\.5|1\\.0)(?!\\d)/);
     if (m) sum += (m[1] === '-' ? -1 : 1) * parseFloat(m[2]);
   });
   return sum;
@@ -790,6 +833,38 @@ if (hoTitleEl){
 }
 
 // ===== 当欠記録（月間集計）=====
+// 円グラフ（人別構成・理由内訳）はconic-gradientのみで実装（外部ライブラリ不使用）。
+// カテゴリ色は固定順で使い切りローテーションしない方針とし、上位5件+「その他」にまとめる。
+const HO_PIE_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'];
+const HO_PIE_OTHER_COLOR = '#9ca3af';
+function pieItemsFromCounts(list, getLabel, getValue, maxSlices, otherLabelFn){
+  const top = list.slice(0, maxSlices - 1);
+  const rest = list.slice(maxSlices - 1);
+  const items = top.map((x, idx) => ({ label: getLabel(x), value: getValue(x), color: HO_PIE_COLORS[idx % HO_PIE_COLORS.length] }));
+  if (rest.length){
+    const restTotal = rest.reduce((s, x) => s + getValue(x), 0);
+    if (restTotal > 0) items.push({ label: otherLabelFn(rest), value: restTotal, color: HO_PIE_OTHER_COLOR });
+  }
+  return items;
+}
+function buildPieChart(items){
+  const total = items.reduce((s, i) => s + i.value, 0) || 1;
+  let acc = 0;
+  const stops = items.map(it => {
+    const start = acc, end = acc + (it.value / total * 100);
+    acc = end;
+    return it.color + ' ' + start.toFixed(2) + '% ' + end.toFixed(2) + '%';
+  }).join(', ');
+  const legend = items.map(it => {
+    const pct = Math.round(it.value / total * 100);
+    return '<div class="ho-pie-legend-row"><span class="ho-pie-swatch" style="background:' + it.color + '"></span>'
+      + '<span class="ho-pie-legend-label">' + esc(it.label) + '</span>'
+      + '<span class="ho-pie-legend-val">' + it.value + '件（' + pct + '%）</span></div>';
+  }).join('');
+  return '<div class="ho-pie-wrap"><div class="ho-pie" style="background:conic-gradient(' + stops + ')">'
+    + '<div class="ho-pie-hole"><span class="ho-pie-total">' + total + '</span><span class="ho-pie-total-lbl">件</span></div></div>'
+    + '<div class="ho-pie-legend">' + legend + '</div></div>';
+}
 function currentYm(){
   const t = today();
   return t.slice(0, 7);
@@ -832,11 +907,14 @@ function renderTokaSumBody(){
       listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
       return;
     }
-    listEl.innerHTML = data.ranking.map((r, i) =>
+    const pieItems = pieItemsFromCounts(data.ranking, r => r.name, r => r.count, 6, rest => 'その他（' + rest.length + '名）');
+    const pieHtml = buildPieChart(pieItems);
+    const rowsHtml = data.ranking.map((r, i) =>
       '<div class="ho-tokasum-rank-row" data-name="'+esc(r.name)+'"><span class="ho-tokasum-rank-no">'+(i+1)+'</span>'+
       '<span class="ho-tokasum-rank-name">'+esc(r.name)+'</span>'+
       '<span class="ho-tokasum-rank-count">'+r.count+'回</span></div>'
     ).join('');
+    listEl.innerHTML = pieHtml + rowsHtml;
     listEl.querySelectorAll('.ho-tokasum-rank-row').forEach(row =>
       row.addEventListener('click', () => openTokaDetail(row.dataset.name)));
     return;
@@ -854,11 +932,12 @@ function renderTokaSumBody(){
 // 個人別の当欠傾向（曜日別/月推移/理由内訳）を表示する
 async function openTokaDetail(name){
   H.tokaSumPerson = name;
+  if (!H.tokaDetailMonths) H.tokaDetailMonths = 6;
   setTokaSumView('detail');
   const listEl = document.getElementById('ho-tokasum-list');
   listEl.innerHTML = '<div class="ho-tokasum-empty">読み込み中…</div>';
   try {
-    const data = await api('GET', '/'+H.division+'/toka-detail?name='+encodeURIComponent(name)+'&month='+H.tokaSumMonth+'&months=6');
+    const data = await api('GET', '/'+H.division+'/toka-detail?name='+encodeURIComponent(name)+'&month='+H.tokaSumMonth+'&months='+H.tokaDetailMonths);
     renderTokaDetailBody(data);
   } catch(e){
     listEl.innerHTML = '<div class="ho-tokasum-empty">読み込みエラー: '+esc(e.message)+'</div>';
@@ -866,6 +945,10 @@ async function openTokaDetail(name){
 }
 function renderTokaDetailBody(data){
   const listEl = document.getElementById('ho-tokasum-list');
+  const monthsOptions = [3, 6, 12];
+  const monthsBarHtml = '<div class="ho-tokasum-months-bar">' + monthsOptions.map(n =>
+    '<button type="button" class="ho-tokasum-months-btn'+(H.tokaDetailMonths===n?' active':'')+'" data-months="'+n+'">'+n+'ヶ月</button>'
+  ).join('') + '</div>';
   const maxMonthCount = Math.max(1, ...data.monthly.map(m => m.count));
   const monthlyHtml = data.monthly.map(m => {
     const w = Math.round((m.count / maxMonthCount) * 100);
@@ -881,14 +964,22 @@ function renderTokaDetailBody(data){
       '<div class="ho-tokasum-bar-track"><div class="ho-tokasum-bar-fill" style="width:'+w+'%"></div></div>'+
       '<span class="ho-tokasum-bar-val">'+cnt+'</span></div>';
   }).join('');
+  const reasonPieHtml = data.reasons.length
+    ? buildPieChart(pieItemsFromCounts(data.reasons, r => r.reason, r => r.count, 6, rest => 'その他（' + rest.length + '）'))
+    : '';
   const reasonHtml = data.reasons.length ? data.reasons.map(r =>
     '<div class="ho-tokasum-reason-row"><span>'+esc(r.reason)+'</span><span>'+r.count+'件</span></div>'
   ).join('') : '<div class="ho-tokasum-empty">理由の記録はありません</div>';
   listEl.innerHTML =
     '<div class="ho-tokasum-detail-name">'+esc(data.name)+'</div>' +
-    '<div class="ho-tokasum-detail-sub">月別の推移（直近6ヶ月）</div>' + monthlyHtml +
+    monthsBarHtml +
+    '<div class="ho-tokasum-detail-sub">月別の推移（直近'+H.tokaDetailMonths+'ヶ月）</div>' + monthlyHtml +
     '<div class="ho-tokasum-detail-sub">曜日別の傾向</div>' + wdHtml +
-    '<div class="ho-tokasum-detail-sub">理由の内訳</div>' + reasonHtml;
+    '<div class="ho-tokasum-detail-sub">理由の内訳</div>' + reasonPieHtml + reasonHtml;
+  listEl.querySelectorAll('.ho-tokasum-months-btn').forEach(btn => btn.addEventListener('click', () => {
+    H.tokaDetailMonths = parseInt(btn.dataset.months, 10);
+    openTokaDetail(H.tokaSumPerson);
+  }));
 }
 // タブ('list'/'ranking')・戻る('detail'→'ranking')で表示を切り替える
 function setTokaSumView(view){
@@ -904,10 +995,14 @@ function setTokaSumView(view){
 document.getElementById('ho-tokasum-tab-list').addEventListener('click', () => setTokaSumView('list'));
 document.getElementById('ho-tokasum-tab-rank').addEventListener('click', () => setTokaSumView('ranking'));
 document.getElementById('ho-tokasum-back').addEventListener('click', () => setTokaSumView('ranking'));
-function openTokaSummary(){
+async function openTokaSummary(){
   if (!H.tokaSumMonth) H.tokaSumMonth = currentYm();
   document.getElementById('ho-tokasum-overlay').classList.add('show');
   setTokaSumView('list');
+  document.getElementById('ho-tokasum-list').innerHTML = '<div class="ho-tokasum-empty">読み込み中…</div>';
+  // 直前に入力した当欠が保存デバウンス待ち（最大900ms）のままだと集計に反映されないため、
+  // 開いた瞬間に未保存分を先に確定させてから集計を取得する
+  await flushPendingSaves();
   loadTokaSummary();
 }
 function closeTokaSummary(){
@@ -966,19 +1061,26 @@ function openLimitModal(){
 function closeLimitModal(){
   document.getElementById('ho-limit-overlay').classList.remove('show');
 }
+function addDaysToDate(dateStr, days){
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
 async function createLimit(){
   const taskEl = document.getElementById('ho-limit-task-inp');
   const timeEl = document.getElementById('ho-limit-time-inp');
+  const daysEl = document.getElementById('ho-limit-days-inp');
   const task = taskEl.value.trim();
   const limitTime = timeEl.value;
+  const days = parseInt(daysEl.value, 10) || 0;
   if (!task){ toast('タスク内容を入力してください', 2000); return; }
   if (!limitTime){ toast('時刻を選択してください', 2000); return; }
+  const targetDate = addDaysToDate(H.date, days);
   try {
-    await api('POST', '/'+H.division+'/'+H.date+'/limits', { task: task, limit_time: limitTime });
-    taskEl.value = ''; timeEl.value = '';
-    await loadLimits();
-    renderLimitList();
-    toast('リミットを設定しました');
+    await api('POST', '/'+H.division+'/'+targetDate+'/limits', { task: task, limit_time: limitTime });
+    taskEl.value = ''; timeEl.value = ''; daysEl.value = '0';
+    if (targetDate === H.date) { await loadLimits(); renderLimitList(); }
+    toast(days > 0 ? (targetDate+' のリミットを設定しました') : 'リミットを設定しました');
   } catch(e){ toast('エラー: '+e.message, 2500); }
 }
 async function deleteLimit(id){
@@ -1035,11 +1137,40 @@ async function loadSheet(date){
   renderDateBar();
   try {
     const data = await api('GET', '/'+H.division+'/'+date);
-    H.updatedAt = data.sheet?.updated_at || null;
+    H.updatedAt = data.version ?? (data.sheet?.updated_at || null);
     H.customContent = data.customContent || [];
     renderSheet(data.sheet, date);
+    hideStaleBanner();
   } catch(e){ toast('読み込みエラー: '+e.message, 3000); }
 }
+
+// ===== 他端末での更新検知（ポーリング）=====
+// 開いているシートの「最終更新」を定期的に問い合わせ、自分が知っている値と違えば
+// （＝他の端末が保存した、もしくは自分がこのタブで保存した直後ではない変化があれば）赤いバナーを出す。
+// 自分自身の保存はsaveField()がH.updatedAtを都度更新するため、誤検知しない。
+function showStaleBanner(){
+  document.getElementById('ho-stale-banner').classList.add('show');
+}
+function hideStaleBanner(){
+  document.getElementById('ho-stale-banner').classList.remove('show');
+}
+async function checkStaleVersion(){
+  if (!H.date) return;
+  const division = H.division, date = H.date;
+  try {
+    const data = await api('GET', '/'+division+'/'+date+'/version');
+    if (division !== H.division || date !== H.date) return; // 問い合わせ中に別シートへ切り替えていたら無視
+    if (data.version && data.version !== H.updatedAt) showStaleBanner();
+    else hideStaleBanner();
+  } catch(e) { /* 通信エラー時は次回ポーリングに委ねる */ }
+}
+async function reloadStaleSheet(){
+  hideStaleBanner();
+  await flushPendingSaves(); // 自分の未保存の入力を消さないよう、読み込み直す前に先に保存する
+  await loadSheet(H.date);
+  toast('最新の内容に更新しました');
+}
+document.getElementById('ho-stale-banner').addEventListener('click', reloadStaleSheet);
 
 // ===== 表示セクション（右カラム）のHTML構築 =====
 // 特別枠5項目（当欠/事故車/点検/車両異常/乗務希望）は既存の入力補助を保つため
@@ -1357,6 +1488,7 @@ window.addEventListener('pagehide', () => { flushPendingSaves(); });
 
 renderTabs();
 loadSections().then(() => { loadFontSizes(); loadDates(); });
+setInterval(checkStaleVersion, 15000);
 })();
 </script>
 `;

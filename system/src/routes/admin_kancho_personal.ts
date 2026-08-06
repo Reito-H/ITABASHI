@@ -256,15 +256,20 @@ app.get('/kancho-shift/personal', (c) => {
         var code = e ? (e.code || '') : '';
         var note = nmap[dt] || '';
         var dowColor = dow === 0 ? '#dc2626' : dow === 6 ? '#2563eb' : '#6b7280';
-        var stampBg, stampLabel, stampItalic = false;
+        var stampBg, stampLabel;
         if (code) {
           // 通常の記号（直・非・遅・早番・公 等）。「非」は「明け」表記で統一
           // 「直」がis_diagonal=1の場合は斜め直（14:00〜翌8:00）→斜体表示
+          // Chromeは和文フォントに合成イタリックを適用しないため、font-styleではなくtransform:skewXで斜体化する
           var dispCode = LABEL_OVERRIDE[code] || code;
+          var dispCodeHtml = escH(dispCode);
           var subLabel = LABEL_OVERRIDE[code] ? '' : (labelMap[code] ? ' <span style="font-weight:400;color:#6b7280;">(' + escH(labelMap[code]) + ')</span>' : '');
-          if (code === '直' && e && e.is_diagonal) { stampItalic = true; subLabel = ' <span style="font-weight:400;color:#6b7280;">(斜め直 14:00〜翌8:00)</span>'; }
+          if (code === '直' && e && e.is_diagonal) {
+            dispCodeHtml = '<span style="display:inline-block;transform:skewX(-14deg);">' + escH(dispCode) + '</span>';
+            subLabel = ' <span style="font-weight:400;color:#6b7280;">(斜め直 14:00〜翌8:00)</span>';
+          }
           stampBg = colorMap[code] || '#e5e7eb';
-          stampLabel = escH(dispCode) + subLabel;
+          stampLabel = dispCodeHtml + subLabel;
         } else if (e && e.cell_color) {
           // 記号なし+色マス = 早日勤（7:30〜16:30）
           stampBg = e.cell_color;
@@ -277,7 +282,7 @@ app.get('/kancho-shift/personal', (c) => {
         return '<tr' + (isToday ? ' style="background:#eff6ff;"' : '') + '>'
           + '<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-weight:700;color:#1e3a5f;">' + (t.getMonth()+1) + '/' + t.getDate() + '</td>'
           + '<td style="padding:8px 6px;border-bottom:1px solid #f3f4f6;white-space:nowrap;font-weight:700;color:' + dowColor + ';">' + WD[dow] + '</td>'
-          + '<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap;"><span style="display:inline-block;padding:4px 12px;border-radius:6px;background:' + stampBg + ';font-size:13px;font-weight:700;' + (stampItalic ? 'font-style:italic;' : '') + '">' + stampLabel + '</span></td>'
+          + '<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;white-space:nowrap;"><span style="display:inline-block;padding:4px 12px;border-radius:6px;background:' + stampBg + ';font-size:13px;font-weight:700;">' + stampLabel + '</span></td>'
           + '<td style="padding:6px 10px;border-bottom:1px solid #f3f4f6;">'
           + '<input type="text" class="note-input" data-date="' + dt + '" value="' + escH(note) + '" placeholder="その他（自由記入）" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 9px;font-size:13px;box-sizing:border-box;" onblur="saveNote(this)" onkeydown="if(event.key===\\'Enter\\'){this.blur();}">'
           + '</td>'

@@ -144,6 +144,8 @@ app.post('/api/form/accident', async (c) => {
     police_notified?: boolean;
     passenger_delivered?: boolean;
     additional_info?: string;
+    other_party_name?: string;
+    other_party_phone?: string;
   }>();
 
   const uid = await validateSession(c.env.DB, body.token);
@@ -156,8 +158,8 @@ app.post('/api/form/accident', async (c) => {
       (received_at, vehicle_no, employee_name, employee_emp_no,
        employee_division, employee_team, accident_type, location, car_status,
        substitute_requested, police_notified, passenger_delivered,
-       additional_info, summary_text, reported_by_uid)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       additional_info, other_party_name, other_party_phone, summary_text, reported_by_uid)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.received_at ?? null, body.vehicle_no ?? null,
     body.employee_name ?? null, body.employee_emp_no ?? null,
@@ -167,7 +169,7 @@ app.post('/api/form/accident', async (c) => {
     body.substitute_requested ? 1 : 0,
     body.police_notified ? 1 : 0,
     body.passenger_delivered ? 1 : 0,
-    body.additional_info ?? null, summary, uid,
+    body.additional_info ?? null, body.other_party_name ?? null, body.other_party_phone ?? null, summary, uid,
   ).run();
 
   await c.env.DB.prepare('DELETE FROM form_sessions WHERE token = ?').bind(body.token).run();
@@ -213,6 +215,9 @@ function buildAccidentSummary(body: Record<string, unknown>): string {
   if (body.accident_type) lines.push(`事故形態: ${body.accident_type}`);
   if (body.car_status)    lines.push(`状態: ${body.car_status}`);
   if (body.location)      lines.push(`場所: ${body.location}`);
+  if (body.other_party_name || body.other_party_phone) {
+    lines.push(`事故相手: ${body.other_party_name ?? ''} ${body.other_party_phone ?? ''}`.trim());
+  }
   if (body.car_status === '実車' || body.car_status === '迎車') {
     lines.push(`代車要請: ${body.substitute_requested ? '済み' : '未'}`);
     if (body.car_status === '実車') {
@@ -604,6 +609,14 @@ function accidentFormPage(token: string): string {
           <label>事故発生場所</label>
           <input type="text" id="location" placeholder="例: 足立区栗原3丁目の住宅街">
         </div>
+        <div class="field">
+          <label>事故相手の名前</label>
+          <input type="text" id="other_party_name" placeholder="例: 田中 一郎">
+        </div>
+        <div class="field">
+          <label>事故相手の電話番号</label>
+          <input type="tel" id="other_party_phone" placeholder="090-0000-0000">
+        </div>
       </div>
 
       <div class="card dep-section" id="dep-section">
@@ -729,6 +742,8 @@ function accidentFormPage(token: string): string {
         police_notified:document.getElementById('police_notified').checked,
         passenger_delivered:document.getElementById('passenger_delivered').checked,
         additional_info:document.getElementById('additional_info').value.trim()||null,
+        other_party_name:document.getElementById('other_party_name').value.trim()||null,
+        other_party_phone:document.getElementById('other_party_phone').value.trim()||null,
       }),
     })
     .then(function(r){ return r.json(); })

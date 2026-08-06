@@ -1148,6 +1148,7 @@ app.get('/settings/accidents', async (c) => {
     id: number; received_at: string | null; vehicle_no: string | null;
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     accident_type: string | null; location: string | null; car_status: string | null;
+    other_party_name: string | null; other_party_phone: string | null;
     summary_text: string | null; status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
@@ -1157,6 +1158,7 @@ app.get('/settings/accidents', async (c) => {
 
   const rows = all.map(r => {
     const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
+    const otherPartyStr = (r.other_party_name || r.other_party_phone) ? `${r.other_party_name ?? ''} ${r.other_party_phone ?? ''}`.trim() : '—';
     return `<tr id="report-row-${r.id}">
       ${reportCheckboxTd(r.id)}
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
@@ -1166,6 +1168,7 @@ app.get('/settings/accidents', async (c) => {
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.accident_type ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(r.location ?? '')}">${escHtml(r.location ?? '—')}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;">${escHtml(r.car_status ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;white-space:nowrap;">${escHtml(otherPartyStr)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(reporterDisplay(r.reporter_name, r.reported_by_admin))}</td>
       <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
         ${statusCellHtml(r.status === 'resolved', '解決済')}
@@ -1208,7 +1211,7 @@ app.get('/settings/accidents', async (c) => {
         <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
       </div>
       <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:800px;">
+        <table style="width:100%;border-collapse:collapse;min-width:900px;">
           <thead style="background:#f9fafb;">
             <tr>
               ${reportCheckboxTh()}
@@ -1219,6 +1222,7 @@ app.get('/settings/accidents', async (c) => {
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">事故形態</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">場所</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">事故相手</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
@@ -1226,7 +1230,7 @@ app.get('/settings/accidents', async (c) => {
             </tr>
           </thead>
           <tbody>
-            ${rows || '<tr><td colspan="12" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+            ${rows || '<tr><td colspan="13" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1249,6 +1253,10 @@ app.get('/settings/accidents', async (c) => {
       </div>
       <div class="nr-field"><label>事故形態</label><input type="text" id="nr-accident_type" placeholder="例: 単独接触事故、追突事故"></div>
       <div class="nr-field"><label>事故発生場所</label><input type="text" id="nr-location" placeholder="例: 足立区栗原3丁目の住宅街"></div>
+      <div class="nr-row2 nr-field">
+        <div><label>事故相手の名前</label><input type="text" id="nr-other_party_name" placeholder="例: 田中 一郎"></div>
+        <div><label>事故相手の電話番号</label><input type="tel" id="nr-other_party_phone" placeholder="090-0000-0000"></div>
+      </div>
       <div id="nr-passenger-check" class="nr-check-row" style="display:none;">
         <input type="checkbox" id="nr-passenger_delivered"><label for="nr-passenger_delivered">乗客を目的地まで送り届けた</label>
       </div>
@@ -1289,6 +1297,8 @@ app.get('/settings/accidents', async (c) => {
         police_notified: document.getElementById('nr-police_notified').checked,
         passenger_delivered: document.getElementById('nr-passenger_delivered').checked,
         additional_info: document.getElementById('nr-additional_info').value.trim() || null,
+        other_party_name: document.getElementById('nr-other_party_name').value.trim() || null,
+        other_party_phone: document.getElementById('nr-other_party_phone').value.trim() || null,
       };
       fetch('${ADMIN_PATH}/api/liff/accident-reports', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -1778,6 +1788,7 @@ app.get('/settings/accidents/print/:id', async (c) => {
     id: number; received_at: string | null; vehicle_no: string | null;
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     accident_type: string | null; location: string | null; car_status: string | null;
+    other_party_name: string | null; other_party_phone: string | null;
     substitute_requested: number | null; police_notified: number | null; passenger_delivered: number | null;
     additional_info: string | null; summary_text: string | null;
     status: string; created_at: string;
@@ -1793,6 +1804,8 @@ app.get('/settings/accidents/print/:id', async (c) => {
     { label: '事故形態', value: r.accident_type ?? '' },
     { label: '発生場所', value: r.location ?? '' },
     { label: '車両状態', value: r.car_status ?? '' },
+    { label: '事故相手の名前', value: r.other_party_name ?? '' },
+    { label: '事故相手の電話番号', value: r.other_party_phone ?? '' },
     { label: '代車要請', value: r.substitute_requested ? '要請済み' : '未要請' },
     { label: '警察対応', value: r.police_notified ? '指示済み' : '未指示' },
     { label: '乗客対応', value: r.passenger_delivered ? '送り届け済み' : '未対応' },
@@ -1974,6 +1987,7 @@ app.get('/settings/accidents/print-bulk', async (c) => {
     id: number; received_at: string | null; vehicle_no: string | null;
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     accident_type: string | null; location: string | null; car_status: string | null;
+    other_party_name: string | null; other_party_phone: string | null;
     substitute_requested: number | null; police_notified: number | null; passenger_delivered: number | null;
     additional_info: string | null; summary_text: string | null;
     status: string; created_at: string;
@@ -1986,6 +2000,7 @@ app.get('/settings/accidents/print-bulk', async (c) => {
       { label: '事故形態', value: r.accident_type ?? '' },
       { label: '発生場所', value: r.location ?? '' },
       { label: '車両状態', value: r.car_status ?? '' },
+      { label: '事故相手', value: `${r.other_party_name ?? ''} ${r.other_party_phone ?? ''}`.trim() },
       { label: '代車要請', value: r.substitute_requested ? '要請済み' : '未要請' },
       { label: '警察対応', value: r.police_notified ? '指示済み' : '未指示' },
       { label: '乗客対応', value: r.passenger_delivered ? '送り届け済み' : '未対応' },
@@ -2379,6 +2394,7 @@ app.post('/api/liff/accident-reports', async (c) => {
     accident_type?: string; location?: string; car_status?: string;
     substitute_requested?: boolean; police_notified?: boolean; passenger_delivered?: boolean;
     additional_info?: string;
+    other_party_name?: string; other_party_phone?: string;
   }>();
 
   const result = await c.env.DB.prepare(`
@@ -2386,15 +2402,15 @@ app.post('/api/liff/accident-reports', async (c) => {
       (received_at, vehicle_no, employee_name, employee_emp_no,
        employee_division, employee_team, accident_type, location, car_status,
        substitute_requested, police_notified, passenger_delivered,
-       additional_info, reported_by_admin)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       additional_info, other_party_name, other_party_phone, reported_by_admin)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.received_at ?? null, body.vehicle_no ?? null,
     body.employee_name ?? null, body.employee_emp_no ?? null,
     body.employee_division ?? null, body.employee_team ?? null,
     body.accident_type ?? null, body.location ?? null, body.car_status ?? null,
     body.substitute_requested ? 1 : 0, body.police_notified ? 1 : 0, body.passenger_delivered ? 1 : 0,
-    body.additional_info ?? null, adminName,
+    body.additional_info ?? null, body.other_party_name ?? null, body.other_party_phone ?? null, adminName,
   ).run();
 
   await logReportAction(c.env.DB, 'accident', result.meta.last_row_id as number, 'created', adminName,
@@ -2531,6 +2547,82 @@ app.get('/api/liff/lost-items/employee-search',        nrEmployeeSearchHandler);
 app.get('/api/liff/accident-reports/employee-search',  nrEmployeeSearchHandler);
 app.get('/api/liff/violation-reports/employee-search', nrEmployeeSearchHandler);
 app.get('/api/liff/general-reports/employee-search',   nrEmployeeSearchHandler);
+
+// 車番から乗務員を検索（クイック報告モーダルの車番入力用。employees.car_noの完全一致）
+async function nrCarSearchHandler(c: Context<{ Bindings: Env }>) {
+  const carNo = (c.req.query('car_no') ?? '').trim();
+  if (!carNo) return c.json({ results: [] });
+  const results = await c.env.DB.prepare(
+    `SELECT id, emp_no, name, division, team FROM employees
+     WHERE is_active = 1 AND car_no = ?
+     ORDER BY name LIMIT 10`
+  ).bind(carNo).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null }>();
+  return c.json({ results: results.results ?? [] });
+}
+app.get('/api/liff/lost-items/employee-by-car',        nrCarSearchHandler);
+app.get('/api/liff/accident-reports/employee-by-car',  nrCarSearchHandler);
+app.get('/api/liff/violation-reports/employee-by-car', nrCarSearchHandler);
+app.get('/api/liff/general-reports/employee-by-car',   nrCarSearchHandler);
+
+// 乗務員選択時に、その課の当日の引き継ぎシート概要を返す（クイック報告モーダル用の抜粋表示）
+async function nrDivisionInfoHandler(c: Context<{ Bindings: Env }>) {
+  const division = parseInt(c.req.query('division') ?? '', 10);
+  const date = c.req.query('date') ?? '';
+  if (!Number.isInteger(division) || division < 1 || division > 4 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return c.json({ sheet: null });
+  }
+  const sheet = await c.env.DB.prepare(
+    `SELECT douta, main_content, toka_content FROM handover_sheets WHERE division = ? AND date = ?`
+  ).bind(division, date).first<{ douta: string; main_content: string; toka_content: string }>();
+  return c.json({ sheet: sheet ?? null });
+}
+app.get('/api/liff/lost-items/division-info',        nrDivisionInfoHandler);
+app.get('/api/liff/accident-reports/division-info',  nrDivisionInfoHandler);
+app.get('/api/liff/violation-reports/division-info', nrDivisionInfoHandler);
+app.get('/api/liff/general-reports/division-info',   nrDivisionInfoHandler);
+
+// LINE連携者（役職付きLIFF利用者）への報告サマリー送信（クイック報告モーダル用）
+async function nrLineRecipientsHandler(c: Context<{ Bindings: Env }>) {
+  const rows = await c.env.DB.prepare(
+    `SELECT id, name, role FROM line_liff_users WHERE role != 'unknown' ORDER BY role, name`
+  ).all<{ id: number; name: string | null; role: string }>();
+  return c.json({ results: rows.results ?? [] });
+}
+app.get('/api/liff/lost-items/line-recipients',        nrLineRecipientsHandler);
+app.get('/api/liff/accident-reports/line-recipients',  nrLineRecipientsHandler);
+app.get('/api/liff/violation-reports/line-recipients', nrLineRecipientsHandler);
+app.get('/api/liff/general-reports/line-recipients',   nrLineRecipientsHandler);
+
+async function lineMulticastSimple(token: string, uids: string[], messages: object[]): Promise<void> {
+  const batches: string[][] = [];
+  for (let i = 0; i < uids.length; i += 500) batches.push(uids.slice(i, i + 500));
+  await Promise.allSettled(batches.map(batch =>
+    fetch('https://api.line.me/v2/bot/message/multicast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: batch, messages }),
+    })
+  ));
+}
+async function nrSendLineSummaryHandler(c: Context<{ Bindings: Env }>) {
+  const b = await c.req.json<{ recipient_ids?: number[]; summary?: string }>().catch(() => ({}) as { recipient_ids?: number[]; summary?: string });
+  const ids = Array.isArray(b.recipient_ids) ? b.recipient_ids.filter(n => Number.isInteger(n)) : [];
+  const summary = (b.summary ?? '').trim();
+  if (!ids.length || !summary) return c.json({ error: '送信先と内容が必要です' }, 400);
+  if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) return c.json({ error: 'LINE未設定' }, 500);
+  const placeholders = ids.map(() => '?').join(',');
+  const rows = await c.env.DB.prepare(
+    `SELECT line_uid FROM line_liff_users WHERE id IN (${placeholders}) AND role != 'unknown'`
+  ).bind(...ids).all<{ line_uid: string }>();
+  const uids = [...new Set((rows.results ?? []).map(r => r.line_uid))];
+  if (!uids.length) return c.json({ error: '送信先が見つかりません' }, 400);
+  await lineMulticastSimple(c.env.LINE_CHANNEL_ACCESS_TOKEN, uids, [{ type: 'text', text: summary }]);
+  return c.json({ ok: true, sent: uids.length });
+}
+app.post('/api/liff/lost-items/send-line-summary',        nrSendLineSummaryHandler);
+app.post('/api/liff/accident-reports/send-line-summary',  nrSendLineSummaryHandler);
+app.post('/api/liff/violation-reports/send-line-summary', nrSendLineSummaryHandler);
+app.post('/api/liff/general-reports/send-line-summary',   nrSendLineSummaryHandler);
 
 // 違反種類マスタ（settings.violation-types ではなく settings.violations 権限で通す）
 app.get('/api/liff/violation-reports/violation-types', async (c) => {

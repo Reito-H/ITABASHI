@@ -198,6 +198,10 @@ export function layout(title: string, content: string, activePage: string = '', 
           ${escHtml(item.label)}
         </a>
       `).join('')}
+      <!-- CC名簿: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。ページを開くたびに専用パスワードを要求する -->
+      <a href="${ADMIN_PATH}/cc-list" class="nav-item${activePage === 'cc-list' ? ' active' : ''}" onclick="closeSidebar()">
+        CC
+      </a>
     </nav>
     <div style="padding:12px 0;border-top:1px solid rgba(255,255,255,0.1);">
       <a href="${ADMIN_PATH}/logout" class="nav-item" style="color:#fca5a5;">ログアウト</a>

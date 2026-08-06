@@ -114,9 +114,16 @@ function cellBg(
 
 function cellFont(cell: KanchoCell | undefined): string {
   let s = '';
-  if (cell?.dg) s += 'font-style:italic;';
   if (cell?.ws) s += 'color:#dc2626;font-weight:700;';
   return s;
+}
+
+// 斜め直はfont-style:italicで表示するが、Chromeは和文フォント(Hiragino Sans/Meiryo等)に
+// 合成イタリックを適用しないため斜体にならない。transform:skewXで強制的に斜めにする。
+function cellContent(cell: KanchoCell | undefined): string {
+  const code = escHtml(cell?.code ?? '');
+  if (cell?.dg && code) return `<span style="display:inline-block;transform:skewX(-14deg);">${code}</span>`;
+  return code;
 }
 
 // メンバー1人の月度内カウント
@@ -205,7 +212,7 @@ export function kanchoShiftPage(
     return `<td class="kc" data-member="${m.id}" data-date="${d}" data-name="${escHtml(m.name)}" data-sec="${secGroup}"
       data-code="${escHtml(s?.code ?? '')}" data-dg="${s?.dg ?? 0}" data-ws="${s?.ws ?? 0}" data-cl="${s?.cl ?? ''}"
       data-tc="${m.team_color ?? ''}" data-inp="${inPeriod ? 1 : 0}"${hasWish ? ' data-wish="1"' : ''}
-      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}">${escHtml(s?.code ?? '')}</td>`;
+      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}">${cellContent(s)}</td>`;
   }
 
   // 前任者と名前が違う場合は「旧名→新名」表示（月をまたいだ入れ替わりを表から分かるように）
@@ -361,7 +368,7 @@ export function kanchoShiftPage(
     ).join('')}
   </div>
   <div style="font-size:11px;color:#6b7280;margin-bottom:10px;">
-    色マス（記号なし）＝早日勤 7:30〜16:30 ／ 白マス＝未入力 ／ <i>斜体の直</i>＝斜め直 14:00〜翌8:00 ／ 終業班長 3:00〜12:00 ／ <span style="color:#dc2626;font-weight:700;">赤文字</span>＝希望休の反映
+    色マス（記号なし）＝早日勤 7:30〜16:30 ／ 白マス＝未入力 ／ <span style="display:inline-block;transform:skewX(-14deg);">直</span>（斜体）＝斜め直 14:00〜翌8:00 ／ 終業班長 3:00〜12:00 ／ <span style="color:#dc2626;font-weight:700;">赤文字</span>＝希望休の反映
   </div>
 
   <div style="overflow-x:auto;overflow-y:auto;max-height:70vh;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
@@ -730,10 +737,19 @@ function paintCell(td) {
   else if (code) bg = (teamColorCodes[code] && tc) ? tc : (colorMap[code] || '#fff7ed');
   else bg = '#ffffff';
   td.style.background = bg;
-  td.style.fontStyle = td.dataset.dg === '1' ? 'italic' : 'normal';
   if (td.dataset.ws === '1') { td.style.color = '#dc2626'; td.style.fontWeight = '700'; }
   else { td.style.color = ''; td.style.fontWeight = ''; }
-  td.textContent = code;
+  // 斜め直はfont-style:italicではなくtransform:skewXで表示（Chromeは和文フォントに合成イタリックを適用しないため）
+  if (td.dataset.dg === '1' && code) {
+    td.textContent = '';
+    var sp = document.createElement('span');
+    sp.style.display = 'inline-block';
+    sp.style.transform = 'skewX(-14deg)';
+    sp.textContent = code;
+    td.appendChild(sp);
+  } else {
+    td.textContent = code;
+  }
 }
 
 // ===== 集計の再計算 =====
@@ -942,7 +958,7 @@ function openCell(td) {
     var btn = '<button data-code="' + escH(t.code) + '" onclick="selectPreset(this.dataset.code, 0)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;">' + escH(t.code) + '</button>';
     // 直の隣に斜め直ボタンを並べる（記号は同じ「直」で斜体フラグ付き）
     if (t.code === '直') {
-      btn += '<button onclick="selectPreset(\\'直\\', 1)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;font-style:italic;">斜め直</button>';
+      btn += '<button onclick="selectPreset(\\'直\\', 1)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;"><span style="display:inline-block;transform:skewX(-14deg);">斜め直</span></button>';
     }
     return btn;
   }).join('');
@@ -1533,7 +1549,7 @@ export function kanchoPrintPage(
   function printCell(m: KanchoMember, d: string): string {
     const s = shiftMap[`${m.id}_${d}`];
     const bg = cellBg(s, m, true, colorMap, teamColorCodes);
-    return `<td style="background:${bg};${cellFont(s)}">${escHtml(s?.code ?? '')}</td>`;
+    return `<td style="background:${bg};${cellFont(s)}">${cellContent(s)}</td>`;
   }
 
   let mainRows = '';
@@ -1609,7 +1625,7 @@ export function kanchoPrintPage(
   </table>
   <div class="legend">
     ${activeTypes.map(t => `<span style="background:${t.color};">${escHtml(t.code)}${t.label ? ` ${escHtml(t.label)}` : ''}</span>`).join('')}
-    <span>色マス(記号なし)=早日勤 7:30〜16:30</span><span><i>斜体の直</i>=斜め直 14:00〜翌8:00</span><span>終業班長 3:00〜12:00</span><span style="color:#dc2626;font-weight:700;">赤文字=希望休</span>
+    <span>色マス(記号なし)=早日勤 7:30〜16:30</span><span><span style="display:inline-block;transform:skewX(-14deg);">直</span>(斜体)=斜め直 14:00〜翌8:00</span><span>終業班長 3:00〜12:00</span><span style="color:#dc2626;font-weight:700;">赤文字=希望休</span>
   </div>
   ${s1Members.length ? `<h2>① 表</h2><table><thead><tr><th>氏名</th>${dateHead}</tr></thead><tbody>${subRows(s1Members)}</tbody></table>` : ''}
   ${s2Members.length ? `<h2>② 表</h2><table><thead><tr><th>氏名</th>${dateHead}</tr></thead><tbody>${subRows(s2Members)}</tbody></table>` : ''}
