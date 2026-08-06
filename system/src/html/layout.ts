@@ -198,6 +198,10 @@ export function layout(title: string, content: string, activePage: string = '', 
           ${escHtml(item.label)}
         </a>
       `).join('')}
+      <!-- 便利: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。編集はフル権限アカウントのみ（ページ側で判定） -->
+      <a href="${ADMIN_PATH}/benri" class="nav-item${activePage === 'benri' ? ' active' : ''}" onclick="closeSidebar()">
+        便利
+      </a>
       <!-- CC名簿: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。ページを開くたびに専用パスワードを要求する -->
       <a href="${ADMIN_PATH}/cc-list" class="nav-item${activePage === 'cc-list' ? ' active' : ''}" onclick="closeSidebar()">
         CC

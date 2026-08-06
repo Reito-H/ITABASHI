@@ -48,6 +48,7 @@ import adminHandoverRoutes from './routes/admin_handover';
 import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
 import adminRequestsRoutes from './routes/admin_requests';
 import adminCcListRoutes from './routes/admin_cc_list';
+import adminBenriRoutes from './routes/admin_benri';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -178,7 +179,11 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // ただし他のメニュー項目のフィルタは通常通り効かせたいため、権限チェックだけを免除しawait next()以降は共通処理に合流させる
   const isCcList = subPath.startsWith('/cc-list') || subPath.startsWith('/api/cc-list');
 
-  if (!isCcList && !isPathAllowed(perms, subPath, c.req.method)) {
+  // 便利（距離控除表・高速料金表など）: 閲覧はページ権限を使わず全アカウント共通でアクセス可。
+  // 編集（非GET）はルート側でフル権限アカウント（permissions IS NULL）かどうかを別途チェックする
+  const isBenri = subPath.startsWith('/benri') || subPath.startsWith('/api/benri');
+
+  if (!isCcList && !isBenri && !isPathAllowed(perms, subPath, c.req.method)) {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
@@ -218,6 +223,7 @@ app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
 app.route(`/${SECRET}/admin`, adminCcListRoutes);
+app.route(`/${SECRET}/admin`, adminBenriRoutes);
 
 // =====================
 // API（認証必須）
