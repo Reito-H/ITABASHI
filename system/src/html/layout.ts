@@ -41,7 +41,6 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/inspection`,   label: '点検管理',        id: 'inspection' },
     { href: `${ADMIN_PATH}/announcements`, label: 'お知らせ配信',   id: 'announcements' },
     { href: `${ADMIN_PATH}/requests`,     label: '要望欄',          id: 'requests' },
-    { href: `${ADMIN_PATH}/toll-calc`,    label: '高速料金計算',    id: 'toll-calc' },
     { href: `${ADMIN_PATH}/settings`,     label: '設定',            id: 'settings' },
   ];
 

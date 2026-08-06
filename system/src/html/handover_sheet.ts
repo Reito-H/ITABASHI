@@ -110,10 +110,8 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 
 .ho-sec{padding:8px 10px;border-bottom:1px solid #ddd;display:flex;flex-direction:column;min-height:120px;}
 .ho-sec:last-child{border-bottom:none;}
-/* 点検・車検・リコールは初期表示を2行程度に抑え、その分を車両異常・修理予定に回す
-   （どちらも内容が増えれば通常のセクション同様に枠ごと下へ伸びる） */
-.ho-sec.ho-tenken{min-height:80px;}
-.ho-sec.ho-joshu{min-height:160px;}
+/* 右カラム各セクションの高さは設定モーダルの「高さ」設定値がインラインstyleで
+   min-heightを指定する（小/標準/大/特大）。内容が増えれば枠ごと下へ伸びる。 */
 .ho-lbl{font-size:var(--ho-fs,14px);font-weight:800;color:var(--navy);text-decoration:underline;text-underline-offset:2px;margin-bottom:4px;flex-shrink:0;}
 .ho-lbl.red{color:var(--red);}
 .ho-ta{width:100%;border:none;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;resize:none;font-family:inherit;
@@ -151,13 +149,15 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-fontset-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                     align-items:center;justify-content:center;}
 #ho-fontset-overlay.show{display:flex;}
-#ho-fontset-modal{background:#fff;border-radius:10px;padding:18px 20px;width:340px;max-width:90vw;
-                  box-shadow:0 12px 32px rgba(0,0,0,.3);}
+#ho-fontset-modal{background:#fff;border-radius:10px;padding:18px 20px;width:420px;max-width:92vw;
+                  max-height:85vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
 .ho-fontset-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
-                 color:var(--navy);margin-bottom:4px;}
+                 color:var(--navy);margin-bottom:4px;flex-shrink:0;}
 #ho-fontset-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
-.ho-fontset-desc{font-size:12px;color:var(--muted);margin-bottom:12px;}
-.ho-fontset-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #eee;}
+.ho-fontset-body{overflow-y:auto;flex:1;}
+.ho-fontset-desc{font-size:12px;color:var(--muted);margin-bottom:10px;}
+.ho-fontset-subhead{font-size:13px;font-weight:800;color:var(--navy);margin:14px 0 6px;}
+.ho-fontset-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;}
 .ho-fontset-row:last-child{border-bottom:none;}
 .ho-fontset-name{font-size:13px;font-weight:700;color:#333;}
 .ho-fontset-opts{display:flex;gap:4px;}
@@ -165,6 +165,27 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
                 font-weight:700;color:#555;cursor:pointer;}
 .ho-fontset-btn.active{background:var(--navy);border-color:var(--navy);color:#fff;}
 .ho-fontset-btn.disabled{cursor:default;opacity:.5;}
+
+.ho-sec-row{display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #eee;}
+.ho-sec-row:last-child{border-bottom:none;}
+.ho-sec-row.inactive{opacity:.45;}
+.ho-sec-move{display:flex;flex-direction:column;gap:1px;flex-shrink:0;}
+.ho-sec-move-btn{border:1px solid #ccc;background:#fafafa;border-radius:3px;font-size:9px;line-height:1;
+                 padding:1px 4px;cursor:pointer;color:#555;}
+.ho-sec-move-btn:disabled{opacity:.3;cursor:default;}
+.ho-sec-label-inp{flex:1;min-width:0;border:1px solid #ddd;border-radius:5px;padding:4px 6px;font-size:12px;
+                  font-family:inherit;}
+.ho-sec-height-sel{border:1px solid #ccc;background:#fafafa;border-radius:5px;padding:3px 4px;font-size:11px;
+                   color:#555;flex-shrink:0;}
+.ho-sec-toggle{border:1px solid #ccc;background:#fafafa;border-radius:12px;padding:3px 8px;font-size:10px;
+              font-weight:700;color:#555;cursor:pointer;flex-shrink:0;white-space:nowrap;}
+.ho-sec-toggle.on{background:#e3f5e6;border-color:#8ec99b;color:#2e7d32;}
+.ho-sec-del{border:none;background:transparent;color:#ccc;font-size:14px;cursor:pointer;padding:2px 4px;flex-shrink:0;}
+.ho-sec-del:hover{color:var(--red);}
+.ho-sec-add-row{display:flex;gap:6px;margin-top:8px;flex-shrink:0;}
+#ho-sec-add-inp{flex:1;border:1px solid #ccc;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;}
+#ho-sec-add-btn{border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:6px;padding:6px 12px;
+                font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 
 .ho-toolrow{display:flex;justify-content:flex-end;margin-bottom:8px;}
 .ho-tokasum-btn{border:1px solid #ccc;background:#fff;color:#374151;border-radius:16px;padding:5px 12px;
@@ -189,6 +210,26 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-tokasum-row-name{flex:1;color:#111;font-weight:700;}
 .ho-tokasum-row-val{color:var(--red);font-weight:800;}
 .ho-tokasum-empty{text-align:center;color:var(--muted);font-size:13px;padding:24px 0;}
+.ho-tokasum-tabs{display:flex;gap:6px;margin-bottom:10px;flex-shrink:0;}
+.ho-tokasum-tab{flex:1;text-align:center;border:1px solid #ccc;background:#fafafa;border-radius:6px;padding:5px 0;
+                font-size:12px;font-weight:700;color:#555;cursor:pointer;}
+.ho-tokasum-tab.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+.ho-tokasum-back{border:none;background:transparent;color:var(--navy);font-size:12px;font-weight:700;cursor:pointer;
+                 padding:0;margin-bottom:8px;flex-shrink:0;text-align:left;}
+.ho-tokasum-rank-row{display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #f0f0f0;
+                     font-size:13px;cursor:pointer;}
+.ho-tokasum-rank-row:hover{background:#f7f7f7;}
+.ho-tokasum-rank-no{width:20px;flex-shrink:0;color:var(--muted);font-weight:800;text-align:center;}
+.ho-tokasum-rank-name{flex:1;font-weight:700;color:#111;}
+.ho-tokasum-rank-count{color:var(--red);font-weight:800;}
+.ho-tokasum-detail-name{font-size:15px;font-weight:800;color:var(--navy);text-align:center;margin-bottom:6px;}
+.ho-tokasum-detail-sub{font-size:12px;font-weight:800;color:var(--navy);margin:12px 0 6px;}
+.ho-tokasum-bar-row{display:flex;align-items:center;gap:8px;padding:2px 0;font-size:12px;}
+.ho-tokasum-bar-lbl{width:56px;flex-shrink:0;color:#555;}
+.ho-tokasum-bar-track{flex:1;background:#f0f0f0;border-radius:4px;height:14px;overflow:hidden;}
+.ho-tokasum-bar-fill{height:100%;background:var(--navy);border-radius:4px;}
+.ho-tokasum-bar-val{width:24px;flex-shrink:0;text-align:right;color:#333;font-weight:700;}
+.ho-tokasum-reason-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid #f5f5f5;}
 </style>
 
 <div id="ho-root">
@@ -214,9 +255,18 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 <div id="ho-toast"></div>
 <div id="ho-fontset-overlay">
   <div id="ho-fontset-modal">
-    <div class="ho-fontset-head"><span>文字サイズ設定</span><button type="button" id="ho-fontset-close">×</button></div>
-    <div class="ho-fontset-desc">課ごとに引き継ぎシート本文の文字サイズを設定します。</div>
-    <div id="ho-fontset-rows"></div>
+    <div class="ho-fontset-head"><span id="ho-fontset-title">課の設定</span><button type="button" id="ho-fontset-close">×</button></div>
+    <div class="ho-fontset-body">
+      <div class="ho-fontset-desc" id="ho-fontset-desc"></div>
+      <div id="ho-fontset-rows"></div>
+      <div class="ho-fontset-subhead">表示セクション</div>
+      <div class="ho-fontset-desc">右カラムの項目を追加・削除・改名・並び替え・高さ変更できます。当欠・事故車など既存5項目は削除できず、非表示のみ可能です。</div>
+      <div id="ho-sec-rows"></div>
+      <div class="ho-sec-add-row">
+        <input type="text" id="ho-sec-add-inp" placeholder="新しいセクション名" maxlength="30">
+        <button type="button" id="ho-sec-add-btn">＋ 追加</button>
+      </div>
+    </div>
   </div>
 </div>
 <div id="ho-limit-overlay">
@@ -236,7 +286,12 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 <div id="ho-tokasum-overlay">
   <div id="ho-tokasum-modal">
     <div class="ho-tokasum-head"><span>当欠記録</span><button type="button" id="ho-tokasum-close">×</button></div>
-    <div class="ho-tokasum-monthbar">
+    <div class="ho-tokasum-tabs" id="ho-tokasum-tabs">
+      <button type="button" class="ho-tokasum-tab" id="ho-tokasum-tab-list">日別</button>
+      <button type="button" class="ho-tokasum-tab" id="ho-tokasum-tab-rank">人別集計</button>
+    </div>
+    <button type="button" class="ho-tokasum-back" id="ho-tokasum-back" style="display:none">‹ 集計に戻る</button>
+    <div class="ho-tokasum-monthbar" id="ho-tokasum-monthbar">
       <button type="button" class="ho-tokasum-monthbtn" id="ho-tokasum-prev">‹前月</button>
       <span class="ho-tokasum-monthlbl" id="ho-tokasum-monthlbl"></span>
       <button type="button" class="ho-tokasum-monthbtn" id="ho-tokasum-next">翌月›</button>
@@ -262,6 +317,7 @@ function initialDivision(){
 const H = {
   division: initialDivision(), date: null, dates: [], updatedAt: null, fieldTimers: {}, savedRange: null,
   numpickApply: null, fontSizes: { 1: 14, 2: 14, 3: 14, 4: 14 }, limits: [],
+  sections: [], customContent: [],
 };
 // DOM要素id → DBカラム名（項目単位の部分保存で使用）
 const FIELD_BY_ID = {
@@ -269,6 +325,12 @@ const FIELD_BY_ID = {
   'ho-main-c':'main_content', 'ho-toka-c':'toka_content', 'ho-jomu-c':'jomu_content',
   'ho-jiko-c':'jiko_content', 'ho-tenken-c':'tenken_content', 'ho-joshu-c':'joshu_content',
 };
+// 特別枠（右カラムの入力補助付き5項目）のsection_key → DOM要素id
+const SPECIAL_DOM_ID = {
+  'toka':'ho-toka-c', 'jiko':'ho-jiko-c', 'tenken':'ho-tenken-c', 'joshu':'ho-joshu-c', 'jomu':'ho-jomu-c',
+};
+// 表示セクションの高さプリセット→px（設定モーダルの「小/標準/大/特大」に対応）
+const HEIGHT_PX = { small:80, normal:120, large:160, xlarge:220 };
 
 function esc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function safeNum(v){ return (v===null||v===undefined||v==='') ? '' : String(v); }
@@ -420,11 +482,12 @@ function attachNameSuggest(ta, field, opts){
   });
 }
 
-// 当欠欄の「名前 ±数値」行を集計し、稼働予定が入力済みなら稼働実績へ自動反映
+// 当欠欄の「名前 ±数値」行（後ろに理由が続いていてもよい）を集計し、
+// 稼働予定が入力済みなら稼働実績へ自動反映
 function calcTokaDelta(text){
   let sum = 0;
   (text || '').split('\\n').forEach(line => {
-    const m = line.trim().match(/([+\\-])(0\\.5|1\\.0)$/);
+    const m = line.trim().match(/([+\\-])(0\\.5|1\\.0)(?:\\s|$)/);
     if (m) sum += (m[1] === '-' ? -1 : 1) * parseFloat(m[2]);
   });
   return sum;
@@ -558,7 +621,16 @@ async function switchDivision(d){
   try { localStorage.setItem('ho_last_division', String(d)); } catch {}
   renderTabs();
   applyFontSize();
+  await loadSections();
   await loadDates();
+}
+
+// ===== 表示セクション構成の取得（右カラムの特別枠5項目＋自由追加したカスタム枠） =====
+async function loadSections(){
+  try {
+    const data = await api('GET', '/'+H.division+'/sections');
+    H.sections = data.sections || [];
+  } catch(e){ H.sections = []; }
 }
 
 // ===== 文字サイズ設定（課ごと）=====
@@ -573,18 +645,20 @@ async function loadFontSizes(){
   } catch(e){ /* 取得失敗時は既定値のまま */ }
   applyFontSize();
 }
+// 文字サイズは今開いている課（H.division）のみを表示・編集する
+// （他課の設定を見たい場合は課タブを切り替えてから開く仕様）。
 function renderFontSettingsRows(){
   const wrap = document.getElementById('ho-fontset-rows');
-  wrap.innerHTML = [1,2,3,4].map(d => {
-    const cur = H.fontSizes[d] || 14;
-    const opts = FONT_SIZES.map(o =>
-      '<button type="button" class="ho-fontset-btn'+(o.v===cur?' active':'')+(EDITABLE?'':' disabled')+
-      '" data-d="'+d+'" data-v="'+o.v+'">'+o.label+'</button>'
-    ).join('');
-    return '<div class="ho-fontset-row"><span class="ho-fontset-name">板橋'+d+'課</span><div class="ho-fontset-opts">'+opts+'</div></div>';
-  }).join('');
+  const descEl = document.getElementById('ho-fontset-desc');
+  if (descEl) descEl.textContent = '今開いている板橋'+H.division+'課の引き継ぎシート本文の文字サイズを設定します。';
+  const cur = H.fontSizes[H.division] || 14;
+  const opts = FONT_SIZES.map(o =>
+    '<button type="button" class="ho-fontset-btn'+(o.v===cur?' active':'')+(EDITABLE?'':' disabled')+
+    '" data-v="'+o.v+'">'+o.label+'</button>'
+  ).join('');
+  wrap.innerHTML = '<div class="ho-fontset-row"><span class="ho-fontset-name">文字サイズ</span><div class="ho-fontset-opts">'+opts+'</div></div>';
   if (!EDITABLE) return;
-  wrap.querySelectorAll('.ho-fontset-btn').forEach(b => b.addEventListener('click', () => setFontSize(parseInt(b.dataset.d,10), parseInt(b.dataset.v,10))));
+  wrap.querySelectorAll('.ho-fontset-btn').forEach(b => b.addEventListener('click', () => setFontSize(H.division, parseInt(b.dataset.v,10))));
 }
 async function setFontSize(division, size){
   try {
@@ -599,8 +673,103 @@ async function setFontSize(division, size){
     toast('文字サイズを変更しました');
   } catch(e){ toast('エラー: '+e.message, 2500); }
 }
+
+// ===== 表示セクション設定（今開いている課のみ）=====
+const HEIGHT_SIZE_OPTS = [ ['small','小'], ['normal','標準'], ['large','大'], ['xlarge','特大'] ];
+function renderSectionSettingsRows(){
+  const wrap = document.getElementById('ho-sec-rows');
+  const list = H.sections || [];
+  wrap.innerHTML = list.map((s, i) => {
+    const heightOpts = HEIGHT_SIZE_OPTS.map(([v,label]) =>
+      '<option value="'+v+'"'+(s.height_size===v?' selected':'')+'>'+label+'</option>'
+    ).join('');
+    return '<div class="ho-sec-row'+(s.is_active?'':' inactive')+'">' +
+      '<div class="ho-sec-move">' +
+        '<button type="button" class="ho-sec-move-btn ho-sec-up" data-id="'+s.id+'"'+(i===0?' disabled':'')+'>▲</button>' +
+        '<button type="button" class="ho-sec-move-btn ho-sec-down" data-id="'+s.id+'"'+(i===list.length-1?' disabled':'')+'>▼</button>' +
+      '</div>' +
+      '<input type="text" class="ho-sec-label-inp" data-id="'+s.id+'" value="'+esc(s.label)+'" maxlength="30">' +
+      '<select class="ho-sec-height-sel" data-id="'+s.id+'">'+heightOpts+'</select>' +
+      '<button type="button" class="ho-sec-toggle'+(s.is_active?' on':'')+'" data-id="'+s.id+'">'+(s.is_active?'表示中':'非表示')+'</button>' +
+      (s.kind==='custom' ? '<button type="button" class="ho-sec-del" data-id="'+s.id+'" title="削除">🗑</button>' : '') +
+    '</div>';
+  }).join('');
+  if (!EDITABLE){
+    wrap.querySelectorAll('input,select,button').forEach(el => { el.disabled = true; });
+    return;
+  }
+  wrap.querySelectorAll('.ho-sec-label-inp').forEach(inp => {
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); inp.blur(); } });
+    inp.addEventListener('blur', () => updateSectionLabel(parseInt(inp.dataset.id,10), inp.value));
+  });
+  wrap.querySelectorAll('.ho-sec-height-sel').forEach(sel => {
+    sel.addEventListener('change', () => updateSectionField(parseInt(sel.dataset.id,10), { height_size: sel.value }));
+  });
+  wrap.querySelectorAll('.ho-sec-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const s = (H.sections||[]).find(x => x.id === parseInt(btn.dataset.id,10));
+      if (s) updateSectionField(s.id, { is_active: !s.is_active });
+    });
+  });
+  wrap.querySelectorAll('.ho-sec-del').forEach(btn => btn.addEventListener('click', () => deleteSection(parseInt(btn.dataset.id,10))));
+  wrap.querySelectorAll('.ho-sec-up').forEach(btn => btn.addEventListener('click', () => moveSection(parseInt(btn.dataset.id,10), -1)));
+  wrap.querySelectorAll('.ho-sec-down').forEach(btn => btn.addEventListener('click', () => moveSection(parseInt(btn.dataset.id,10), 1)));
+}
+// セクション設定の変更後は一覧を再取得し、開いているシートがあれば表示にも反映する
+async function reloadSectionsAndSheet(){
+  await loadSections();
+  renderSectionSettingsRows();
+  if (H.date) loadSheet(H.date);
+}
+async function updateSectionLabel(id, label){
+  label = label.trim();
+  if (!label){ toast('セクション名を入力してください', 2000); renderSectionSettingsRows(); return; }
+  const s = (H.sections||[]).find(x => x.id === id);
+  if (s && s.label === label) return;
+  await updateSectionField(id, { label });
+}
+async function updateSectionField(id, patch){
+  try {
+    await api('PATCH', '/'+H.division+'/sections/'+id, patch);
+    await reloadSectionsAndSheet();
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+async function moveSection(id, dir){
+  const list = [...(H.sections||[])];
+  const idx = list.findIndex(x => x.id === id);
+  const swapIdx = idx + dir;
+  if (idx < 0 || swapIdx < 0 || swapIdx >= list.length) return;
+  [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
+  try {
+    await api('PUT', '/'+H.division+'/sections/reorder', { order: list.map(s => s.id) });
+    await reloadSectionsAndSheet();
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+async function deleteSection(id){
+  if (!confirm('このセクションを削除しますか？（保存済みの内容も削除されます）')) return;
+  try {
+    await api('DELETE', '/'+H.division+'/sections/'+id);
+    await reloadSectionsAndSheet();
+    toast('削除しました');
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+async function addSection(){
+  const inp = document.getElementById('ho-sec-add-inp');
+  const label = inp.value.trim();
+  if (!label){ toast('セクション名を入力してください', 2000); return; }
+  try {
+    await api('POST', '/'+H.division+'/sections', { label });
+    inp.value = '';
+    await reloadSectionsAndSheet();
+    toast('セクションを追加しました');
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+document.getElementById('ho-sec-add-btn').addEventListener('click', addSection);
+
 function openFontSettings(){
+  document.getElementById('ho-fontset-title').textContent = '板橋'+H.division+'課の設定';
   renderFontSettingsRows();
+  renderSectionSettingsRows();
   document.getElementById('ho-fontset-overlay').classList.add('show');
 }
 function closeFontSettings(){
@@ -616,7 +785,7 @@ const hoTitleEl = document.querySelector('.desktop-header h1');
 if (hoTitleEl){
   hoTitleEl.style.cursor = 'pointer';
   hoTitleEl.style.borderBottom = '1px dotted #9ca3af';
-  hoTitleEl.title = 'クリックで文字サイズ設定を開く';
+  hoTitleEl.title = 'クリックで課の設定を開く';
   hoTitleEl.addEventListener('click', openFontSettings);
 }
 
@@ -646,23 +815,99 @@ async function loadTokaSummary(){
   listEl.innerHTML = '<div class="ho-tokasum-empty">読み込み中…</div>';
   try {
     const data = await api('GET', '/'+H.division+'/toka-summary?month='+H.tokaSumMonth);
+    H.tokaSumData = data;
     countEl.innerHTML = '板橋'+H.division+'課 当欠数：<b>'+data.count+'</b>件';
-    if (!data.entries.length){
-      listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
-      return;
-    }
-    listEl.innerHTML = data.entries.map(e =>
-      '<div class="ho-tokasum-row"><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
-      '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'+
-      '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span></div>'
-    ).join('');
+    renderTokaSumBody();
   } catch(e){
     listEl.innerHTML = '<div class="ho-tokasum-empty">読み込みエラー: '+esc(e.message)+'</div>';
   }
 }
+// H.tokaSumView（'list'=日別 / 'ranking'=人別集計）に応じて一覧を描画する
+function renderTokaSumBody(){
+  const listEl = document.getElementById('ho-tokasum-list');
+  const data = H.tokaSumData;
+  if (!data || H.tokaSumView === 'detail') return;
+  if (H.tokaSumView === 'ranking'){
+    if (!data.ranking.length){
+      listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
+      return;
+    }
+    listEl.innerHTML = data.ranking.map((r, i) =>
+      '<div class="ho-tokasum-rank-row" data-name="'+esc(r.name)+'"><span class="ho-tokasum-rank-no">'+(i+1)+'</span>'+
+      '<span class="ho-tokasum-rank-name">'+esc(r.name)+'</span>'+
+      '<span class="ho-tokasum-rank-count">'+r.count+'回</span></div>'
+    ).join('');
+    listEl.querySelectorAll('.ho-tokasum-rank-row').forEach(row =>
+      row.addEventListener('click', () => openTokaDetail(row.dataset.name)));
+    return;
+  }
+  if (!data.entries.length){
+    listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
+    return;
+  }
+  listEl.innerHTML = data.entries.map(e =>
+    '<div class="ho-tokasum-row"><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
+    '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'+
+    '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span></div>'
+  ).join('');
+}
+// 個人別の当欠傾向（曜日別/月推移/理由内訳）を表示する
+async function openTokaDetail(name){
+  H.tokaSumPerson = name;
+  setTokaSumView('detail');
+  const listEl = document.getElementById('ho-tokasum-list');
+  listEl.innerHTML = '<div class="ho-tokasum-empty">読み込み中…</div>';
+  try {
+    const data = await api('GET', '/'+H.division+'/toka-detail?name='+encodeURIComponent(name)+'&month='+H.tokaSumMonth+'&months=6');
+    renderTokaDetailBody(data);
+  } catch(e){
+    listEl.innerHTML = '<div class="ho-tokasum-empty">読み込みエラー: '+esc(e.message)+'</div>';
+  }
+}
+function renderTokaDetailBody(data){
+  const listEl = document.getElementById('ho-tokasum-list');
+  const maxMonthCount = Math.max(1, ...data.monthly.map(m => m.count));
+  const monthlyHtml = data.monthly.map(m => {
+    const w = Math.round((m.count / maxMonthCount) * 100);
+    return '<div class="ho-tokasum-bar-row"><span class="ho-tokasum-bar-lbl">'+fmtYm(m.ym).replace('年','/').replace('月','')+'</span>'+
+      '<div class="ho-tokasum-bar-track"><div class="ho-tokasum-bar-fill" style="width:'+w+'%"></div></div>'+
+      '<span class="ho-tokasum-bar-val">'+m.count+'</span></div>';
+  }).join('');
+  const wdLabels = ['日','月','火','水','木','金','土'];
+  const maxWd = Math.max(1, ...data.weekday);
+  const wdHtml = data.weekday.map((cnt, i) => {
+    const w = Math.round((cnt / maxWd) * 100);
+    return '<div class="ho-tokasum-bar-row"><span class="ho-tokasum-bar-lbl">'+wdLabels[i]+'曜</span>'+
+      '<div class="ho-tokasum-bar-track"><div class="ho-tokasum-bar-fill" style="width:'+w+'%"></div></div>'+
+      '<span class="ho-tokasum-bar-val">'+cnt+'</span></div>';
+  }).join('');
+  const reasonHtml = data.reasons.length ? data.reasons.map(r =>
+    '<div class="ho-tokasum-reason-row"><span>'+esc(r.reason)+'</span><span>'+r.count+'件</span></div>'
+  ).join('') : '<div class="ho-tokasum-empty">理由の記録はありません</div>';
+  listEl.innerHTML =
+    '<div class="ho-tokasum-detail-name">'+esc(data.name)+'</div>' +
+    '<div class="ho-tokasum-detail-sub">月別の推移（直近6ヶ月）</div>' + monthlyHtml +
+    '<div class="ho-tokasum-detail-sub">曜日別の傾向</div>' + wdHtml +
+    '<div class="ho-tokasum-detail-sub">理由の内訳</div>' + reasonHtml;
+}
+// タブ('list'/'ranking')・戻る('detail'→'ranking')で表示を切り替える
+function setTokaSumView(view){
+  H.tokaSumView = view;
+  document.getElementById('ho-tokasum-tab-list').classList.toggle('active', view === 'list');
+  document.getElementById('ho-tokasum-tab-rank').classList.toggle('active', view === 'ranking');
+  document.getElementById('ho-tokasum-tabs').style.display = (view === 'detail') ? 'none' : 'flex';
+  document.getElementById('ho-tokasum-back').style.display = (view === 'detail') ? 'block' : 'none';
+  document.getElementById('ho-tokasum-monthbar').style.display = (view === 'detail') ? 'none' : 'flex';
+  document.getElementById('ho-tokasum-count').style.display = (view === 'detail') ? 'none' : 'block';
+  if (view === 'list' || view === 'ranking') renderTokaSumBody();
+}
+document.getElementById('ho-tokasum-tab-list').addEventListener('click', () => setTokaSumView('list'));
+document.getElementById('ho-tokasum-tab-rank').addEventListener('click', () => setTokaSumView('ranking'));
+document.getElementById('ho-tokasum-back').addEventListener('click', () => setTokaSumView('ranking'));
 function openTokaSummary(){
   if (!H.tokaSumMonth) H.tokaSumMonth = currentYm();
   document.getElementById('ho-tokasum-overlay').classList.add('show');
+  setTokaSumView('list');
   loadTokaSummary();
 }
 function closeTokaSummary(){
@@ -791,8 +1036,97 @@ async function loadSheet(date){
   try {
     const data = await api('GET', '/'+H.division+'/'+date);
     H.updatedAt = data.sheet?.updated_at || null;
+    H.customContent = data.customContent || [];
     renderSheet(data.sheet, date);
   } catch(e){ toast('読み込みエラー: '+e.message, 3000); }
+}
+
+// ===== 表示セクション（右カラム）のHTML構築 =====
+// 特別枠5項目（当欠/事故車/点検/車両異常/乗務希望）は既存の入力補助を保つため
+// idやフィールド名を固定のまま、ラベル文言と高さだけH.sectionsの設定値に差し替える。
+function buildSpecialSectionHtml(s, sheet, ro, ce){
+  const px = HEIGHT_PX[s.height_size] || 120;
+  const lbl = esc(s.label);
+  const style = ' style="min-height:'+px+'px"';
+  switch(s.section_key){
+    case 'toka':
+      return '<div class="ho-sec ho-toka"'+style+'><div class="ho-lbl">'+lbl+'</div><textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea></div>';
+    case 'jiko':
+      return '<div class="ho-sec ho-jiko"'+style+'><div class="ho-lbl red">'+lbl+'</div><div class="ho-ce" id="ho-jiko-c" contenteditable="'+ce+'">'+safeHtml(sheet?.jiko_content)+'</div></div>';
+    case 'tenken':
+      return '<div class="ho-sec ho-tenken"'+style+'><div class="ho-lbl">'+lbl+'</div><div class="ho-ce" id="ho-tenken-c" contenteditable="'+ce+'">'+safeHtml(sheet?.tenken_content)+'</div></div>';
+    case 'joshu':
+      return '<div class="ho-sec ho-joshu"'+style+'><div class="ho-lbl">'+lbl+'</div><div class="ho-ce" id="ho-joshu-c" contenteditable="'+ce+'">'+safeHtml(sheet?.joshu_content)+'</div></div>';
+    case 'jomu':
+      return '<div class="ho-sec ho-jomu"'+style+'><div class="ho-lbl">'+lbl+'</div><textarea class="ho-ta" id="ho-jomu-c"'+ro+'>'+esc(sheet?.jomu_content||'')+'</textarea></div>';
+    default:
+      return '';
+  }
+}
+// カスタム枠（自由追加した素のテキスト欄、入力補助なし）
+function buildCustomSectionHtml(s, ro, customMap){
+  const px = HEIGHT_PX[s.height_size] || 120;
+  const val = customMap.get(s.id) || '';
+  return '<div class="ho-sec ho-custom" style="min-height:'+px+'px"><div class="ho-lbl">'+esc(s.label)+'</div><textarea class="ho-ta" id="ho-custom-'+s.id+'"'+ro+'>'+esc(val)+'</textarea></div>';
+}
+function buildRightColumnHtml(sheet, ro, ce){
+  const customMap = new Map((H.customContent||[]).map(cc => [cc.sectionId, cc.content]));
+  return (H.sections||[]).filter(s => s.is_active).map(s =>
+    s.kind === 'special' ? buildSpecialSectionHtml(s, sheet, ro, ce) : buildCustomSectionHtml(s, ro, customMap)
+  ).join('');
+}
+// 特別枠のwiring（入力補助のアタッチ）。既存の挙動をsection_keyごとに保持する。
+function wireSpecialSection(s){
+  const id = SPECIAL_DOM_ID[s.section_key];
+  const el = document.getElementById(id);
+  if (!el) return;
+  const field = FIELD_BY_ID[id];
+  if (s.section_key === 'toka'){
+    attachNameSuggest(el, field, {
+      onInput: recalcJisseki,
+      skipIfDone: (text) => /[+\\-](0\\.5|1\\.0)(\\s|$)/.test(text),
+      extraNames: ['不明', '入力ミス'],
+      afterPick: (ta, newPos) => {
+        const numRect = getTextareaCaretRect(ta);
+        showNumpick(numRect, (signed) => {
+          const cur2 = ta.value;
+          const insert = ' ' + signed + '\\n';
+          ta.value = cur2.slice(0, newPos) + insert + cur2.slice(newPos);
+          const finalPos = newPos + insert.length;
+          ta.focus(); ta.setSelectionRange(finalPos, finalPos);
+          hideNumpick();
+          autoGrowTa(ta);
+          scheduleSave('toka_content');
+          recalcJisseki();
+        });
+      },
+    });
+    attachHankaku(el);
+    attachAutoGrow(el);
+  } else if (s.section_key === 'jomu'){
+    attachNameSuggest(el, field);
+    attachHankaku(el);
+    attachAutoGrow(el);
+  } else {
+    // jiko / tenken / joshu（contenteditable）
+    el.addEventListener('input', () => scheduleSave(field));
+    attachHankaku(el);
+    if (s.section_key === 'tenken' || s.section_key === 'joshu') attachCarSuggest(el, field);
+  }
+}
+// カスタム枠のwiring（素のテキスト欄、サジェスト等なし）
+function wireCustomSection(s){
+  const el = document.getElementById('ho-custom-'+s.id);
+  if (!el) return;
+  el.addEventListener('input', () => scheduleSave('section_'+s.id));
+  attachHankaku(el);
+  attachAutoGrow(el);
+}
+function wireRightColumnSections(){
+  (H.sections||[]).filter(s => s.is_active).forEach(s => {
+    if (s.kind === 'special') wireSpecialSection(s);
+    else wireCustomSection(s);
+  });
 }
 
 function renderSheet(sheet, date){
@@ -823,13 +1157,7 @@ function renderSheet(sheet, date){
       '<div class="ho-sec ho-main"><div class="ho-ce" id="ho-main-c" contenteditable="'+ce+'">'+safeHtml(sheet?.main_content)+'</div></div>' +
     '</div>' +
     '<div class="ho-divider"></div>' +
-    '<div class="ho-col-right">' +
-      '<div class="ho-sec ho-toka"><div class="ho-lbl">当欠・理由</div><textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea></div>' +
-      '<div class="ho-sec ho-jiko"><div class="ho-lbl red">事故車</div><div class="ho-ce" id="ho-jiko-c" contenteditable="'+ce+'">'+safeHtml(sheet?.jiko_content)+'</div></div>' +
-      '<div class="ho-sec ho-tenken"><div class="ho-lbl">点検・車検・リコール</div><div class="ho-ce" id="ho-tenken-c" contenteditable="'+ce+'">'+safeHtml(sheet?.tenken_content)+'</div></div>' +
-      '<div class="ho-sec ho-joshu"><div class="ho-lbl">車両異常・修理予定</div><div class="ho-ce" id="ho-joshu-c" contenteditable="'+ce+'">'+safeHtml(sheet?.joshu_content)+'</div></div>' +
-      '<div class="ho-sec ho-jomu"><div class="ho-lbl">乗務希望</div><textarea class="ho-ta" id="ho-jomu-c"'+ro+'>'+esc(sheet?.jomu_content||'')+'</textarea></div>' +
-    '</div>' +
+    '<div class="ho-col-right">' + buildRightColumnHtml(sheet, ro, ce) + '</div>' +
     '</div></div>';
 
   document.getElementById('ho-limit-btn')?.addEventListener('click', openLimitModal);
@@ -848,44 +1176,12 @@ function renderSheet(sheet, date){
       document.getElementById('ho-save-dot').className = 'saving';
       saveField('douta', H.division, H.date, fieldValue('douta'));
     });
-    const tokaEl = document.getElementById('ho-toka-c');
-    if (tokaEl){
-      attachNameSuggest(tokaEl, 'toka_content', {
-        onInput: recalcJisseki,
-        skipIfDone: (text) => /[+\\-](0\\.5|1\\.0)\\s*$/.test(text),
-        extraNames: ['不明', '入力ミス'],
-        afterPick: (ta, newPos) => {
-          const numRect = getTextareaCaretRect(ta);
-          showNumpick(numRect, (signed) => {
-            const cur2 = ta.value;
-            const insert = ' ' + signed + '\\n';
-            ta.value = cur2.slice(0, newPos) + insert + cur2.slice(newPos);
-            const finalPos = newPos + insert.length;
-            ta.focus(); ta.setSelectionRange(finalPos, finalPos);
-            hideNumpick();
-            autoGrowTa(ta);
-            scheduleSave('toka_content');
-            recalcJisseki();
-          });
-        },
-      });
-      attachHankaku(tokaEl);
-      attachAutoGrow(tokaEl);
+    const mainEl = document.getElementById('ho-main-c');
+    if (mainEl){
+      mainEl.addEventListener('input', () => scheduleSave('main_content'));
+      attachHankaku(mainEl);
     }
-    const jomuEl = document.getElementById('ho-jomu-c');
-    if (jomuEl){
-      attachNameSuggest(jomuEl, 'jomu_content');
-      attachHankaku(jomuEl);
-      attachAutoGrow(jomuEl);
-    }
-    ['ho-main-c','ho-jiko-c','ho-tenken-c','ho-joshu-c'].forEach(id => {
-      const c2 = document.getElementById(id);
-      if (!c2) return;
-      c2.addEventListener('input', () => scheduleSave(FIELD_BY_ID[id]));
-      attachHankaku(c2);
-    });
-    attachCarSuggest(document.getElementById('ho-tenken-c'), 'tenken_content');
-    attachCarSuggest(document.getElementById('ho-joshu-c'), 'joshu_content');
+    wireRightColumnSections();
     document.getElementById('ho-del-btn')?.addEventListener('click', () => confirmDeleteDate(H.date));
   }
 }
@@ -934,7 +1230,11 @@ document.getElementById('ho-c-close').onclick = hideToolbar;
 // ===== 保存（項目単位）=====
 // 課内の複数アカウントが同時に別の欄を編集しても取り合いにならないよう、保存の都度
 // シート全体を上書きするのではなく、変更のあった項目だけをPATCHで送る。
+// 'section_<id>'はカスタムセクション（自由追加した素のテキスト欄）の内容取得
 function fieldValue(field){
+  if (field.startsWith('section_')){
+    return document.getElementById('ho-custom-'+field.slice(8))?.value || '';
+  }
   switch(field){
     case 'kabu_yotei': return parseFloat(document.getElementById('ho-kabu-y')?.value) || null;
     case 'kabu_jisseki': return parseFloat(document.getElementById('ho-kabu-j')?.value) || null;
@@ -950,11 +1250,14 @@ function fieldValue(field){
 }
 // division/date/valueはスケジュール時点の値を渡す（発火までの間にユーザーが別の日付・課へ
 // 切り替えても、その時点のDOMを読み直さず・誤ったシートへ書き込まないようにするため）
+// 'section_<id>'はカスタムセクション専用エンドポイントへ保存する。
 async function saveField(field, division, date, value){
   if (!date) return;
   const dot = document.getElementById('ho-save-dot');
   try {
-    const res = await api('PATCH', '/'+division+'/'+date+'/field', { field, value });
+    const res = field.startsWith('section_')
+      ? await api('PATCH', '/'+division+'/'+date+'/section-content/'+field.slice(8), { value })
+      : await api('PATCH', '/'+division+'/'+date+'/field', { field, value });
     if (division === H.division && date === H.date) H.updatedAt = res.updated_at || H.updatedAt;
     dot.className = 'saved';
     setTimeout(() => { dot.className = ''; }, 2000);
@@ -1053,8 +1356,7 @@ document.addEventListener('click', (e) => {
 window.addEventListener('pagehide', () => { flushPendingSaves(); });
 
 renderTabs();
-loadFontSizes();
-loadDates();
+loadSections().then(() => { loadFontSizes(); loadDates(); });
 })();
 </script>
 `;

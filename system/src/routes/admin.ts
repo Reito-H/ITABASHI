@@ -1708,7 +1708,6 @@ app.get('/settings/tutorial', (c) => {
     <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
     <a href="#handover" data-perm-key="handover">1-20. 引き継ぎシート — 課の申し送り事項</a>
     <a href="#crew-portal" data-perm-key="crew-portal">1-21. 乗務員ポータル — 個人データ・シフト・売上・担当車表</a>
-    <a href="#toll-calc" data-perm-key="toll_calc">1-22. 高速料金計算</a>
     <div class="tut-toc-section" style="margin-top:12px;" data-perm-key="settings.vehicle-search-guide">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
     <a href="#veh-guide" data-perm-key="settings.vehicle-search-guide">2-1. LINE車番検索ガイド（詳細は専用ページへ）</a>
     <div class="tut-toc-section" style="margin-top:12px;">第3章 — 現場スタッフ向け（LINE利用ガイド）</div>
@@ -2129,12 +2128,6 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>売上分析（全社）</td><td>全社員横断の売上分析</td></tr>
       <tr><td>担当車表</td><td>3班・4班の担当者一覧表。Webで編集・印刷できる（板橋のみ）</td></tr>
     </table>
-  </div>
-
-  <!-- 1-22 高速料金計算 -->
-  <div class="tut-section" id="toll-calc" data-perm-key="toll_calc">
-    <h3><span class="num">22</span>高速料金計算</h3>
-    <p style="font-size:13px;">利用した高速道路の区間を選択すると、料金を自動で計算できます。</p>
   </div>
 
   <hr class="tut-divider">

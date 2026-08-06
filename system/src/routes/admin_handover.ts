@@ -112,8 +112,28 @@ app.get('/api/handover/:division/dates', async (c) => {
   return c.json({ dates: (rows.results ?? []).map(r => r.date) });
 });
 
-// 当欠・理由欄の月間集計（記録ページ用）。「名前 -0.5」「名前 -1.0」のように
-// 候補選択で正しく入力された行だけを当欠数として数える（自由記述の理由行や+の行は対象外）。
+// 当欠・理由欄のパーサー。「名前 -0.5」「名前 -1.0」のように候補選択で正しく入力された
+// 行だけを当欠として扱う（+の代走行は対象外）。±数値ピッカーで確定すると自動で改行が
+// 入り理由は次の行に続けて書く形になるため、当欠行の直後の行が別の当欠行でなければ
+// それを理由として扱う（例:「山田 -1.0」の次の行が「通院」ならreason="通院"）。
+// toka-summary/toka-detailで共用する。
+function parseTokaLines(content: string): { name: string; value: number; reason: string }[] {
+  const lines = (content || '').split('\n');
+  const isEntryLine = (s: string) => /^(.*?)\s*-(0\.5|1\.0)\s*$/.test(s.trim());
+  const entries: { name: string; value: number; reason: string }[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].trim().match(/^(.*?)\s*-(0\.5|1\.0)\s*$/);
+    if (!m) continue;
+    const name = m[1].trim();
+    if (!name) continue;
+    const nextLine = (lines[i + 1] || '').trim();
+    const reason = (nextLine && !isEntryLine(nextLine)) ? nextLine : '';
+    entries.push({ name, value: -parseFloat(m[2]), reason });
+  }
+  return entries;
+}
+
+// 当欠・理由欄の月間集計（記録ページ用）。日別の一覧に加え、当欠回数が多い人のランキングも返す。
 app.get('/api/handover/:division/toka-summary', async (c) => {
   const division = c.req.param('division');
   if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
@@ -126,16 +146,77 @@ app.get('/api/handover/:division/toka-summary', async (c) => {
 
   const entries: { date: string; name: string; value: number }[] = [];
   for (const row of rows.results ?? []) {
-    for (const rawLine of (row.toka_content || '').split('\n')) {
-      const line = rawLine.trim();
-      const m = line.match(/^(.*?)\s*-(0\.5|1\.0)\s*$/);
-      if (!m) continue;
-      const name = m[1].trim();
-      if (!name) continue;
-      entries.push({ date: row.date, name, value: -parseFloat(m[2]) });
+    for (const parsed of parseTokaLines(row.toka_content || '')) {
+      entries.push({ date: row.date, name: parsed.name, value: parsed.value });
     }
   }
-  return c.json({ entries, count: entries.length });
+
+  const byName = new Map<string, { count: number; total: number }>();
+  for (const e of entries) {
+    const cur = byName.get(e.name) ?? { count: 0, total: 0 };
+    cur.count += 1;
+    cur.total += Math.abs(e.value);
+    byName.set(e.name, cur);
+  }
+  const ranking = [...byName.entries()]
+    .map(([name, v]) => ({ name, count: v.count, total: v.total }))
+    .sort((a, b) => b.count - a.count || b.total - a.total);
+
+  return c.json({ entries, count: entries.length, ranking });
+});
+
+// 個人別の当欠傾向詳細。指定月を末尾として過去monthsヶ月分を走査し、対象nameに完全一致する
+// 当欠行だけを抽出して月別推移・曜日別件数・理由の内訳を返す。
+app.get('/api/handover/:division/toka-detail', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const month = c.req.query('month') || '';
+  if (!isValidMonth(month)) return c.json({ error: '月の指定が不正です' }, 400);
+  const name = (c.req.query('name') || '').trim();
+  if (!name) return c.json({ error: '氏名の指定が不正です' }, 400);
+  const months = Math.min(24, Math.max(1, parseInt(c.req.query('months') || '6', 10) || 6));
+
+  const [endY, endM] = month.split('-').map(Number);
+  const endMonthIndex = endY * 12 + (endM - 1);
+  const startMonthIndex = endMonthIndex - (months - 1);
+  const startYm = `${Math.floor(startMonthIndex / 12)}-${String(startMonthIndex % 12 + 1).padStart(2, '0')}`;
+
+  const rows = await c.env.DB.prepare(
+    'SELECT date, toka_content FROM handover_sheets WHERE division = ? AND date >= ? AND date < ? ORDER BY date'
+  ).bind(parseInt(division, 10), `${startYm}-01`, `${month}-32`).all<{ date: string; toka_content: string }>();
+
+  const monthlyMap = new Map<string, { count: number; total: number }>();
+  const weekday = [0, 0, 0, 0, 0, 0, 0];
+  const reasonMap = new Map<string, number>();
+  const entries: { date: string; value: number; reason: string }[] = [];
+
+  for (const row of rows.results ?? []) {
+    const ym = row.date.slice(0, 7);
+    for (const parsed of parseTokaLines(row.toka_content || '')) {
+      if (parsed.name !== name) continue;
+      const cur = monthlyMap.get(ym) ?? { count: 0, total: 0 };
+      cur.count += 1;
+      cur.total += Math.abs(parsed.value);
+      monthlyMap.set(ym, cur);
+      weekday[new Date(row.date + 'T00:00:00Z').getUTCDay()] += 1;
+      const reasonKey = parsed.reason || '(理由未記入)';
+      reasonMap.set(reasonKey, (reasonMap.get(reasonKey) ?? 0) + 1);
+      entries.push({ date: row.date, value: parsed.value, reason: parsed.reason });
+    }
+  }
+
+  const monthly: { ym: string; count: number; total: number }[] = [];
+  for (let i = 0; i < months; i++) {
+    const idx = startMonthIndex + i;
+    const ym = `${Math.floor(idx / 12)}-${String(idx % 12 + 1).padStart(2, '0')}`;
+    const v = monthlyMap.get(ym) ?? { count: 0, total: 0 };
+    monthly.push({ ym, count: v.count, total: v.total });
+  }
+  const reasons = [...reasonMap.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count);
+
+  return c.json({ name, monthly, weekday, reasons, entries });
 });
 
 // 当欠欄オートコンプリート用: 課内の在籍社員名を部分一致検索
@@ -204,14 +285,146 @@ app.put('/api/handover/:division/font-size', async (c) => {
   return c.json({ ok: true, size });
 });
 
+// ===== 表示セクション構成（右カラムの特別枠5項目＋自由追加できるカスタム枠） =====
+type SectionRow = {
+  id: number; division: number; section_key: string; kind: 'special' | 'custom';
+  label: string; sort_order: number; height_size: string; is_active: number;
+};
+const HEIGHT_SIZES = new Set(['small', 'normal', 'large', 'xlarge']);
+
+app.get('/api/handover/:division/sections', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM handover_sections WHERE division = ? ORDER BY sort_order, id'
+  ).bind(parseInt(division, 10)).all<SectionRow>();
+  return c.json({ sections: rows.results ?? [] });
+});
+
+app.post('/api/handover/:division/sections', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ label?: string }>().catch(() => ({}) as { label?: string });
+  const label = (b.label || '').trim();
+  if (!label) return c.json({ error: 'セクション名を入力してください' }, 400);
+
+  const divNum = parseInt(division, 10);
+  const maxRow = await c.env.DB.prepare(
+    'SELECT MAX(sort_order) AS m FROM handover_sections WHERE division = ?'
+  ).bind(divNum).first<{ m: number | null }>();
+  const sortOrder = (maxRow?.m ?? -1) + 1;
+  const sectionKey = `custom_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+
+  const r = await c.env.DB.prepare(
+    `INSERT INTO handover_sections (division, section_key, kind, label, sort_order, height_size, updated_at)
+     VALUES (?, ?, 'custom', ?, ?, 'normal', datetime('now','localtime'))`
+  ).bind(divNum, sectionKey, label, sortOrder).run();
+  return c.json({ ok: true, id: r.meta.last_row_id });
+});
+
+app.patch('/api/handover/:division/sections/:id', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ label?: string; height_size?: string; is_active?: boolean }>().catch(() => ({}) as { label?: string; height_size?: string; is_active?: boolean });
+
+  const divNum = parseInt(division, 10);
+  const existing = await c.env.DB.prepare(
+    'SELECT * FROM handover_sections WHERE id = ? AND division = ?'
+  ).bind(id, divNum).first<SectionRow>();
+  if (!existing) return c.json({ error: 'セクションが存在しません' }, 404);
+
+  const label = b.label !== undefined ? b.label.trim() : existing.label;
+  if (!label) return c.json({ error: 'セクション名を入力してください' }, 400);
+  const heightSize = b.height_size !== undefined ? b.height_size : existing.height_size;
+  if (!HEIGHT_SIZES.has(heightSize)) return c.json({ error: '高さの指定が不正です' }, 400);
+  const isActive = b.is_active !== undefined ? (b.is_active ? 1 : 0) : existing.is_active;
+
+  await c.env.DB.prepare(
+    `UPDATE handover_sections SET label = ?, height_size = ?, is_active = ?, updated_at = datetime('now','localtime') WHERE id = ?`
+  ).bind(label, heightSize, isActive, id).run();
+  return c.json({ ok: true });
+});
+
+app.put('/api/handover/:division/sections/reorder', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ order?: number[] }>().catch(() => ({}) as { order?: number[] });
+  const order = b.order;
+  if (!Array.isArray(order) || order.length === 0 || order.length > 50) {
+    return c.json({ error: 'リクエストが不正です' }, 400);
+  }
+  const divNum = parseInt(division, 10);
+  const stmt = c.env.DB.prepare(
+    `UPDATE handover_sections SET sort_order = ?, updated_at = datetime('now','localtime') WHERE id = ? AND division = ?`
+  );
+  await c.env.DB.batch(order.map((id, idx) => stmt.bind(idx, id, divNum)));
+  return c.json({ ok: true });
+});
+
+app.delete('/api/handover/:division/sections/:id', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+
+  const divNum = parseInt(division, 10);
+  const existing = await c.env.DB.prepare(
+    'SELECT * FROM handover_sections WHERE id = ? AND division = ?'
+  ).bind(id, divNum).first<SectionRow>();
+  if (!existing) return c.json({ error: 'セクションが存在しません' }, 404);
+  if (existing.kind === 'special') return c.json({ error: '特別枠は削除できません。非表示にしてください' }, 400);
+
+  await c.env.DB.prepare('DELETE FROM handover_section_content WHERE section_id = ?').bind(id).run();
+  await c.env.DB.prepare('DELETE FROM handover_sections WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
+// カスタムセクションの日次内容の保存（項目単位PATCHと同じ発想のupsert）
+app.patch('/api/handover/:division/:date/section-content/:sectionId', async (c) => {
+  const division = c.req.param('division');
+  const date = c.req.param('date');
+  const sectionId = parseInt(c.req.param('sectionId'), 10);
+  if (!isValidDivision(division) || !isValidDate(date) || !sectionId) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+
+  const divNum = parseInt(division, 10);
+  const section = await c.env.DB.prepare(
+    `SELECT id FROM handover_sections WHERE id = ? AND division = ? AND kind = 'custom'`
+  ).bind(sectionId, divNum).first();
+  if (!section) return c.json({ error: 'セクションが存在しません' }, 404);
+
+  const b = await c.req.json<{ value?: string }>().catch(() => ({}) as { value?: string });
+  const value = b.value ?? '';
+  const updatedBy = (await adminName(c)).name;
+  await c.env.DB.prepare(`
+    INSERT INTO handover_section_content (section_id, date, content, updated_at, updated_by)
+    VALUES (?, ?, ?, datetime('now','localtime'), ?)
+    ON CONFLICT(section_id, date) DO UPDATE SET
+      content = excluded.content, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+  `).bind(sectionId, date, value, updatedBy).run();
+  return c.json({ ok: true });
+});
+
 app.get('/api/handover/:division/:date', async (c) => {
   const division = c.req.param('division');
   const date = c.req.param('date');
   if (!isValidDivision(division) || !isValidDate(date)) return c.json({ error: '指定が不正です' }, 400);
+  const divNum = parseInt(division, 10);
   const sheet = await c.env.DB.prepare(
     'SELECT * FROM handover_sheets WHERE division = ? AND date = ?'
-  ).bind(parseInt(division, 10), date).first<Sheet>();
-  return c.json({ sheet: sheet ?? null });
+  ).bind(divNum, date).first<Sheet>();
+  const customRows = await c.env.DB.prepare(
+    `SELECT s.id AS sectionId, c.content AS content
+     FROM handover_sections s
+     LEFT JOIN handover_section_content c ON c.section_id = s.id AND c.date = ?
+     WHERE s.division = ? AND s.kind = 'custom' AND s.is_active = 1`
+  ).bind(date, divNum).all<{ sectionId: number; content: string | null }>();
+  const customContent = (customRows.results ?? []).map(r => ({ sectionId: r.sectionId, content: r.content ?? '' }));
+  return c.json({ sheet: sheet ?? null, customContent });
 });
 
 app.put('/api/handover/:division/:date', async (c) => {
@@ -311,6 +524,7 @@ app.post('/api/handover/:division/:date/next', async (c) => {
   ).bind(divNum, date).first<{ main_content: string; jiko_content: string; joshu_content: string; jomu_content: string }>();
   const tenkenContent = await buildTenkenContent(c.env.DB, divNum, next);
 
+  const updatedBy = (await adminName(c)).name;
   await c.env.DB.prepare(`
     INSERT OR IGNORE INTO handover_sheets
       (division, date, main_content, jiko_content, tenken_content, joshu_content, jomu_content, updated_at, updated_by)
@@ -318,8 +532,27 @@ app.post('/api/handover/:division/:date/next', async (c) => {
   `).bind(
     divNum, next,
     cur?.main_content ?? '', cur?.jiko_content ?? '', tenkenContent, cur?.joshu_content ?? '', cur?.jomu_content ?? '',
-    (await adminName(c)).name,
+    updatedBy,
   ).run();
+
+  // カスタムセクション（自由追加した枠）の内容も前日からそのまま引き継ぐ
+  const customSections = await c.env.DB.prepare(
+    `SELECT id FROM handover_sections WHERE division = ? AND kind = 'custom' AND is_active = 1`
+  ).bind(divNum).all<{ id: number }>();
+  if (customSections.results && customSections.results.length > 0) {
+    const curCustom = await c.env.DB.prepare(
+      `SELECT section_id, content FROM handover_section_content WHERE date = ? AND section_id IN (${customSections.results.map(() => '?').join(',')})`
+    ).bind(date, ...customSections.results.map(s => s.id)).all<{ section_id: number; content: string }>();
+    const contentBySection = new Map((curCustom.results ?? []).map(r => [r.section_id, r.content]));
+    const stmt = c.env.DB.prepare(`
+      INSERT INTO handover_section_content (section_id, date, content, updated_at, updated_by)
+      VALUES (?, ?, ?, datetime('now','localtime'), ?)
+      ON CONFLICT(section_id, date) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+    `);
+    await c.env.DB.batch(customSections.results.map(s =>
+      stmt.bind(s.id, next, contentBySection.get(s.id) ?? '', updatedBy)
+    ));
+  }
 
   await logAction(c, 'next', divNum, next);
   return c.json({ nextDate: next });

@@ -48,8 +48,6 @@ import adminHandoverRoutes from './routes/admin_handover';
 import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
 import adminRequestsRoutes from './routes/admin_requests';
 import requestsApi from './routes/api/requests';
-import adminTollCalcRoutes from './routes/admin_toll_calc';
-import tollCalcApi from './routes/api/toll_calc';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import type { Env } from './auth';
@@ -214,7 +212,6 @@ app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
-app.route(`/${SECRET}/admin`, adminTollCalcRoutes);
 
 // =====================
 // API（認証必須）
@@ -263,7 +260,6 @@ app.route('/api/inspection', inspectionApi);
 app.route('/api/dia', diaApi);
 app.route('/api/documents', documentsApi);
 app.route('/api/requests', requestsApi);
-app.route('/api/toll-calc', tollCalcApi);
 
 // =====================
 // LINE Webhook（署名検証あり・認証不要）
