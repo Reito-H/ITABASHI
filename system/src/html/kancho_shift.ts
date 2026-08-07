@@ -21,7 +21,6 @@ export type KanchoMember = {
   month: number;
   emp_no: string | null;     // 社員番号（社員マスタemployees.emp_noと同値。希望休フォームの本人確認に使用）
   slot_key: string | null;   // 枠の月度をまたぐ同一性キー。編集を将来の既存月度へ自動伝播するために使う
-  prev_name?: string | null; // 前月度で同じ行(section・班色・role・並び順)だった人の名前。月またぎのグレー日付の自動反映と名前欄の「旧名→新名」表示に使用（サーバー側で相関サブクエリにより算出）
 };
 
 export type KanchoShiftType = {
@@ -220,9 +219,7 @@ export function kanchoShiftPage(
       style="background:${bg}">${cellContent(s)}</td>`;
   }
 
-  // 前任者と名前が違う場合は「旧名→新名」表示（月をまたいだ入れ替わりを表から分かるように）
   function nameLabel(m: KanchoMember): string {
-    if (m.prev_name && m.prev_name !== m.name) return `${escHtml(m.prev_name)}→${escHtml(m.name)}`;
     return escHtml(m.name);
   }
 
@@ -242,8 +239,8 @@ export function kanchoShiftPage(
       ).join('');
       const nameBg = m.team_color ? `background:linear-gradient(to right, ${m.team_color} 6px, #f8fafc 6px);` : FIX_BG;
       const linkBadge = (canEdit && !m.emp_no) ? '<span title="社員番号が未紐付け" style="color:#dc2626;margin-left:3px;">🔗</span>' : '';
-      html += `<tr>
-        <td class="${canEdit ? 'kc-name' : ''}" data-mid="${m.id}" data-name="${escHtml(m.name)}" style="min-width:92px;max-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px 3px 10px;${STICKY}left:0;${nameBg}white-space:nowrap;overflow:hidden;${canEdit ? 'cursor:pointer;' : ''}">${nameLabel(m)}${linkBadge}</td>
+      html += `<tr data-sec="main" data-role="${escHtml(role)}">
+        <td class="${canEdit ? 'kc-name kc-name-cell' : ''}" data-mid="${m.id}" data-name="${escHtml(m.name)}" style="min-width:92px;max-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px 3px 10px;${STICKY}left:0;${nameBg}white-space:nowrap;overflow:hidden;${canEdit ? 'cursor:pointer;' : ''}">${nameLabel(m)}${linkBadge}</td>
         ${cells}${counts}
       </tr>`;
     }
@@ -264,22 +261,27 @@ export function kanchoShiftPage(
 
   function subTable(title: string, list: KanchoMember[], secGroup: string): string {
     if (list.length === 0) return '';
-    const rows = list.map(m => `<tr>
-      <td style="min-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px;${STICKY}left:0;${FIX_BG}white-space:nowrap;">${nameLabel(m)}</td>
+    const rows = list.map(m => `<tr data-sec="${secGroup}">
+      <td class="${canEdit ? 'kc-name-cell' : ''}" data-mid="${m.id}" style="min-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px;${STICKY}left:0;${FIX_BG}white-space:nowrap;">${nameLabel(m)}</td>
       ${dates.map(d => cell(m, d, secGroup)).join('')}
     </tr>`).join('');
     return `
-    <h3 style="font-size:13px;font-weight:700;color:#1e3a5f;margin:18px 0 6px;">${escHtml(title)}</h3>
-    <div style="overflow-x:auto;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
-      <table style="border-collapse:collapse;table-layout:fixed;">
-        <thead style="position:sticky;top:0;z-index:10;background:white;">
-          <tr>
-            <th style="min-width:92px;${STICKY}left:0;z-index:20;${HDR_BG}font-size:11px;padding:4px;border:1px solid #4b6cb7;">氏名</th>
-            ${dateHeaders()}
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+    <div class="ksub-header" onclick="toggleSubTable('${secGroup}')" style="cursor:pointer;display:flex;align-items:center;gap:5px;margin:18px 0 6px;user-select:none;">
+      <span id="${secGroup}-arrow" style="font-size:10px;color:#6b7280;">▼</span>
+      <h3 style="font-size:13px;font-weight:700;color:#1e3a5f;margin:0;">${escHtml(title)}</h3>
+    </div>
+    <div id="${secGroup}-body">
+      <div style="overflow-x:auto;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
+        <table style="border-collapse:collapse;table-layout:fixed;">
+          <thead style="position:sticky;top:0;z-index:10;background:white;">
+            <tr>
+              <th style="min-width:92px;${STICKY}left:0;z-index:20;${HDR_BG}font-size:11px;padding:4px;border:1px solid #4b6cb7;">氏名</th>
+              ${dateHeaders()}
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
     </div>`;
   }
 
@@ -332,7 +334,7 @@ export function kanchoShiftPage(
         <button class="gear-item" onclick="closeGearMenu();openHistory()">履歴</button>
         ${canEdit ? `
         <button class="gear-item" onclick="closeGearMenu();openNotify()">通知設定</button>
-        <a class="gear-item" href="${ADMIN_PATH}/settings/kancho-slots" style="text-decoration:none;box-sizing:border-box;">枠設定（追加・役割・班色）</a>
+        <button class="gear-item" onclick="closeGearMenu();openSlots()">枠編集（追加・役割・班色）</button>
         <button class="gear-item" onclick="closeGearMenu();openTypes()">記号管理</button>` : ''}
       </div>
     </div>
@@ -530,6 +532,75 @@ export function kanchoShiftPage(
   </div>
 </div>
 
+<!-- 枠編集モーダル -->
+<div id="slots-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
+  <div class="kmodal-box" style="max-width:920px;">
+    <div class="kmodal-header">
+      <h3>枠編集 <span style="font-size:12px;font-weight:400;color:#6b7280;">（${year}年${month}月度）</span></h3>
+      <button class="kmodal-close" onclick="sel('#slots-modal').style.display='none'">✕</button>
+    </div>
+    <div class="kmodal-hint">
+      班長シフト表の「枠」（役割・班色・並び順）をここで編集します。誰がこの枠を担当するか（名前・社員番号）は、表の名前をタップして選んでください（ここでは設定できません。「現在の担当」は参考表示・社員管理との照合用です）。並び順は表側で名前をドラッグしても変更できます。
+    </div>
+    <div class="kmodal-scroll">
+      <div class="ktable-wrap">
+        <table class="ktable">
+          <thead><tr>
+            <th></th><th>現在の担当</th><th>役割</th><th>表</th><th>班色</th><th>内勤</th><th>新人</th><th></th>
+          </tr></thead>
+          <tbody id="slots-body"></tbody>
+        </table>
+      </div>
+
+      <div class="ksection">
+        <div class="ksection-title">＋ 枠を追加</div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">追加直後は空き枠として作成されます。担当者は表の名前タップから割り当ててください。</div>
+        <div class="kadd-row">
+          <input id="new-slot-role" type="text" list="slot-role-list" placeholder="役割（班長表のみ）" style="width:130px;">
+          <select id="new-slot-section">
+            <option value="main">班長シフト表</option><option value="s1">①表</option><option value="s2">②表</option>
+          </select>
+          <select id="new-slot-color">
+            <option value="">班色なし</option><option value="#00ff00">黄緑</option><option value="#ffff00">黄色</option>
+            <option value="#00ffff">水色</option><option value="#ff99cc">ピンク</option>
+          </select>
+          <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-slot-indoor" type="checkbox" checked>内勤</label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-slot-rookie" type="checkbox">新人班長</label>
+          <button class="kchip-btn ok" onclick="addSlot()">＋ 追加</button>
+        </div>
+        <datalist id="slot-role-list">${ROLE_ORDER.map(r => `<option value="${r}">`).join('')}</datalist>
+      </div>
+
+      <div class="ksection">
+        <div class="ksection-title">当直禁忌ペア（相性等の個別理由。新人班長同士は自動で警告されるため登録不要）</div>
+        <div id="fp-body" style="margin-bottom:8px;font-size:12.5px;"></div>
+        <div class="kadd-row">
+          <select id="new-fp-a"></select>
+          <select id="new-fp-b"></select>
+          <input id="new-fp-reason" type="text" placeholder="理由（任意）" style="width:160px;">
+          <button class="kchip-btn ok" onclick="addForbiddenPair()">＋ 追加</button>
+        </div>
+      </div>
+    </div>
+    <div class="kmodal-footer">
+      <button onclick="saveAllSlots()" id="slots-save-btn" class="kmodal-save-btn">一括保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 社員管理との照合モーダル（枠編集の「現在の担当」名クリックで開く）-->
+<div id="emp-match-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1002;align-items:center;justify-content:center;padding:12px;">
+  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:88vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">社員管理と照合</h3>
+      <button onclick="closeEmployeeMatch()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
+    </div>
+    <div id="emp-match-name" style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:10px;"></div>
+    <div id="emp-match-current" style="display:none;font-size:12.5px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:9px;margin-bottom:12px;"></div>
+    <div id="emp-match-body"></div>
+  </div>
+</div>
+
 <!-- 希望休モーダル -->
 <div id="wishes-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
   <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:680px;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
@@ -592,6 +663,10 @@ ${saveToastHtml()}
   .kc[data-lk="1"] { box-shadow: inset 0 0 0 2px ${LOCK_BORDER}; }
   .kc[data-ws="1"] { color:#dc2626;font-weight:700; }
   ${canEdit ? '.kc { cursor:pointer; }' : ''}
+  .kc-name-cell[draggable="true"] { cursor:grab; }
+  .kc-name-cell[draggable="true"]:active { cursor:grabbing; }
+  .kc-name-cell.kc-dragover { outline:2px dashed #2563eb !important; outline-offset:-2px; }
+  .ksub-header:hover h3 { text-decoration:underline; }
 
   /* 記号管理モーダル（表形式＋常に見えるsticky保存フッター） */
   .kmodal-box { background:white;border-radius:14px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);display:flex;flex-direction:column;max-height:88vh;overflow:hidden; }
@@ -619,6 +694,10 @@ ${saveToastHtml()}
   .kchip-btn { padding:4px 9px;background:#f3f4f6;border:1px solid #d1d5db;color:#4b5563;border-radius:99px;font-size:11px;cursor:pointer;white-space:nowrap; }
   .kchip-btn.danger { background:#fef2f2;border-color:#fca5a5;color:#dc2626; }
   .kchip-btn.ok { background:#f0fdf4;border-color:#86efac;color:#166534; }
+  .drag-handle { cursor:grab;font-size:14px;user-select:none;padding:0 4px; }
+  .drag-handle:active { cursor:grabbing; }
+  #slots-body tr[data-mid] { background:white; }
+  #slots-body tr[data-mid]:hover { background:#fafbfc; }
 </style>
 
 <script>
@@ -631,6 +710,9 @@ var _types = ${safeJson(activeTypes.map(t => ({ id: t.id, code: t.code, color: t
 var _allTypes = ${safeJson(types.map(t => ({ id: t.id, code: t.code, label: t.label, color: t.color, section: t.section, daily_required: t.daily_required, sort_order: t.sort_order, is_active: t.is_active, use_team_color: t.use_team_color, counts_as_work: t.counts_as_work, counts_as_off: t.counts_as_off, show_in_input: t.show_in_input })))};
 var _allMembers = ${safeJson(allMembers.map(m => ({ id: m.id, name: m.name, role: m.role, section: m.section, sort_order: m.sort_order, is_active: m.is_active, team_color: m.team_color, is_indoor: m.is_indoor, is_rookie: m.is_rookie, emp_no: m.emp_no })))};
 var _forbiddenPairs = ${safeJson(forbiddenPairs)};  // [{id, member_id_a, member_id_b, reason}]
+var VACANT_LABEL = ${safeJson(VACANT_SLOT_LABEL)};
+var SLOT_SECTION_LABEL = { main: '班長シフト表', s1: '①表', s2: '②表' };
+var SLOT_COLOR_OPTIONS = [['', '班色なし'], ['#00ff00', '黄緑'], ['#ffff00', '黄色'], ['#00ffff', '水色'], ['#ff99cc', 'ピンク']];
 var colorMap = {};
 var teamColorCodes = {};
 var workCodes = {};
@@ -802,6 +884,7 @@ function startEdit() {
   sel('#edit-start-wrap').style.display = 'none';
   sel('#edit-mode-bar').style.display = 'flex';
   window.addEventListener('beforeunload', _beforeUnload);
+  enableNameDrag();
 }
 function startCpMode() {
   _cpMode = true;
@@ -824,7 +907,102 @@ function _exitAllModes() {
   sel('#edit-mode-bar').style.display = 'none';
   sel('#cp-mode-bar').style.display = 'none';
   document.querySelectorAll('.kc[data-copysrc]').forEach(function(td) { delete td.dataset.copysrc; });
+  disableNameDrag();
 }
+
+// ===== 名前セルのドラッグ&ドロップ並び替え（編集モード中のみ有効・ドロップで即時保存）=====
+function enableNameDrag() {
+  document.querySelectorAll('.kc-name-cell[data-mid]').forEach(function(td) {
+    td.setAttribute('draggable', 'true');
+  });
+}
+function disableNameDrag() {
+  document.querySelectorAll('.kc-name-cell[data-mid]').forEach(function(td) {
+    td.removeAttribute('draggable');
+    td.classList.remove('kc-dragover');
+  });
+}
+var _nameDragSrcRow = null;
+document.addEventListener('dragstart', function(e) {
+  var td = e.target && e.target.closest ? e.target.closest('.kc-name-cell[draggable="true"]') : null;
+  if (!td) return;
+  _nameDragSrcRow = td.closest('tr');
+  e.dataTransfer.effectAllowed = 'move';
+});
+document.addEventListener('dragover', function(e) {
+  if (!_nameDragSrcRow) return;
+  var td = e.target && e.target.closest ? e.target.closest('.kc-name-cell') : null;
+  if (!td) return;
+  var row = td.closest('tr');
+  if (!row || row === _nameDragSrcRow) return;
+  if (row.dataset.sec !== _nameDragSrcRow.dataset.sec) return;
+  if (row.dataset.sec === 'main' && row.dataset.role !== _nameDragSrcRow.dataset.role) return;
+  e.preventDefault();
+  var rect = row.getBoundingClientRect();
+  var before = (e.clientY - rect.top) / rect.height < 0.5;
+  row.parentNode.insertBefore(_nameDragSrcRow, before ? row : row.nextSibling);
+});
+document.addEventListener('drop', function(e) {
+  if (!_nameDragSrcRow) return;
+  e.preventDefault();
+});
+document.addEventListener('dragend', function() {
+  if (!_nameDragSrcRow) return;
+  var row = _nameDragSrcRow;
+  _nameDragSrcRow = null;
+  _saveNameOrder(row);
+});
+async function _saveNameOrder(row) {
+  var sec = row.dataset.sec;
+  var role = row.dataset.role;
+  var rows = Array.prototype.filter.call(
+    (sec === 'main' ? document.querySelectorAll('tr[data-sec="main"][data-role="' + CSS.escape(role || '') + '"]') : document.querySelectorAll('tr[data-sec="' + sec + '"]')),
+    function(r) { return r.querySelector('.kc-name-cell[data-mid]'); }
+  );
+  var entries = rows.map(function(r, i) {
+    return { id: parseInt(r.querySelector('.kc-name-cell').dataset.mid), sort_order: (i + 1) * 10 };
+  });
+  if (entries.length === 0) return;
+  try {
+    var res = await fetch(API + '/members/batch', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ entries: entries })
+    });
+    if (!res.ok) throw new Error();
+    entries.forEach(function(en) {
+      var m = _allMembers.filter(function(x) { return x.id === en.id; })[0];
+      if (m) m.sort_order = en.sort_order;
+    });
+    showToast('並び順を保存しました');
+  } catch (e) {
+    alert('並び替えの保存に失敗しました。画面を最新の状態に更新します。');
+    location.reload();
+  }
+}
+
+// ===== ①②表の開閉（自分のブラウザだけ記憶）=====
+function toggleSubTable(sec) {
+  var body = sel('#' + sec + '-body');
+  var arrow = sel('#' + sec + '-arrow');
+  if (!body) return;
+  var collapsed = body.style.display !== 'none';
+  body.style.display = collapsed ? 'none' : '';
+  if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
+  try { localStorage.setItem('kancho_' + sec + '_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+}
+function _restoreSubTableState() {
+  ['s1', 's2'].forEach(function(sec) {
+    var body = sel('#' + sec + '-body');
+    if (!body) return;
+    var collapsed = false;
+    try { collapsed = localStorage.getItem('kancho_' + sec + '_collapsed') === '1'; } catch (e) {}
+    if (collapsed) {
+      body.style.display = 'none';
+      var arrow = sel('#' + sec + '-arrow');
+      if (arrow) arrow.textContent = '▶';
+    }
+  });
+}
+_restoreSubTableState();
 function cancelEdit() {
   var n = Object.keys(_pending).length;
   if (n > 0 && !confirm(n + '件の未保存変更を破棄しますか？')) return;
@@ -1250,6 +1428,228 @@ function _refreshWarningsBadge() {
   btn.textContent = total > 0 ? '⚠ 警告チェック（' + total + '件）' : '⚠ 警告チェック';
 }
 recalcAll();  // 全ての集計・警告バッジを初期描画（DEPT_COLOR_MAP等の定義後に実行する必要がある）
+
+// ===== 枠編集（役割・班色・並び順・当直禁忌ペア）=====
+function openSlots() {
+  renderSlots();
+  sel('#slots-modal').style.display = 'flex';
+}
+function renderSlots() {
+  var bySec = { main: [], s1: [], s2: [] };
+  _allMembers.forEach(function(m) { (bySec[m.section] || bySec.main).push(m); });
+  var html = '';
+  ['main', 's1', 's2'].forEach(function(secKey) {
+    var list = bySec[secKey];
+    if (list.length === 0 && secKey !== 'main') return;
+    html += '<tr><td colspan="8" style="background:#eff6ff;color:#1e3a5f;font-weight:700;font-size:11px;padding:4px 8px;">' + SLOT_SECTION_LABEL[secKey] + '</td></tr>';
+    html += list.slice().sort(function(a, b) { return a.sort_order - b.sort_order || a.id - b.id; }).map(function(m) {
+      var colorSel = '<select class="slot-color"' + (CAN_EDIT ? '' : ' disabled') + ' style="background:' + (m.team_color || 'white') + ';border:1px solid #d1d5db;border-radius:6px;padding:2px 5px;font-size:12.5px;">'
+        + SLOT_COLOR_OPTIONS.map(function(co) { return '<option value="' + co[0] + '"' + ((m.team_color || '') === co[0] ? ' selected' : '') + '>' + co[1] + '</option>'; }).join('')
+        + '</select>';
+      var occupant;
+      if (m.name === VACANT_LABEL) {
+        occupant = '<span style="color:#9ca3af;">' + escH(VACANT_LABEL) + '</span>';
+      } else {
+        var nameHtml = '<b>' + escH(m.name) + '</b>' + (m.emp_no ? '<span style="color:#9ca3af;"> (' + escH(m.emp_no) + ')</span>' : ' <span style="color:#dc2626;font-size:10px;">未紐付け</span>');
+        occupant = CAN_EDIT
+          ? '<span onclick="openEmployeeMatch(' + m.id + ')" style="cursor:pointer;border-bottom:1px dotted #93c5fd;" title="社員管理と照合">' + nameHtml + '</span>'
+          : nameHtml;
+      }
+      var dragHandle = CAN_EDIT ? '<span class="drag-handle" draggable="true" title="ドラッグで並び替え">⠿</span>' : '';
+      return '<tr style="' + (m.is_active ? '' : 'opacity:0.45;') + '" data-mid="' + m.id + '" data-section="' + secKey + '">'
+        + '<td style="padding:3px 6px;border-bottom:1px solid #f1f5f9;text-align:center;color:#9ca3af;">' + dragHandle + '</td>'
+        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + occupant + '</td>'
+        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="text" class="slot-role" list="slot-role-list"' + (CAN_EDIT ? '' : ' disabled') + ' value="' + escH(m.role || '') + '" style="width:100px;border:1px solid #d1d5db;border-radius:6px;padding:2px 6px;font-size:12.5px;"></td>'
+        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;"><select class="slot-section"' + (CAN_EDIT ? '' : ' disabled') + ' style="border:1px solid #d1d5db;border-radius:6px;padding:2px 5px;font-size:12.5px;">' + ['main','s1','s2'].map(function(s) { return '<option value="' + s + '"' + (m.section === s ? ' selected' : '') + '>' + SLOT_SECTION_LABEL[s] + '</option>'; }).join('') + '</select></td>'
+        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + colorSel + '</td>'
+        + '<td style="text-align:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="checkbox" class="slot-indoor"' + (CAN_EDIT ? '' : ' disabled') + (m.is_indoor ? ' checked' : '') + '></td>'
+        + '<td style="text-align:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="checkbox" class="slot-rookie"' + (CAN_EDIT ? '' : ' disabled') + (m.is_rookie ? ' checked' : '') + '></td>'
+        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + (CAN_EDIT ? '<button class="kchip-btn' + (m.is_active ? ' danger' : ' ok') + '" onclick="toggleSlot(' + m.id + ', ' + (m.is_active ? 0 : 1) + ')">' + (m.is_active ? '削除' : '復元') + '</button>' : '') + '</td>'
+        + '</tr>';
+    }).join('');
+  });
+  sel('#slots-body').innerHTML = html || '<tr><td colspan="8" style="color:#9ca3af;padding:12px;">枠がありません</td></tr>';
+  renderForbiddenPairs();
+  attachSlotDragHandlers();
+}
+var _slotDragSrc = null;
+function attachSlotDragHandlers() {
+  document.querySelectorAll('#slots-body .drag-handle').forEach(function(handle) {
+    handle.addEventListener('dragstart', function() {
+      _slotDragSrc = handle.closest('tr');
+    });
+  });
+  document.querySelectorAll('#slots-body tr[data-mid]').forEach(function(row) {
+    row.addEventListener('dragover', function(e) {
+      if (!_slotDragSrc || row === _slotDragSrc || row.dataset.section !== _slotDragSrc.dataset.section) return;
+      e.preventDefault();
+      var rect = row.getBoundingClientRect();
+      var before = (e.clientY - rect.top) / rect.height < 0.5;
+      row.parentNode.insertBefore(_slotDragSrc, before ? row : row.nextSibling);
+    });
+    row.addEventListener('drop', function(e) { e.preventDefault(); });
+  });
+}
+function renderForbiddenPairs() {
+  var mains = _allMembers.filter(function(m) { return m.section === 'main' && m.is_active === 1; });
+  var opts = mains.map(function(m) { return '<option value="' + m.id + '">' + escH(m.name) + '</option>'; }).join('');
+  sel('#new-fp-a').innerHTML = opts;
+  sel('#new-fp-b').innerHTML = opts;
+  var byId = {};
+  mains.forEach(function(m) { byId[m.id] = m.name; });
+  if (_forbiddenPairs.length === 0) {
+    sel('#fp-body').innerHTML = '<div style="color:#9ca3af;font-size:12px;">登録されている禁忌ペアはありません</div>';
+    return;
+  }
+  sel('#fp-body').innerHTML = _forbiddenPairs.map(function(p) {
+    var nameA = byId[p.member_id_a] || ('id:' + p.member_id_a);
+    var nameB = byId[p.member_id_b] || ('id:' + p.member_id_b);
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">'
+      + '<span><b>' + escH(nameA) + '</b> × <b>' + escH(nameB) + '</b>' + (p.reason ? '（' + escH(p.reason) + '）' : '') + '</span>'
+      + (CAN_EDIT ? '<button class="kchip-btn danger" onclick="deleteForbiddenPair(' + p.id + ')">削除</button>' : '')
+      + '</div>';
+  }).join('');
+}
+async function saveAllSlots() {
+  var btn = sel('#slots-save-btn');
+  var entries = [];
+  var counters = {};
+  document.querySelectorAll('#slots-body tr[data-mid]').forEach(function(row) {
+    var sec = row.dataset.section;
+    counters[sec] = (counters[sec] || 0) + 1;
+    entries.push({
+      id: parseInt(row.dataset.mid),
+      role: row.querySelector('.slot-role').value,
+      section: row.querySelector('.slot-section').value,
+      team_color: row.querySelector('.slot-color').value || null,
+      is_indoor: row.querySelector('.slot-indoor').checked ? 1 : 0,
+      is_rookie: row.querySelector('.slot-rookie').checked ? 1 : 0,
+      sort_order: counters[sec] * 10
+    });
+  });
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    var res = await fetch(API + '/members/batch', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ entries: entries })
+    });
+    var d = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(d.error || '保存に失敗しました');
+    if (d.error) alert(d.error);
+    location.reload();
+  } catch (e) {
+    alert(e.message || '保存に失敗しました');
+    btn.disabled = false; btn.textContent = '一括保存';
+  }
+}
+async function toggleSlot(id, active) {
+  if (!active && !confirm('この枠を一覧から外しますか？（過去のシフトは残ります）')) return;
+  var res = await fetch(API + '/members/' + id, {
+    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ is_active: active })
+  });
+  if (res.ok) location.reload();
+  else alert('変更に失敗しました');
+}
+async function addSlot() {
+  var body = {
+    name: VACANT_LABEL,
+    role: sel('#new-slot-role').value,
+    section: sel('#new-slot-section').value,
+    team_color: sel('#new-slot-color').value || null,
+    is_indoor: sel('#new-slot-indoor').checked ? 1 : 0,
+    is_rookie: sel('#new-slot-rookie').checked ? 1 : 0,
+    emp_no: null,
+    sort_order: 9999,
+    year: _year, month: _month
+  };
+  var res = await fetch(API + '/members', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if (res.ok) location.reload();
+  else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '追加に失敗しました'); }
+}
+async function addForbiddenPair() {
+  var a = parseInt(sel('#new-fp-a').value);
+  var b = parseInt(sel('#new-fp-b').value);
+  if (!a || !b || a === b) { alert('異なる2名を選んでください'); return; }
+  var res = await fetch(API + '/forbidden-pairs', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ member_id_a: a, member_id_b: b, reason: sel('#new-fp-reason').value })
+  });
+  if (res.ok) location.reload();
+  else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '追加に失敗しました'); }
+}
+async function deleteForbiddenPair(id) {
+  if (!confirm('この禁忌ペアを削除しますか？')) return;
+  var res = await fetch(API + '/forbidden-pairs/' + id, { method: 'DELETE' });
+  if (res.ok) location.reload();
+  else alert('削除に失敗しました');
+}
+
+// 社員管理との照合（枠編集の「現在の担当」名クリックで開く。未紐付け行の解消用）
+var _empMatchMid = null;
+async function openEmployeeMatch(mid) {
+  _empMatchMid = mid;
+  var m = _allMembers.filter(function(x) { return x.id === mid; })[0];
+  sel('#emp-match-name').textContent = 'シフト表の表示名: ' + (m ? m.name : '');
+  sel('#emp-match-current').style.display = 'none';
+  sel('#emp-match-body').innerHTML = '<div style="color:#9ca3af;font-size:12.5px;">読み込み中...</div>';
+  sel('#emp-match-modal').style.display = 'flex';
+  try {
+    var res = await fetch(API + '/members/' + mid + '/employee-match');
+    var d = await res.json();
+    if (d.current) {
+      sel('#emp-match-current').style.display = 'block';
+      sel('#emp-match-current').innerHTML = '現在の紐付け: <b>' + escH(d.current.name) + '</b>（番' + escH(d.current.emp_no) + '）' + (d.current.is_hanchyo ? '' : '<span style="color:#dc2626;"> ※班長未登録</span>');
+    }
+    var cands = d.candidates || [];
+    var html = '';
+    if (cands.length) {
+      html += '<div style="font-size:12px;color:#6b7280;margin-bottom:6px;">名前が近い社員（部分一致）</div>';
+      html += '<select id="emp-match-select" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;background:white;margin-bottom:8px;">'
+        + '<option value="">-- 選択してください --</option>'
+        + cands.map(function(e) { return '<option value="' + escH(e.emp_no) + '">' + escH(e.name) + '（番' + escH(e.emp_no) + '）' + (e.is_hanchyo ? '' : '　※班長未登録') + '</option>'; }).join('')
+        + '</select>';
+      html += '<button onclick="linkToEmployee()" style="width:100%;padding:9px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:14px;">この社員に紐付ける</button>';
+    } else {
+      html += '<div style="font-size:12px;color:#9ca3af;margin-bottom:14px;">一致する社員が見つかりませんでした</div>';
+    }
+    html += '<div style="border-top:1px solid #f1f5f9;padding-top:12px;">'
+      + '<div style="font-size:12px;color:#6b7280;margin-bottom:6px;">見つからない場合は社員管理に新規登録します</div>'
+      + '<input id="emp-reg-empno" type="text" placeholder="社員番号（8桁）" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;box-sizing:border-box;margin-bottom:6px;">'
+      + '<input id="emp-reg-name" type="text" value="' + escH(d.row_name || '') + '" placeholder="氏名（フルネーム）" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;box-sizing:border-box;margin-bottom:8px;">'
+      + '<button onclick="registerNewEmployee()" style="width:100%;padding:9px;background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">新規登録して紐付ける</button>'
+      + '</div>';
+    sel('#emp-match-body').innerHTML = html;
+  } catch (e) {
+    alert('読み込みに失敗しました');
+    closeEmployeeMatch();
+  }
+}
+function closeEmployeeMatch() {
+  sel('#emp-match-modal').style.display = 'none';
+  _empMatchMid = null;
+}
+async function linkToEmployee() {
+  var empNo = sel('#emp-match-select').value;
+  if (!empNo) { alert('社員を選んでください'); return; }
+  var res = await fetch(API + '/members/' + _empMatchMid + '/employee-link', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: empNo })
+  });
+  var d = await res.json().catch(function() { return {}; });
+  if (!res.ok) { alert(d.error || '紐付けに失敗しました'); return; }
+  location.reload();
+}
+async function registerNewEmployee() {
+  var empNo = sel('#emp-reg-empno').value.trim();
+  var name = sel('#emp-reg-name').value.trim();
+  if (!empNo || !name) { alert('社員番号・氏名の両方を入力してください'); return; }
+  var res = await fetch(API + '/members/' + _empMatchMid + '/employee-register', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: empNo, name: name })
+  });
+  var d = await res.json().catch(function() { return {}; });
+  if (!res.ok) { alert(d.error || '登録に失敗しました'); return; }
+  location.reload();
+}
 
 // ===== 記号管理 =====
 var TYPE_SECTION_LABEL = { main: '班長表', sub: '①②表', all: '両方' };

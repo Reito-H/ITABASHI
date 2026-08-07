@@ -46,7 +46,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
-  [/^\/settings\/kancho-slots/,         'settings.kancho-slots'],
   [/^\/settings\/kancho$/,              'settings.kancho'],
   [/^\/settings/,                       'settings'],
   // 設定配下のAPI
@@ -208,7 +207,6 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.tutorial',             label: 'チュートリアル' },
     { key: 'settings.status',               label: 'システムステータス' },
     { key: 'settings.kancho',               label: '班長関連（ハブ）' },
-    { key: 'settings.kancho-slots',         label: '枠設定（班長シフトの枠・当直禁忌ペア）' },
     { key: 'settings.kancho-roster',        label: '班長リスト（班長登録の解除のみ編集可）' },
     { key: 'settings.kancho-wish',          label: '希望休フォーム' },
   ]},

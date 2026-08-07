@@ -167,12 +167,11 @@ app.get('/kancho-shift', async (c) => {
     c.env.DB.prepare(
       `SELECT m.*,
          ${rowMatchSql('id')} AS prev_id,
-         ${rowMatchSql('name')} AS prev_name,
          ${rowMatchSql('id')} AS next_id
        FROM kancho_members m
        WHERE m.year = ? AND m.month = ? ORDER BY m.section, m.sort_order, m.id`
-    ).bind(prevYear, prevMonth, prevYear, prevMonth, nextYear, nextMonth, year, month)
-      .all<KanchoMember & { prev_id: number | null; prev_name: string | null; next_id: number | null }>(),
+    ).bind(prevYear, prevMonth, nextYear, nextMonth, year, month)
+      .all<KanchoMember & { prev_id: number | null; next_id: number | null }>(),
     c.env.DB.prepare('SELECT * FROM kancho_shift_types WHERE year = ? AND month = ? ORDER BY sort_order, id')
       .bind(year, month).all<KanchoShiftType>(),
     c.env.DB.prepare('SELECT member_id, date, code, is_diagonal, is_wish, cell_color, is_locked FROM kancho_shifts WHERE date BETWEEN ? AND ?')
