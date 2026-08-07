@@ -49,6 +49,7 @@ import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
 import adminRequestsRoutes from './routes/admin_requests';
 import adminCcListRoutes from './routes/admin_cc_list';
 import adminBenriRoutes from './routes/admin_benri';
+import adminNojicoRoutes from './routes/admin_nojico';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -93,6 +94,7 @@ app.use('*', async (c, next) => {
   const pathname = new URL(c.req.url).pathname;
   const isLiff = pathname.startsWith('/liff');
   const isForm = pathname.startsWith('/form');
+  const isNojicoPage = pathname === `/${SECRET}/admin/nojico`;
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   c.res.headers.set('Cache-Control', 'no-store');
@@ -113,8 +115,10 @@ app.use('*', async (c, next) => {
     c.res.headers.set('X-Frame-Options', 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    // nojicoページのみ、アプリ内ブラウザとして外部サイト(app.no-jico.com)をiframe表示できるようframe-srcを追加で許可する
+    const frameSrc = isNojicoPage ? ' frame-src https://app.no-jico.com;' : '';
     c.res.headers.set('Content-Security-Policy',
-      "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; frame-ancestors 'none';"
+      "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; frame-ancestors 'none';" + frameSrc
     );
   }
 });
@@ -183,7 +187,10 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // 編集（非GET）はルート側でフル権限アカウント（permissions IS NULL）かどうかを別途チェックする
   const isBenri = subPath.startsWith('/benri') || subPath.startsWith('/api/benri');
 
-  if (!isCcList && !isBenri && !isPathAllowed(perms, subPath, c.req.method)) {
+  // nojico: 外部サイトをアプリ内ブラウザで開くだけのページ。ページ権限は使わず全アカウント共通でアクセス可
+  const isNojico = subPath.startsWith('/nojico');
+
+  if (!isCcList && !isBenri && !isNojico && !isPathAllowed(perms, subPath, c.req.method)) {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
@@ -224,6 +231,7 @@ app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
 app.route(`/${SECRET}/admin`, adminCcListRoutes);
 app.route(`/${SECRET}/admin`, adminBenriRoutes);
+app.route(`/${SECRET}/admin`, adminNojicoRoutes);
 
 // =====================
 // API（認証必須）

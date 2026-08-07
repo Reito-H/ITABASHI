@@ -989,19 +989,14 @@ app.get('/settings', (c) => {
       // 4種の報告ページはタブで行き来できるため、入口カードは1枚に集約。
       // perm はスペース区切りで「いずれかの権限があれば表示」（filterHtmlByPermissions参照）
       { href: `${ADMIN}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos', title: '報告センター', desc: '忘れ物・事故・違反・一般報告・引き継ぎメモの履歴と対応状況をタブで管理', highlight: true },
+      { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄',       desc: 'ホシコンについての要望・意見・欲しい機能などを自由に投稿' },
     ]},
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
       { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINE連携',   desc: 'QRコード発行での新人・運行管理者等の登録・連携済みユーザー管理', highlight: true },
     ]},
     { heading: 'シフト関連の設定', cards: [
-      { href: `${ADMIN}/settings/schedule-types`, perm: 'settings.schedule-types', title: 'シフト区分',   desc: 'プリセットボタンの区分名・色・目標回数' },
-      { href: `${ADMIN}/settings/dia`,            perm: 'settings.dia',            title: '勤務ダイヤ・サイクル', desc: 'ダイヤマスター（勤務時間帯・指導基準）とサイクル一覧表の管理' },
-      { href: `${ADMIN}/settings/coaches`,        perm: 'settings.coaches',        title: '研修担当',     desc: 'シフト表の研修担当者（コーチ）一覧' },
-      { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
-      { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },
-      { href: `${ADMIN}/settings/benten`,         perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理' },
-      { href: `${ADMIN}/settings/kancho`,         perm: 'settings.kancho settings.kancho-roster settings.kancho-wish', title: '班長関連', desc: '班長リスト（社員番号・内勤）、希望休フォームの設定' },
+      { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', desc: 'シフト区分・勤務ダイヤ・研修担当・班長指導者・月度設定・ベンテンクラブ・班長関連 の一覧', highlight: true },
     ]},
     { heading: 'LINE関連', cards: [
       { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理',     desc: '新人招待コード発行・紐付け状況' },
@@ -1011,13 +1006,14 @@ app.get('/settings', (c) => {
     { heading: 'マスタ管理', cards: [
       { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所',              desc: '各営業所の電話番号・住所の管理' },
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
+      { href: `${ADMIN}/cc-list`,                  perm: '',                         title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
     ]},
     { heading: 'ガイド・システム', cards: [
       { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: '資料センター',       desc: 'マニュアルPDF・就業規則などの資料を保存・共有' },
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
       { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド',     desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
       { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・通信状態・利用統計・DB統計・アクセスQRコード' },
-      { href: `${ADMIN}/request-review`,                perm: 'settings.requests-admin',       title: '要望欄（収集一覧）', desc: 'サイドバー「要望欄」から寄せられた要望・意見の一覧（フル権限adminのみ）' },
+      { href: `${ADMIN}/request-review`,                perm: 'settings.requests-admin',       title: '要望欄（収集一覧）', desc: '設定ページ「要望欄」から寄せられた要望・意見の一覧（フル権限adminのみ）' },
     ]},
   ];
   const cardHtml = (card: SettingCard) => `
@@ -1051,6 +1047,30 @@ function settingsSubHeader(title: string): string {
     <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">${title}</h2>
   </div>`;
 }
+
+// ===== シフト関連の設定 ハブページ =====
+app.get('/settings/shift', (c) => {
+  const ADMIN = ADMIN_PATH;
+  type ShiftCard = { href: string; perm: string; title: string; desc: string };
+  const cards: ShiftCard[] = [
+    { href: `${ADMIN}/settings/schedule-types`, perm: 'settings.schedule-types', title: 'シフト区分',   desc: 'プリセットボタンの区分名・色・目標回数' },
+    { href: `${ADMIN}/settings/dia`,            perm: 'settings.dia',            title: '勤務ダイヤ・サイクル', desc: 'ダイヤマスター（勤務時間帯・指導基準）とサイクル一覧表の管理' },
+    { href: `${ADMIN}/settings/coaches`,        perm: 'settings.coaches',        title: '研修担当',     desc: 'シフト表の研修担当者（コーチ）一覧' },
+    { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
+    { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },
+    { href: `${ADMIN}/settings/benten`,         perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理' },
+    { href: `${ADMIN}/settings/kancho`,         perm: 'settings.kancho settings.kancho-roster settings.kancho-wish', title: '班長関連', desc: '班長リスト（社員番号・内勤）、希望休フォームの設定' },
+  ];
+  const html = settingsSubHeader('シフト関連の設定') + `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;max-width:820px;">
+      ${cards.map(card => `
+      <a href="${card.href}" data-perm-key="${card.perm}" style="display:block;background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;text-decoration:none;color:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="font-weight:700;color:#1e3a5f;margin-bottom:4px;">${card.title}</div>
+        <div style="font-size:12px;color:#6b7280;">${card.desc}</div>
+      </a>`).join('')}
+    </div>`;
+  return c.html(layout('シフト関連の設定', html, 'settings'));
+});
 
 // ===== シフト区分設定 =====
 app.get('/settings/schedule-types', async (c) => {
@@ -1959,6 +1979,7 @@ app.get('/settings/tutorial', (c) => {
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>報告センター</td><td>忘れ物・事故・違反・一般報告・引き継ぎメモをタブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
+      <tr><td>要望欄</td><td>ホシコンについての要望・意見・欲しい機能などを自由に投稿</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍権限・アカウント</p>
@@ -1969,6 +1990,7 @@ app.get('/settings/tutorial', (c) => {
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍シフト関連の設定</p>
+    <p style="font-size:13px;">「シフト関連の設定」カードを開くと、以下の項目が一覧で表示されます。</p>
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>シフト区分</td><td>実研・公休・座学などの区分名・背景色・月間目標回数を追加・編集</td></tr>
@@ -1992,6 +2014,7 @@ app.get('/settings/tutorial', (c) => {
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>営業所</td><td>各営業所・連絡先の電話番号・住所（車両検索の結果にも表示される）</td></tr>
       <tr><td>違反種類・点数/反則金</td><td>違反報告フォームの選択肢と点数・反則金の管理</td></tr>
+      <tr><td>CC名簿</td><td>クレーム客の記録台帳。開くたびに専用パスワードの入力が必要</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍ガイド・システム</p>
@@ -2001,7 +2024,7 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>チュートリアル</td><td>このマニュアル（印刷・PDF出力対応）</td></tr>
       <tr><td>車番検索ガイド</td><td>班長・指導者向けLINE車番検索の使い方ページ（印刷・配布用）</td></tr>
       <tr><td>システムステータス</td><td>サーバー・DB・APIの稼働状態確認、利用統計・DB統計、管理画面アクセスQRコードの表示・ダウンロード。フル権限adminはメンテナンスモードのON/OFFもここから行えます</td></tr>
-      <tr><td>要望欄（収集一覧）</td><td>サイドバー「要望欄」から寄せられた要望・意見の一覧（フル権限adminのみ）</td></tr>
+      <tr><td>要望欄（収集一覧）</td><td>設定ページ「要望欄」から寄せられた要望・意見の一覧（フル権限adminのみ）</td></tr>
     </table>
     <div class="tut-note">車番検索の権限は、本人がLINEで「車番連携」と送信して自己申請する方式です（管理画面からの手動登録は廃止）。</div>
     <div class="tut-warn">メンテナンスモードをONにすると、LINE Botの応答も含め全ユーザーにメンテナンス中の画面が表示されます。作業前後の切り忘れに注意してください。</div>

@@ -30,6 +30,9 @@ async function adminName(c: { env: Env; get: (k: 'adminId') => number }): Promis
 // ===== ページ =====
 app.get('/cc-list', async (c) => {
   const content = `
+    <div class="no-print" style="margin-bottom:20px;">
+      <a href="${ADMIN_PATH}/settings" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 設定に戻る</a>
+    </div>
     <div style="max-width:1100px;">
       <div id="cc-gate" style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:40px 24px;text-align:center;max-width:360px;margin:60px auto;">
         <div style="font-size:32px;margin-bottom:10px;">🔒</div>
@@ -227,7 +230,7 @@ app.get('/cc-list', async (c) => {
     }
     </script>
   `;
-  return c.html(layout('CC名簿', content, 'cc-list'));
+  return c.html(layout('CC名簿', content, 'settings'));
 });
 
 // ===== API（すべて X-CC-Password ヘッダー必須） =====

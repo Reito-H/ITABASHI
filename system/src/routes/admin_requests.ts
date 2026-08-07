@@ -1,5 +1,5 @@
 // 要望欄
-// /requests        : サイドバーから誰でもアクセス可（要望の投稿・自分の投稿履歴）
+// /requests        : 設定ページ「日々の運用」（報告センターの一個下）からアクセス（要望の投稿・自分の投稿履歴）
 // /request-review  : 収集した要望の一覧（フル権限adminのみ・permissions.tsのPATH_PERMISSIONSに未掲載のため
 //                     制限付きアカウントは403。設定ページのカードもdata-perm-key="settings.requests-admin"で
 //                     どの権限キーにも該当しないため制限付きアカウントの一覧からは自動的に消える。admin_line_usage.tsと同じ手法）
@@ -33,7 +33,7 @@ app.get('/requests', async (c) => {
   ).bind(adminId).all<RequestRow>();
   const mine = rows.results ?? [];
 
-  const html = `
+  const html = settingsSubHeader('要望欄') + `
     <div style="max-width:640px;">
       <p style="font-size:13px;color:#6b7280;margin:0 0 18px;">ホシコンについての要望・意見・欲しい機能などを自由に記入してください。内容は管理者に届きます。</p>
 
@@ -108,7 +108,7 @@ app.get('/requests', async (c) => {
     renderMine();
     </script>`;
 
-  return c.html(layout('要望欄', html, 'requests'));
+  return c.html(layout('要望欄', html, 'settings'));
 });
 
 // ===== 収集一覧（フル権限adminのみ） =====
@@ -118,7 +118,7 @@ app.get('/request-review', async (c) => {
 
   const html = settingsSubHeader('要望欄（収集一覧）') + `
     <div style="max-width:820px;">
-      <p style="font-size:13px;color:#6b7280;margin:0 0 14px;">サイドバー「要望欄」から寄せられた要望・意見の一覧です。</p>
+      <p style="font-size:13px;color:#6b7280;margin:0 0 14px;">設定ページ「要望欄」から寄せられた要望・意見の一覧です。</p>
       <div id="req-list" style="display:flex;flex-direction:column;gap:10px;"></div>
     </div>
 

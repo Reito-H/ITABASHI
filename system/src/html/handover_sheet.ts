@@ -1488,7 +1488,20 @@ window.addEventListener('pagehide', () => { flushPendingSaves(); });
 
 renderTabs();
 loadSections().then(() => { loadFontSizes(); loadDates(); });
-setInterval(checkStaleVersion, 15000);
+// 終日開きっぱなし運用が前提の画面のため、タブが非表示の間はポーリングを止めて復帰時に即チェックする（メモリ・通信量対策）
+let _staleInterval = null;
+function startStalePolling(){
+  if (_staleInterval) return;
+  _staleInterval = setInterval(checkStaleVersion, 15000);
+}
+function stopStalePolling(){
+  if (_staleInterval) { clearInterval(_staleInterval); _staleInterval = null; }
+}
+startStalePolling();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopStalePolling(); }
+  else { checkStaleVersion(); startStalePolling(); }
+});
 })();
 </script>
 `;

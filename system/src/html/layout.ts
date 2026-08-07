@@ -40,7 +40,6 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/vehicles`,     label: '車両検索',        id: 'vehicles' },
     { href: `${ADMIN_PATH}/inspection`,   label: '点検管理',        id: 'inspection' },
     { href: `${ADMIN_PATH}/announcements`, label: 'お知らせ配信',   id: 'announcements' },
-    { href: `${ADMIN_PATH}/requests`,     label: '要望欄',          id: 'requests' },
     { href: `${ADMIN_PATH}/settings`,     label: '設定',            id: 'settings' },
   ];
 
@@ -202,9 +201,9 @@ export function layout(title: string, content: string, activePage: string = '', 
       <a href="${ADMIN_PATH}/benri" class="nav-item${activePage === 'benri' ? ' active' : ''}" onclick="closeSidebar()">
         便利
       </a>
-      <!-- CC名簿: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。ページを開くたびに専用パスワードを要求する -->
-      <a href="${ADMIN_PATH}/cc-list" class="nav-item${activePage === 'cc-list' ? ' active' : ''}" onclick="closeSidebar()">
-        CC
+      <!-- nojico: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。外部サイトをアプリ内ブラウザ（iframe）で表示するだけ -->
+      <a href="${ADMIN_PATH}/nojico" class="nav-item${activePage === 'nojico' ? ' active' : ''}" onclick="closeSidebar()">
+        nojico
       </a>
     </nav>
     <div style="padding:12px 0;border-top:1px solid rgba(255,255,255,0.1);">
@@ -240,11 +239,12 @@ export function layout(title: string, content: string, activePage: string = '', 
 
   ${showReportFab ? `
   <div id="report-fab-wrap" style="position:fixed;right:20px;bottom:20px;z-index:60;">
-    <div id="report-fab-menu" style="display:none;position:absolute;bottom:64px;right:0;background:white;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.22);min-width:170px;overflow:hidden;border:1px solid #e5e7eb;">
-      <a href="javascript:void(0)" onclick="openQrModal('lost');return false;" data-perm-key="settings.lost-items" style="display:block;padding:12px 16px;font-size:13px;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">忘れ物報告</a>
-      <a href="javascript:void(0)" onclick="openQrModal('accident');return false;" data-perm-key="settings.accidents" style="display:block;padding:12px 16px;font-size:13px;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">事故報告</a>
-      <a href="javascript:void(0)" onclick="openQrModal('violation');return false;" data-perm-key="settings.violations" style="display:block;padding:12px 16px;font-size:13px;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">違反報告</a>
-      <a href="javascript:void(0)" onclick="openQrModal('general');return false;" data-perm-key="settings.general-reports" style="display:block;padding:12px 16px;font-size:13px;color:#1e3a5f;text-decoration:none;">一般報告</a>
+    <div id="report-fab-menu" style="display:none;position:absolute;bottom:66px;right:0;background:white;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.22);min-width:220px;overflow:hidden;border:1px solid #e5e7eb;">
+      <a href="javascript:void(0)" onclick="openQrModal('lost');return false;" data-perm-key="settings.lost-items" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">忘れ物報告</a>
+      <a href="javascript:void(0)" onclick="openQrModal('accident');return false;" data-perm-key="settings.accidents" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">事故報告</a>
+      <a href="javascript:void(0)" onclick="openQrModal('violation');return false;" data-perm-key="settings.violations" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">違反報告</a>
+      <a href="javascript:void(0)" onclick="openQrModal('general');return false;" data-perm-key="settings.general-reports" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">一般報告</a>
+      <a href="javascript:void(0)" onclick="createHandoverMemoFromFab();return false;" data-perm-key="settings.handover-memos" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;">引き継ぎメモ</a>
     </div>
     <button id="report-fab-btn" onclick="toggleReportFab()" aria-label="新規報告" title="新規報告"
       style="width:54px;height:54px;border-radius:50%;background:#1e3a5f;color:#fff;border:none;box-shadow:0 4px 14px rgba(0,0,0,0.3);font-size:26px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;">＋</button>
@@ -273,7 +273,7 @@ export function layout(title: string, content: string, activePage: string = '', 
       if (elm) elm.textContent = s;
     }
     updateTime();
-    setInterval(updateTime, 60000);
+    var _timeInterval = setInterval(updateTime, 60000);
 
     function escLimitText(s) {
       return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -305,12 +305,44 @@ export function layout(title: string, content: string, activePage: string = '', 
       try { await fetch('${ADMIN_PATH}/api/limits/' + id + '/dismiss', { method: 'POST' }); } catch (e) {}
       checkLimits();
     }
-    checkLimits();
-    setInterval(checkLimits, 20000);
+    var _limitsInterval = null;
+    function startLimitsPolling() {
+      if (_limitsInterval) return;
+      checkLimits();
+      _limitsInterval = setInterval(checkLimits, 20000);
+    }
+    function stopLimitsPolling() {
+      if (_limitsInterval) { clearInterval(_limitsInterval); _limitsInterval = null; }
+    }
+    startLimitsPolling();
+    // タブが非表示の間はポーリングを止め、復帰時に即再開・即時反映する（長時間開きっぱなし運用でのメモリ増加対策）
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        stopLimitsPolling();
+        clearInterval(_timeInterval);
+      } else {
+        updateTime();
+        _timeInterval = setInterval(updateTime, 60000);
+        startLimitsPolling();
+      }
+    });
 
     function toggleReportFab() {
       const menu = document.getElementById('report-fab-menu');
       if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+    }
+    function createHandoverMemoFromFab() {
+      const menu = document.getElementById('report-fab-menu');
+      if (menu) menu.style.display = 'none';
+      fetch('${ADMIN_PATH}/api/handover-memos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) { location.href = '${ADMIN_PATH}/settings/handover-memos/' + data.id; }
+        else { alert('作成に失敗しました'); }
+      })
+      .catch(function() { alert('通信エラーが発生しました'); });
     }
     document.addEventListener('click', function (e) {
       const wrap = document.getElementById('report-fab-wrap');

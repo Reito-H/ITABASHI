@@ -1782,187 +1782,190 @@ app.get('/settings/general-reports', async (c) => {
 
 // ===================================================
 // 引き継ぎメモ（報告センターの5つ目のタブ）
-//   何でも自由に書けるセル形式（Excel風グリッド）のメモ。LINEからは投稿できず、管理画面でのみ作成・編集する。
-//   grid_data は { rows, cols, cells: { "r,c": { v, sz, c, bg, b } } } のJSON文字列で保存する
+//   ワード風の自由記述メモ帳（contenteditable）。LINEからは投稿できず、管理画面でのみ作成・編集する。
+//   grid_data列（歴史的な列名）に編集後のHTML本文をそのまま文字列で保存する
 // ===================================================
 
-const MEMO_DEFAULT_ROWS = 30;
-const MEMO_DEFAULT_COLS = 10;
-const MEMO_MAX_ROWS = 300;
-const MEMO_MAX_COLS = 40;
-
-type MemoCell = { v?: string; sz?: number; c?: string; bg?: string; b?: number };
-type MemoGrid = { rows: number; cols: number; cells: Record<string, MemoCell> };
-
-function parseMemoGrid(raw: string): MemoGrid {
-  try {
-    const g = JSON.parse(raw);
-    const rows = Number.isInteger(g.rows) ? Math.min(Math.max(g.rows, 1), MEMO_MAX_ROWS) : MEMO_DEFAULT_ROWS;
-    const cols = Number.isInteger(g.cols) ? Math.min(Math.max(g.cols, 1), MEMO_MAX_COLS) : MEMO_DEFAULT_COLS;
-    return { rows, cols, cells: (g.cells && typeof g.cells === 'object') ? g.cells : {} };
-  } catch {
-    return { rows: MEMO_DEFAULT_ROWS, cols: MEMO_DEFAULT_COLS, cells: {} };
-  }
+function sanitizeMemoContent(raw: unknown): string {
+  return typeof raw === 'string' ? raw : '';
 }
 
-// 引き継ぎメモ 編集画面ツールバー・グリッドの共通スクリプト
-function memoEditorScript(id: number, grid: MemoGrid): string {
+// 引き継ぎメモ 編集画面ツールバー・本文エディタの共通スクリプト
+function memoEditorScript(id: number, content: string): string {
   return `
     var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
     var MEMO_ID = ${id};
-    var GRID = ${safeJson(grid)};
-    var dirty = false, mouseDown = false;
-    var anchorR = 0, anchorC = 0, curR = 0, curC = 0;
+    var dirty = false;
     var PRESET_COLORS = ['#111827','#dc2626','#2563eb','#059669','#d97706','#7c3aed','#6b7280'];
-    var PRESET_BGS = ['#ffffff','#fef3c7','#fee2e2','#dbeafe','#dcfce7','#ede9fe','#f3f4f6'];
+    var PRESET_BGS = ['#fef3c7','#fee2e2','#dbeafe','#dcfce7','#ede9fe','#f3f4f6'];
 
-    function cellKey(r, c) { return r + ',' + c; }
-    function ensureCell(r, c) {
-      var k = cellKey(r, c);
-      if (!GRID.cells[k]) GRID.cells[k] = {};
-      return GRID.cells[k];
+    var editor = document.getElementById('memo-editor');
+    var initialMemoContent = ${safeJson(content)};
+    if (initialMemoContent) {
+      editor.innerHTML = initialMemoContent;
+    } else {
+      var memoStartedAt = new Date().toLocaleString('ja-JP', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      editor.innerHTML = '<p style="color:#9ca3af;font-size:13px;">開始: ' + memoStartedAt + '</p><p><br></p>';
     }
-    function pruneCell(r, c) {
-      var k = cellKey(r, c), d = GRID.cells[k];
-      if (d && !d.v && !d.sz && !d.c && !d.bg && !d.b) delete GRID.cells[k];
-    }
+    editor.addEventListener('input', function() { markDirty(); });
+
     function markDirty() { dirty = true; }
-
-    function colLabel(c) {
-      var s = ''; c++;
-      while (c > 0) {
-        var m = (c - 1) % 26;
-        s = String.fromCharCode(65 + m) + s;
-        c = Math.floor((c - 1) / 26);
-      }
-      return s;
+    function focusEditor() { editor.focus(); }
+    function escMemo(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
     }
 
-    function buildGrid() {
-      var table = document.getElementById('memo-grid');
-      table.innerHTML = '';
-      var thead = document.createElement('tr');
-      thead.appendChild(document.createElement('th'));
-      for (var c = 0; c < GRID.cols; c++) {
-        var th = document.createElement('th');
-        th.textContent = colLabel(c);
-        th.style.cssText = 'min-width:110px;padding:4px;font-size:11px;color:#9ca3af;background:#f9fafb;border:1px solid #e5e7eb;position:sticky;top:0;';
-        thead.appendChild(th);
-      }
-      table.appendChild(thead);
-      for (var r = 0; r < GRID.rows; r++) {
-        var tr = document.createElement('tr');
-        var rh = document.createElement('th');
-        rh.textContent = String(r + 1);
-        rh.style.cssText = 'padding:4px 8px;font-size:11px;color:#9ca3af;background:#f9fafb;border:1px solid #e5e7eb;position:sticky;left:0;';
-        tr.appendChild(rh);
-        for (var c2 = 0; c2 < GRID.cols; c2++) {
-          var td = document.createElement('td');
-          td.style.cssText = 'border:1px solid #e5e7eb;padding:0;';
-          var input = document.createElement('input');
-          input.type = 'text';
-          input.dataset.r = r; input.dataset.c = c2;
-          var d = GRID.cells[cellKey(r, c2)] || {};
-          input.value = d.v || '';
-          input.style.cssText = 'border:none;outline:none;padding:4px 6px;box-sizing:border-box;width:110px;height:30px;'
-            + 'font-size:' + (d.sz || 14) + 'px;color:' + (d.c || '#111827') + ';font-weight:' + (d.b ? '700' : '400') + ';background:' + (d.bg || '#ffffff') + ';';
-          input.addEventListener('input', onCellInput);
-          input.addEventListener('mousedown', onCellMouseDown);
-          input.addEventListener('mouseover', onCellMouseOver);
-          input.addEventListener('focus', onCellFocus);
-          td.appendChild(input);
-          tr.appendChild(td);
-        }
-        table.appendChild(tr);
+    var memoSavedRange = null;
+    function saveMemoSelection() {
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
+        memoSavedRange = sel.getRangeAt(0).cloneRange();
       }
     }
+    editor.addEventListener('mouseup', saveMemoSelection);
+    editor.addEventListener('keyup', saveMemoSelection);
+    editor.addEventListener('blur', saveMemoSelection);
 
-    function onCellInput() {
-      var r = parseInt(this.dataset.r), c = parseInt(this.dataset.c);
-      var v = this.value;
-      if (v) { ensureCell(r, c).v = v; }
-      else if (GRID.cells[cellKey(r, c)]) { delete GRID.cells[cellKey(r, c)].v; pruneCell(r, c); }
+    function insertTextIntoMemo(text) {
+      editor.focus();
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      if (memoSavedRange && editor.contains(memoSavedRange.startContainer)) {
+        sel.addRange(memoSavedRange);
+      } else {
+        var r = document.createRange();
+        r.selectNodeContents(editor);
+        r.collapse(false);
+        sel.addRange(r);
+      }
+      document.execCommand('insertText', false, text);
+      saveMemoSelection();
       markDirty();
-    }
-    function onCellMouseDown() {
-      mouseDown = true;
-      anchorR = curR = parseInt(this.dataset.r);
-      anchorC = curC = parseInt(this.dataset.c);
-      updateSelection();
-    }
-    function onCellMouseOver() {
-      if (!mouseDown) return;
-      curR = parseInt(this.dataset.r); curC = parseInt(this.dataset.c);
-      updateSelection();
-    }
-    function onCellFocus() {
-      if (mouseDown) return;
-      anchorR = curR = parseInt(this.dataset.r);
-      anchorC = curC = parseInt(this.dataset.c);
-      updateSelection();
-    }
-    function updateSelection() {
-      var r0 = Math.min(anchorR, curR), r1 = Math.max(anchorR, curR);
-      var c0 = Math.min(anchorC, curC), c1 = Math.max(anchorC, curC);
-      document.querySelectorAll('#memo-grid input').forEach(function(inp) {
-        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
-        inp.style.boxShadow = (r >= r0 && r <= r1 && c >= c0 && c <= c1) ? 'inset 0 0 0 2px #2563eb' : 'none';
-      });
-    }
-    function selectedInputs() {
-      var r0 = Math.min(anchorR, curR), r1 = Math.max(anchorR, curR);
-      var c0 = Math.min(anchorC, curC), c1 = Math.max(anchorC, curC);
-      return Array.prototype.filter.call(document.querySelectorAll('#memo-grid input'), function(inp) {
-        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
-        return r >= r0 && r <= r1 && c >= c0 && c <= c1;
-      });
     }
 
-    function applySize(sz) {
-      sz = parseInt(sz);
-      selectedInputs().forEach(function(inp) {
-        ensureCell(parseInt(inp.dataset.r), parseInt(inp.dataset.c)).sz = sz;
-        inp.style.fontSize = sz + 'px';
-      });
-      markDirty();
+    var memoEmpSearchTimer = null;
+    var memoCarSearchTimer = null;
+    var memoLastCarResults = [];
+    var memoLastEmpResults = [];
+
+    function memoCarSearchDebounce() {
+      clearTimeout(memoCarSearchTimer);
+      memoCarSearchTimer = setTimeout(memoDoCarSearch, 300);
     }
-    function applyColor(color) {
-      selectedInputs().forEach(function(inp) {
-        ensureCell(parseInt(inp.dataset.r), parseInt(inp.dataset.c)).c = color;
-        inp.style.color = color;
-      });
-      markDirty();
+    function memoDoCarSearch() {
+      var q = document.getElementById('memo-car-search').value.trim();
+      var sug = document.getElementById('memo-car-suggestions');
+      if (!q) { sug.style.display = 'none'; return; }
+      fetch(ADMIN_PATH + '/api/handover-memos/employee-by-car?car_no=' + encodeURIComponent(q))
+        .then(function(r) { return r.json(); })
+        .then(function(data) { memoRenderCarSuggestions(data && data.results, q); })
+        .catch(function() { sug.style.display = 'none'; });
     }
-    function applyBg(color) {
-      selectedInputs().forEach(function(inp) {
-        ensureCell(parseInt(inp.dataset.r), parseInt(inp.dataset.c)).bg = color;
-        inp.style.background = color;
-      });
+    function memoRenderCarSuggestions(list, carNo) {
+      memoLastCarResults = list || [];
+      var sug = document.getElementById('memo-car-suggestions');
+      if (!memoLastCarResults.length) { sug.style.display = 'none'; return; }
+      sug.innerHTML = memoLastCarResults.map(function(e, i) {
+        var div = e.division ? e.division + '課' : '';
+        var team = e.team ? e.team + '班' : '';
+        return '<div class="memo-search-item" data-idx="' + i + '">'
+          + '<div>' + escMemo(e.name) + '（車番' + escMemo(carNo) + '）</div>'
+          + '<div class="memo-search-meta">' + escMemo(div + team) + ' / ' + escMemo(e.emp_no) + '</div></div>';
+      }).join('');
+      sug.style.display = 'block';
+    }
+
+    function memoEmpSearchDebounce() {
+      clearTimeout(memoEmpSearchTimer);
+      memoEmpSearchTimer = setTimeout(memoDoEmpSearch, 300);
+    }
+    function memoDoEmpSearch() {
+      var q = document.getElementById('memo-emp-search').value.trim();
+      var sug = document.getElementById('memo-emp-suggestions');
+      if (!q) { sug.style.display = 'none'; return; }
+      fetch(ADMIN_PATH + '/api/handover-memos/employee-search?q=' + encodeURIComponent(q))
+        .then(function(r) { return r.json(); })
+        .then(function(data) { memoRenderEmpSuggestions(data && data.results); })
+        .catch(function() { sug.style.display = 'none'; });
+    }
+    function memoRenderEmpSuggestions(list) {
+      memoLastEmpResults = list || [];
+      var sug = document.getElementById('memo-emp-suggestions');
+      if (!memoLastEmpResults.length) { sug.style.display = 'none'; return; }
+      sug.innerHTML = memoLastEmpResults.map(function(e, i) {
+        var div = e.division ? e.division + '課' : '';
+        var team = e.team ? e.team + '班' : '';
+        var car = e.car_no ? '（車番' + escMemo(e.car_no) + '）' : '';
+        return '<div class="memo-search-item" data-idx="' + i + '">'
+          + '<div>' + escMemo(e.name) + car + '</div>'
+          + '<div class="memo-search-meta">' + escMemo(div + team) + ' / ' + escMemo(e.emp_no) + '</div></div>';
+      }).join('');
+      sug.style.display = 'block';
+    }
+
+    function memoInsertEmp(e, carNo) {
+      var text = carNo ? (carNo + ' ' + e.name) : e.name;
+      insertTextIntoMemo(text);
+      document.getElementById('memo-car-suggestions').style.display = 'none';
+      document.getElementById('memo-emp-suggestions').style.display = 'none';
+      document.getElementById('memo-car-search').value = '';
+      document.getElementById('memo-emp-search').value = '';
+    }
+
+    document.getElementById('memo-car-suggestions').addEventListener('click', function(e) {
+      var item = e.target.closest('.memo-search-item');
+      if (!item) return;
+      var r = memoLastCarResults[parseInt(item.getAttribute('data-idx'), 10)];
+      if (r) memoInsertEmp(r, document.getElementById('memo-car-search').value.trim());
+    });
+    document.getElementById('memo-emp-suggestions').addEventListener('click', function(e) {
+      var item = e.target.closest('.memo-search-item');
+      if (!item) return;
+      var r = memoLastEmpResults[parseInt(item.getAttribute('data-idx'), 10)];
+      if (r) memoInsertEmp(r, r.car_no);
+    });
+    document.addEventListener('click', function(e) {
+      var carSug = document.getElementById('memo-car-suggestions');
+      var carInput = document.getElementById('memo-car-search');
+      if (carSug && carInput && !carInput.contains(e.target) && !carSug.contains(e.target)) carSug.style.display = 'none';
+      var empSug = document.getElementById('memo-emp-suggestions');
+      var empInput = document.getElementById('memo-emp-search');
+      if (empSug && empInput && !empInput.contains(e.target) && !empSug.contains(e.target)) empSug.style.display = 'none';
+    });
+
+    function applyFormatBlock(tag) {
+      focusEditor();
+      document.execCommand('formatBlock', false, tag);
       markDirty();
     }
     function toggleBold() {
-      var inputs = selectedInputs();
-      if (inputs.length === 0) return;
-      var makeBold = inputs[0].style.fontWeight !== '700';
-      inputs.forEach(function(inp) {
-        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
-        inp.style.fontWeight = makeBold ? '700' : '400';
-        if (makeBold) { ensureCell(r, c).b = 1; }
-        else { var d = GRID.cells[cellKey(r, c)]; if (d) delete d.b; pruneCell(r, c); }
-      });
+      focusEditor();
+      document.execCommand('bold', false, null);
+      markDirty();
+    }
+    function toggleList() {
+      focusEditor();
+      document.execCommand('insertUnorderedList', false, null);
+      markDirty();
+    }
+    function applyColor(color) {
+      focusEditor();
+      document.execCommand('foreColor', false, color);
+      markDirty();
+    }
+    function applyBg(color) {
+      focusEditor();
+      document.execCommand('hiliteColor', false, color) || document.execCommand('backColor', false, color);
       markDirty();
     }
     function clearFormat() {
-      selectedInputs().forEach(function(inp) {
-        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
-        var k = cellKey(r, c);
-        var v = (GRID.cells[k] && GRID.cells[k].v) || '';
-        if (v) { GRID.cells[k] = { v: v }; } else { delete GRID.cells[k]; }
-        inp.style.fontSize = '14px'; inp.style.color = '#111827'; inp.style.background = '#ffffff'; inp.style.fontWeight = '400';
-      });
+      focusEditor();
+      document.execCommand('removeFormat', false, null);
+      document.execCommand('formatBlock', false, 'p');
       markDirty();
     }
-    function addRows() { GRID.rows += 10; buildGrid(); markDirty(); }
 
     function buildSwatches(containerId, colors, applyFn) {
       var el = document.getElementById(containerId);
@@ -1971,7 +1974,7 @@ function memoEditorScript(id: number, grid: MemoGrid): string {
         btn.type = 'button';
         btn.title = col;
         btn.style.cssText = 'width:20px;height:20px;border-radius:4px;border:1px solid #d1d5db;background:' + col + ';cursor:pointer;padding:0;';
-        btn.onclick = function() { applyFn(col); };
+        btn.onmousedown = function(e) { e.preventDefault(); applyFn(col); };
         el.appendChild(btn);
       });
     }
@@ -1979,7 +1982,7 @@ function memoEditorScript(id: number, grid: MemoGrid): string {
     function saveMemo() {
       var btn = document.getElementById('memo-save-btn');
       btn.disabled = true;
-      var payload = { title: document.getElementById('memo-title').value.trim() || '無題のメモ', grid_data: JSON.stringify(GRID) };
+      var payload = { title: document.getElementById('memo-title').value.trim() || '無題のメモ', content: editor.innerHTML };
       fetch(ADMIN_PATH + '/api/handover-memos/' + MEMO_ID, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       })
@@ -1992,16 +1995,49 @@ function memoEditorScript(id: number, grid: MemoGrid): string {
       .catch(function() { btn.disabled = false; alert('通信エラーが発生しました'); });
     }
 
+    async function copyMemoContent() {
+      var html = editor.innerHTML;
+      var plain = editor.innerText;
+      var btn = document.getElementById('memo-copy-btn');
+      try {
+        if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+          await navigator.clipboard.write([new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([plain], { type: 'text/plain' }),
+          })]);
+        } else {
+          await navigator.clipboard.writeText(plain);
+        }
+        var orig = btn.textContent;
+        btn.textContent = 'コピーしました';
+        btn.disabled = true;
+        setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1500);
+      } catch (e) {
+        alert('コピーに失敗しました（ブラウザの設定をご確認ください）');
+      }
+    }
+
+    function saveMemoAsImage() {
+      if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
+      html2canvas(editor, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+        var title = document.getElementById('memo-title').value.trim() || '無題のメモ';
+        var link = document.createElement('a');
+        link.download = title + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      }).catch(function() {
+        alert('画像の生成に失敗しました');
+      });
+    }
+
     window.addEventListener('beforeunload', function(e) {
       if (!dirty) return;
       e.preventDefault();
       e.returnValue = '';
     });
-    document.addEventListener('mouseup', function() { mouseDown = false; });
 
     buildSwatches('tb-color-swatches', PRESET_COLORS, applyColor);
     buildSwatches('tb-bg-swatches', PRESET_BGS, applyBg);
-    buildGrid();
   `;
 }
 
@@ -2094,7 +2130,7 @@ app.get('/settings/handover-memos/:id', async (c) => {
   }>();
   if (!memo) return c.text('メモが見つかりません', 404);
 
-  const grid = parseMemoGrid(memo.grid_data);
+  const memoContent = sanitizeMemoContent(memo.grid_data);
 
   const content = `
     ${subHeader('報告センター')}
@@ -2109,35 +2145,57 @@ app.get('/settings/handover-memos/:id', async (c) => {
       最終更新: ${escHtml(memo.updated_by_admin ?? '—')}（${escHtml(memo.updated_at.slice(0, 16))}）
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
-      <button type="button" onclick="toggleBold()" title="太字" style="width:32px;height:32px;font-weight:700;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">B</button>
-      <select onchange="applySize(this.value)" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px;">
-        <option value="12">12px</option>
-        <option value="14" selected>14px</option>
-        <option value="16">16px</option>
-        <option value="18">18px</option>
-        <option value="20">20px</option>
-        <option value="24">24px</option>
-        <option value="28">28px</option>
-        <option value="32">32px</option>
+      <select onchange="applyFormatBlock(this.value)" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px;">
+        <option value="p">本文</option>
+        <option value="h2">見出し1</option>
+        <option value="h3">見出し2</option>
       </select>
+      <button type="button" onclick="toggleBold()" title="太字" style="width:32px;height:32px;font-weight:700;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">B</button>
+      <button type="button" onclick="toggleList()" title="箇条書き" style="padding:5px 10px;font-size:13px;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">• 箇条書き</button>
       <span style="font-size:12px;color:#6b7280;">文字色</span>
       <div id="tb-color-swatches" style="display:flex;gap:4px;"></div>
       <input type="color" onchange="applyColor(this.value)" value="#111827" title="文字色を選ぶ" style="width:28px;height:28px;padding:0;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
-      <span style="font-size:12px;color:#6b7280;margin-left:8px;">背景色</span>
+      <span style="font-size:12px;color:#6b7280;margin-left:8px;">マーカー</span>
       <div id="tb-bg-swatches" style="display:flex;gap:4px;"></div>
-      <input type="color" onchange="applyBg(this.value)" value="#ffffff" title="背景色を選ぶ" style="width:28px;height:28px;padding:0;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
+      <input type="color" onchange="applyBg(this.value)" value="#fef3c7" title="マーカー色を選ぶ" style="width:28px;height:28px;padding:0;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
       <button type="button" onclick="clearFormat()" style="padding:5px 10px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">書式クリア</button>
-      <button type="button" onclick="addRows()" style="padding:5px 10px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">＋10行</button>
       <div style="flex:1;"></div>
+      <button type="button" onclick="copyMemoContent()" id="memo-copy-btn" style="padding:7px 14px;background:white;color:#1e3a5f;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">コピー</button>
+      <button type="button" onclick="saveMemoAsImage()" style="padding:7px 14px;background:white;color:#1e3a5f;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">画像保存</button>
       <button type="button" onclick="saveMemo()" id="memo-save-btn" style="padding:7px 18px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">保存</button>
     </div>
-    <div style="overflow:auto;max-height:70vh;border:1px solid #e5e7eb;border-radius:8px;background:white;">
-      <table id="memo-grid" style="border-collapse:collapse;"></table>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+      <div style="position:relative;">
+        <label style="display:block;font-size:11px;color:#6b7280;margin-bottom:3px;">車番から乗務員を検索</label>
+        <input type="text" id="memo-car-search" placeholder="例: 5232" inputmode="numeric" autocomplete="off" oninput="memoCarSearchDebounce()"
+          style="width:130px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <div id="memo-car-suggestions" class="memo-search-suggestions"></div>
+      </div>
+      <div style="position:relative;">
+        <label style="display:block;font-size:11px;color:#6b7280;margin-bottom:3px;">乗務員名で検索</label>
+        <input type="text" id="memo-emp-search" placeholder="氏名・社員番号で検索" autocomplete="off" oninput="memoEmpSearchDebounce()"
+          style="width:200px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
+        <div id="memo-emp-suggestions" class="memo-search-suggestions"></div>
+      </div>
+      <div style="font-size:11px;color:#9ca3af;padding-bottom:7px;">候補をクリックするとカーソル位置にメモへ挿入されます</div>
     </div>
+    <div id="memo-editor" contenteditable="true" style="min-height:60vh;padding:24px 28px;border:1px solid #e5e7eb;border-radius:8px;background:white;font-size:15px;line-height:1.9;color:#111827;outline:none;"></div>
+    <style>
+      #memo-editor h2 { font-size: 22px; font-weight: 800; color: #1e3a5f; margin: 0.6em 0 0.3em; }
+      #memo-editor h3 { font-size: 18px; font-weight: 700; color: #1e3a5f; margin: 0.6em 0 0.3em; }
+      #memo-editor p { margin: 0 0 0.6em; }
+      #memo-editor ul { margin: 0 0 0.6em; padding-left: 1.4em; }
+      .memo-search-suggestions { display:none; position:absolute; top:100%; left:0; min-width:220px; background:white; border:1px solid #d1d5db; border-radius:6px; z-index:20; box-shadow:0 4px 12px rgba(0,0,0,0.12); max-height:220px; overflow-y:auto; margin-top:2px; }
+      .memo-search-item { padding:8px 10px; font-size:13px; cursor:pointer; border-bottom:1px solid #f3f4f6; }
+      .memo-search-item:last-child { border-bottom:none; }
+      .memo-search-item:hover { background:#f0f9ff; }
+      .memo-search-meta { font-size:11px; color:#6b7280; }
+    </style>
     ${saveToastHtml()}
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script>
     ${saveToastScript()}
-    ${memoEditorScript(id, grid)}
+    ${memoEditorScript(id, memoContent)}
     </script>
   `;
 
@@ -2148,11 +2206,10 @@ app.post('/api/handover-memos', async (c) => {
   const adminName = await getAdminName(c);
   const body = await c.req.json<{ title?: string }>().catch(() => ({} as { title?: string }));
   const title = (body.title ?? '').trim() || '無題のメモ';
-  const grid: MemoGrid = { rows: MEMO_DEFAULT_ROWS, cols: MEMO_DEFAULT_COLS, cells: {} };
 
   const result = await c.env.DB.prepare(
     'INSERT INTO handover_memos (title, grid_data, created_by_admin, updated_by_admin) VALUES (?, ?, ?, ?)'
-  ).bind(title, JSON.stringify(grid), adminName, adminName).run();
+  ).bind(title, '', adminName, adminName).run();
   const id = result.meta.last_row_id as number;
 
   await logReportAction(c.env.DB, 'handover_memo', id, 'created', adminName, title);
@@ -2166,13 +2223,13 @@ app.put('/api/handover-memos/:id', async (c) => {
   if (!exists) return c.json({ error: 'not found' }, 404);
 
   const adminName = await getAdminName(c);
-  const body = await c.req.json<{ title?: string; grid_data?: string }>();
+  const body = await c.req.json<{ title?: string; content?: string }>();
   const title = (body.title ?? '').trim() || '無題のメモ';
-  const grid = parseMemoGrid(body.grid_data ?? '{}');
+  const memoContent = sanitizeMemoContent(body.content);
 
   await c.env.DB.prepare(
     "UPDATE handover_memos SET title = ?, grid_data = ?, updated_by_admin = ?, updated_at = datetime('now','localtime') WHERE id = ?"
-  ).bind(title, JSON.stringify(grid), adminName, id).run();
+  ).bind(title, memoContent, adminName, id).run();
   return c.json({ ok: true });
 });
 
@@ -2186,6 +2243,29 @@ app.delete('/api/handover-memos/:id', async (c) => {
   await c.env.DB.prepare('DELETE FROM handover_memos WHERE id = ?').bind(id).run();
   await logReportAction(c.env.DB, 'handover_memo', id, 'deleted', adminName, row.title);
   return c.json({ ok: true });
+});
+
+// 引き継ぎメモ編集画面の乗務員検索（氏名・社員番号 / 車番）。本文への挿入用に car_no も返す
+app.get('/api/handover-memos/employee-search', async (c) => {
+  const q = (c.req.query('q') ?? '').trim();
+  if (!q) return c.json({ results: [] });
+  const like = `%${q}%`;
+  const results = await c.env.DB.prepare(
+    `SELECT id, emp_no, name, division, team, car_no FROM employees
+     WHERE is_active = 1 AND (name LIKE ? OR emp_no LIKE ?)
+     ORDER BY name LIMIT 20`
+  ).bind(like, like).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null; car_no: string | null }>();
+  return c.json({ results: results.results ?? [] });
+});
+app.get('/api/handover-memos/employee-by-car', async (c) => {
+  const carNo = (c.req.query('car_no') ?? '').trim();
+  if (!carNo) return c.json({ results: [] });
+  const results = await c.env.DB.prepare(
+    `SELECT id, emp_no, name, division, team, car_no FROM employees
+     WHERE is_active = 1 AND car_no = ?
+     ORDER BY name LIMIT 10`
+  ).bind(carNo).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null; car_no: string | null }>();
+  return c.json({ results: results.results ?? [] });
 });
 
 // ===================================================
