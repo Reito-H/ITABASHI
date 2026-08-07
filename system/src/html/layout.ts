@@ -39,7 +39,6 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/staff`,        label: '社員管理',        id: 'staff' },
     { href: `${ADMIN_PATH}/vehicles`,     label: '車両検索',        id: 'vehicles' },
     { href: `${ADMIN_PATH}/inspection`,   label: '点検管理',        id: 'inspection' },
-    { href: `${ADMIN_PATH}/announcements`, label: 'お知らせ配信',   id: 'announcements' },
     { href: `${ADMIN_PATH}/settings`,     label: '設定',            id: 'settings' },
   ];
 
@@ -197,10 +196,6 @@ export function layout(title: string, content: string, activePage: string = '', 
           ${escHtml(item.label)}
         </a>
       `).join('')}
-      <!-- 便利: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。編集はフル権限アカウントのみ（ページ側で判定） -->
-      <a href="${ADMIN_PATH}/benri" class="nav-item${activePage === 'benri' ? ' active' : ''}" onclick="closeSidebar()">
-        便利
-      </a>
       <!-- nojico: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。外部サイトをアプリ内ブラウザ（iframe）で表示するだけ -->
       <a href="${ADMIN_PATH}/nojico" class="nav-item${activePage === 'nojico' ? ' active' : ''}" onclick="closeSidebar()">
         nojico

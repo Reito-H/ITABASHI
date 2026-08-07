@@ -538,6 +538,19 @@ app.put('/api/kancho/types/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// 記号の削除（月度ごとに独立データのため、この月度からのみ削除される）
+app.delete('/api/kancho/types/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  const old = await c.env.DB.prepare('SELECT * FROM kancho_shift_types WHERE id = ?').bind(id).first<KanchoShiftType>();
+  if (!old) return c.json({ error: '記号が見つかりません' }, 404);
+  const { id: adminId, name } = await adminName(c);
+  await c.env.DB.prepare('DELETE FROM kancho_shift_types WHERE id = ?').bind(id).run();
+  await c.env.DB.prepare(
+    'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, old_value) VALUES (?, ?, ?, ?, ?)'
+  ).bind(adminId, name, 'type', old.code, `${old.year}年${old.month}月度から削除`).run();
+  return c.json({ ok: true });
+});
+
 // 記号の一括保存
 app.post('/api/kancho/types/batch', async (c) => {
   const body = await c.req.json<{ entries: Array<{ id: number; code?: string; label?: string; color?: string; section?: string; daily_required?: number; sort_order?: number; use_team_color?: number; counts_as_work?: number; counts_as_off?: number; show_in_input?: number }> }>();

@@ -8,6 +8,7 @@ import { Hono } from 'hono';
 import { layout, escHtml, safeJson, saveToastHtml, saveToastScript } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { getAdminPermissions } from '../permissions';
+import { settingsSubHeader } from './admin';
 import type { Env } from '../auth';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -51,9 +52,8 @@ app.get('/benri', (c) => {
   const cards: Card[] = [
     { href: `${ADMIN_PATH}/benri/highway`, title: '高速料金・距離控除表', desc: '距離控除一覧（IC間距離）と高速道路帰路会社負担路線一覧' },
   ];
-  const html = `
+  const html = settingsSubHeader('便利') + `
     <div style="max-width:560px;">
-      <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">便利</h2>
       <p style="font-size:12px;color:#6b7280;margin-bottom:20px;">よく使う資料・ツールをここにまとめていきます。閲覧はどのアカウントでも可能です。</p>
       <div style="display:flex;flex-direction:column;gap:12px;">
         ${cards.map(card => `
@@ -67,7 +67,7 @@ app.get('/benri', (c) => {
           </a>`).join('')}
       </div>
     </div>`;
-  return c.html(layout('便利', html, 'benri'));
+  return c.html(layout('便利', html, 'settings'));
 });
 
 // ===== 距離控除表・高速料金表（タブ） =====
@@ -608,7 +608,7 @@ app.get('/benri/highway', async (c) => {
       else alert('保存に失敗しました');
     }
     </script>`;
-  return c.html(layout('高速料金・距離控除表', html, 'benri'));
+  return c.html(layout('高速料金・距離控除表', html, 'settings'));
 });
 
 // ===== API: 距離控除表 =====

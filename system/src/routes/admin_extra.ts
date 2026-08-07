@@ -9,6 +9,7 @@ import type { Env } from '../auth';
 import type { SalesSummary, DailySale } from '../html/sales';
 import type { InterviewRecord } from './api/interviews';
 import { ROLE_LABELS, ROLE_COLORS } from './admin_liff';
+import { settingsSubHeader } from './admin';
 import { getTantoshaShiftMap, tantoshaShiftLabel, isItabashi } from '../utils/tantosha_lookup';
 import type { TantoshaShift } from '../utils/tantosha_lookup';
 
@@ -1314,7 +1315,7 @@ filterLiff();
 updateCount();
 </script>
 `;
-  return c.html(layout('お知らせ配信', content, 'announcements'));
+  return c.html(layout('お知らせ配信', settingsSubHeader('お知らせ配信') + content, 'settings'));
 });
 
 // =====================

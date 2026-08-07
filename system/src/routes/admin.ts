@@ -992,6 +992,7 @@ app.get('/settings', (c) => {
       // perm はスペース区切りで「いずれかの権限があれば表示」（filterHtmlByPermissions参照）
       { href: `${ADMIN}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos', title: '報告センター', desc: '忘れ物・事故・違反・一般報告・引き継ぎメモの履歴と対応状況をタブで管理', highlight: true },
       { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄',       desc: 'ホシコンについての要望・意見・欲しい機能などを自由に投稿' },
+      { href: `${ADMIN}/benri`,            perm: '',               title: '便利',         desc: '距離控除表・高速料金表・会社負担マップなど（どのアカウントでも閲覧可能）' },
     ]},
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
@@ -1002,6 +1003,7 @@ app.get('/settings', (c) => {
     ]},
     { heading: 'LINE関連', cards: [
       { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理',     desc: '新人招待コード発行・紐付け状況' },
+      { href: `${ADMIN}/announcements`,          perm: 'announcements',         title: 'お知らせ配信', desc: '全員・入社月・個別指定・LINE連携者への一斉配信とアンケート' },
       { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定', desc: '朝レポート・報告アラート・ベンテン/班長通知の時刻とON/OFF' },
       { href: `${ADMIN}/usage`,                  perm: 'settings.line-usage',    title: 'LINE利用状況', desc: 'トーク・LIFF操作のユーザー別利用集計（フル権限adminのみ）' },
     ]},
@@ -1043,7 +1045,7 @@ app.get('/settings', (c) => {
 });
 
 // ===== 設定サブページ共通ヘッダー =====
-function settingsSubHeader(title: string): string {
+export function settingsSubHeader(title: string): string {
   return `<div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
     <a href="${ADMIN_PATH}/settings" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 設定に戻る</a>
     <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">${title}</h2>

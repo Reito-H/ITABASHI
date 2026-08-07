@@ -492,11 +492,16 @@ export function kanchoShiftPage(
 <div id="types-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
   <div class="kmodal-box" style="max-width:960px;">
     <div class="kmodal-header">
-      <h3>シフト記号管理 <span style="font-size:12px;font-weight:400;color:#6b7280;">（${year}年${month}月度）</span></h3>
+      <h3>シフト記号管理</h3>
       <button class="kmodal-close" onclick="sel('#types-modal').style.display='none'">✕</button>
     </div>
+    <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 8px;">
+      <button class="btn-nav-sm" onclick="gotoTypesMonth(-1)">◀</button>
+      <span style="font-size:13px;font-weight:700;color:#1e3a5f;white-space:nowrap;">${year}年${month}月度</span>
+      <button class="btn-nav-sm" onclick="gotoTypesMonth(1)">▶</button>
+    </div>
     <div class="kmodal-hint">
-      班色=セル背景に本人の班色を使う（直・遅・早）。出勤/公休=右端の出勤数・公休数カウントに含める。必要人数=日別チェック行（当直・遅日勤など）。
+      班色=セル背景に本人の班色を使う（直・遅・早）。出勤/公休=右端の出勤数・公休数カウントに含める。必要人数=日別チェック行（当直・遅日勤など）。記号一覧は月度ごとに独立しているため、削除してもこの月度以外には影響しません。
     </div>
     <div class="kmodal-scroll">
       <div class="ktable-wrap">
@@ -1666,7 +1671,10 @@ function openTypes() {
       + '<td style="text-align:center;"><input type="checkbox" class="type-off"' + (t.counts_as_off ? ' checked' : '') + '></td>'
       + '<td style="text-align:center;"><input type="checkbox" class="type-input"' + (t.show_in_input ? ' checked' : '') + '></td>'
       + '<td><input type="number" class="type-sort" value="' + t.sort_order + '" style="width:48px;"></td>'
-      + '<td><button class="kchip-btn' + (t.is_active ? ' danger' : ' ok') + '" onclick="toggleType(' + t.id + ', ' + (t.is_active ? 0 : 1) + ')">' + (t.is_active ? '無効' : '有効') + '</button></td>'
+      + '<td style="display:flex;gap:4px;white-space:nowrap;">'
+      + '<button class="kchip-btn' + (t.is_active ? ' danger' : ' ok') + '" onclick="toggleType(' + t.id + ', ' + (t.is_active ? 0 : 1) + ')">' + (t.is_active ? '無効' : '有効') + '</button>'
+      + '<button class="kchip-btn danger" onclick="deleteType(' + t.id + ', \\'' + escH(t.code) + '\\')">削除</button>'
+      + '</td>'
       + '</tr>';
   }).join('');
   sel('#types-modal').style.display = 'flex';
@@ -1709,6 +1717,17 @@ async function toggleType(id, active) {
   });
   if (res.ok) location.reload();
   else alert('変更に失敗しました');
+}
+async function deleteType(id, code) {
+  if (!confirm('記号「' + code + '」を' + _year + '年' + _month + '月度から削除します。よろしいですか？（既に入力済みのセルの表示自体はそのまま残ります）')) return;
+  var res = await fetch(API + '/types/' + id, { method: 'DELETE' });
+  if (res.ok) location.reload();
+  else { var d = await res.json().catch(function() { return {}; }); alert(d.error || '削除に失敗しました'); }
+}
+function gotoTypesMonth(diff) {
+  var y = _year, m = _month + diff;
+  if (m < 1) { m = 12; y--; } else if (m > 12) { m = 1; y++; }
+  location.href = location.pathname + '?year=' + y + '&month=' + m + '&openTypes=1';
 }
 async function addType() {
   var body = {
@@ -1954,6 +1973,8 @@ async function saveMemos() {
     btn.disabled = false; btn.textContent = 'メモを保存';
   }
 }
+
+if (new URLSearchParams(location.search).get('openTypes') === '1') openTypes();
 </script>`;
 }
 
