@@ -365,7 +365,7 @@ app.get('/', async (c) => {
   const quickHtml = quickLinks.map(q =>
     `<a href="${q.href}" data-nav-id="${q.nav}" class="hm-quick">${escHtml(q.label)}</a>`
   ).join('') +
-    `<a href="${ADMIN_PATH}/settings/reports" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports" class="hm-quick">報告センター</a>`;
+    `<a href="${ADMIN_PATH}/settings/reports" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos" class="hm-quick">報告センター</a>`;
 
   // ===== 分析グラフ（縦棒: 直近6ヶ月） =====
   const monthLabel = (ym: string) => `${parseInt(ym.slice(5, 7))}月`;
@@ -988,7 +988,7 @@ app.get('/settings', (c) => {
     { heading: '日々の運用', cards: [
       // 4種の報告ページはタブで行き来できるため、入口カードは1枚に集約。
       // perm はスペース区切りで「いずれかの権限があれば表示」（filterHtmlByPermissions参照）
-      { href: `${ADMIN}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports', title: '報告センター', desc: '忘れ物・事故・違反・一般報告の履歴と対応状況をタブで管理', highlight: true },
+      { href: `${ADMIN}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos', title: '報告センター', desc: '忘れ物・事故・違反・一般報告・引き継ぎメモの履歴と対応状況をタブで管理', highlight: true },
     ]},
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
@@ -1703,7 +1703,7 @@ app.get('/settings/tutorial', (c) => {
     <a href="#staff-search" data-perm-key="staff">1-14. 社員絞り込み検索 — 条件を組み合わせた検索</a>
     <a href="#inspection" data-perm-key="inspection">1-15. 点検管理 — 車両点検スケジュール</a>
     <a href="#document-center" data-perm-key="settings.documents">1-16. 資料センター — マニュアル・就業規則の保管</a>
-    <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">1-17. 報告センター — 忘れ物・事故・違反・一般報告</a>
+    <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">1-17. 報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</a>
     <a href="#benten-shift" data-perm-key="settings.benten">1-18. ベンテンクラブ シフト</a>
     <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
     <a href="#handover" data-perm-key="handover">1-20. 引き継ぎシート — 課の申し送り事項</a>
@@ -1958,7 +1958,7 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍日々の運用</p>
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
-      <tr><td>報告センター</td><td>忘れ物・事故・違反・一般報告をタブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
+      <tr><td>報告センター</td><td>忘れ物・事故・違反・一般報告・引き継ぎメモをタブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍権限・アカウント</p>
@@ -2064,13 +2064,18 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-17 報告センター -->
-  <div class="tut-section" id="report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">
-    <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反・一般報告</h3>
-    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF「報告」）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告タブ）で確認・管理します。</p>
+  <div class="tut-section" id="report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">
+    <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</h3>
+    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF「報告」）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告/引き継ぎメモタブ）で確認・管理します。</p>
     <ol class="tut-steps">
       <li>設定 → 「忘れ物報告」「事故報告」「違反報告」「一般報告」のいずれかを開く（上部タブで切り替え）</li>
       <li>「対応中」「解決済」ボタンで絞り込み</li>
       <li>対応が終わったら「解決済にする」— ログイン中のアカウント名と日時が「対応者」列に自動で記録されます</li>
+    </ol>
+    <p style="font-size:13px;margin-top:10px;">「引き継ぎメモ」タブは、忘れ物・事故等のような定型項目を持たず、Excel風のセル単位で自由に文字を入力できるメモです。LINEからは投稿できず、管理画面のみで作成・編集します。</p>
+    <ol class="tut-steps">
+      <li>「＋ 新規メモを作成」でメモを作り、セルをクリック（ドラッグで複数選択も可）してツールバーから文字サイズ・文字色・背景色・太字を設定</li>
+      <li>タイトルを入力し「保存」を押すと、作成者・最終更新者・更新日時が自動で記録されます</li>
     </ol>
     <table class="tut-table">
       <tr><th>列</th><th>内容</th></tr>

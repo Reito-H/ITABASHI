@@ -175,8 +175,8 @@ app.get('/kancho-shift', async (c) => {
       .all<KanchoMember & { prev_id: number | null; prev_name: string | null; next_id: number | null }>(),
     c.env.DB.prepare('SELECT * FROM kancho_shift_types WHERE year = ? AND month = ? ORDER BY sort_order, id')
       .bind(year, month).all<KanchoShiftType>(),
-    c.env.DB.prepare('SELECT member_id, date, code, is_diagonal, is_wish, cell_color FROM kancho_shifts WHERE date BETWEEN ? AND ?')
-      .bind(dispStart, dispEnd).all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null }>(),
+    c.env.DB.prepare('SELECT member_id, date, code, is_diagonal, is_wish, cell_color, is_locked FROM kancho_shifts WHERE date BETWEEN ? AND ?')
+      .bind(dispStart, dispEnd).all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null; is_locked: number }>(),
     c.env.DB.prepare('SELECT * FROM kancho_memos WHERE year = ? AND month = ? ORDER BY kind, sort_order, id')
       .bind(year, month).all<KanchoMemo>(),
     c.env.DB.prepare('SELECT id, member_id, date, note FROM kancho_wishes WHERE date BETWEEN ? AND ? ORDER BY date')
@@ -190,7 +190,7 @@ app.get('/kancho-shift', async (c) => {
 
   const shiftMap: Record<string, KanchoCell> = {};
   for (const s of (shifts.results ?? [])) {
-    shiftMap[`${s.member_id}_${s.date}`] = { code: s.code, dg: s.is_diagonal, ws: s.is_wish, cl: s.cell_color };
+    shiftMap[`${s.member_id}_${s.date}`] = { code: s.code, dg: s.is_diagonal, ws: s.is_wish, cl: s.cell_color, lk: s.is_locked };
   }
 
   // 月またぎのグレー表示日は名簿IDが月度ごとに別なので、行一致した前月度/次月度のIDから
@@ -242,15 +242,15 @@ app.get('/kancho-shift/print', async (c) => {
       .bind(year, month).all<KanchoMember>(),
     c.env.DB.prepare('SELECT * FROM kancho_shift_types WHERE year = ? AND month = ? ORDER BY sort_order, id')
       .bind(year, month).all<KanchoShiftType>(),
-    c.env.DB.prepare('SELECT member_id, date, code, is_diagonal, is_wish, cell_color FROM kancho_shifts WHERE date BETWEEN ? AND ?')
-      .bind(periodStart, periodEnd).all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null }>(),
+    c.env.DB.prepare('SELECT member_id, date, code, is_diagonal, is_wish, cell_color, is_locked FROM kancho_shifts WHERE date BETWEEN ? AND ?')
+      .bind(periodStart, periodEnd).all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null; is_locked: number }>(),
     c.env.DB.prepare('SELECT * FROM kancho_memos WHERE year = ? AND month = ? ORDER BY kind, sort_order, id')
       .bind(year, month).all<KanchoMemo>(),
   ]);
 
   const shiftMap: Record<string, KanchoCell> = {};
   for (const s of (shifts.results ?? [])) {
-    shiftMap[`${s.member_id}_${s.date}`] = { code: s.code, dg: s.is_diagonal, ws: s.is_wish, cl: s.cell_color };
+    shiftMap[`${s.member_id}_${s.date}`] = { code: s.code, dg: s.is_diagonal, ws: s.is_wish, cl: s.cell_color, lk: s.is_locked };
   }
 
   return c.html(kanchoPrintPage(
@@ -260,14 +260,14 @@ app.get('/kancho-shift/print', async (c) => {
 });
 
 // ===== API: シフト一括保存 =====
-// 履歴用のセル値表記（例: 直(斜め)(希望休)[#ff99cc]）
-function cellLabel(code: string, dg: number, ws: number, cl: string | null): string {
-  if (!code && !dg && !ws && !cl) return '';
-  return `${code}${dg ? '(斜め)' : ''}${ws ? '(希望休)' : ''}${cl ? `[${cl}]` : ''}`;
+// 履歴用のセル値表記（例: 直(斜め)(希望休)[#ff99cc](確定)）
+function cellLabel(code: string, dg: number, ws: number, cl: string | null, lk: number): string {
+  if (!code && !dg && !ws && !cl && !lk) return '';
+  return `${code}${dg ? '(斜め)' : ''}${ws ? '(希望休)' : ''}${cl ? `[${cl}]` : ''}${lk ? '(確定)' : ''}`;
 }
 
 app.post('/api/kancho/shifts/batch', async (c) => {
-  const body = await c.req.json<{ entries: Array<{ member_id: number; date: string; code: string | null; is_diagonal?: number; is_wish?: number; cell_color?: string | null }> }>();
+  const body = await c.req.json<{ entries: Array<{ member_id: number; date: string; code: string | null; is_diagonal?: number; is_wish?: number; cell_color?: string | null; is_locked?: number }> }>();
   const entries = body.entries ?? [];
   if (entries.length === 0) return c.json({ ok: true, saved: 0 });
   if (entries.length > 500) return c.json({ error: '一度に保存できるのは500件までです' }, 400);
@@ -279,27 +279,39 @@ app.post('/api/kancho/shifts/batch', async (c) => {
   const memberNames = new Map((memberRows.results ?? []).map(m => [m.id, m.name]));
 
   let saved = 0;
+  let blocked = 0;
   for (const e of entries) {
     if (!e.member_id || !/^\d{4}-\d{2}-\d{2}$/.test(e.date ?? '')) continue;
     const code = (e.code ?? '').trim();
     const dg = e.is_diagonal ? 1 : 0;
     const ws = e.is_wish ? 1 : 0;
     const cl = (e.cell_color && /^#[0-9a-fA-F]{6}$/.test(e.cell_color)) ? e.cell_color.toLowerCase() : null;
-    const old = await c.env.DB.prepare('SELECT code, is_diagonal, is_wish, cell_color FROM kancho_shifts WHERE member_id = ? AND date = ?')
-      .bind(e.member_id, e.date).first<{ code: string; is_diagonal: number; is_wish: number; cell_color: string | null }>();
-    const oldLabel = old ? cellLabel(old.code, old.is_diagonal, old.is_wish, old.cell_color) : '';
-    const newLabel = cellLabel(code, dg, ws, cl);
+    const old = await c.env.DB.prepare('SELECT code, is_diagonal, is_wish, cell_color, is_locked FROM kancho_shifts WHERE member_id = ? AND date = ?')
+      .bind(e.member_id, e.date).first<{ code: string; is_diagonal: number; is_wish: number; cell_color: string | null; is_locked: number }>();
+    const oldLocked = old?.is_locked ?? 0;
+    // is_locked省略時は現状維持（コピペ編集・希望休自動反映など、ロックを意識しない書き込み経路のため）
+    const lk = typeof e.is_locked === 'number' ? (e.is_locked ? 1 : 0) : oldLocked;
+    const contentChanged = !old
+      ? !!(code || dg || ws || cl)
+      : (old.code !== code || old.is_diagonal !== dg || old.is_wish !== ws || old.cell_color !== cl);
+    // 確定（ロック）中のセルは、ロックを外さない限り内容変更をブロック（誤操作防止）
+    if (oldLocked === 1 && lk === 1 && contentChanged) {
+      blocked++;
+      continue;
+    }
+    const oldLabel = old ? cellLabel(old.code, old.is_diagonal, old.is_wish, old.cell_color, oldLocked) : '';
+    const newLabel = cellLabel(code, dg, ws, cl, lk);
     if (oldLabel === newLabel) continue;
 
     const stmts = [];
-    if (code === '' && !dg && !ws && !cl) {
-      // 完全な空（色上書きもなし）は行ごと削除 = 自動表示（班色出勤）に戻る
+    if (code === '' && !dg && !ws && !cl && !lk) {
+      // 完全な空（色上書き・確定もなし）は行ごと削除 = 自動表示（班色出勤）に戻る
       stmts.push(c.env.DB.prepare('DELETE FROM kancho_shifts WHERE member_id = ? AND date = ?').bind(e.member_id, e.date));
     } else {
       stmts.push(c.env.DB.prepare(
-        `INSERT INTO kancho_shifts (member_id, date, code, is_diagonal, is_wish, cell_color, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, datetime('now','localtime'), ?)
-         ON CONFLICT(member_id, date) DO UPDATE SET code = excluded.code, is_diagonal = excluded.is_diagonal, is_wish = excluded.is_wish, cell_color = excluded.cell_color, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
-      ).bind(e.member_id, e.date, code, dg, ws, cl, name));
+        `INSERT INTO kancho_shifts (member_id, date, code, is_diagonal, is_wish, cell_color, is_locked, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now','localtime'), ?)
+         ON CONFLICT(member_id, date) DO UPDATE SET code = excluded.code, is_diagonal = excluded.is_diagonal, is_wish = excluded.is_wish, cell_color = excluded.cell_color, is_locked = excluded.is_locked, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
+      ).bind(e.member_id, e.date, code, dg, ws, cl, lk, name));
     }
     stmts.push(c.env.DB.prepare(
       'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, date, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -307,7 +319,7 @@ app.post('/api/kancho/shifts/batch', async (c) => {
     await c.env.DB.batch(stmts);
     saved++;
   }
-  return c.json({ ok: true, saved });
+  return c.json({ ok: true, saved, blocked });
 });
 
 // ===== API: 編集履歴 =====

@@ -47,7 +47,11 @@ export type KanchoCell = {
   dg: number;               // 斜め直（斜体）
   ws: number;               // 希望休の反映（赤文字）
   cl: string | null;        // セル個別色
+  lk?: number;              // 確定（ロック）。解除するまで内容編集をブロック
 };
+
+// ロック済みセルの枠線色（確定マーク）
+const LOCK_BORDER = '#f59e0b';
 
 export type KanchoMemo = {
   id: number;
@@ -209,10 +213,11 @@ export function kanchoShiftPage(
     const inPeriod = d >= periodStart && d <= periodEnd;
     const bg = cellBg(s, m, inPeriod, colorMap, teamColorCodes);
     const hasWish = wishSet.has(`${m.id}_${d}`);
+    const locked = !!s?.lk;
     return `<td class="kc" data-member="${m.id}" data-date="${d}" data-name="${escHtml(m.name)}" data-sec="${secGroup}"
-      data-code="${escHtml(s?.code ?? '')}" data-dg="${s?.dg ?? 0}" data-ws="${s?.ws ?? 0}" data-cl="${s?.cl ?? ''}"
+      data-code="${escHtml(s?.code ?? '')}" data-dg="${s?.dg ?? 0}" data-ws="${s?.ws ?? 0}" data-cl="${s?.cl ?? ''}" data-lk="${locked ? 1 : 0}"
       data-tc="${m.team_color ?? ''}" data-inp="${inPeriod ? 1 : 0}"${hasWish ? ' data-wish="1"' : ''}
-      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}">${cellContent(s)}</td>`;
+      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${locked ? `box-shadow:inset 0 0 0 2px ${LOCK_BORDER};` : ''}${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}">${cellContent(s)}</td>`;
   }
 
   // 前任者と名前が違う場合は「旧名→新名」表示（月をまたいだ入れ替わりを表から分かるように）
@@ -368,7 +373,7 @@ export function kanchoShiftPage(
     ).join('')}
   </div>
   <div style="font-size:11px;color:#6b7280;margin-bottom:10px;">
-    色マス（記号なし）＝早日勤 7:30〜16:30 ／ 白マス＝未入力 ／ <span style="display:inline-block;transform:skewX(-14deg);">直</span>（斜体）＝斜め直 14:00〜翌8:00 ／ 終業班長 3:00〜12:00 ／ <span style="color:#dc2626;font-weight:700;">赤文字</span>＝希望休の反映
+    色マス（記号なし）＝早日勤 7:30〜16:30 ／ 白マス＝未入力 ／ <span style="display:inline-block;transform:skewX(-14deg);">直</span>（斜体）＝斜め直 14:00〜翌8:00 ／ 終業班長 3:00〜12:00 ／ <span style="color:#dc2626;font-weight:700;">赤文字</span>＝希望休の反映 ／ <span style="display:inline-block;box-shadow:inset 0 0 0 2px ${LOCK_BORDER};padding:0 4px;">枠線</span>＝確定（ロック）済み
   </div>
 
   <div style="overflow-x:auto;overflow-y:auto;max-height:70vh;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
@@ -399,6 +404,11 @@ export function kanchoShiftPage(
       </div>
       <button onclick="closeCellModal()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;padding:0 4px;line-height:1;">✕</button>
     </div>
+    <div id="modal-lock-banner" style="display:none;background:#fffbeb;border:1px solid ${LOCK_BORDER};border-radius:6px;padding:8px 10px;margin-bottom:10px;font-size:12px;color:#92400e;">🔒 このマスは確定（ロック）済みです。下のチェックを外すと編集できます。</div>
+    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;margin-bottom:12px;padding:8px 10px;border:1px solid #fde68a;border-radius:6px;background:#fffbeb;">
+      <input type="checkbox" id="modal-lock" onchange="onModalLockChange()">
+      <span style="color:#92400e;font-weight:700;">🔒 このマスを確定する（ロック）</span>
+    </label>
     <div id="blank-work-wrap" style="margin-bottom:8px;">
       <button id="blank-work-btn" onclick="setBlankWork()" style="width:100%;padding:10px;border:2px solid #16a34a;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;touch-action:manipulation;">早日勤で出勤（文字なしの色マス）</button>
       <div style="font-size:10px;color:#9ca3af;margin-top:3px;">記号なしの色付きマス（早日勤 7:30〜16:30）になります。「クリア」は白（未入力）に戻します</div>
@@ -428,7 +438,7 @@ export function kanchoShiftPage(
       </select>
     </div>
     <div style="display:flex;gap:8px;">
-      <button onclick="clearCell()" style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;cursor:pointer;background:#fff;touch-action:manipulation;">クリア</button>
+      <button id="modal-clear-btn" onclick="clearCell()" style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;cursor:pointer;background:#fff;touch-action:manipulation;">クリア</button>
       <button onclick="applyCell(true)" style="flex:2;padding:10px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation;">適用</button>
     </div>
   </div>
@@ -737,6 +747,7 @@ function paintCell(td) {
   else if (code) bg = (teamColorCodes[code] && tc) ? tc : (colorMap[code] || '#fff7ed');
   else bg = '#ffffff';
   td.style.background = bg;
+  td.style.boxShadow = td.dataset.lk === '1' ? 'inset 0 0 0 2px ${LOCK_BORDER}' : '';
   if (td.dataset.ws === '1') { td.style.color = '#dc2626'; td.style.fontWeight = '700'; }
   else { td.style.color = ''; td.style.fontWeight = ''; }
   // 斜め直はfont-style:italicではなくtransform:skewXで表示（Chromeは和文フォントに合成イタリックを適用しないため）
@@ -839,14 +850,17 @@ async function batchSave() {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ entries: entries })
     });
-    if (!res.ok) {
-      var d = await res.json().catch(function() { return {}; });
-      throw new Error(d.error || 'server');
-    }
+    var d = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(d.error || 'server');
     document.querySelectorAll('.kc[data-pending="true"]').forEach(function(td) { delete td.dataset.pending; });
     _pending = {};
     _exitAllModes();
-    showToast('保存しました');
+    if (d.blocked > 0) {
+      alert(d.blocked + '件は確定（ロック）済みのため保存されませんでした。画面を最新の状態に更新します。');
+      location.reload();
+    } else {
+      showToast('保存しました');
+    }
   } catch(e) {
     if (err) { err.textContent = '保存に失敗しました: ' + (e.message || ''); err.style.display = 'block'; }
     else alert('保存に失敗しました: ' + (e.message || ''));
@@ -879,6 +893,7 @@ function cpTap(td) {
     return;
   }
   if (td.dataset.copysrc === '1') return; // コピー元自身への貼り付けは無視
+  if (td.dataset.lk === '1') { showToast('確定（ロック）済みのマスには貼り付けできません'); return; }
   var key = td.dataset.member + '_' + td.dataset.date;
   _pending[key] = {
     member_id: parseInt(td.dataset.member), date: td.dataset.date,
@@ -930,6 +945,7 @@ function _autoAke(memberId, date, dg, sec) {
   var next = sel('.kc[data-member="' + memberId + '"][data-date="' + nd + '"]');
   if (!next) return;
   if ((next.dataset.code || '') !== '' || next.dataset.cl) return;
+  if (next.dataset.lk === '1') return; // 確定済みの翌日マスは自動セットしない
   _pending[memberId + '_' + nd] = { member_id: parseInt(memberId), date: nd, code: '非', is_diagonal: dg, is_wish: 0, cell_color: null };
   next.dataset.code = '非';
   next.dataset.dg = String(dg);
@@ -946,7 +962,24 @@ function _loadCellToModal(td) {
   sel('#modal-dg').checked = td.dataset.dg === '1';
   sel('#modal-ws').checked = td.dataset.ws === '1';
   sel('#modal-cl').value = td.dataset.cl || '';
+  sel('#modal-lock').checked = td.dataset.lk === '1';
+  _applyModalLockUI();
 }
+// ロック中は内容編集系のコントロールをブロック（ロックのON/OFF自体と◀▶ナビは常に操作可）
+function _applyModalLockUI() {
+  var locked = sel('#modal-lock').checked;
+  sel('#modal-lock-banner').style.display = locked ? 'block' : 'none';
+  ['#blank-work-btn', '#modal-code', '#modal-dg', '#modal-ws', '#modal-cl', '#modal-clear-btn'].forEach(function(id) {
+    var el = sel(id);
+    if (el) el.disabled = locked;
+  });
+  sel('#preset-buttons').querySelectorAll('button').forEach(function(b) { b.disabled = locked; });
+  ['#blank-work-wrap', '#preset-buttons'].forEach(function(id) {
+    var el = sel(id);
+    if (el) el.style.opacity = locked ? '0.4' : '1';
+  });
+}
+function onModalLockChange() { _applyModalLockUI(); }
 function openCell(td) {
   if (!CAN_EDIT) return;
   if (!_editMode) { showToast('編集モードを開始してください'); return; }
@@ -986,14 +1019,16 @@ function _applyToPending(clOverride) {
   var dg = sel('#modal-dg').checked ? 1 : 0;
   var ws = sel('#modal-ws').checked ? 1 : 0;
   var cl = clOverride !== undefined ? clOverride : (sel('#modal-cl').value || null);
+  var lk = sel('#modal-lock').checked ? 1 : 0;
   var key = _cur.memberId + '_' + _cur.date;
   var td = _cellTd();
-  _pending[key] = { member_id: parseInt(_cur.memberId), date: _cur.date, code: code || null, is_diagonal: dg, is_wish: ws, cell_color: cl };
+  _pending[key] = { member_id: parseInt(_cur.memberId), date: _cur.date, code: code || null, is_diagonal: dg, is_wish: ws, cell_color: cl, is_locked: lk };
   if (td) {
     td.dataset.code = code;
     td.dataset.dg = String(dg);
     td.dataset.ws = String(ws);
     td.dataset.cl = cl || '';
+    td.dataset.lk = String(lk);
     td.dataset.pending = 'true';
     paintCell(td);
   }
@@ -1386,6 +1421,7 @@ function autoAssign(roleFilter) {
   wishesInPeriod.forEach(function(w) {
     var td = sel('.kc[data-member="' + w.member_id + '"][data-date="' + w.date + '"]');
     if (!td) return;
+    if (td.dataset.lk === '1') return; // 確定済みマスは自動反映しない
     var code = td.dataset.code || '';
     if (code === '' || code === '公') {
       if (code === '公' && td.dataset.ws === '1') return; // 反映済み
@@ -1411,6 +1447,7 @@ function autoAssign(roleFilter) {
     var next = sel('.kc[data-member="' + td.dataset.member + '"][data-date="' + nd + '"]');
     if (!next || (next.dataset.code || '') !== '') return;
     if (next.dataset.cl) return; // 早日勤の色マスには入れない（白＝未入力のみ）
+    if (next.dataset.lk === '1') return; // 確定済みマスは自動反映しない
     if (_wishOf(parseInt(td.dataset.member), nd)) return; // 翌日が希望休なら公優先（上のループで処理済み）
     var dg = td.dataset.dg === '1' ? 1 : 0;
     _pending[td.dataset.member + '_' + nd] = { member_id: parseInt(td.dataset.member), date: nd, code: '非', is_diagonal: dg, is_wish: 0, cell_color: next.dataset.cl || null };
@@ -1549,7 +1586,8 @@ export function kanchoPrintPage(
   function printCell(m: KanchoMember, d: string): string {
     const s = shiftMap[`${m.id}_${d}`];
     const bg = cellBg(s, m, true, colorMap, teamColorCodes);
-    return `<td style="background:${bg};${cellFont(s)}">${cellContent(s)}</td>`;
+    const lockStyle = s?.lk ? `box-shadow:inset 0 0 0 1.5px ${LOCK_BORDER};` : '';
+    return `<td style="background:${bg};${cellFont(s)}${lockStyle}">${cellContent(s)}</td>`;
   }
 
   let mainRows = '';

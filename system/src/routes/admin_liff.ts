@@ -9,6 +9,7 @@ import type { Env } from '../auth';
 import { getAdminPermissions } from '../permissions';
 import { renderReportPrintPage, type ReportPrintField } from '../html/report_print';
 import { renderReportPrintBulkPage, type ReportPrintBulkItem } from '../html/report_print_bulk';
+import { saveToastHtml, saveToastScript } from '../html/layout';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -52,13 +53,14 @@ async function getAdminName(c: { req: { header: (n: string) => string | undefine
   return adminRow?.username ?? '管理者';
 }
 
-// 忘れ物・事故・違反・一般 共通のタブナビ（権限のないタブは data-perm-key で自動的に非表示になる）
-function reportTabs(active: 'lost' | 'accident' | 'violation' | 'general'): string {
+// 忘れ物・事故・違反・一般・引き継ぎメモ 共通のタブナビ（権限のないタブは data-perm-key で自動的に非表示になる）
+function reportTabs(active: 'lost' | 'accident' | 'violation' | 'general' | 'memo'): string {
   const tabs = [
     { key: 'lost',      href: `${ADMIN_PATH}/settings/lost-items`,      perm: 'settings.lost-items',      label: '忘れ物' },
     { key: 'accident',  href: `${ADMIN_PATH}/settings/accidents`,       perm: 'settings.accidents',       label: '事故' },
     { key: 'violation', href: `${ADMIN_PATH}/settings/violations`,      perm: 'settings.violations',      label: '違反' },
     { key: 'general',   href: `${ADMIN_PATH}/settings/general-reports`, perm: 'settings.general-reports', label: '一般報告' },
+    { key: 'memo',      href: `${ADMIN_PATH}/settings/handover-memos`,  perm: 'settings.handover-memos',  label: '引き継ぎメモ' },
   ];
   return `<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e5e7eb;">
     ${tabs.map(t => `<a href="${t.href}" data-perm-key="${t.perm}" style="padding:8px 20px;font-size:14px;text-decoration:none;font-weight:600;margin-bottom:-2px;${t.key === active
@@ -70,12 +72,13 @@ function reportTabs(active: 'lost' | 'accident' | 'violation' | 'general'): stri
 // GET /settings/reports — 報告センターの入口。権限のある最初のタブへリダイレクト
 // （設定トップのカードを1枚に集約したため、アカウントごとに見えるタブが違っても入口は共通）
 app.get('/settings/reports', async (c) => {
-  const orderedPerms = ['settings.lost-items', 'settings.accidents', 'settings.violations', 'settings.general-reports'];
+  const orderedPerms = ['settings.lost-items', 'settings.accidents', 'settings.violations', 'settings.general-reports', 'settings.handover-memos'];
   const hrefs: Record<string, string> = {
     'settings.lost-items':      `${ADMIN_PATH}/settings/lost-items`,
     'settings.accidents':       `${ADMIN_PATH}/settings/accidents`,
     'settings.violations':      `${ADMIN_PATH}/settings/violations`,
     'settings.general-reports': `${ADMIN_PATH}/settings/general-reports`,
+    'settings.handover-memos':  `${ADMIN_PATH}/settings/handover-memos`,
   };
   const cookie = c.req.header('Cookie') ?? null;
   const sid = getSessionFromCookie(cookie);
@@ -186,7 +189,31 @@ function reportRowScript(apiPath: string, deleteLabel: string, resolvedLabel: st
       }
       document.getElementById('report-log-modal').style.display = 'flex';
     }
-    function closeReportLogs() { document.getElementById('report-log-modal').style.display = 'none'; }`;
+    function closeReportLogs() { document.getElementById('report-log-modal').style.display = 'none'; }
+    async function copyHandoverLink(btn) {
+      var fullUrl = location.origin + btn.dataset.url;
+      var titleText = 'タイトル：' + btn.dataset.title + 'の件';
+      var summaryText = btn.dataset.summary ? ('概要：' + btn.dataset.summary) : '';
+      var html = '<a href="' + fullUrl + '" target="_blank" rel="noopener" style="color:#1d4ed8;font-weight:700;text-decoration:underline;">'
+        + escLog(titleText) + (summaryText ? '<br>' + escLog(summaryText) : '') + '</a>';
+      var plain = titleText + (summaryText ? ('\\n' + summaryText) : '') + '\\n' + fullUrl;
+      try {
+        if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+          await navigator.clipboard.write([new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([plain], { type: 'text/plain' }),
+          })]);
+        } else {
+          await navigator.clipboard.writeText(plain);
+        }
+        var orig = btn.textContent;
+        btn.textContent = 'コピーしました';
+        btn.disabled = true;
+        setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1500);
+      } catch (e) {
+        alert('コピーに失敗しました（ブラウザの設定をご確認ください）');
+      }
+    }`;
 }
 
 // 乗務員の「n課n班 氏名（社員番号）」表示（帳票印刷ページとも共用・社員番号はホシコン内のみ表示）
@@ -237,6 +264,22 @@ function parseBulkIds(idsParam: string | undefined): number[] {
 function printLinkHtml(printPath: string, id: number): string {
   return `<a href="${ADMIN_PATH}${printPath}/${id}" target="_blank"
     style="padding:3px 8px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;text-decoration:none;display:inline-block;">帳票</a>`;
+}
+
+// 長文を指定文字数に切り詰める（引継リンクの概要文用）
+function truncateSummary(s: string | null | undefined, n: number = 80): string {
+  const v = (s ?? '').trim();
+  return v.length > n ? v.slice(0, n) + '…' : v;
+}
+
+// 一覧の行アクションに追加する「引継リンク」ボタン（クリックで案件の帳票ページ＝報告センターの概要ページへのリンクを
+// 「タイトル：○○の件 / 概要：△△」形式のリッチテキストとしてクリップボードへコピーする。
+// 引き継ぎシートのメイン欄はcontenteditableで貼り付けたHTMLをそのまま受け付けるため、貼り付けるだけでクリック可能なリンクになる）
+function handoverLinkButtonHtml(printPath: string, id: number, title: string, summary: string): string {
+  const url = `${ADMIN_PATH}${printPath}/${id}`;
+  return `<button type="button" data-url="${escHtml(url)}" data-title="${escHtml(title)}" data-summary="${escHtml(summary)}"
+    onclick="copyHandoverLink(this)"
+    style="padding:3px 8px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">引継リンク</button>`;
 }
 
 // 一覧上部の「まとめて帳票印刷」バー（チェックした複数件をA4横1枚にまとめて印刷/画像保存するページを新しいタブで開く）
@@ -951,6 +994,8 @@ app.get('/settings/lost-items', async (c) => {
     const typeLabel = isCustomer ? '客問い合わせ' : '社員報告';
     const typeColor = isCustomer ? '#7c3aed' : '#1d4ed8';
     const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
+    const handoverTitle = `${r.vehicle_no ?? '車番不明'} の忘れ物報告`;
+    const handoverSummary = truncateSummary(r.item_description);
     return `<tr id="report-row-${r.id}">
       ${reportCheckboxTd(r.id)}
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
@@ -978,6 +1023,7 @@ app.get('/settings/lost-items', async (c) => {
         <button onclick="deleteReport(${r.id},'${escHtml((r.item_description ?? '').slice(0, 20))}')"
           style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
         ${printLinkHtml('/settings/lost-items/print', r.id)}
+        ${handoverLinkButtonHtml('/settings/lost-items/print', r.id, handoverTitle, handoverSummary)}
       </td>
     </tr>`;
   }).join('');
@@ -1159,6 +1205,8 @@ app.get('/settings/accidents', async (c) => {
   const rows = all.map(r => {
     const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
     const otherPartyStr = (r.other_party_name || r.other_party_phone) ? `${r.other_party_name ?? ''} ${r.other_party_phone ?? ''}`.trim() : '—';
+    const handoverTitle = `${r.vehicle_no ?? '車番不明'} の事故報告`;
+    const handoverSummary = truncateSummary(r.summary_text || r.accident_type || r.location);
     return `<tr id="report-row-${r.id}">
       ${reportCheckboxTd(r.id)}
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
@@ -1186,6 +1234,7 @@ app.get('/settings/accidents', async (c) => {
         <button onclick="deleteReport(${r.id},'${escHtml((r.vehicle_no ?? '車番不明') + (r.accident_type ? ' / ' + r.accident_type : ''))}')"
           style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
         ${printLinkHtml('/settings/accidents/print', r.id)}
+        ${handoverLinkButtonHtml('/settings/accidents/print', r.id, handoverTitle, handoverSummary)}
       </td>
     </tr>`;
   }).join('');
@@ -1363,6 +1412,8 @@ app.get('/settings/violations', async (c) => {
       placeParts.push(escHtml(cs));
     }
     const placeStr = placeParts.length ? placeParts.join('<br>') : '—';
+    const handoverTitle = `${r.vehicle_no ?? '車番不明'} の違反報告`;
+    const handoverSummary = truncateSummary(violationStr !== '—' ? violationStr : r.location);
     return `<tr id="report-row-${r.id}">
       ${reportCheckboxTd(r.id)}
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
@@ -1389,6 +1440,7 @@ app.get('/settings/violations', async (c) => {
         <button onclick="deleteReport(${r.id},'${escHtml((r.vehicle_no ?? '車番不明') + (r.violation_type_name ? ' / ' + r.violation_type_name : ''))}')"
           style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
         ${printLinkHtml('/settings/violations/print', r.id)}
+        ${handoverLinkButtonHtml('/settings/violations/print', r.id, handoverTitle, handoverSummary)}
       </td>
     </tr>`;
   }).join('');
@@ -1576,6 +1628,8 @@ app.get('/settings/general-reports', async (c) => {
     const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
     const routeStr = (r.route_from || r.route_to) ? `${r.route_from ?? '?'} → ${r.route_to ?? '?'}` : '—';
     const customerStr = (r.customer_name || r.customer_phone) ? `${r.customer_name ?? ''} ${r.customer_phone ?? ''}`.trim() : '—';
+    const handoverTitle = r.title ?? (r.vehicle_no ? `${r.vehicle_no} の一般報告` : '一般報告');
+    const handoverSummary = truncateSummary(r.content);
     return `<tr id="report-row-${r.id}">
       ${reportCheckboxTd(r.id)}
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
@@ -1604,6 +1658,7 @@ app.get('/settings/general-reports', async (c) => {
         <button onclick="deleteReport(${r.id},'${escHtml((r.title ?? r.vehicle_no ?? '車番なし') + (r.content ? ' / ' + r.content.slice(0, 20) : ''))}')"
           style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
         ${printLinkHtml('/settings/general-reports/print', r.id)}
+        ${handoverLinkButtonHtml('/settings/general-reports/print', r.id, handoverTitle, handoverSummary)}
       </td>
     </tr>`;
   }).join('');
@@ -1723,6 +1778,414 @@ app.get('/settings/general-reports', async (c) => {
   `;
 
   return c.html(layout('一般報告一覧', content, 'settings'));
+});
+
+// ===================================================
+// 引き継ぎメモ（報告センターの5つ目のタブ）
+//   何でも自由に書けるセル形式（Excel風グリッド）のメモ。LINEからは投稿できず、管理画面でのみ作成・編集する。
+//   grid_data は { rows, cols, cells: { "r,c": { v, sz, c, bg, b } } } のJSON文字列で保存する
+// ===================================================
+
+const MEMO_DEFAULT_ROWS = 30;
+const MEMO_DEFAULT_COLS = 10;
+const MEMO_MAX_ROWS = 300;
+const MEMO_MAX_COLS = 40;
+
+type MemoCell = { v?: string; sz?: number; c?: string; bg?: string; b?: number };
+type MemoGrid = { rows: number; cols: number; cells: Record<string, MemoCell> };
+
+function parseMemoGrid(raw: string): MemoGrid {
+  try {
+    const g = JSON.parse(raw);
+    const rows = Number.isInteger(g.rows) ? Math.min(Math.max(g.rows, 1), MEMO_MAX_ROWS) : MEMO_DEFAULT_ROWS;
+    const cols = Number.isInteger(g.cols) ? Math.min(Math.max(g.cols, 1), MEMO_MAX_COLS) : MEMO_DEFAULT_COLS;
+    return { rows, cols, cells: (g.cells && typeof g.cells === 'object') ? g.cells : {} };
+  } catch {
+    return { rows: MEMO_DEFAULT_ROWS, cols: MEMO_DEFAULT_COLS, cells: {} };
+  }
+}
+
+// 引き継ぎメモ 編集画面ツールバー・グリッドの共通スクリプト
+function memoEditorScript(id: number, grid: MemoGrid): string {
+  return `
+    var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
+    var MEMO_ID = ${id};
+    var GRID = ${safeJson(grid)};
+    var dirty = false, mouseDown = false;
+    var anchorR = 0, anchorC = 0, curR = 0, curC = 0;
+    var PRESET_COLORS = ['#111827','#dc2626','#2563eb','#059669','#d97706','#7c3aed','#6b7280'];
+    var PRESET_BGS = ['#ffffff','#fef3c7','#fee2e2','#dbeafe','#dcfce7','#ede9fe','#f3f4f6'];
+
+    function cellKey(r, c) { return r + ',' + c; }
+    function ensureCell(r, c) {
+      var k = cellKey(r, c);
+      if (!GRID.cells[k]) GRID.cells[k] = {};
+      return GRID.cells[k];
+    }
+    function pruneCell(r, c) {
+      var k = cellKey(r, c), d = GRID.cells[k];
+      if (d && !d.v && !d.sz && !d.c && !d.bg && !d.b) delete GRID.cells[k];
+    }
+    function markDirty() { dirty = true; }
+
+    function colLabel(c) {
+      var s = ''; c++;
+      while (c > 0) {
+        var m = (c - 1) % 26;
+        s = String.fromCharCode(65 + m) + s;
+        c = Math.floor((c - 1) / 26);
+      }
+      return s;
+    }
+
+    function buildGrid() {
+      var table = document.getElementById('memo-grid');
+      table.innerHTML = '';
+      var thead = document.createElement('tr');
+      thead.appendChild(document.createElement('th'));
+      for (var c = 0; c < GRID.cols; c++) {
+        var th = document.createElement('th');
+        th.textContent = colLabel(c);
+        th.style.cssText = 'min-width:110px;padding:4px;font-size:11px;color:#9ca3af;background:#f9fafb;border:1px solid #e5e7eb;position:sticky;top:0;';
+        thead.appendChild(th);
+      }
+      table.appendChild(thead);
+      for (var r = 0; r < GRID.rows; r++) {
+        var tr = document.createElement('tr');
+        var rh = document.createElement('th');
+        rh.textContent = String(r + 1);
+        rh.style.cssText = 'padding:4px 8px;font-size:11px;color:#9ca3af;background:#f9fafb;border:1px solid #e5e7eb;position:sticky;left:0;';
+        tr.appendChild(rh);
+        for (var c2 = 0; c2 < GRID.cols; c2++) {
+          var td = document.createElement('td');
+          td.style.cssText = 'border:1px solid #e5e7eb;padding:0;';
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.dataset.r = r; input.dataset.c = c2;
+          var d = GRID.cells[cellKey(r, c2)] || {};
+          input.value = d.v || '';
+          input.style.cssText = 'border:none;outline:none;padding:4px 6px;box-sizing:border-box;width:110px;height:30px;'
+            + 'font-size:' + (d.sz || 14) + 'px;color:' + (d.c || '#111827') + ';font-weight:' + (d.b ? '700' : '400') + ';background:' + (d.bg || '#ffffff') + ';';
+          input.addEventListener('input', onCellInput);
+          input.addEventListener('mousedown', onCellMouseDown);
+          input.addEventListener('mouseover', onCellMouseOver);
+          input.addEventListener('focus', onCellFocus);
+          td.appendChild(input);
+          tr.appendChild(td);
+        }
+        table.appendChild(tr);
+      }
+    }
+
+    function onCellInput() {
+      var r = parseInt(this.dataset.r), c = parseInt(this.dataset.c);
+      var v = this.value;
+      if (v) { ensureCell(r, c).v = v; }
+      else if (GRID.cells[cellKey(r, c)]) { delete GRID.cells[cellKey(r, c)].v; pruneCell(r, c); }
+      markDirty();
+    }
+    function onCellMouseDown() {
+      mouseDown = true;
+      anchorR = curR = parseInt(this.dataset.r);
+      anchorC = curC = parseInt(this.dataset.c);
+      updateSelection();
+    }
+    function onCellMouseOver() {
+      if (!mouseDown) return;
+      curR = parseInt(this.dataset.r); curC = parseInt(this.dataset.c);
+      updateSelection();
+    }
+    function onCellFocus() {
+      if (mouseDown) return;
+      anchorR = curR = parseInt(this.dataset.r);
+      anchorC = curC = parseInt(this.dataset.c);
+      updateSelection();
+    }
+    function updateSelection() {
+      var r0 = Math.min(anchorR, curR), r1 = Math.max(anchorR, curR);
+      var c0 = Math.min(anchorC, curC), c1 = Math.max(anchorC, curC);
+      document.querySelectorAll('#memo-grid input').forEach(function(inp) {
+        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
+        inp.style.boxShadow = (r >= r0 && r <= r1 && c >= c0 && c <= c1) ? 'inset 0 0 0 2px #2563eb' : 'none';
+      });
+    }
+    function selectedInputs() {
+      var r0 = Math.min(anchorR, curR), r1 = Math.max(anchorR, curR);
+      var c0 = Math.min(anchorC, curC), c1 = Math.max(anchorC, curC);
+      return Array.prototype.filter.call(document.querySelectorAll('#memo-grid input'), function(inp) {
+        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
+        return r >= r0 && r <= r1 && c >= c0 && c <= c1;
+      });
+    }
+
+    function applySize(sz) {
+      sz = parseInt(sz);
+      selectedInputs().forEach(function(inp) {
+        ensureCell(parseInt(inp.dataset.r), parseInt(inp.dataset.c)).sz = sz;
+        inp.style.fontSize = sz + 'px';
+      });
+      markDirty();
+    }
+    function applyColor(color) {
+      selectedInputs().forEach(function(inp) {
+        ensureCell(parseInt(inp.dataset.r), parseInt(inp.dataset.c)).c = color;
+        inp.style.color = color;
+      });
+      markDirty();
+    }
+    function applyBg(color) {
+      selectedInputs().forEach(function(inp) {
+        ensureCell(parseInt(inp.dataset.r), parseInt(inp.dataset.c)).bg = color;
+        inp.style.background = color;
+      });
+      markDirty();
+    }
+    function toggleBold() {
+      var inputs = selectedInputs();
+      if (inputs.length === 0) return;
+      var makeBold = inputs[0].style.fontWeight !== '700';
+      inputs.forEach(function(inp) {
+        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
+        inp.style.fontWeight = makeBold ? '700' : '400';
+        if (makeBold) { ensureCell(r, c).b = 1; }
+        else { var d = GRID.cells[cellKey(r, c)]; if (d) delete d.b; pruneCell(r, c); }
+      });
+      markDirty();
+    }
+    function clearFormat() {
+      selectedInputs().forEach(function(inp) {
+        var r = parseInt(inp.dataset.r), c = parseInt(inp.dataset.c);
+        var k = cellKey(r, c);
+        var v = (GRID.cells[k] && GRID.cells[k].v) || '';
+        if (v) { GRID.cells[k] = { v: v }; } else { delete GRID.cells[k]; }
+        inp.style.fontSize = '14px'; inp.style.color = '#111827'; inp.style.background = '#ffffff'; inp.style.fontWeight = '400';
+      });
+      markDirty();
+    }
+    function addRows() { GRID.rows += 10; buildGrid(); markDirty(); }
+
+    function buildSwatches(containerId, colors, applyFn) {
+      var el = document.getElementById(containerId);
+      colors.forEach(function(col) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.title = col;
+        btn.style.cssText = 'width:20px;height:20px;border-radius:4px;border:1px solid #d1d5db;background:' + col + ';cursor:pointer;padding:0;';
+        btn.onclick = function() { applyFn(col); };
+        el.appendChild(btn);
+      });
+    }
+
+    function saveMemo() {
+      var btn = document.getElementById('memo-save-btn');
+      btn.disabled = true;
+      var payload = { title: document.getElementById('memo-title').value.trim() || '無題のメモ', grid_data: JSON.stringify(GRID) };
+      fetch(ADMIN_PATH + '/api/handover-memos/' + MEMO_ID, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        btn.disabled = false;
+        if (data.ok) { dirty = false; showToast('保存しました'); }
+        else { alert('保存に失敗しました'); }
+      })
+      .catch(function() { btn.disabled = false; alert('通信エラーが発生しました'); });
+    }
+
+    window.addEventListener('beforeunload', function(e) {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
+    document.addEventListener('mouseup', function() { mouseDown = false; });
+
+    buildSwatches('tb-color-swatches', PRESET_COLORS, applyColor);
+    buildSwatches('tb-bg-swatches', PRESET_BGS, applyBg);
+    buildGrid();
+  `;
+}
+
+app.get('/settings/handover-memos', async (c) => {
+  const memos = await c.env.DB.prepare(
+    'SELECT id, title, created_by_admin, updated_by_admin, created_at, updated_at FROM handover_memos ORDER BY updated_at DESC, id DESC LIMIT 200'
+  ).all<{
+    id: number; title: string; created_by_admin: string | null; updated_by_admin: string | null;
+    created_at: string; updated_at: string;
+  }>();
+  const all = memos.results ?? [];
+
+  const rows = all.map(m => `<tr id="memo-row-${m.id}">
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">
+        <a href="${ADMIN_PATH}/settings/handover-memos/${m.id}" style="color:#1e3a5f;text-decoration:none;">${escHtml(m.title || '無題のメモ')}</a>
+      </td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(m.created_by_admin ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(m.updated_by_admin ?? '—')}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(m.updated_at.slice(0, 16))}</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
+        <a href="${ADMIN_PATH}/settings/handover-memos/${m.id}" style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;text-decoration:none;display:inline-block;">開く</a>
+        <button onclick="deleteMemo(${m.id},'${escHtml((m.title || '無題のメモ').replace(/'/g, ''))}')"
+          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
+      </td>
+    </tr>`).join('');
+
+  const content = `
+    ${subHeader('報告センター')}
+    ${reportTabs('memo')}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+      <button onclick="createMemo()" style="padding:7px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ 新規メモを作成</button>
+    </div>
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
+      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
+        <span id="memo-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">メモ ${all.length}件</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:600px;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">タイトル</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">作成者</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">最終更新者</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">更新日時</th>
+              <th style="padding:8px 12px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:#9ca3af;">メモがありません</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <script>
+    var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
+    function createMemo() {
+      fetch(ADMIN_PATH + '/api/handover-memos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.ok) { location.href = ADMIN_PATH + '/settings/handover-memos/' + data.id; }
+        else { alert('作成に失敗しました'); }
+      })
+      .catch(function() { alert('通信エラーが発生しました'); });
+    }
+    async function deleteMemo(id, title) {
+      if (!confirm('このメモを削除しますか？\\n「' + title + '」')) return;
+      var res = await fetch(ADMIN_PATH + '/api/handover-memos/' + id, { method: 'DELETE' });
+      if (!res.ok) { alert('削除に失敗しました'); return; }
+      var row = document.getElementById('memo-row-' + id);
+      if (row) row.remove();
+      var cnt = document.getElementById('memo-count');
+      if (cnt) cnt.textContent = 'メモ ' + Math.max(0, parseInt(cnt.textContent.replace(/[^0-9]/g, '') || '1') - 1) + '件';
+    }
+    </script>
+  `;
+
+  return c.html(layout('引き継ぎメモ一覧', content, 'settings'));
+});
+
+app.get('/settings/handover-memos/:id', async (c) => {
+  const id = parseInt(c.req.param('id') ?? '');
+  if (!Number.isInteger(id)) return c.text('invalid id', 400);
+  const memo = await c.env.DB.prepare(
+    'SELECT id, title, grid_data, created_by_admin, updated_by_admin, created_at, updated_at FROM handover_memos WHERE id = ?'
+  ).bind(id).first<{
+    id: number; title: string; grid_data: string; created_by_admin: string | null; updated_by_admin: string | null;
+    created_at: string; updated_at: string;
+  }>();
+  if (!memo) return c.text('メモが見つかりません', 404);
+
+  const grid = parseMemoGrid(memo.grid_data);
+
+  const content = `
+    ${subHeader('報告センター')}
+    ${reportTabs('memo')}
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
+      <a href="${ADMIN_PATH}/settings/handover-memos" style="color:#6b7280;font-size:13px;text-decoration:none;white-space:nowrap;">← メモ一覧に戻る</a>
+      <input type="text" id="memo-title" oninput="markDirty()" value="${escHtml(memo.title)}" placeholder="メモのタイトル"
+        style="flex:1;min-width:200px;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:15px;font-weight:700;color:#1e3a5f;">
+    </div>
+    <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">
+      作成: ${escHtml(memo.created_by_admin ?? '—')}（${escHtml(memo.created_at.slice(0, 16))}） ／
+      最終更新: ${escHtml(memo.updated_by_admin ?? '—')}（${escHtml(memo.updated_at.slice(0, 16))}）
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+      <button type="button" onclick="toggleBold()" title="太字" style="width:32px;height:32px;font-weight:700;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">B</button>
+      <select onchange="applySize(this.value)" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px;">
+        <option value="12">12px</option>
+        <option value="14" selected>14px</option>
+        <option value="16">16px</option>
+        <option value="18">18px</option>
+        <option value="20">20px</option>
+        <option value="24">24px</option>
+        <option value="28">28px</option>
+        <option value="32">32px</option>
+      </select>
+      <span style="font-size:12px;color:#6b7280;">文字色</span>
+      <div id="tb-color-swatches" style="display:flex;gap:4px;"></div>
+      <input type="color" onchange="applyColor(this.value)" value="#111827" title="文字色を選ぶ" style="width:28px;height:28px;padding:0;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
+      <span style="font-size:12px;color:#6b7280;margin-left:8px;">背景色</span>
+      <div id="tb-bg-swatches" style="display:flex;gap:4px;"></div>
+      <input type="color" onchange="applyBg(this.value)" value="#ffffff" title="背景色を選ぶ" style="width:28px;height:28px;padding:0;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
+      <button type="button" onclick="clearFormat()" style="padding:5px 10px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">書式クリア</button>
+      <button type="button" onclick="addRows()" style="padding:5px 10px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">＋10行</button>
+      <div style="flex:1;"></div>
+      <button type="button" onclick="saveMemo()" id="memo-save-btn" style="padding:7px 18px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">保存</button>
+    </div>
+    <div style="overflow:auto;max-height:70vh;border:1px solid #e5e7eb;border-radius:8px;background:white;">
+      <table id="memo-grid" style="border-collapse:collapse;"></table>
+    </div>
+    ${saveToastHtml()}
+    <script>
+    ${saveToastScript()}
+    ${memoEditorScript(id, grid)}
+    </script>
+  `;
+
+  return c.html(layout(`引き継ぎメモ: ${memo.title}`, content, 'settings'));
+});
+
+app.post('/api/handover-memos', async (c) => {
+  const adminName = await getAdminName(c);
+  const body = await c.req.json<{ title?: string }>().catch(() => ({} as { title?: string }));
+  const title = (body.title ?? '').trim() || '無題のメモ';
+  const grid: MemoGrid = { rows: MEMO_DEFAULT_ROWS, cols: MEMO_DEFAULT_COLS, cells: {} };
+
+  const result = await c.env.DB.prepare(
+    'INSERT INTO handover_memos (title, grid_data, created_by_admin, updated_by_admin) VALUES (?, ?, ?, ?)'
+  ).bind(title, JSON.stringify(grid), adminName, adminName).run();
+  const id = result.meta.last_row_id as number;
+
+  await logReportAction(c.env.DB, 'handover_memo', id, 'created', adminName, title);
+  return c.json({ ok: true, id });
+});
+
+app.put('/api/handover-memos/:id', async (c) => {
+  const id = parseInt(c.req.param('id') ?? '');
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  const exists = await c.env.DB.prepare('SELECT id FROM handover_memos WHERE id = ?').bind(id).first();
+  if (!exists) return c.json({ error: 'not found' }, 404);
+
+  const adminName = await getAdminName(c);
+  const body = await c.req.json<{ title?: string; grid_data?: string }>();
+  const title = (body.title ?? '').trim() || '無題のメモ';
+  const grid = parseMemoGrid(body.grid_data ?? '{}');
+
+  await c.env.DB.prepare(
+    "UPDATE handover_memos SET title = ?, grid_data = ?, updated_by_admin = ?, updated_at = datetime('now','localtime') WHERE id = ?"
+  ).bind(title, JSON.stringify(grid), adminName, id).run();
+  return c.json({ ok: true });
+});
+
+app.delete('/api/handover-memos/:id', async (c) => {
+  const id = parseInt(c.req.param('id') ?? '');
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  const row = await c.env.DB.prepare('SELECT title FROM handover_memos WHERE id = ?').bind(id).first<{ title: string }>();
+  if (!row) return c.json({ error: 'not found' }, 404);
+
+  const adminName = await getAdminName(c);
+  await c.env.DB.prepare('DELETE FROM handover_memos WHERE id = ?').bind(id).run();
+  await logReportAction(c.env.DB, 'handover_memo', id, 'deleted', adminName, row.title);
+  return c.json({ ok: true });
 });
 
 // ===================================================

@@ -15,7 +15,7 @@
 //   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
 //   設定カード: settings.liff / settings.lost-items / settings.accidents /
 //               settings.violations / settings.violation-types /
-//               settings.general-reports /
+//               settings.general-reports / settings.handover-memos /
 //               settings.benten / settings.schedule-types / settings.dia / settings.coaches /
 //               settings.instructors / settings.periods / settings.notifications /
 //               settings.offices / settings.vehicle-search-guide / settings.documents /
@@ -31,6 +31,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/violation-types/,      'settings.violation-types'],
   [/^\/settings\/violations/,           'settings.violations'],
   [/^\/settings\/general-reports/,      'settings.general-reports'],
+  [/^\/settings\/handover-memos/,       'settings.handover-memos'],
   [/^\/settings\/benten/,               'settings.benten'],
   [/^\/settings\/schedule-types/,       'settings.schedule-types'],
   [/^\/settings\/dia/,                  'settings.dia'],
@@ -57,6 +58,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/liff\/accident-reports/,    'settings.accidents'],
   [/^\/api\/liff\/violation-reports/,   'settings.violations'],
   [/^\/api\/liff\/general-reports/,     'settings.general-reports'],
+  [/^\/api\/handover-memos/,            'settings.handover-memos'],
   [/^\/api\/violation-types/,           'settings.violation-types'],
   [/^\/api\/kancho-wish-settings/,      'settings.kancho-wish'],
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
@@ -191,6 +193,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.accidents',            label: '事故報告一覧' },
     { key: 'settings.violations',           label: '違反報告一覧' },
     { key: 'settings.general-reports',      label: '一般報告一覧' },
+    { key: 'settings.handover-memos',       label: '引き継ぎメモ一覧' },
     { key: 'settings.violation-types',      label: '違反種類・点数/反則金' },
     { key: 'settings.benten',               label: 'ベンテンクラブ シフト' },
     { key: 'settings.schedule-types',       label: 'シフト区分' },
