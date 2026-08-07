@@ -268,9 +268,9 @@ function cellLabel(code: string, dg: number, ws: number, cl: string | null, lk: 
 
 app.post('/api/kancho/shifts/batch', async (c) => {
   const body = await c.req.json<{ entries: Array<{ member_id: number; date: string; code: string | null; is_diagonal?: number; is_wish?: number; cell_color?: string | null; is_locked?: number }> }>();
-  const entries = body.entries ?? [];
-  if (entries.length === 0) return c.json({ ok: true, saved: 0 });
-  if (entries.length > 500) return c.json({ error: '一度に保存できるのは500件までです' }, 400);
+  const rawEntries = body.entries ?? [];
+  if (rawEntries.length === 0) return c.json({ ok: true, saved: 0 });
+  if (rawEntries.length > 500) return c.json({ error: '一度に保存できるのは500件までです' }, 400);
 
   const { id: adminId, name } = await adminName(c);
 
@@ -278,16 +278,28 @@ app.post('/api/kancho/shifts/batch', async (c) => {
   const memberRows = await c.env.DB.prepare('SELECT id, name FROM kancho_members').all<{ id: number; name: string }>();
   const memberNames = new Map((memberRows.results ?? []).map(m => [m.id, m.name]));
 
+  const entries = rawEntries.filter(e => e.member_id && /^\d{4}-\d{2}-\d{2}$/.test(e.date ?? ''));
+  if (entries.length === 0) return c.json({ ok: true, saved: 0, blocked: 0 });
+
+  // 対象セルの既存値をまとめて1回で取得（エントリ毎の個別SELECTを避ける）
+  const memberIds = [...new Set(entries.map(e => e.member_id))];
+  const sortedDates = entries.map(e => e.date).sort();
+  const placeholders = memberIds.map(() => '?').join(',');
+  const existingRows = await c.env.DB.prepare(
+    `SELECT member_id, date, code, is_diagonal, is_wish, cell_color, is_locked FROM kancho_shifts WHERE member_id IN (${placeholders}) AND date BETWEEN ? AND ?`
+  ).bind(...memberIds, sortedDates[0], sortedDates[sortedDates.length - 1])
+    .all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null; is_locked: number }>();
+  const oldMap = new Map((existingRows.results ?? []).map(r => [`${r.member_id}_${r.date}`, r]));
+
   let saved = 0;
   let blocked = 0;
+  const stmts: ReturnType<typeof c.env.DB.prepare>[] = [];
   for (const e of entries) {
-    if (!e.member_id || !/^\d{4}-\d{2}-\d{2}$/.test(e.date ?? '')) continue;
     const code = (e.code ?? '').trim();
     const dg = e.is_diagonal ? 1 : 0;
     const ws = e.is_wish ? 1 : 0;
     const cl = (e.cell_color && /^#[0-9a-fA-F]{6}$/.test(e.cell_color)) ? e.cell_color.toLowerCase() : null;
-    const old = await c.env.DB.prepare('SELECT code, is_diagonal, is_wish, cell_color, is_locked FROM kancho_shifts WHERE member_id = ? AND date = ?')
-      .bind(e.member_id, e.date).first<{ code: string; is_diagonal: number; is_wish: number; cell_color: string | null; is_locked: number }>();
+    const old = oldMap.get(`${e.member_id}_${e.date}`);
     const oldLocked = old?.is_locked ?? 0;
     // is_locked省略時は現状維持（コピペ編集・希望休自動反映など、ロックを意識しない書き込み経路のため）
     const lk = typeof e.is_locked === 'number' ? (e.is_locked ? 1 : 0) : oldLocked;
@@ -303,7 +315,6 @@ app.post('/api/kancho/shifts/batch', async (c) => {
     const newLabel = cellLabel(code, dg, ws, cl, lk);
     if (oldLabel === newLabel) continue;
 
-    const stmts = [];
     if (code === '' && !dg && !ws && !cl && !lk) {
       // 完全な空（色上書き・確定もなし）は行ごと削除 = 自動表示（班色出勤）に戻る
       stmts.push(c.env.DB.prepare('DELETE FROM kancho_shifts WHERE member_id = ? AND date = ?').bind(e.member_id, e.date));
@@ -316,9 +327,9 @@ app.post('/api/kancho/shifts/batch', async (c) => {
     stmts.push(c.env.DB.prepare(
       'INSERT INTO kancho_edit_logs (admin_id, admin_name, action, target, date, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(adminId, name, 'shift', memberNames.get(e.member_id) ?? `member:${e.member_id}`, e.date, oldLabel, newLabel));
-    await c.env.DB.batch(stmts);
     saved++;
   }
+  if (stmts.length > 0) await c.env.DB.batch(stmts);
   return c.json({ ok: true, saved, blocked });
 });
 
@@ -398,10 +409,17 @@ app.post('/api/kancho/members/batch', async (c) => {
   if (entries.length > 200) return c.json({ error: '一度に保存できるのは200件までです' }, 400);
   const { id: adminId, name: adminUser } = await adminName(c);
 
+  // 対象メンバーの既存値をまとめて1回で取得（エントリ毎の個別SELECTを避ける）
+  const targetIds = [...new Set(entries.map(e => e.id).filter(Boolean))];
+  const oldRows = targetIds.length > 0
+    ? await c.env.DB.prepare(`SELECT * FROM kancho_members WHERE id IN (${targetIds.map(() => '?').join(',')})`).bind(...targetIds).all<KanchoMember>()
+    : { results: [] };
+  const oldMemberMap = new Map((oldRows.results ?? []).map(m => [m.id, m]));
+
   let saved = 0;
   for (const e of entries) {
     if (!e.id) continue;
-    const old = await c.env.DB.prepare('SELECT * FROM kancho_members WHERE id = ?').bind(e.id).first<KanchoMember>();
+    const old = oldMemberMap.get(e.id);
     if (!old) continue;
     const nm = (e.name ?? old.name).trim();
     if (!nm) continue;
@@ -529,11 +547,18 @@ app.post('/api/kancho/types/batch', async (c) => {
   if (entries.length > 200) return c.json({ error: '一度に保存できるのは200件までです' }, 400);
   const { id: adminId, name: adminUser } = await adminName(c);
 
+  // 対象記号の既存値をまとめて1回で取得（エントリ毎の個別SELECTを避ける）
+  const targetIds = [...new Set(entries.map(e => e.id).filter(Boolean))];
+  const oldRows = targetIds.length > 0
+    ? await c.env.DB.prepare(`SELECT * FROM kancho_shift_types WHERE id IN (${targetIds.map(() => '?').join(',')})`).bind(...targetIds).all<KanchoShiftType>()
+    : { results: [] };
+  const oldTypeMap = new Map((oldRows.results ?? []).map(t => [t.id, t]));
+
   let saved = 0;
   const errors: string[] = [];
   for (const e of entries) {
     if (!e.id) continue;
-    const old = await c.env.DB.prepare('SELECT * FROM kancho_shift_types WHERE id = ?').bind(e.id).first<KanchoShiftType>();
+    const old = oldTypeMap.get(e.id);
     if (!old) continue;
     const code = (e.code ?? old.code).trim();
     if (!code) continue;

@@ -75,7 +75,7 @@ export function crewShiftPage(
     const code = s?.code ?? '';
     const bg = code ? (colorMap[code] ?? '#fff7ed') : '#ffffff';
     return `<td class="cs-cell" data-member="${m.id}" data-date="${d}" data-name="${escHtml(m.name)}" data-code="${escHtml(code)}"
-      style="background:${bg};min-width:34px;max-width:34px;width:34px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${editable ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;">${escHtml(code)}</td>`;
+      style="background:${bg}">${escHtml(code)}</td>`;
   }
 
   function teamTable(team: number): string {
@@ -306,6 +306,9 @@ ${saveToastHtml()}
   .cs-cell:active { opacity:0.6; }
   .cs-cell[data-pending="true"] { outline:2px dashed #f59e0b !important; }
   .cs-row.filtered-out { display:none; }
+  /* セル毎にインラインstyleを繰り返さないための共通クラス（HTML転送量・DOM生成コストの削減） */
+  .cs-cell { min-width:34px;max-width:34px;width:34px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;overflow:hidden;white-space:nowrap;touch-action:manipulation; }
+  ${editable ? '.cs-cell { cursor:pointer; }' : ''}
 </style>
 
 <script>

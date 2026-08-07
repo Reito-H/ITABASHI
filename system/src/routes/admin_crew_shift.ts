@@ -136,24 +136,34 @@ app.get('/summer-report', async (c) => {
 // ===== API: シフト一括保存 =====
 app.post('/api/crew-shift/shifts/batch', async (c) => {
   const body = await c.req.json<{ entries: Array<{ member_id: number; date: string; code: string | null }> }>();
-  const entries = body.entries ?? [];
-  if (entries.length === 0) return c.json({ ok: true, saved: 0 });
-  if (entries.length > 500) return c.json({ error: '一度に保存できるのは500件までです' }, 400);
+  const rawEntries = body.entries ?? [];
+  if (rawEntries.length === 0) return c.json({ ok: true, saved: 0 });
+  if (rawEntries.length > 500) return c.json({ error: '一度に保存できるのは500件までです' }, 400);
 
   const { id: adminId, name } = await adminName(c);
   const memberRows = await c.env.DB.prepare('SELECT id, name FROM crew_shift_members').all<{ id: number; name: string }>();
   const memberNames = new Map((memberRows.results ?? []).map(m => [m.id, m.name]));
 
+  const entries = rawEntries.filter(e => e.member_id && /^\d{4}-\d{2}-\d{2}$/.test(e.date ?? ''));
+  if (entries.length === 0) return c.json({ ok: true, saved: 0 });
+
+  // 対象セルの既存コードをまとめて1回で取得（エントリ毎の個別SELECTを避ける）
+  const memberIds = [...new Set(entries.map(e => e.member_id))];
+  const sortedDates = entries.map(e => e.date).sort();
+  const placeholders = memberIds.map(() => '?').join(',');
+  const existingRows = await c.env.DB.prepare(
+    `SELECT member_id, date, code FROM crew_shifts WHERE member_id IN (${placeholders}) AND date BETWEEN ? AND ?`
+  ).bind(...memberIds, sortedDates[0], sortedDates[sortedDates.length - 1])
+    .all<{ member_id: number; date: string; code: string }>();
+  const oldMap = new Map((existingRows.results ?? []).map(r => [`${r.member_id}_${r.date}`, r.code]));
+
   let saved = 0;
+  const stmts: ReturnType<typeof c.env.DB.prepare>[] = [];
   for (const e of entries) {
-    if (!e.member_id || !/^\d{4}-\d{2}-\d{2}$/.test(e.date ?? '')) continue;
     const code = (e.code ?? '').trim();
-    const old = await c.env.DB.prepare('SELECT code FROM crew_shifts WHERE member_id = ? AND date = ?')
-      .bind(e.member_id, e.date).first<{ code: string }>();
-    const oldCode = old?.code ?? '';
+    const oldCode = oldMap.get(`${e.member_id}_${e.date}`) ?? '';
     if (oldCode === code) continue;
 
-    const stmts = [];
     if (code === '') {
       stmts.push(c.env.DB.prepare('DELETE FROM crew_shifts WHERE member_id = ? AND date = ?').bind(e.member_id, e.date));
     } else {
@@ -165,9 +175,9 @@ app.post('/api/crew-shift/shifts/batch', async (c) => {
     stmts.push(c.env.DB.prepare(
       'INSERT INTO crew_shift_edit_logs (admin_id, admin_name, action, target, date, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?)'
     ).bind(adminId, name, 'shift', memberNames.get(e.member_id) ?? `member:${e.member_id}`, e.date, oldCode, code));
-    await c.env.DB.batch(stmts);
     saved++;
   }
+  if (stmts.length > 0) await c.env.DB.batch(stmts);
   return c.json({ ok: true, saved });
 });
 

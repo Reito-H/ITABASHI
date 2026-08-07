@@ -217,7 +217,7 @@ export function kanchoShiftPage(
     return `<td class="kc" data-member="${m.id}" data-date="${d}" data-name="${escHtml(m.name)}" data-sec="${secGroup}"
       data-code="${escHtml(s?.code ?? '')}" data-dg="${s?.dg ?? 0}" data-ws="${s?.ws ?? 0}" data-cl="${s?.cl ?? ''}" data-lk="${locked ? 1 : 0}"
       data-tc="${m.team_color ?? ''}" data-inp="${inPeriod ? 1 : 0}"${hasWish ? ' data-wish="1"' : ''}
-      style="background:${bg};${cellFont(s)}position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;${locked ? `box-shadow:inset 0 0 0 2px ${LOCK_BORDER};` : ''}${canEdit ? 'cursor:pointer;' : ''}overflow:hidden;white-space:nowrap;touch-action:manipulation;${inPeriod ? '' : 'opacity:0.45;'}">${cellContent(s)}</td>`;
+      style="background:${bg}">${cellContent(s)}</td>`;
   }
 
   // 前任者と名前が違う場合は「旧名→新名」表示（月をまたいだ入れ替わりを表から分かるように）
@@ -586,6 +586,12 @@ ${saveToastHtml()}
   .kc[data-wish="1"]::after { content:''; position:absolute; top:0; right:0; border-style:solid; border-width:0 7px 7px 0; border-color:transparent #dc2626 transparent transparent; }
   .kreq-ng { background:#fee2e2 !important; color:#dc2626; font-weight:700; }
   .kreq-ok { background:#f0fdf4 !important; color:#166534; }
+  /* セル毎にインラインstyleを繰り返さず、data-*属性から導出できる見た目はCSSに任せる（HTML転送量・DOM生成コストの削減） */
+  .kc { position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;overflow:hidden;white-space:nowrap;touch-action:manipulation; }
+  .kc[data-inp="0"] { opacity:0.45; }
+  .kc[data-lk="1"] { box-shadow: inset 0 0 0 2px ${LOCK_BORDER}; }
+  .kc[data-ws="1"] { color:#dc2626;font-weight:700; }
+  ${canEdit ? '.kc { cursor:pointer; }' : ''}
 
   /* 記号管理モーダル（表形式＋常に見えるsticky保存フッター） */
   .kmodal-box { background:white;border-radius:14px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);display:flex;flex-direction:column;max-height:88vh;overflow:hidden; }

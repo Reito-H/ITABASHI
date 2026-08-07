@@ -706,9 +706,11 @@ app.get('/shift', async (c) => {
   const { start: periodStart, end: periodEnd } = getPeriodRange(year, month, periodCfg);
   const { dates } = getShiftDisplayRange(year, month, periodCfg);
 
+  // シフト表の表示に使うカラムのみ取得（birth_date/phone等の個人情報を無駄に転送しない）
+  const SHIFT_EMP_COLS = 'id, emp_no, name, division, team, entry_type, seq_no, status';
   const empQuery = mode === 'completed'
-    ? "SELECT * FROM employees WHERE is_active = 1 AND status = 'completed' ORDER BY entry_type DESC, seq_no, id"
-    : "SELECT * FROM employees WHERE is_active = 1 AND (status IS NULL OR status != 'completed') ORDER BY entry_type DESC, seq_no, id";
+    ? `SELECT ${SHIFT_EMP_COLS} FROM employees WHERE is_active = 1 AND status = 'completed' ORDER BY entry_type DESC, seq_no, id`
+    : `SELECT ${SHIFT_EMP_COLS} FROM employees WHERE is_active = 1 AND (status IS NULL OR status != 'completed') ORDER BY entry_type DESC, seq_no, id`;
 
   const [employeesRes, shiftsRes, instructorsRes, instSchedulesRes, scheduleTypesRes, coachesRes] = await Promise.all([
     c.env.DB.prepare(empQuery).all<Employee>(),

@@ -96,15 +96,11 @@ export function shiftPage(
   const FIX_BG = 'background:#f8fafc;';
 
   function cell(am: string, row: 'am'|'pm'|'coach', empId: number, date: string, name: string, inPeriod: boolean): string {
-    const bg = row === 'coach'
-      ? '#fafafa'
-      : (colorMap[am] ?? (am ? '#fff7ed' : '#ffffff'));
-    const op = inPeriod ? '' : 'opacity:0.45;';
-    const fs = row === 'coach' ? 'font-size:8px;color:#6b7280;line-height:1;' : 'font-size:11px;';
-    const pd = row === 'coach' ? 'padding:2px 1px;' : 'padding:5px 2px;';
-    return `<td class="sc" data-emp="${empId}" data-date="${date}" data-row="${row}" data-name="${escHtml(name)}"
-      style="background:${bg};min-width:44px;max-width:44px;width:44px;text-align:center;${fs}${pd}border:1px solid ${row==='coach'?'#f0f0f0':'#d1d5db'};cursor:pointer;overflow:hidden;white-space:nowrap;touch-action:manipulation;${op}"
-      onclick="openEditor(this)">${escHtml(am)}</td>`;
+    // 共通の見た目は<style>の.sc/.sc-coach/.sc-opクラスに任せ、セル毎に変わる背景色だけインラインstyleにする
+    // （毎セルに全プロパティを書き出すとHTML転送量・DOMメモリが肥大化するため）
+    const cls = row === 'coach' ? 'sc sc-coach' : 'sc';
+    const styleAttr = row === 'coach' ? '' : ` style="background:${colorMap[am] ?? (am ? '#fff7ed' : '#ffffff')}"`;
+    return `<td class="${cls}${inPeriod ? '' : ' sc-op'}" data-emp="${empId}" data-date="${date}" data-row="${row}" data-name="${escHtml(name)}"${styleAttr}>${escHtml(am)}</td>`;
   }
 
   function renderEmployeeRows(list: Employee[]): string {
@@ -247,7 +243,7 @@ export function shiftPage(
     <a href="${ADMIN_PATH}/settings" style="margin-left:4px;font-size:11px;color:#2563eb;text-decoration:none;">区分を編集</a>
   </div>
 
-  <div style="overflow-x:auto;overflow-y:auto;max-height:75vh;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
+  <div id="shiftTableWrap" style="overflow-x:auto;overflow-y:auto;max-height:75vh;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
     <table style="border-collapse:collapse;table-layout:fixed;">
       <thead style="position:sticky;top:0;z-index:10;background:white;">
         <tr>
@@ -362,6 +358,10 @@ ${saveToastHtml()}
   .sc[data-pending="true"] { outline:2px dashed #f59e0b !important; position:relative; }
   /* 班長セル未保存インジケーター */
   td[data-inst][data-pending="true"] { outline:2px dashed #f59e0b !important; }
+  /* セル毎にインラインstyleを繰り返さないための共通クラス（DOM/HTML転送量の削減） */
+  .sc { min-width:44px;max-width:44px;width:44px;text-align:center;font-size:11px;padding:5px 2px;border:1px solid #d1d5db;cursor:pointer;overflow:hidden;white-space:nowrap;touch-action:manipulation; }
+  .sc-coach { font-size:8px;color:#6b7280;line-height:1;padding:2px 1px;border-color:#f0f0f0;background:#fafafa; }
+  .sc-op { opacity:0.45; }
 </style>
 
 <script>
@@ -600,6 +600,15 @@ document.addEventListener('visibilitychange', function() {
   if (!document.hidden) _checkLockStatus();
 });
 _startLockCheckPolling();
+
+// セル毎にonclickを付与する代わりに、表全体で1個のリスナーに委譲（DOM生成コスト・メモリの削減）
+(function() {
+  var wrap = document.getElementById('shiftTableWrap');
+  if (wrap) wrap.addEventListener('click', function(e) {
+    var td = e.target.closest('td.sc');
+    if (td) openEditor(td);
+  });
+})();
 
 // ===== セル編集 =====
 function openEditor(td) {
