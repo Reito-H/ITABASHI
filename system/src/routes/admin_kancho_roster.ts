@@ -43,6 +43,10 @@ app.get('/settings/kancho', (c) => {
         <div style="font-weight:700;color:#1e3a5f;margin-bottom:4px;">希望休フォーム</div>
         <div style="font-size:12px;color:#6b7280;">募集期間・対象月度・送信権限・提出状況の確認</div>
       </a>
+      <a href="${ADMIN_PATH}/settings/kancho-logic" style="${cardStyle}">
+        <div style="font-weight:700;color:#1e3a5f;margin-bottom:4px;">ロジック仕様</div>
+        <div style="font-size:12px;color:#6b7280;">データモデル・自動伝播・記号ルール・警告チェックなどの内部仕様（閲覧専用）</div>
+      </a>
     </div>`;
   return c.html(layout('班長関連', html, 'settings'));
 });

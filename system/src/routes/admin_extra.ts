@@ -812,7 +812,7 @@ app.get('/announcements', async (c) => {
 
   const history = await c.env.DB.prepare(
     'SELECT * FROM announcements ORDER BY created_at DESC LIMIT 30'
-  ).all<{ id: number; title: string; message: string; target_type: string; target_data: string; sent_count: number; created_at: string }>();
+  ).all<{ id: number; title: string; message: string; target_type: string; target_data: string; sent_count: number; channel: string; created_at: string }>();
 
   // LINE連携者（line_liff_users）一覧: ロール順（ROLE_LABELSの定義順）→名前順
   const liffUsersRes = await c.env.DB.prepare(
@@ -827,6 +827,9 @@ app.get('/announcements', async (c) => {
   const liffNameMap = new Map(liffUsers.map(u => [String(u.id), u.name ?? '(名前未設定)']));
 
   const linkedCount = (employees.results ?? []).filter(e => e.has_line).length;
+
+  const adminCountRow = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM admins').first<{ n: number }>();
+  const adminCount = adminCountRow?.n ?? 0;
 
   // 入社月ごとのLINE連携済み人数
   const monthCounts = new Map<string, number>();
@@ -844,6 +847,7 @@ app.get('/announcements', async (c) => {
   const TARGET_LABEL: Record<string, string> = {
     all: '全員', entry_month: '入社月', individual: '個別指定', liff: 'LINE連携者'
   };
+  const CHANNEL_LABEL: Record<string, string> = { line: 'LINE', web: 'Web', both: 'LINE+Web' };
 
   const roleChips = [...roleCounts.entries()].map(([role, n]) =>
     `<button type="button" class="ann-chip" data-role="${escHtml(role)}" onclick="setRoleFilter('${escHtml(role)}', this)">${escHtml(ROLE_LABELS[role] ?? role)}<span class="ann-chip-n">${n}</span></button>`
@@ -880,17 +884,20 @@ app.get('/announcements', async (c) => {
       ? data.split(',').map(x => liffNameMap.get(x.trim()) ?? x.trim()).join('、')
       : data;
 
-  const historyRows = (history.results ?? []).map(r => `
+  const historyRows = (history.results ?? []).map(r => {
+    const channel = r.channel || 'line';
+    return `
     <tr class="ann-row" onclick="showDetail(${r.id})">
       <td class="ann-td ann-td-title">${escHtml(r.title)}</td>
       <td class="ann-td">
-        <span class="ann-tag">${escHtml(TARGET_LABEL[r.target_type] ?? r.target_type)}</span>
-        ${r.target_data ? `<span class="ann-td-sub">${escHtml(fmtTargetData(r.target_type, r.target_data) ?? '')}</span>` : ''}
+        <span class="ann-tag ann-tag-ch">${escHtml(CHANNEL_LABEL[channel] ?? channel)}</span>
+        ${channel !== 'web' ? `<span class="ann-tag">${escHtml(TARGET_LABEL[r.target_type] ?? r.target_type)}</span>` : ''}
+        ${channel !== 'web' && r.target_data ? `<span class="ann-td-sub">${escHtml(fmtTargetData(r.target_type, r.target_data) ?? '')}</span>` : ''}
       </td>
       <td class="ann-td ann-td-num">${r.sent_count}<span class="ann-td-unit">名</span></td>
       <td class="ann-td ann-td-date">${r.created_at.slice(0, 16)}</td>
-    </tr>`
-  ).join('');
+    </tr>`;
+  }).join('');
 
   const content = `
 <style>
@@ -958,7 +965,8 @@ app.get('/announcements', async (c) => {
 .ann-row:hover{background:#f8fafc;}
 .ann-row:last-child .ann-td{border-bottom:none;}
 .ann-td-title{font-weight:600;color:#12263f;}
-.ann-tag{background:#eef4fb;color:#1d4ed8;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:600;}
+.ann-tag{background:#eef4fb;color:#1d4ed8;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:600;margin-right:4px;}
+.ann-tag-ch{background:#fef3c7;color:#92400e;}
 .ann-td-sub{margin-left:6px;font-size:11px;color:#9aa4b2;}
 .ann-td-num{text-align:center;font-weight:700;color:#1a3a5c;}
 .ann-td-unit{font-size:11px;color:#9aa4b2;font-weight:400;margin-left:1px;}
@@ -988,7 +996,7 @@ app.get('/announcements', async (c) => {
 
   <!-- 配信フォーム -->
   <div class="ann-card">
-    <div class="ann-head"><h3>新規配信</h3><span class="ann-sub">LINE公式アカウントからテキストメッセージを送信します</span></div>
+    <div class="ann-head"><h3>新規配信</h3><span class="ann-sub">LINE公式アカウント、またはWeb管理画面の右上お知らせベルに配信します</span></div>
     <div class="ann-body">
       <label class="ann-label">タイトル<span class="ann-req">*</span></label>
       <input type="text" id="ann-title" class="ann-input" placeholder="例: 研修スケジュール変更のお知らせ" oninput="refreshPreview()">
@@ -996,6 +1004,19 @@ app.get('/announcements', async (c) => {
       <label class="ann-label">本文<span class="ann-req">*</span></label>
       <textarea id="ann-message" class="ann-textarea" rows="5" placeholder="配信する内容を入力してください" oninput="refreshPreview()"></textarea>
 
+      <label class="ann-label">配信先</label>
+      <div class="ann-seg" id="ann-channel-seg">
+        <button type="button" class="on" onclick="setChannel('line', this)">LINEのみ</button>
+        <button type="button" onclick="setChannel('web', this)">Web管理画面のみ</button>
+        <button type="button" onclick="setChannel('both', this)">LINE＋Web</button>
+      </div>
+
+      <!-- Web管理画面のみ: 対象は全管理アカウント共通固定のため選択UIなし -->
+      <div class="ann-panel" id="panel-web-only" style="display:none;">
+        <div class="ann-info">全管理アカウント（${adminCount}件）の右上お知らせベルに表示されます。</div>
+      </div>
+
+      <div id="ann-target-block">
       <label class="ann-label">配信対象</label>
       <div class="ann-seg" id="ann-seg">
         <button type="button" class="on" onclick="setTarget('liff', this)">LINE連携者</button>
@@ -1059,6 +1080,7 @@ app.get('/announcements', async (c) => {
           ${empRows || '<div class="ann-empty">社員がいません</div>'}
         </div>
       </div>
+      </div><!-- /ann-target-block -->
 
       <!-- プレビュー -->
       <div class="ann-preview" id="ann-preview">
@@ -1124,8 +1146,20 @@ app.get('/announcements', async (c) => {
 const annHistory = ${safeJson(history.results ?? [])};
 const LIFF_USER_NAMES = ${safeJson(Object.fromEntries(liffNameMap))};
 const LINKED_COUNT = ${linkedCount};
+const ADMIN_COUNT = ${adminCount};
 let targetType = 'liff';
 let roleFilter = '';
+let channel = 'line';
+
+function setChannel(ch, btn) {
+  channel = ch;
+  document.querySelectorAll('#ann-channel-seg button').forEach(function(b) { b.classList.remove('on'); });
+  btn.classList.add('on');
+  const webOnly = ch === 'web';
+  document.getElementById('panel-web-only').style.display = webOnly ? 'block' : 'none';
+  document.getElementById('ann-target-block').style.display = webOnly ? 'none' : 'block';
+  updateCount();
+}
 
 function setTarget(t, btn) {
   targetType = t;
@@ -1180,6 +1214,7 @@ function checkedIds(listId) {
 }
 
 function currentCount() {
+  if (channel === 'web') return ADMIN_COUNT;
   if (targetType === 'liff') return checkedIds('liff-list').length;
   if (targetType === 'individual') return checkedIds('emp-list').length;
   if (targetType === 'all') return LINKED_COUNT;
@@ -1212,6 +1247,7 @@ function getTarget() {
 }
 
 function targetSummary() {
+  if (channel === 'web') return '全管理アカウント（Web管理画面のベルマーク）';
   if (targetType === 'all') return 'LINE連携済みの全社員';
   if (targetType === 'entry_month') {
     const sel = document.getElementById('ann-entry-month');
@@ -1231,7 +1267,7 @@ function openConfirm() {
   const message = document.getElementById('ann-message').value.trim();
   if (!title || !message) { showToast('タイトルと本文を入力してください', true); return; }
   const t = getTarget();
-  if ((t.type === 'liff' || t.type === 'individual') && !t.data) { showToast('送信先を1名以上選択してください', true); return; }
+  if (channel !== 'web' && (t.type === 'liff' || t.type === 'individual') && !t.data) { showToast('送信先を1名以上選択してください', true); return; }
   document.getElementById('c-target').textContent = targetSummary();
   document.getElementById('c-count').textContent = currentCount() + '名';
   document.getElementById('c-msg').textContent = '【お知らせ】' + title + '\\n\\n' + message;
@@ -1255,7 +1291,8 @@ async function doSend() {
         title: document.getElementById('ann-title').value.trim(),
         message: document.getElementById('ann-message').value.trim(),
         target_type: t.type,
-        target_data: t.data
+        target_data: t.data,
+        channel: channel
       })
     });
     const json = await res.json();
@@ -1289,14 +1326,16 @@ function showDetail(id) {
   const r = annHistory.find(function(a) { return a.id === id; });
   if (!r) return;
   const TL = { all: '全員', entry_month: '入社月', individual: '個別指定', liff: 'LINE連携者' };
+  const CL = { line: 'LINE', web: 'Web管理画面', both: 'LINE＋Web管理画面' };
+  const ch = r.channel || 'line';
   const targetData = r.target_type === 'liff' && r.target_data
     ? r.target_data.split(',').map(function(x) { return LIFF_USER_NAMES[x.trim()] || x.trim(); }).join('、')
     : r.target_data;
   document.getElementById('modal-title').textContent = r.title;
   document.getElementById('modal-body').textContent = r.message;
   document.getElementById('modal-meta').textContent =
-    '対象: ' + (TL[r.target_type] || r.target_type) +
-    (targetData ? '（' + targetData + '）' : '') +
+    '配信先: ' + (CL[ch] || ch) +
+    (ch !== 'web' ? ' ／ 対象: ' + (TL[r.target_type] || r.target_type) + (targetData ? '（' + targetData + '）' : '') : '') +
     ' ／ 送信数: ' + r.sent_count + '名 ／ ' + r.created_at.slice(0, 16);
   document.getElementById('detail-modal').classList.add('show');
 }

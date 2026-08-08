@@ -988,9 +988,7 @@ app.get('/settings', (c) => {
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[] }> = [
     { heading: '日々の運用', cards: [
-      // 4種の報告ページはタブで行き来できるため、入口カードは1枚に集約。
-      // perm はスペース区切りで「いずれかの権限があれば表示」（filterHtmlByPermissions参照）
-      { href: `${ADMIN}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos', title: '報告センター', desc: '忘れ物・事故・違反・一般報告・引き継ぎメモの履歴と対応状況をタブで管理', highlight: true },
+      // 報告センターは左サイドバーに独立項目として配置したため、ここには表示しない
       { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄',       desc: 'ホシコンについての要望・意見・欲しい機能などを自由に投稿' },
       { href: `${ADMIN}/benri`,            perm: '',               title: '便利',         desc: '距離控除表・高速料金表・会社負担マップなど（どのアカウントでも閲覧可能）' },
     ]},
@@ -1003,7 +1001,7 @@ app.get('/settings', (c) => {
     ]},
     { heading: 'LINE関連', cards: [
       { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理',     desc: '新人招待コード発行・紐付け状況' },
-      { href: `${ADMIN}/announcements`,          perm: 'announcements',         title: 'お知らせ配信', desc: '全員・入社月・個別指定・LINE連携者への一斉配信とアンケート' },
+      { href: `${ADMIN}/announcements`,          perm: 'announcements',         title: 'お知らせ配信', desc: '全員・入社月・個別指定・LINE連携者への一斉配信、Web管理画面のお知らせベル、アンケート' },
       { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定', desc: '朝レポート・報告アラート・ベンテン/班長通知の時刻とON/OFF' },
       { href: `${ADMIN}/usage`,                  perm: 'settings.line-usage',    title: 'LINE利用状況', desc: 'トーク・LIFF操作のユーザー別利用集計（フル権限adminのみ）' },
     ]},
@@ -1063,7 +1061,7 @@ app.get('/settings/shift', (c) => {
     { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
     { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },
     { href: `${ADMIN}/settings/benten`,         perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理' },
-    { href: `${ADMIN}/settings/kancho`,         perm: 'settings.kancho settings.kancho-roster settings.kancho-wish', title: '班長関連', desc: '班長リスト（社員番号・内勤）、希望休フォームの設定' },
+    { href: `${ADMIN}/settings/kancho`,         perm: 'settings.kancho settings.kancho-roster settings.kancho-wish settings.kancho-logic', title: '班長関連', desc: '班長リスト（社員番号・内勤）、希望休フォームの設定、ロジック仕様' },
   ];
   const html = settingsSubHeader('シフト関連の設定') + `
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;max-width:820px;">
@@ -1732,6 +1730,7 @@ app.get('/settings/tutorial', (c) => {
     <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
     <a href="#handover" data-perm-key="handover">1-20. 引き継ぎシート — 課の申し送り事項</a>
     <a href="#crew-portal" data-perm-key="crew-portal">1-21. 乗務員ポータル — 個人データ・シフト・売上・担当車表</a>
+    <a href="#todo" data-perm-key="todo">1-22. やることリスト — 課ごとの日次チェックリスト・当直共通タスク</a>
     <div class="tut-toc-section" style="margin-top:12px;" data-perm-key="settings.vehicle-search-guide">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
     <a href="#veh-guide" data-perm-key="settings.vehicle-search-guide">2-1. LINE車番検索ガイド（詳細は専用ページへ）</a>
     <div class="tut-toc-section" style="margin-top:12px;">第3章 — 現場スタッフ向け（LINE利用ガイド）</div>
@@ -2159,6 +2158,20 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>乗務員シフト</td><td>月間勤務予定表のWeb版。夏季稼働計画対実績の確認も可能</td></tr>
       <tr><td>売上分析（全社）</td><td>全社員横断の売上分析</td></tr>
       <tr><td>担当車表</td><td>3班・4班の担当者一覧表。Webで編集・印刷できる（板橋のみ）</td></tr>
+    </table>
+  </div>
+
+  <!-- 1-22 やることリスト -->
+  <div class="tut-section" id="todo" data-perm-key="todo">
+    <h3><span class="num">22</span>やることリスト — 課ごとの日次チェックリスト・当直共通タスク</h3>
+    <p style="font-size:13px;">1〜4課それぞれの日次定型業務と、当直担当者の共通業務をチェックリストで管理します。日付を切り替えて過去・当日・翌日の状況を確認できます。</p>
+    <table class="tut-table">
+      <tr><th>機能</th><th>内容</th></tr>
+      <tr><td>課タブ</td><td>1課〜4課はそれぞれ独立したリスト（他課の編集・チェックには影響しない）。「当直」タブは課の区別なく1本のリストを共有</td></tr>
+      <tr><td>チェック</td><td>日付ごとにチェック状態を保存。誰が完了したかも記録される</td></tr>
+      <tr><td>曜日限定タスク</td><td>「点検札を入れる」など特定曜日のみのタスクは対象外の日は淡色表示になる</td></tr>
+      <tr><td>日付連動の注意書き</td><td>「点呼作成」の19日など、毎月特定の日だけ注意書きを強調表示できる</td></tr>
+      <tr><td>リストを編集</td><td>タスクの追加・編集・削除（論理削除）・ドラッグ&ドロップでの並び替えが可能</td></tr>
     </table>
   </div>
 

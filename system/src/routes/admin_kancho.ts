@@ -31,6 +31,52 @@ function parseYearMonth(c: { req: { query: (k: string) => string | undefined } }
   return { year, month };
 }
 
+function adjacentPeriod(year: number, month: number): { prevYear: number; prevMonth: number; nextYear: number; nextMonth: number } {
+  let prevYear = year, prevMonth = month - 1;
+  if (prevMonth < 1) { prevMonth = 12; prevYear--; }
+  let nextYear = year, nextMonth = month + 1;
+  if (nextMonth > 12) { nextMonth = 1; nextYear++; }
+  return { prevYear, prevMonth, nextYear, nextMonth };
+}
+
+// 月またぎのグレー表示は前月度/次月度の同一枠を自動で引き当てる。社員番号(emp_no)が
+// 紐付いていればそれを最優先（内勤/乗務が不規則に入れ替わってもズレない）。未紐付けの
+// 行だけ、従来通り「行」（section・班色・role・並び順）でフォールバック照合する
+// （NULLがあり得るのでIS比較）
+function rowMatchSql(col: string): string {
+  return `
+    (SELECT p.${col} FROM kancho_members p WHERE p.year = ? AND p.month = ?
+       AND (
+         (m.emp_no IS NOT NULL AND m.emp_no != '' AND p.emp_no = m.emp_no)
+         OR ((m.emp_no IS NULL OR m.emp_no = '') AND p.section = m.section AND p.team_color IS m.team_color AND p.role IS m.role AND p.sort_order = m.sort_order)
+       )
+     LIMIT 1)`;
+}
+
+// 表示範囲(dates)のうち月度外の日は、行一致した前月度/次月度のIDのシフトを
+// 読み取り専用で別名として補完する（保存は常に現月度の自分のIDに対して行う）
+function fillAdjacentShifts(
+  memberList: Array<KanchoMember & { prev_id: number | null; next_id: number | null }>,
+  dates: string[], periodStart: string, periodEnd: string, shiftMap: Record<string, KanchoCell>
+): void {
+  for (const m of memberList) {
+    for (const d of dates) {
+      if (d >= periodStart) continue;
+      if (!m.prev_id) continue;
+      const key = `${m.id}_${d}`;
+      const srcKey = `${m.prev_id}_${d}`;
+      if (!shiftMap[key] && shiftMap[srcKey]) shiftMap[key] = shiftMap[srcKey];
+    }
+    for (const d of dates) {
+      if (d <= periodEnd) continue;
+      if (!m.next_id) continue;
+      const key = `${m.id}_${d}`;
+      const srcKey = `${m.next_id}_${d}`;
+      if (!shiftMap[key] && shiftMap[srcKey]) shiftMap[key] = shiftMap[srcKey];
+    }
+  }
+}
+
 // ===== 枠(slot_key)の変更を、既に存在する将来の月度へ自動反映 =====
 // 「意図的に変更しない限り同じ設定を使い続ける」運用のため、枠設定・担当者変更・
 // 社員管理照合での編集はすべてこの関数を通して将来の月度に伝播させる
@@ -145,22 +191,7 @@ app.get('/kancho-shift', async (c) => {
   const periodCfg = await getPeriodSettings(c.env.DB);
   const { start: periodStart, end: periodEnd } = getPeriodRange(year, month, periodCfg);
   const { start: dispStart, end: dispEnd, dates } = getShiftDisplayRange(year, month, periodCfg);
-  let prevYear = year, prevMonth = month - 1;
-  if (prevMonth < 1) { prevMonth = 12; prevYear--; }
-  let nextYear = year, nextMonth = month + 1;
-  if (nextMonth > 12) { nextMonth = 1; nextYear++; }
-
-  // 月またぎのグレー表示・「旧名→新名」は前月度/次月度の同一人物を自動で引き当てる。
-  // 社員番号(emp_no)が紐付いていればそれを最優先（内勤/乗務が不規則に入れ替わっても
-  // ズレない）。未紐付けの行だけ、従来通り「行」（section・班色・role・並び順）で
-  // フォールバック照合する（NULLがあり得るのでIS比較）
-  const rowMatchSql = (col: string) => `
-    (SELECT p.${col} FROM kancho_members p WHERE p.year = ? AND p.month = ?
-       AND (
-         (m.emp_no IS NOT NULL AND m.emp_no != '' AND p.emp_no = m.emp_no)
-         OR ((m.emp_no IS NULL OR m.emp_no = '') AND p.section = m.section AND p.team_color IS m.team_color AND p.role IS m.role AND p.sort_order = m.sort_order)
-       )
-     LIMIT 1)`;
+  const { prevYear, prevMonth, nextYear, nextMonth } = adjacentPeriod(year, month);
 
   const [members, types, shifts, memos, wishes, forbiddenPairs] = await Promise.all([
     // 無効メンバーも取得（名簿管理モーダルで再有効化できるように。表への表示は画面側で絞る）
@@ -192,25 +223,8 @@ app.get('/kancho-shift', async (c) => {
     shiftMap[`${s.member_id}_${s.date}`] = { code: s.code, dg: s.is_diagonal, ws: s.is_wish, cl: s.cell_color, lk: s.is_locked };
   }
 
-  // 月またぎのグレー表示日は名簿IDが月度ごとに別なので、行一致した前月度/次月度のIDから
-  // 別名として引き当てる（読み取り専用。保存は現月度の自分のIDに対して行われる）
   const memberList = members.results ?? [];
-  for (const m of memberList) {
-    for (const d of dates) {
-      if (d >= periodStart) continue;
-      if (!m.prev_id) continue;
-      const key = `${m.id}_${d}`;
-      const srcKey = `${m.prev_id}_${d}`;
-      if (!shiftMap[key] && shiftMap[srcKey]) shiftMap[key] = shiftMap[srcKey];
-    }
-    for (const d of dates) {
-      if (d <= periodEnd) continue;
-      if (!m.next_id) continue;
-      const key = `${m.id}_${d}`;
-      const srcKey = `${m.next_id}_${d}`;
-      if (!shiftMap[key] && shiftMap[srcKey]) shiftMap[key] = shiftMap[srcKey];
-    }
-  }
+  fillAdjacentShifts(memberList, dates, periodStart, periodEnd, shiftMap);
 
   const editable = await canEdit(c);
   const headerNav = kanchoPeriodNavHtml(year, month, periodStart, periodEnd);
@@ -226,23 +240,24 @@ app.get('/kancho-shift/print', async (c) => {
   await ensureKanchoPeriod(c.env.DB, year, month);
   const periodCfg = await getPeriodSettings(c.env.DB);
   const { start: periodStart, end: periodEnd } = getPeriodRange(year, month, periodCfg);
-
-  // 印刷は月度内のみ（前後の余白日は含めない）
-  const dates: string[] = [];
-  const cur = new Date(periodStart);
-  const endD = new Date(periodEnd);
-  while (cur <= endD) {
-    dates.push(cur.toISOString().split('T')[0]);
-    cur.setDate(cur.getDate() + 1);
-  }
+  // 終業班長は締め日の関係でシフト行が1日ずれる等のイレギュラーがあるため、印刷でも
+  // 月度内だけでなく前後の余白日（前月度/次月度の枠）を薄く表示して確認できるようにする
+  const { start: dispStart, end: dispEnd, dates } = getShiftDisplayRange(year, month, periodCfg);
+  const { prevYear, prevMonth, nextYear, nextMonth } = adjacentPeriod(year, month);
 
   const [members, types, shifts, memos] = await Promise.all([
-    c.env.DB.prepare('SELECT * FROM kancho_members WHERE is_active = 1 AND year = ? AND month = ? ORDER BY section, sort_order, id')
-      .bind(year, month).all<KanchoMember>(),
+    c.env.DB.prepare(
+      `SELECT m.*,
+         ${rowMatchSql('id')} AS prev_id,
+         ${rowMatchSql('id')} AS next_id
+       FROM kancho_members m
+       WHERE m.is_active = 1 AND m.year = ? AND m.month = ? ORDER BY m.section, m.sort_order, m.id`
+    ).bind(prevYear, prevMonth, nextYear, nextMonth, year, month)
+      .all<KanchoMember & { prev_id: number | null; next_id: number | null }>(),
     c.env.DB.prepare('SELECT * FROM kancho_shift_types WHERE year = ? AND month = ? ORDER BY sort_order, id')
       .bind(year, month).all<KanchoShiftType>(),
     c.env.DB.prepare('SELECT member_id, date, code, is_diagonal, is_wish, cell_color, is_locked FROM kancho_shifts WHERE date BETWEEN ? AND ?')
-      .bind(periodStart, periodEnd).all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null; is_locked: number }>(),
+      .bind(dispStart, dispEnd).all<{ member_id: number; date: string; code: string; is_diagonal: number; is_wish: number; cell_color: string | null; is_locked: number }>(),
     c.env.DB.prepare('SELECT * FROM kancho_memos WHERE year = ? AND month = ? ORDER BY kind, sort_order, id')
       .bind(year, month).all<KanchoMemo>(),
   ]);
@@ -251,9 +266,11 @@ app.get('/kancho-shift/print', async (c) => {
   for (const s of (shifts.results ?? [])) {
     shiftMap[`${s.member_id}_${s.date}`] = { code: s.code, dg: s.is_diagonal, ws: s.is_wish, cl: s.cell_color, lk: s.is_locked };
   }
+  const memberList = members.results ?? [];
+  fillAdjacentShifts(memberList, dates, periodStart, periodEnd, shiftMap);
 
   return c.html(kanchoPrintPage(
-    members.results ?? [], types.results ?? [], shiftMap, memos.results ?? [],
+    memberList, types.results ?? [], shiftMap, memos.results ?? [],
     dates, year, month, periodStart, periodEnd
   ));
 });

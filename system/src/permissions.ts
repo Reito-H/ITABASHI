@@ -8,7 +8,7 @@
 //   migration_031 で既存の制限付きアカウントには全キーの .edit を付与済み。
 
 // 権限キー一覧
-//   サイドバー: home / kancho-shift / handover / crew-portal / newcomers / staff /
+//   サイドバー: home / kancho-shift / handover / todo / crew-portal / newcomers / staff /
 //               vehicles / inspection / settings / announcements / line / requests
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
@@ -19,10 +19,13 @@
 //               settings.benten / settings.schedule-types / settings.dia / settings.coaches /
 //               settings.instructors / settings.periods / settings.notifications /
 //               settings.offices / settings.vehicle-search-guide / settings.documents /
-//               settings.tutorial / settings.status
+//               settings.tutorial / settings.status / settings.kancho-logic
 
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
+// キーは '|' 区切りで複数指定可（いずれか1つでも権限があればOK）。例: 'a|b|c'
 const PATH_PERMISSIONS: Array<[RegExp, string]> = [
+  // 報告センター入口（5種の報告タブいずれかの権限があれば入れる。各タブ自体の制御は個別エントリで行う）
+  [/^\/settings\/reports/,              'settings.lost-items|settings.accidents|settings.violations|settings.general-reports|settings.handover-memos'],
   // 設定サブページ
   [/^\/settings\/accounts/,             'settings.accounts'],
   [/^\/settings\/liff/,                 'settings.liff'],
@@ -46,6 +49,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
+  [/^\/settings\/kancho-logic/,         'settings.kancho-logic'],
   [/^\/settings\/kancho$/,              'settings.kancho'],
   [/^\/settings/,                       'settings'],
   // 設定配下のAPI
@@ -68,6 +72,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/handover/, 'handover'],
   [/^\/tantosha/,     'tantosha'],
   [/^\/api\/tantosha/, 'tantosha'],
+  [/^\/todo/,         'todo'],
+  [/^\/api\/todo/,    'todo'],
   [/^\/crew-portal/,  'crew-portal'],
   [/^\/crew-shift/,        'crew-shift'],
   [/^\/summer-report/,     'crew-shift'],
@@ -158,11 +164,14 @@ export function isRootApiWriteAllowed(perms: string[], path: string, method: str
 
 // 制限アカウントがアクセス可能か判定
 // 非GETリクエスト（データ変更）には <key>.edit が必要
+// キーが '|' 区切りの場合はいずれか1つでも条件を満たせば許可
 export function isPathAllowed(perms: string[], subPath: string, method: string = 'GET'): boolean {
   const key = requiredPermissionKey(subPath);
-  if (key === null || !perms.includes(key)) return false;
+  if (key === null) return false;
+  const keys = key.split('|');
+  if (!keys.some(k => perms.includes(k))) return false;
   const isRead = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
-  return isRead || perms.includes(`${key}.edit`);
+  return isRead || keys.some(k => perms.includes(`${k}.edit`));
 }
 
 // 権限設定UI用のカタログ（キー・表示名）。各キーに閲覧/編集のチェックを持つ
@@ -174,6 +183,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'handover',      label: '引き継ぎシート' },
     { key: 'crew-portal',   label: '乗務員ポータル（個人データ参照）' },
     { key: 'tantosha',      label: '担当車表' },
+    { key: 'todo',          label: 'やることリスト' },
     { key: 'crew-shift',    label: '乗務員シフト・夏季稼働' },
     { key: 'newcomers',     label: '総合新人管理' },
     { key: 'staff',         label: '社員管理（詳細検索含む）' },
@@ -209,6 +219,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.kancho',               label: '班長関連（ハブ）' },
     { key: 'settings.kancho-roster',        label: '班長リスト（班長登録の解除のみ編集可）' },
     { key: 'settings.kancho-wish',          label: '希望休フォーム' },
+    { key: 'settings.kancho-logic',         label: '班長シフト ロジック仕様（閲覧のみ）' },
   ]},
 ];
 

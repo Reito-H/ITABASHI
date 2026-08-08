@@ -325,12 +325,12 @@ export function kanchoShiftPage(
 <div style="font-family:'Hiragino Sans','Meiryo',sans-serif;">
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
     <a href="${ADMIN_PATH}/kancho-shift/personal" class="btn-secondary" style="text-decoration:none;">👤 個人別確認</a>
-    <a href="${ADMIN_PATH}/kancho-shift/print?year=${year}&month=${month}" target="_blank" class="btn-secondary">🖨️ 印刷</a>
     <button onclick="openWarnings()" id="warnings-btn" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">⚠ 警告チェック</button>
     ${canEdit ? `<button onclick="openWishes()" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">希望休</button>` : ''}
     <div style="position:relative;">
       <button onclick="toggleGearMenu(event)" id="gear-btn" class="btn-secondary" style="border:none;cursor:pointer;font-size:15px;line-height:1;">⚙️</button>
       <div id="gear-menu" class="gear-menu">
+        <a class="gear-item" href="${ADMIN_PATH}/kancho-shift/print?year=${year}&month=${month}" target="_blank" style="text-decoration:none;box-sizing:border-box;">印刷</a>
         <button class="gear-item" onclick="closeGearMenu();openHistory()">履歴</button>
         ${canEdit ? `
         <button class="gear-item" onclick="closeGearMenu();openNotify()">通知設定</button>
@@ -1317,16 +1317,21 @@ function _shiftOf(mid, date) {
   if (!td) return null;
   return { code: td.dataset.code || '', dg: td.dataset.dg === '1', cl: td.dataset.cl || '' };
 }
+// その日の実効班色（他班ヘルプでcell_colorが入っていればそちらを優先）から所属課を判定する。
+// 1課の班長がその日だけ2課の枠を手伝う、といったケースがあるため、team_color固定ではなく日別に判定する
+function _deptOf(m, d) {
+  var s = _shiftOf(m.id, d);
+  var color = (s && s.cl) || m.team_color;
+  return color ? DEPT_COLOR_MAP[color] : null;
+}
 function computeWarnings() {
   var mains = _allMembers.filter(function(m) { return m.section === 'main' && m.is_active === 1 && m.is_indoor === 1; });
-  var byDept = { 1: [], 2: [], 3: [], 4: [] };
-  mains.forEach(function(m) {
-    var dept = m.team_color ? DEPT_COLOR_MAP[m.team_color] : null;
-    if (dept) byDept[dept].push(m);
-  });
   var periodDates = _dates.filter(function(d) { return d >= periodStart && d <= periodEnd; });
+  function membersOfDept(dept, d) {
+    return mains.filter(function(m) { return _deptOf(m, d) === dept; });
+  }
 
-  var headcountWarnings = [], pairWarnings = [], coverageWarnings = [], coverageNotes = [], streakWarnings = [];
+  var headcountWarnings = [], pairWarnings = [], coverageWarnings = [], coverageNotes = [], gapWarnings = [], streakWarnings = [];
 
   function _requiredOf(code) {
     var t = _allTypes.filter(function(x) { return x.code === code && x.is_active === 1 && (x.section === 'main' || x.section === 'all'); })[0];
@@ -1356,32 +1361,51 @@ function computeWarnings() {
   });
 
   [1, 2, 3, 4].forEach(function(dept) {
-    var members = byDept[dept];
-    if (members.length === 0) return;
-    var shukugyo = members.filter(function(m) { return m.role === '終業班長'; });
     periodDates.forEach(function(d) {
+      var members = membersOfDept(dept, d);
+      if (members.length === 0) return;
+      var shukugyo = members.filter(function(m) { return m.role === '終業班長'; });
       var shukugyoCovered = shukugyo.some(function(m) {
         var s = _shiftOf(m.id, d);
         if (!s || !s.code) return true;  // 未入力・空欄＝終業班長のデフォルト出勤とみなす
         return !offCodes[s.code];
       });
-      if (shukugyoCovered) return;
 
-      var idx = _dates.indexOf(d);
-      var prevDate = idx > 0 ? _dates[idx - 1] : null;
-      var prevDiagonal = prevDate ? members.some(function(m) { var s = _shiftOf(m.id, prevDate); return s && s.code === '直' && s.dg; }) : false;
-      var todayDayShift = members.some(function(m) { var s = _shiftOf(m.id, d); return s && ((s.code === '' && s.cl) || s.code === '早'); });
-      if (prevDiagonal && todayDayShift) return;
+      if (!shukugyoCovered) {
+        var idx = _dates.indexOf(d);
+        var prevDate = idx > 0 ? _dates[idx - 1] : null;
+        var prevMembers = prevDate ? membersOfDept(dept, prevDate) : [];
+        var prevDiagonal = prevMembers.some(function(m) { var s = _shiftOf(m.id, prevDate); return s && s.code === '直' && s.dg; });
+        var todayDayShift = members.some(function(m) { var s = _shiftOf(m.id, d); return s && ((s.code === '' && s.cl) || s.code === '早'); });
+        if (prevDiagonal && todayDayShift) return;
 
-      // 前日斜め直（〜翌8:00）＋当日の通常直（9:00〜）で実質カバーされているケース。
-      // 8:00〜9:00の僅かな隙間は残るため警告からは外すが、念のため下部に注記として残す。
-      var todayChoku = members.some(function(m) { var s = _shiftOf(m.id, d); return s && s.code === '直' && !s.dg; });
-      if (prevDiagonal && todayChoku) {
-        coverageNotes.push(d + '：' + DEPT_LABEL[dept] + ' は前日斜め直＋当日直で実質カバー（8:00〜9:00頃のみ要確認）');
+        // 前日斜め直（〜翌8:00）＋当日の通常直（9:00〜）で実質カバーされているケース。
+        // 8:00〜9:00の僅かな隙間は残るため警告からは外すが、念のため下部に注記として残す。
+        var todayChoku = members.some(function(m) { var s = _shiftOf(m.id, d); return s && s.code === '直' && !s.dg; });
+        if (prevDiagonal && todayChoku) {
+          coverageNotes.push(d + '：' + DEPT_LABEL[dept] + ' は前日斜め直＋当日直で実質カバー（8:00〜9:00頃のみ要確認）');
+          return;
+        }
+
+        coverageWarnings.push(d + '：' + DEPT_LABEL[dept] + ' の3:00〜12:00がカバーされていない可能性');
         return;
       }
 
-      coverageWarnings.push(d + '：' + DEPT_LABEL[dept] + ' の3:00〜12:00がカバーされていない可能性');
+      // 終業班長が出勤している日でも、その夜から斜め直（14:00〜翌8:00）が入っていると
+      // 12:00（終業班長の勤務終了）〜14:00（斜め直の開始）が誰もカバーしない穴になる。
+      // 同課の別の班長（終業班長本人を除く。終業班長の空欄＋班色セルは早日勤と見た目が同じため、
+      // これを早日勤として誤カウントしないよう明示的に除外する）が早日勤・遅日勤・通常直で
+      // 出勤していれば穴は埋まる
+      var diagonalToday = members.some(function(m) { var s = _shiftOf(m.id, d); return s && s.code === '直' && s.dg; });
+      if (!diagonalToday) return;
+      var midCovered = members.some(function(m) {
+        if (m.role === '終業班長') return false;
+        var s = _shiftOf(m.id, d);
+        return s && (s.code === '遅' || s.code === '早' || (s.code === '' && s.cl) || (s.code === '直' && !s.dg));
+      });
+      if (!midCovered) {
+        gapWarnings.push(d + '：' + DEPT_LABEL[dept] + ' は斜め直当日の12:00〜14:00がカバーされていない可能性（同課の早日勤・遅日勤が必要）');
+      }
     });
   });
 
@@ -1399,11 +1423,11 @@ function computeWarnings() {
     }
   });
 
-  return { headcountWarnings: headcountWarnings, pairWarnings: pairWarnings, coverageWarnings: coverageWarnings, coverageNotes: coverageNotes, streakWarnings: streakWarnings };
+  return { headcountWarnings: headcountWarnings, pairWarnings: pairWarnings, coverageWarnings: coverageWarnings, coverageNotes: coverageNotes, gapWarnings: gapWarnings, streakWarnings: streakWarnings };
 }
 function openWarnings() {
   var w = computeWarnings();
-  var total = w.headcountWarnings.length + w.pairWarnings.length + w.coverageWarnings.length + w.streakWarnings.length;
+  var total = w.headcountWarnings.length + w.pairWarnings.length + w.coverageWarnings.length + w.gapWarnings.length + w.streakWarnings.length;
   function section(title, list) {
     if (list.length === 0) return '';
     return '<div style="margin-bottom:14px;"><div style="font-weight:700;color:#dc2626;margin-bottom:4px;">' + escH(title) + '（' + list.length + '件）</div>'
@@ -1421,6 +1445,7 @@ function openWarnings() {
     : section('当直・遅日勤の頭数不足', w.headcountWarnings)
       + section('当直の禁忌ペア', w.pairWarnings)
       + section('課の3:00〜12:00カバー漏れ（可能性・目安）', w.coverageWarnings)
+      + section('斜め直当日の12:00〜14:00カバー漏れ（可能性・目安）', w.gapWarnings)
       + section('10日以上の連勤', w.streakWarnings))
     + noteSection('前日斜め直＋当日直で実質カバー（参考・念のため確認）', w.coverageNotes);
   sel('#warnings-modal').style.display = 'flex';
@@ -1429,7 +1454,7 @@ function _refreshWarningsBadge() {
   var btn = sel('#warnings-btn');
   if (!btn) return;
   var w = computeWarnings();
-  var total = w.headcountWarnings.length + w.pairWarnings.length + w.coverageWarnings.length + w.streakWarnings.length;
+  var total = w.headcountWarnings.length + w.pairWarnings.length + w.coverageWarnings.length + w.gapWarnings.length + w.streakWarnings.length;
   btn.textContent = total > 0 ? '⚠ 警告チェック（' + total + '件）' : '⚠ 警告チェック';
 }
 recalcAll();  // 全ての集計・警告バッジを初期描画（DEPT_COLOR_MAP等の定義後に実行する必要がある）
@@ -2006,7 +2031,8 @@ export function kanchoPrintPage(
   const dateHead = dates.map(d => {
     const dt = new Date(d);
     const dow = dt.getUTCDay();
-    return `<th style="background:${dow === 0 ? '#fee2e2' : dow === 6 ? '#dbeafe' : '#f3f4f6'};">
+    const inPeriod = d >= periodStart && d <= periodEnd;
+    return `<th style="background:${dow === 0 ? '#fee2e2' : dow === 6 ? '#dbeafe' : '#f3f4f6'};${inPeriod ? '' : 'opacity:0.5;'}">
       <div>${dt.getUTCDate()}</div><div>${WEEKDAY_JA[dow]}</div></th>`;
   }).join('');
 
@@ -2084,6 +2110,7 @@ export function kanchoPrintPage(
 <body>
   <button class="print-btn" onclick="window.print()">🖨️ 印刷 / PDF保存</button>
   <h1>管理者公休予定表　${year}年${month}月度（${periodStart} 〜 ${periodEnd}）</h1>
+  <div style="font-size:9px;color:#6b7280;margin-bottom:4px;">薄く表示している日付は前月度・次月度の参考表示です（終業班長の締め日ずれ等の確認用）</div>
   <table>
     <thead><tr><th>氏名</th>${dateHead}${COUNT_COLS.map(cc => `<th>${cc.label}</th>`).join('')}</tr></thead>
     <tbody>${mainRows}</tbody>

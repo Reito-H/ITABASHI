@@ -30,16 +30,21 @@ const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift
 
 export function layout(title: string, content: string, activePage: string = '', headerExtra: string = ''): string {
   const showReportFab = !REPORT_FAB_HIDDEN_PAGES.has(activePage);
-  const navItems = [
-    { href: `${ADMIN_PATH}`,              label: 'ホーム',          id: 'home' },
-    { href: `${ADMIN_PATH}/kancho-shift`, label: '班長シフト',      id: 'kancho-shift' },
-    { href: `${ADMIN_PATH}/handover`,     label: '引き継ぎシート',  id: 'handover' },
-    { href: `${ADMIN_PATH}/crew-portal`,  label: '乗務員ポータル',  id: 'crew-portal' },
-    { href: `${ADMIN_PATH}/newcomers`,    label: '総合新人管理',    id: 'newcomers' },
-    { href: `${ADMIN_PATH}/staff`,        label: '社員管理',        id: 'staff' },
-    { href: `${ADMIN_PATH}/vehicles`,     label: '車両検索',        id: 'vehicles' },
-    { href: `${ADMIN_PATH}/inspection`,   label: '点検管理',        id: 'inspection' },
-    { href: `${ADMIN_PATH}/settings`,     label: '設定',            id: 'settings' },
+  // permKey省略時は id をそのまま権限キーとして使う（filterHtmlByPermissionsのdata-nav-id判定用）。
+  // 報告センターは専用の権限キーを持たず、既存の5つの報告権限のいずれかで表示する（スペース区切り＝OR）
+  const REPORT_CENTER_PERM = 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos';
+  const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean }> = [
+    { href: `${ADMIN_PATH}`,               label: 'ホーム',          id: 'home' },
+    { href: `${ADMIN_PATH}/settings/reports`, label: '報告センター', id: 'report-center', permKey: REPORT_CENTER_PERM, highlight: true },
+    { href: `${ADMIN_PATH}/kancho-shift`,  label: '班長シフト',      id: 'kancho-shift' },
+    { href: `${ADMIN_PATH}/handover`,      label: '引き継ぎシート',  id: 'handover' },
+    { href: `${ADMIN_PATH}/todo`,          label: 'やることリスト',  id: 'todo' },
+    { href: `${ADMIN_PATH}/crew-portal`,   label: '乗務員ポータル',  id: 'crew-portal' },
+    { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
+    { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
+    { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
+    { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
+    { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
 
   return `<!DOCTYPE html>
@@ -120,6 +125,9 @@ export function layout(title: string, content: string, activePage: string = '', 
     }
     .nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
     .nav-item.active { background: rgba(255,255,255,0.12); color: white; border-left-color: #60a5fa; }
+    .nav-item.nav-item-highlight { color: var(--color-accent); font-weight: 700; background: rgba(242,193,78,0.08); }
+    .nav-item.nav-item-highlight:hover { background: rgba(242,193,78,0.16); color: var(--color-accent); }
+    .nav-item.nav-item-highlight.active { background: rgba(242,193,78,0.22); border-left-color: var(--color-accent); color: var(--color-accent); }
     .sidebar-collapse-btn {
       flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; border: none;
       background: rgba(255,255,255,0.12); color: #cbd5e1; cursor: pointer;
@@ -159,6 +167,7 @@ export function layout(title: string, content: string, activePage: string = '', 
       .main-content { margin-left: 0; }
       .mobile-header { display: flex; }
       .desktop-header { display: none; }
+      #bell-dropdown { top: 50px; right: 8px; left: 8px; width: auto; max-width: none; }
     }
     @media (min-width: 769px) and (max-width: 1024px) {
       .sidebar { width: 180px; }
@@ -178,7 +187,13 @@ export function layout(title: string, content: string, activePage: string = '', 
       <span></span><span></span><span></span>
     </button>
     <span style="font-size:13px;font-weight:600;">${escHtml(title)}</span>
-    <span style="font-size:12px;color:#93c5fd;" id="current-time-m"></span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <button id="bell-btn-m" onclick="toggleBellDropdown()" aria-label="お知らせ" title="お知らせ" style="position:relative;background:none;border:none;cursor:pointer;padding:4px;display:flex;align-items:center;justify-content:center;color:#e5e7eb;">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span id="bell-badge-m" style="display:none;position:absolute;top:0;right:0;background:#dc2626;color:#fff;font-size:9px;font-weight:700;min-width:14px;height:14px;border-radius:8px;align-items:center;justify-content:center;padding:0 3px;line-height:1;"></span>
+      </button>
+      <span style="font-size:12px;color:#93c5fd;" id="current-time-m"></span>
+    </div>
   </div>
 
   <!-- サイドバーオーバーレイ（モバイル） -->
@@ -192,7 +207,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     </div>
     <nav style="flex:1;overflow-y:auto;padding:6px 0;">
       ${navItems.map(item => `
-        <a href="${item.href}" data-nav-id="${item.id}" class="nav-item${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
+        <a href="${item.href}" data-nav-id="${item.permKey ?? item.id}" class="nav-item${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
           ${escHtml(item.label)}
         </a>
       `).join('')}
@@ -213,12 +228,25 @@ export function layout(title: string, content: string, activePage: string = '', 
         <h1 style="font-size:20px;font-weight:700;color:#1e293b;white-space:nowrap;">${escHtml(title)}</h1>
         ${headerExtra}
       </div>
-      <span style="font-size:12px;color:#9ca3af;flex-shrink:0;" id="current-time"></span>
+      <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
+        <button id="bell-btn-d" onclick="toggleBellDropdown()" aria-label="お知らせ" title="お知らせ" style="position:relative;background:none;border:none;cursor:pointer;padding:6px;display:flex;align-items:center;justify-content:center;color:#4b5563;border-radius:6px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span id="bell-badge-d" style="display:none;position:absolute;top:2px;right:2px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;min-width:15px;height:15px;border-radius:8px;align-items:center;justify-content:center;padding:0 3px;line-height:1;"></span>
+        </button>
+        <span style="font-size:12px;color:#9ca3af;" id="current-time"></span>
+      </div>
     </div>
     <div class="page-content" style="padding:16px;">
       ${content}
     </div>
   </div>
+
+  <!-- お知らせ（ベルマーク）ドロップダウン -->
+  <div id="bell-dropdown" style="display:none;position:fixed;top:54px;right:20px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.2);width:340px;max-width:92vw;max-height:70vh;overflow-y:auto;z-index:70;">
+    <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#1e293b;position:sticky;top:0;background:#fff;">お知らせ</div>
+    <div id="bell-list"></div>
+  </div>
+  <div id="bell-overlay" onclick="closeBellDropdown()" style="display:none;position:fixed;inset:0;z-index:65;"></div>
 
   <!-- リミット到達ポップアップ（引き継ぎシートで設定した締切タスクの通知。全ページ共通・所属課ベースでサーバ側フィルタ済み） -->
   <div id="limit-alert-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;align-items:center;justify-content:center;padding:16px;">
@@ -321,6 +349,67 @@ export function layout(title: string, content: string, activePage: string = '', 
         startLimitsPolling();
       }
     });
+
+    function escBellText(s) {
+      return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function setBellBadge(n) {
+      ['bell-badge-d', 'bell-badge-m'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        if (n > 0) { el.textContent = n > 99 ? '99+' : String(n); el.style.display = 'flex'; }
+        else { el.style.display = 'none'; }
+      });
+    }
+    async function loadBellUnreadCount() {
+      try {
+        var res = await fetch('/api/announcements/web/unread-count');
+        if (!res.ok) return;
+        var data = await res.json();
+        setBellBadge(data.count || 0);
+      } catch (e) { /* 通信エラー時は次回ページ遷移時に再取得 */ }
+    }
+    function renderBellList(items) {
+      var list = document.getElementById('bell-list');
+      if (!items || !items.length) {
+        list.innerHTML = '<div style="padding:24px 16px;text-align:center;color:#9ca3af;font-size:13px;">お知らせはありません</div>';
+        return;
+      }
+      list.innerHTML = items.map(function (a) {
+        return '<div style="padding:12px 16px;border-bottom:1px solid #f4f6f9;' + (a.read ? '' : 'background:#f0f7ff;') + '">'
+          + '<div style="font-size:13px;font-weight:700;color:#12263f;margin-bottom:3px;">' + escBellText(a.title) + '</div>'
+          + '<div style="font-size:12.5px;color:#4b5563;line-height:1.6;white-space:pre-wrap;">' + escBellText(a.message) + '</div>'
+          + '<div style="font-size:11px;color:#9ca3af;margin-top:5px;">' + escBellText((a.created_at || '').slice(0, 16)) + '</div>'
+          + '</div>';
+      }).join('');
+    }
+    async function loadBellList() {
+      var list = document.getElementById('bell-list');
+      list.innerHTML = '<div style="padding:24px 16px;text-align:center;color:#9ca3af;font-size:13px;">読み込み中...</div>';
+      try {
+        var res = await fetch('/api/announcements/web/list');
+        if (!res.ok) return;
+        var data = await res.json();
+        renderBellList(data.announcements || []);
+        setBellBadge(0);
+        fetch('/api/announcements/web/mark-read', { method: 'POST' }).catch(function () {});
+      } catch (e) {
+        list.innerHTML = '<div style="padding:24px 16px;text-align:center;color:#9ca3af;font-size:13px;">読み込みに失敗しました</div>';
+      }
+    }
+    var _bellOpen = false;
+    function toggleBellDropdown() {
+      _bellOpen = !_bellOpen;
+      document.getElementById('bell-dropdown').style.display = _bellOpen ? 'block' : 'none';
+      document.getElementById('bell-overlay').style.display = _bellOpen ? 'block' : 'none';
+      if (_bellOpen) loadBellList();
+    }
+    function closeBellDropdown() {
+      _bellOpen = false;
+      document.getElementById('bell-dropdown').style.display = 'none';
+      document.getElementById('bell-overlay').style.display = 'none';
+    }
+    loadBellUnreadCount();
 
     function toggleReportFab() {
       const menu = document.getElementById('report-fab-menu');

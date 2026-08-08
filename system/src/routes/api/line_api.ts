@@ -48,16 +48,29 @@ app.delete('/invite/:code', async (c) => {
 app.get('/announcements', async (c) => {
   const rows = await c.env.DB.prepare(
     'SELECT * FROM announcements ORDER BY created_at DESC LIMIT 50'
-  ).all<{ id: number; title: string; message: string; target_type: string; target_data: string; sent_count: number; created_at: string }>();
+  ).all<{ id: number; title: string; message: string; target_type: string; target_data: string; sent_count: number; channel: string; created_at: string }>();
   return c.json({ announcements: rows.results ?? [] });
 });
 
 // お知らせ一括配信
+// channel: 'line'（既定・LINE配信のみ） / 'web'（Web管理画面のベルマークのみ） / 'both'（両方）
 app.post('/announcements', async (c) => {
-  const { title, message, target_type, target_data } = await c.req.json<{
-    title: string; message: string; target_type: string; target_data?: string;
+  const { title, message, target_type, target_data, channel: rawChannel } = await c.req.json<{
+    title: string; message: string; target_type: string; target_data?: string; channel?: string;
   }>();
   if (!title || !message) return c.json({ error: 'タイトルと本文が必要です' }, 400);
+  const channel = ['line', 'web', 'both'].includes(rawChannel ?? '') ? (rawChannel as string) : 'line';
+  const includesLine = channel === 'line' || channel === 'both';
+
+  // Web管理画面のみへの掲示: LINE送信は行わず、全管理アカウント向けに記録するだけ
+  if (!includesLine) {
+    const adminCount = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM admins').first<{ n: number }>();
+    await c.env.DB.prepare(
+      'INSERT INTO announcements (title, message, target_type, target_data, sent_count, channel) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(title, message, 'all', null, adminCount?.n ?? 0, channel).run();
+    return c.json({ ok: true, sent: adminCount?.n ?? 0 });
+  }
+
   if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) return c.json({ error: 'LINE未設定' }, 500);
 
   let uids: string[] = [];
@@ -97,8 +110,8 @@ app.post('/announcements', async (c) => {
 
   if (uids.length === 0) {
     await c.env.DB.prepare(
-      'INSERT INTO announcements (title, message, target_type, target_data, sent_count) VALUES (?, ?, ?, ?, 0)'
-    ).bind(title, message, target_type, target_data ?? null).run();
+      'INSERT INTO announcements (title, message, target_type, target_data, sent_count, channel) VALUES (?, ?, ?, ?, 0, ?)'
+    ).bind(title, message, target_type, target_data ?? null, channel).run();
     return c.json({ ok: true, sent: 0, warning: '送信対象のLINE紐付き社員がいません' });
   }
 
@@ -106,8 +119,8 @@ app.post('/announcements', async (c) => {
   await lineMulticast(c.env.LINE_CHANNEL_ACCESS_TOKEN, uids, lineMessage);
 
   await c.env.DB.prepare(
-    'INSERT INTO announcements (title, message, target_type, target_data, sent_count) VALUES (?, ?, ?, ?, ?)'
-  ).bind(title, message, target_type, target_data ?? null, uids.length).run();
+    'INSERT INTO announcements (title, message, target_type, target_data, sent_count, channel) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(title, message, target_type, target_data ?? null, uids.length, channel).run();
 
   return c.json({ ok: true, sent: uids.length });
 });

@@ -35,11 +35,16 @@ export const ROLE_COLORS: Record<string, string> = {
   unknown:             '#9ca3af',
 };
 
-function subHeader(title: string): string {
+function subHeader(title: string, backHref: string = `${ADMIN_PATH}/settings`, backLabel: string = '設定に戻る'): string {
   return `<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-    <a href="${ADMIN_PATH}/settings" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 設定に戻る</a>
+    <a href="${backHref}" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← ${escHtml(backLabel)}</a>
     <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;margin:0;">${escHtml(title)}</h2>
   </div>`;
+}
+
+// 報告センター配下（忘れ物・事故・違反・一般報告・引き継ぎメモ）の見出し。設定ではなく報告センターに戻る
+function reportSubHeader(title: string): string {
+  return subHeader(title, `${ADMIN_PATH}/settings/reports`, '報告センターに戻る');
 }
 
 // ログイン中の管理者名を取得（報告の「対応者」記録用）
@@ -1038,7 +1043,7 @@ app.get('/settings/lost-items', async (c) => {
   };
 
   const content = `
-    ${subHeader('報告センター')}
+    ${reportSubHeader('報告センター')}
     ${reportTabs('lost')}
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
@@ -1170,7 +1175,7 @@ app.get('/settings/lost-items', async (c) => {
     </script>
   `;
 
-  return c.html(layout('忘れ物報告一覧', content, 'settings'));
+  return c.html(layout('忘れ物報告一覧', content, 'report-center'));
 });
 
 // ===================================================
@@ -1246,7 +1251,7 @@ app.get('/settings/accidents', async (c) => {
   };
 
   const content = `
-    ${subHeader('報告センター')}
+    ${reportSubHeader('報告センター')}
     ${reportTabs('accident')}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
       ${filterBtn('すべて', '')}
@@ -1363,7 +1368,7 @@ app.get('/settings/accidents', async (c) => {
     </script>
   `;
 
-  return c.html(layout('事故報告一覧', content, 'settings'));
+  return c.html(layout('事故報告一覧', content, 'report-center'));
 });
 
 // ===================================================
@@ -1452,7 +1457,7 @@ app.get('/settings/violations', async (c) => {
   };
 
   const content = `
-    ${subHeader('報告センター')}
+    ${reportSubHeader('報告センター')}
     ${reportTabs('violation')}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
       ${filterBtn('すべて', '')}
@@ -1592,7 +1597,7 @@ app.get('/settings/violations', async (c) => {
     </script>
   `;
 
-  return c.html(layout('違反報告一覧', content, 'settings'));
+  return c.html(layout('違反報告一覧', content, 'report-center'));
 });
 
 // ===================================================
@@ -1670,7 +1675,7 @@ app.get('/settings/general-reports', async (c) => {
   };
 
   const content = `
-    ${subHeader('報告センター')}
+    ${reportSubHeader('報告センター')}
     ${reportTabs('general')}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
       ${filterBtn('すべて', '')}
@@ -1777,7 +1782,7 @@ app.get('/settings/general-reports', async (c) => {
     </script>
   `;
 
-  return c.html(layout('一般報告一覧', content, 'settings'));
+  return c.html(layout('一般報告一覧', content, 'report-center'));
 });
 
 // ===================================================
@@ -2065,7 +2070,7 @@ app.get('/settings/handover-memos', async (c) => {
     </tr>`).join('');
 
   const content = `
-    ${subHeader('報告センター')}
+    ${reportSubHeader('報告センター')}
     ${reportTabs('memo')}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
       <button onclick="createMemo()" style="padding:7px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ 新規メモを作成</button>
@@ -2116,7 +2121,7 @@ app.get('/settings/handover-memos', async (c) => {
     </script>
   `;
 
-  return c.html(layout('引き継ぎメモ一覧', content, 'settings'));
+  return c.html(layout('引き継ぎメモ一覧', content, 'report-center'));
 });
 
 app.get('/settings/handover-memos/:id', async (c) => {
@@ -2133,7 +2138,7 @@ app.get('/settings/handover-memos/:id', async (c) => {
   const memoContent = sanitizeMemoContent(memo.grid_data);
 
   const content = `
-    ${subHeader('報告センター')}
+    ${reportSubHeader('報告センター')}
     ${reportTabs('memo')}
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
       <a href="${ADMIN_PATH}/settings/handover-memos" style="color:#6b7280;font-size:13px;text-decoration:none;white-space:nowrap;">← メモ一覧に戻る</a>
@@ -2199,7 +2204,7 @@ app.get('/settings/handover-memos/:id', async (c) => {
     </script>
   `;
 
-  return c.html(layout(`引き継ぎメモ: ${memo.title}`, content, 'settings'));
+  return c.html(layout(`引き継ぎメモ: ${memo.title}`, content, 'report-center'));
 });
 
 app.post('/api/handover-memos', async (c) => {
