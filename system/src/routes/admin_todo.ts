@@ -45,9 +45,15 @@ function parseKaParam(raw: string | undefined): { ka: number | null; kaParam: st
   return null;
 }
 
+function cookieValue(cookieHeader: string | undefined, name: string): string | undefined {
+  return cookieHeader?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1];
+}
+
 // ===== ページ =====
 app.get('/todo', async (c) => {
-  const parsedKa = parseKaParam(c.req.query('ka')) ?? { ka: 1, kaParam: '1' };
+  // ?ka= が無い場合は前回開いた課をCookieから復元する（無ければ1課）
+  const kaCookie = cookieValue(c.req.header('Cookie'), 'todo_ka');
+  const parsedKa = parseKaParam(c.req.query('ka')) ?? parseKaParam(kaCookie) ?? { ka: 1, kaParam: '1' };
   const dateRaw = c.req.query('date') ?? '';
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : todayUtcStr();
 
@@ -71,7 +77,9 @@ app.get('/todo', async (c) => {
     tasks: rows.results ?? [],
     editable,
   });
-  return c.html(layout('やることリスト', html, 'todo'));
+  const res = c.html(layout('やることリスト', html, 'todo'));
+  res.headers.append('Set-Cookie', `todo_ka=${parsedKa.kaParam}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=15552000`);
+  return res;
 });
 
 // ===== API =====

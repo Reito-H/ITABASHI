@@ -1,5 +1,5 @@
 // 共通HTMLレイアウト
-import { ADMIN_PATH } from '../config';
+import { ADMIN_PATH, APP_VERSION } from '../config';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
 
 export function safeJson(value: unknown): string {
@@ -128,6 +128,16 @@ export function layout(title: string, content: string, activePage: string = '', 
     .nav-item.nav-item-highlight { color: var(--color-accent); font-weight: 700; background: rgba(242,193,78,0.08); }
     .nav-item.nav-item-highlight:hover { background: rgba(242,193,78,0.16); color: var(--color-accent); }
     .nav-item.nav-item-highlight.active { background: rgba(242,193,78,0.22); border-left-color: var(--color-accent); color: var(--color-accent); }
+    .version-pill {
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.06em; color: var(--color-accent);
+      background: linear-gradient(135deg, var(--color-primary) 0%, #2e1354 100%);
+      border: 1px solid rgba(242,193,78,0.45);
+      border-radius: 999px; padding: 3px 9px 3px 8px; line-height: 1.4;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
+      user-select: none; white-space: nowrap;
+    }
+    .version-pill-m { color: var(--color-accent); background: rgba(255,255,255,0.1); border: 1px solid rgba(242,193,78,0.35); }
     .sidebar-collapse-btn {
       flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; border: none;
       background: rgba(255,255,255,0.12); color: #cbd5e1; cursor: pointer;
@@ -192,6 +202,7 @@ export function layout(title: string, content: string, activePage: string = '', 
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
         <span id="bell-badge-m" style="display:none;position:absolute;top:0;right:0;background:#dc2626;color:#fff;font-size:9px;font-weight:700;min-width:14px;height:14px;border-radius:8px;align-items:center;justify-content:center;padding:0 3px;line-height:1;"></span>
       </button>
+      <span class="version-pill version-pill-m">v${escHtml(APP_VERSION)}</span>
       <span style="font-size:12px;color:#93c5fd;" id="current-time-m"></span>
     </div>
   </div>
@@ -233,6 +244,7 @@ export function layout(title: string, content: string, activePage: string = '', 
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
           <span id="bell-badge-d" style="display:none;position:absolute;top:2px;right:2px;background:#dc2626;color:#fff;font-size:10px;font-weight:700;min-width:15px;height:15px;border-radius:8px;align-items:center;justify-content:center;padding:0 3px;line-height:1;"></span>
         </button>
+        <span class="version-pill" title="バージョン ${escHtml(APP_VERSION)}">v${escHtml(APP_VERSION)}</span>
         <span style="font-size:12px;color:#9ca3af;" id="current-time"></span>
       </div>
     </div>
@@ -247,6 +259,18 @@ export function layout(title: string, content: string, activePage: string = '', 
     <div id="bell-list"></div>
   </div>
   <div id="bell-overlay" onclick="closeBellDropdown()" style="display:none;position:fixed;inset:0;z-index:65;"></div>
+
+  <!-- お知らせ 詳細モーダル（長文タップで全文表示） -->
+  <div id="bell-detail-overlay" onclick="closeBellDetail()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:80;align-items:center;justify-content:center;padding:16px;">
+    <div onclick="event.stopPropagation()" style="background:#fff;border-radius:14px;padding:22px 22px 20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,0.3);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;">
+        <div id="bell-detail-title" style="font-size:15px;font-weight:700;color:#12263f;"></div>
+        <button onclick="closeBellDetail()" aria-label="閉じる" style="background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;line-height:1;padding:2px;flex-shrink:0;">×</button>
+      </div>
+      <div id="bell-detail-message" style="font-size:13.5px;color:#1c2733;line-height:1.75;white-space:pre-wrap;"></div>
+      <div id="bell-detail-date" style="font-size:11px;color:#9ca3af;margin-top:14px;"></div>
+    </div>
+  </div>
 
   <!-- リミット到達ポップアップ（引き継ぎシートで設定した締切タスクの通知。全ページ共通・所属課ベースでサーバ側フィルタ済み） -->
   <div id="limit-alert-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;align-items:center;justify-content:center;padding:16px;">
@@ -369,16 +393,22 @@ export function layout(title: string, content: string, activePage: string = '', 
         setBellBadge(data.count || 0);
       } catch (e) { /* 通信エラー時は次回ページ遷移時に再取得 */ }
     }
+    var _bellItems = {};
     function renderBellList(items) {
       var list = document.getElementById('bell-list');
+      _bellItems = {};
+      items.forEach(function (a) { _bellItems[a.id] = a; });
       if (!items || !items.length) {
         list.innerHTML = '<div style="padding:24px 16px;text-align:center;color:#9ca3af;font-size:13px;">お知らせはありません</div>';
         return;
       }
       list.innerHTML = items.map(function (a) {
-        return '<div style="padding:12px 16px;border-bottom:1px solid #f4f6f9;' + (a.read ? '' : 'background:#f0f7ff;') + '">'
-          + '<div style="font-size:13px;font-weight:700;color:#12263f;margin-bottom:3px;">' + escBellText(a.title) + '</div>'
-          + '<div style="font-size:12.5px;color:#4b5563;line-height:1.6;white-space:pre-wrap;">' + escBellText(a.message) + '</div>'
+        return '<div class="bell-item" data-id="' + a.id + '" onclick="openBellDetail(' + a.id + ')" style="padding:12px 16px;border-bottom:1px solid #f4f6f9;cursor:pointer;position:relative;' + (a.read ? '' : 'background:#f0f7ff;') + '">'
+          + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
+          + '<div style="font-size:13px;font-weight:700;color:#12263f;margin-bottom:3px;flex:1;min-width:0;">' + escBellText(a.title) + '</div>'
+          + '<button onclick="event.stopPropagation();dismissBellAnnouncement(' + a.id + ')" aria-label="削除" title="削除" style="flex-shrink:0;background:none;border:none;color:#c1c9d4;cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;">×</button>'
+          + '</div>'
+          + '<div style="font-size:12.5px;color:#4b5563;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">' + escBellText(a.message) + '</div>'
           + '<div style="font-size:11px;color:#9ca3af;margin-top:5px;">' + escBellText((a.created_at || '').slice(0, 16)) + '</div>'
           + '</div>';
       }).join('');
@@ -395,6 +425,29 @@ export function layout(title: string, content: string, activePage: string = '', 
         fetch('/api/announcements/web/mark-read', { method: 'POST' }).catch(function () {});
       } catch (e) {
         list.innerHTML = '<div style="padding:24px 16px;text-align:center;color:#9ca3af;font-size:13px;">読み込みに失敗しました</div>';
+      }
+    }
+    function openBellDetail(id) {
+      var a = _bellItems[id];
+      if (!a) return;
+      document.getElementById('bell-detail-title').textContent = a.title;
+      document.getElementById('bell-detail-message').textContent = a.message;
+      document.getElementById('bell-detail-date').textContent = (a.created_at || '').slice(0, 16);
+      document.getElementById('bell-detail-overlay').style.display = 'flex';
+    }
+    function closeBellDetail() {
+      document.getElementById('bell-detail-overlay').style.display = 'none';
+    }
+    async function dismissBellAnnouncement(id) {
+      var el = document.querySelector('.bell-item[data-id="' + id + '"]');
+      try {
+        await fetch('/api/announcements/web/' + id + '/dismiss', { method: 'POST' });
+      } catch (e) { /* 通信エラー時は次回開いた際に再表示される */ }
+      delete _bellItems[id];
+      if (el) el.remove();
+      var list = document.getElementById('bell-list');
+      if (list && !list.querySelector('.bell-item')) {
+        list.innerHTML = '<div style="padding:24px 16px;text-align:center;color:#9ca3af;font-size:13px;">お知らせはありません</div>';
       }
     }
     var _bellOpen = false;

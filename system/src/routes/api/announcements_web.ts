@@ -20,7 +20,7 @@ app.get('/unread-count', async (c) => {
   return c.json({ count: row?.n ?? 0 });
 });
 
-// 最新一覧（既読フラグ付き）
+// 最新一覧（既読フラグ付き・本人が削除済みのものは除く）
 app.get('/list', async (c) => {
   const adminId = c.get('adminId');
   const rows = await c.env.DB.prepare(`
@@ -28,7 +28,7 @@ app.get('/list', async (c) => {
       CASE WHEN r.admin_id IS NULL THEN 0 ELSE 1 END AS is_read
     FROM announcements a
     LEFT JOIN admin_announcement_reads r ON r.admin_id = ? AND r.announcement_id = a.id
-    WHERE a.channel IN ('web', 'both')
+    WHERE a.channel IN ('web', 'both') AND (r.dismissed_at IS NULL)
     ORDER BY a.created_at DESC
     LIMIT 30
   `).bind(adminId).all<AnnouncementRow & { is_read: number }>();
@@ -51,6 +51,19 @@ app.post('/mark-read', async (c) => {
       'INSERT OR IGNORE INTO admin_announcement_reads (admin_id, announcement_id) VALUES (?, ?)'
     ).bind(adminId, id).run();
   }
+  return c.json({ ok: true });
+});
+
+// 既読にしたお知らせを自分の一覧からだけ削除（announcements本体・他アカウントの表示には影響しない）
+app.post('/:id/dismiss', async (c) => {
+  const adminId = c.get('adminId');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!id) return c.json({ error: '不正なIDです' }, 400);
+  await c.env.DB.prepare(`
+    INSERT INTO admin_announcement_reads (admin_id, announcement_id, read_at, dismissed_at)
+    VALUES (?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
+    ON CONFLICT(admin_id, announcement_id) DO UPDATE SET dismissed_at = excluded.dismissed_at
+  `).bind(adminId, id).run();
   return c.json({ ok: true });
 });
 
