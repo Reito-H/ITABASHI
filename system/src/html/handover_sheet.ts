@@ -195,9 +195,13 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-sec-add-btn{border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:6px;padding:6px 12px;
                 font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 
-.ho-toolrow{display:flex;justify-content:flex-end;margin-bottom:8px;}
+.ho-toolrow{display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:8px;}
 .ho-tokasum-btn{border:1px solid #ccc;background:#fff;color:#374151;border-radius:16px;padding:5px 12px;
                 font-size:12px;font-weight:700;cursor:pointer;}
+.ho-copy-btn,.ho-print-btn{border:1px solid #ccc;background:#fff;color:#374151;border-radius:14px;padding:3px 10px;
+             font-size:11px;font-weight:700;cursor:pointer;}
+.ho-copy-btn:hover,.ho-print-btn:hover{border-color:#999;}
+.ho-copy-btn:disabled,.ho-print-btn:disabled{color:#999;cursor:default;}
 #ho-tokasum-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                     align-items:center;justify-content:center;}
 #ho-tokasum-overlay.show{display:flex;}
@@ -265,7 +269,11 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 
 <div id="ho-root">
   <div class="ho-tabs-h" id="ho-tabs-m"></div>
-  <div class="ho-toolrow"><button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button></div>
+  <div class="ho-toolrow">
+    <button type="button" id="ho-copy-btn" class="ho-copy-btn">コピー</button>
+    <button type="button" id="ho-print-btn" class="ho-print-btn">印刷</button>
+    <button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button>
+  </div>
   <div class="ho-date-bar" id="ho-date-bar"></div>
   <div id="ho-sheet-wrap"></div>
 </div>
@@ -342,6 +350,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
@@ -1008,6 +1017,65 @@ async function openTokaSummary(){
 function closeTokaSummary(){
   document.getElementById('ho-tokasum-overlay').classList.remove('show');
 }
+function copySheetImage(){
+  if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
+  const el = document.querySelector('#ho-sheet-wrap .ho-doc');
+  if (!el) { alert('シートが読み込まれていません'); return; }
+  const btn = document.getElementById('ho-copy-btn');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then((canvas) => {
+    canvas.toBlob((blob) => {
+      if (!blob) { btn.disabled = false; btn.textContent = orig; alert('画像の生成に失敗しました'); return; }
+      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => {
+          btn.textContent = 'コピーしました';
+          setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
+        }).catch(() => {
+          btn.disabled = false; btn.textContent = orig;
+          alert('コピーに失敗しました（ブラウザの設定をご確認ください）');
+        });
+      } else {
+        btn.disabled = false; btn.textContent = orig;
+        alert('このブラウザは画像コピーに対応していません');
+      }
+    }, 'image/png');
+  }).catch(() => {
+    btn.disabled = false; btn.textContent = orig;
+    alert('画像の生成に失敗しました');
+  });
+}
+function printSheetImage(){
+  if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
+  const el = document.querySelector('#ho-sheet-wrap .ho-doc');
+  if (!el) { alert('シートが読み込まれていません'); return; }
+  const btn = document.getElementById('ho-print-btn');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  const reset = () => { btn.disabled = false; btn.textContent = orig; };
+  html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then((canvas) => {
+    const dataUrl = canvas.toDataURL('image/png');
+    document.getElementById('ho-print-frame')?.remove();
+    const f = document.createElement('iframe');
+    f.id = 'ho-print-frame';
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(f);
+    const doc = f.contentDocument;
+    doc.open();
+    doc.write('<!DOCTYPE html><html><head><title>引き継ぎシート</title><style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:100%;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
+    doc.close();
+    const img = doc.querySelector('img');
+    const doPrint = () => { f.contentWindow.focus(); f.contentWindow.print(); reset(); };
+    if (img.complete) doPrint(); else img.onload = doPrint;
+  }).catch(() => {
+    reset();
+    alert('画像の生成に失敗しました');
+  });
+}
+document.getElementById('ho-copy-btn').addEventListener('click', copySheetImage);
+document.getElementById('ho-print-btn').addEventListener('click', printSheetImage);
 document.getElementById('ho-tokasum-btn').addEventListener('click', openTokaSummary);
 document.getElementById('ho-tokasum-close').addEventListener('click', closeTokaSummary);
 document.getElementById('ho-tokasum-overlay').addEventListener('click', (e) => {
