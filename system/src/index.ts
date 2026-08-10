@@ -55,9 +55,11 @@ import adminBenriRoutes from './routes/admin_benri';
 import adminNojicoRoutes from './routes/admin_nojico';
 import adminGarageRoutes from './routes/admin_garage';
 import adminDriverReportsRoutes from './routes/admin_driver_reports';
+import adminAccidentsRoutes from './routes/admin_accidents';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
+import publicAccidentsMonitorRoutes from './routes/public_accidents_monitor';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { getMaintenanceMode, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
@@ -241,6 +243,7 @@ app.route(`/${SECRET}/admin`, adminBenriRoutes);
 app.route(`/${SECRET}/admin`, adminNojicoRoutes);
 app.route(`/${SECRET}/admin`, adminGarageRoutes);
 app.route(`/${SECRET}/admin`, adminDriverReportsRoutes);
+app.route(`/${SECRET}/admin`, adminAccidentsRoutes);
 
 // =====================
 // API（認証必須）
@@ -341,6 +344,7 @@ app.route('', liffKanchoRoutes);
 
 // 完全公開ページ（ログイン不要・LINEログインも不要）
 app.route('', publicKanchoWishRoutes);
+app.route('', publicAccidentsMonitorRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

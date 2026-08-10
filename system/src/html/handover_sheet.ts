@@ -1064,7 +1064,7 @@ function printSheetImage(){
     document.body.appendChild(f);
     const doc = f.contentDocument;
     doc.open();
-    doc.write('<!DOCTYPE html><html><head><title>引き継ぎシート</title><style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:100%;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
+    doc.write('<!DOCTYPE html><html><head><title>引き継ぎシート</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:100%;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
     doc.close();
     const img = doc.querySelector('img');
     const doPrint = () => { f.contentWindow.focus(); f.contentWindow.print(); reset(); };

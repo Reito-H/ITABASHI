@@ -10,10 +10,11 @@ import type { Env } from '../auth';
 import type {
   Employee, ShiftEntry, Instructor, InstructorSchedule, ScheduleType, Coach
 } from '../html/shift';
-import { ADMIN_PATH } from '../config';
+import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH } from '../config';
 import qrcode from 'qrcode-generator';
 import { getMaintenanceMode, setMaintenanceMode, isAdminAccount } from '../utils/maintenance';
 import { agoLabel } from './admin_line_usage';
+import { bucketCoarseBands, COARSE_BAND_LABELS } from '../html/accidents';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -224,6 +225,7 @@ app.get('/', async (c) => {
     empStats, unrespondedEvents, overdueInterviews, openReports, lastLogin,
     hireTrend, reportTrend, divisionComp, salesStats, lineUsage,
     recentEvents, overdueList, selfAdmin, maintenanceOn, dbHealthOk,
+    accidentTimes, prevAccidentCount,
   ] = await Promise.all([
     c.env.DB.prepare(`
       SELECT
@@ -320,6 +322,11 @@ app.get('/', async (c) => {
       : Promise.resolve(null),
     getMaintenanceMode(c.env.DB).catch(() => false),
     c.env.DB.prepare('SELECT 1').first().then(() => true).catch(() => false),
+    // 今月の事故（件数・時間帯）
+    c.env.DB.prepare(`SELECT occurred_time FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
+      .bind(`${curY}-${String(curM).padStart(2, '0')}`).all<{ occurred_time: string | null }>().catch(() => null),
+    c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
+      .bind(`${prevY}-${String(prevM).padStart(2, '0')}`).first<{ cnt: number }>().catch(() => null),
   ]);
   const empCount     = { cnt: empStats?.total         ?? 0 };
   const trainingCount = { cnt: empStats?.training_count ?? 0 };
@@ -435,6 +442,34 @@ app.get('/', async (c) => {
       </div>
     </div>`;
 
+  // 今月の事故（件数・時間帯） — 「無事故キロ数」は見る人が少ないため、代わりに件数・時間帯を常時表示する
+  const accidentCount = (accidentTimes?.results ?? []).length;
+  const accidentDiffHtml = (() => {
+    const prevCnt = prevAccidentCount?.cnt;
+    if (prevCnt === undefined || prevCnt === null) return '<span class="hm-kpi-note">前月比 —</span>';
+    const diff = accidentCount - prevCnt;
+    if (diff === 0) return `<span class="hm-kpi-note">前月比 ±0（前月 ${prevCnt}件）</span>`;
+    const up = diff > 0;
+    return `<span class="hm-kpi-note" style="color:${up ? '#b91c1c' : '#16a34a'};font-weight:700;">前月比 ${up ? '+' : ''}${diff}（前月 ${prevCnt}件）</span>`;
+  })();
+  const accidentBands = bucketCoarseBands((accidentTimes?.results ?? []).map(r => r.occurred_time));
+  const accidentBandMax = Math.max(...accidentBands, 1);
+  const accidentBandHtml = accidentBands.map((cnt, i) => `
+    <div class="hm-div-row">
+      <span class="hm-div-name" style="width:auto;">${COARSE_BAND_LABELS[i].split('（')[0]}</span>
+      <div class="hm-div-track"><div class="hm-div-fill" style="width:${Math.round(cnt / accidentBandMax * 100)}%;background:linear-gradient(90deg,#f59e0b,#b45309);"></div></div>
+      <span class="hm-div-cnt">${cnt}件</span>
+    </div>`).join('');
+  const accidentCardHtml = `
+    <a href="${ADMIN_PATH}/accidents" data-nav-id="accidents" class="hm-card hm-card-link">
+      <div class="hm-card-head"><span class="hm-card-title">今月の事故</span><span class="hm-card-sub">${curM}月度</span></div>
+      <div class="hm-card-body">
+        <div class="hm-kpi-main">${accidentCount}<span class="hm-kpi-unit">件</span></div>
+        <div class="hm-kpi-row">${accidentDiffHtml}</div>
+        <div style="margin-top:10px;">${accidentBandHtml}</div>
+      </div>
+    </a>`;
+
   const eventRows = (recentEvents.results ?? []).length === 0
     ? '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">報告はありません</div>'
     : (recentEvents.results ?? []).map(e => `
@@ -529,7 +564,7 @@ app.get('/', async (c) => {
   .hm-quick:hover { background:#f4f8fc; border-color:#c3d3e4; border-left-color:#2d6a9f; box-shadow:0 3px 10px rgba(26,58,92,.08); }
   /* 分析カード */
   .hm-ana { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
-  .hm-ana4 { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:14px; margin-bottom:26px; }
+  .hm-ana4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; margin-bottom:26px; }
   .hm-card { background:#fff; border:1px solid #e8edf3; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
   .hm-card-link { text-decoration:none; transition:border-color .15s, box-shadow .15s; }
   .hm-card-link:hover { border-color:#c3d3e4; box-shadow:0 4px 14px rgba(26,58,92,.08); }
@@ -617,6 +652,7 @@ app.get('/', async (c) => {
       <div class="hm-card-body">${divisionHtml}</div>
     </div>
     ${salesCardHtml}
+    ${accidentCardHtml}
     ${lineCardHtml}
     <div class="hm-card hm-card-link" style="cursor:default;">
       <div class="hm-card-head"><span class="hm-card-title">システム状態</span><span class="hm-card-sub">${statusCheckedAt}時点</span></div>
@@ -984,7 +1020,7 @@ app.get('/shift/print/:empId', async (c) => {
 // ===== 設定トップ（カード一覧）=====
 app.get('/settings', (c) => {
   const ADMIN = ADMIN_PATH;
-  type SettingCard = { href: string; perm: string; title: string; desc: string; highlight?: boolean };
+  type SettingCard = { href: string; perm: string; title: string; desc: string; highlight?: boolean; newTab?: boolean };
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[] }> = [
     { heading: '日々の運用', cards: [
@@ -1010,6 +1046,9 @@ app.get('/settings', (c) => {
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
       { href: `${ADMIN}/cc-list`,                  perm: '',                         title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
     ]},
+    { heading: 'モニター表示', cards: [
+      { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）', newTab: true },
+    ]},
     { heading: 'ガイド・システム', cards: [
       { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: '資料センター',       desc: 'マニュアルPDF・就業規則などの資料を保存・共有' },
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
@@ -1019,7 +1058,7 @@ app.get('/settings', (c) => {
     ]},
   ];
   const cardHtml = (card: SettingCard) => `
-          <a href="${card.href}" data-perm-key="${card.perm}" style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
+          <a href="${card.href}" ${card.newTab ? 'target="_blank" rel="noopener"' : ''} data-perm-key="${card.perm}" style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
             onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
             <div>
               <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};margin-bottom:3px;">${card.title}</div>

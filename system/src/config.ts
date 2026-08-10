@@ -8,3 +8,6 @@ export const APP_VERSION = '0.0.01';
 
 // 希望休フォーム（ログイン不要の公開ページ）の秘密パス。推測されないよう複雑な文字列にする
 export const KANCHO_WISH_PATH = '/kw-dea54792603559b9bb0e74ebb70188b4';
+
+// 事故モニター表示（ログイン不要・専用パスワードで保護する公開ページ）の秘密パス
+export const MONITOR_ACCIDENTS_PATH = '/mon-61b500053713bf4c69b959d7567202b4';

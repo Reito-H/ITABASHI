@@ -86,6 +86,10 @@ pattern = "bentenclub.com/kw-dea54792603559b9bb0e74ebb70188b4*"
 zone_name = "bentenclub.com"
 
 [[routes]]
+pattern = "bentenclub.com/mon-61b500053713bf4c69b959d7567202b4*"
+zone_name = "bentenclub.com"
+
+[[routes]]
 pattern = "bentenclub.com/robots.txt"
 zone_name = "bentenclub.com"
 

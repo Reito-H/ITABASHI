@@ -9,7 +9,7 @@
 
 // 権限キー一覧
 //   サイドバー: home / kancho-shift / handover / todo / crew-portal / newcomers / staff /
-//               vehicles / garage / inspection / settings / announcements / line / requests
+//               vehicles / garage / accidents / inspection / settings / announcements / line / requests
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
 //   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
@@ -93,6 +93,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/vehicles/,     'vehicles'],
   [/^\/garage/,       'garage'],
   [/^\/api\/garage/,  'garage'],
+  [/^\/accidents/,       'accidents'],
+  [/^\/api\/accidents/,  'accidents'],
   [/^\/inspection/,   'inspection'],
   [/^\/announcements/, 'announcements'],
   [/^\/line/,         'line'],
@@ -192,6 +194,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'events',        label: '報告一覧' },
     { key: 'vehicles',      label: '車両検索' },
     { key: 'garage',        label: '車庫見取り図' },
+    { key: 'accidents',     label: '事故データ' },
     { key: 'inspection',    label: '点検管理' },
     { key: 'announcements', label: 'お知らせ配信' },
     { key: 'line',          label: 'LINE管理' },
