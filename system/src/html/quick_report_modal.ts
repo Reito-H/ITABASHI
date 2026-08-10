@@ -13,6 +13,12 @@ export function quickReportModalHtml(): string {
         <h3 id="qr-title" style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0;"></h3>
         <button type="button" id="qr-close-btn" onclick="closeQrModal()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
       </div>
+      <div id="qr-tabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+        <button type="button" id="qr-tab-lost" class="qr-tab-btn" data-perm-key="settings.lost-items" onclick="qrSwitchType('lost')">忘れ物</button>
+        <button type="button" id="qr-tab-accident" class="qr-tab-btn" data-perm-key="settings.accidents" onclick="qrSwitchType('accident')">事故</button>
+        <button type="button" id="qr-tab-violation" class="qr-tab-btn" data-perm-key="settings.violations" onclick="qrSwitchType('violation')">違反</button>
+        <button type="button" id="qr-tab-general" class="qr-tab-btn" data-perm-key="settings.general-reports" onclick="qrSwitchType('general')">一般</button>
+      </div>
       <div id="qr-error" style="display:none;background:#fee2e2;color:#991b1b;border-radius:6px;padding:8px 10px;font-size:12px;margin-bottom:10px;"></div>
 
       <form id="qr-form">
@@ -97,6 +103,10 @@ export function quickReportModalHtml(): string {
               <div class="qr-row2 qr-field">
                 <div><label>事故相手の名前</label><input type="text" id="qr-a-other_party_name" placeholder="例: 田中 一郎"></div>
                 <div><label>事故相手の電話番号</label><input type="tel" id="qr-a-other_party_phone" placeholder="090-0000-0000"></div>
+              </div>
+              <div class="qr-row2 qr-field">
+                <div><label>乗車中のお客様の氏名</label><input type="text" id="qr-a-customer_name" placeholder="例: 田中 一郎"></div>
+                <div><label>乗車中のお客様の電話番号</label><input type="tel" id="qr-a-customer_phone" placeholder="090-0000-0000"></div>
               </div>
               <div id="qr-a-passenger-check" class="qr-check-row" style="display:none;">
                 <input type="checkbox" id="qr-a-passenger_delivered"><label for="qr-a-passenger_delivered">乗客を目的地まで送り届けた</label>
@@ -196,6 +206,8 @@ export function quickReportModalHtml(): string {
     #qr-modal .qr-toggle-group { display: flex; gap: 8px; flex-wrap: wrap; }
     #qr-modal .qr-toggle-btn { padding: 6px 14px; border: 2px solid #d1d5db; border-radius: 6px; background: white; color: #374151; font-size: 13px; font-weight: 600; cursor: pointer; }
     #qr-modal .qr-toggle-btn.active { border-color: #1e3a5f; background: #eff6ff; color: #1e3a5f; }
+    #qr-modal .qr-tab-btn { padding: 8px 16px; border: 2px solid #d1d5db; border-radius: 999px; background: white; color: #374151; font-size: 13px; font-weight: 700; cursor: pointer; }
+    #qr-modal .qr-tab-btn.active { border-color: #1e3a5f; background: #1e3a5f; color: white; }
     #qr-modal .qr-check-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
     #qr-modal .qr-check-row label { margin: 0; font-weight: 400; cursor: pointer; }
     #qr-modal .qr-line-recip-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; font-size: 13px; border-bottom: 1px solid #f3f4f6; }
@@ -238,38 +250,62 @@ export function quickReportModalScript(): string {
   };
 
   var QR_CONFIG = {
-    lost:      { title: '忘れ物報告の新規登録', group: 'qr-group-lost',      empSearch: '/api/liff/lost-items/employee-search',        carSearch: '/api/liff/lost-items/employee-by-car',        divisionInfo: '/api/liff/lost-items/division-info',        lineRecipients: '/api/liff/lost-items/line-recipients',        sendLine: '/api/liff/lost-items/send-line-summary',        postPath: '/api/liff/lost-items',        listPath: '/settings/lost-items',      label: '忘れ物報告' },
-    accident:  { title: '事故報告の新規登録',   group: 'qr-group-accident',  empSearch: '/api/liff/accident-reports/employee-search',  carSearch: '/api/liff/accident-reports/employee-by-car',  divisionInfo: '/api/liff/accident-reports/division-info',  lineRecipients: '/api/liff/accident-reports/line-recipients',  sendLine: '/api/liff/accident-reports/send-line-summary',  postPath: '/api/liff/accident-reports',  listPath: '/settings/accidents',       label: '事故報告' },
-    violation: { title: '違反報告の新規登録',   group: 'qr-group-violation', empSearch: '/api/liff/violation-reports/employee-search', carSearch: '/api/liff/violation-reports/employee-by-car', divisionInfo: '/api/liff/violation-reports/division-info', lineRecipients: '/api/liff/violation-reports/line-recipients', sendLine: '/api/liff/violation-reports/send-line-summary', postPath: '/api/liff/violation-reports', listPath: '/settings/violations',      label: '違反報告' },
-    general:   { title: '一般報告の新規登録',   group: 'qr-group-general',   empSearch: '/api/liff/general-reports/employee-search',   carSearch: '/api/liff/general-reports/employee-by-car',   divisionInfo: '/api/liff/general-reports/division-info',   lineRecipients: '/api/liff/general-reports/line-recipients',   sendLine: '/api/liff/general-reports/send-line-summary',   postPath: '/api/liff/general-reports',   listPath: '/settings/general-reports', label: '一般報告' },
+    lost:      { title: '忘れ物報告の新規登録', group: 'qr-group-lost',      empSearch: '/api/liff/lost-items/employee-search',        carSearch: '/api/liff/lost-items/employee-by-car',        divisionInfo: '/api/liff/lost-items/division-info',        lineRecipients: '/api/liff/lost-items/line-recipients',        sendLine: '/api/liff/lost-items/send-line-summary',        postPath: '/api/liff/lost-items',        listPath: '/settings/reports',      label: '忘れ物報告' },
+    accident:  { title: '事故報告の新規登録',   group: 'qr-group-accident',  empSearch: '/api/liff/accident-reports/employee-search',  carSearch: '/api/liff/accident-reports/employee-by-car',  divisionInfo: '/api/liff/accident-reports/division-info',  lineRecipients: '/api/liff/accident-reports/line-recipients',  sendLine: '/api/liff/accident-reports/send-line-summary',  postPath: '/api/liff/accident-reports',  listPath: '/settings/reports',       label: '事故報告' },
+    violation: { title: '違反報告の新規登録',   group: 'qr-group-violation', empSearch: '/api/liff/violation-reports/employee-search', carSearch: '/api/liff/violation-reports/employee-by-car', divisionInfo: '/api/liff/violation-reports/division-info', lineRecipients: '/api/liff/violation-reports/line-recipients', sendLine: '/api/liff/violation-reports/send-line-summary', postPath: '/api/liff/violation-reports', listPath: '/settings/reports',      label: '違反報告' },
+    general:   { title: '一般報告の新規登録',   group: 'qr-group-general',   empSearch: '/api/liff/general-reports/employee-search',   carSearch: '/api/liff/general-reports/employee-by-car',   divisionInfo: '/api/liff/general-reports/division-info',   lineRecipients: '/api/liff/general-reports/line-recipients',   sendLine: '/api/liff/general-reports/send-line-summary',   postPath: '/api/liff/general-reports',   listPath: '/settings/reports', label: '一般報告' },
   };
 
+  var QR_TYPE_ORDER = ['lost', 'accident', 'violation', 'general'];
+  var qrTypeInitialized = {};
+
+  function qrFirstAvailableType() {
+    for (var i = 0; i < QR_TYPE_ORDER.length; i++) {
+      if (document.getElementById('qr-tab-' + QR_TYPE_ORDER[i])) return QR_TYPE_ORDER[i];
+    }
+    return null;
+  }
+
   function openQrModal(type) {
+    if (!type) type = qrFirstAvailableType();
     var cfg = QR_CONFIG[type];
     if (!cfg) return;
-    var menu = document.getElementById('report-fab-menu');
-    if (menu) menu.style.display = 'none';
-    qrActiveType = type;
     qrSelectedEmp = null;
+    qrTypeInitialized = {};
     document.getElementById('qr-form').reset();
     document.getElementById('qr-error').style.display = 'none';
     document.getElementById('qr-form-body').style.display = '';
     document.getElementById('qr-submit-btn').style.display = 'block';
     document.getElementById('qr-success-panel').style.display = 'none';
-    document.getElementById('qr-title').textContent = cfg.title;
-    document.querySelectorAll('#qr-modal .qr-group').forEach(function(el) { el.style.display = 'none'; });
-    document.getElementById(cfg.group).style.display = 'block';
     var sel = document.getElementById('qr-emp-selected');
     sel.style.display = 'none'; sel.textContent = '';
     document.getElementById('qr-employee_division').value = '';
     document.getElementById('qr-employee_team').value = '';
     document.getElementById('qr-division-info').style.display = 'none';
-    qrResetType(type);
+    qrSwitchType(type);
     var modalEl = document.getElementById('qr-modal');
     modalEl.style.display = 'flex';
     modalEl.classList.remove('qr-floating');
     if (window.matchMedia('(min-width: 769px)').matches) {
       modalEl.classList.add('qr-floating');
+    }
+  }
+
+  // タブ切替。入力途中の共通項目（受電時刻・車番・乗務員）や各種別の入力内容は保持したまま、
+  // 表示するフォーム欄だけを切り替える（種別ごとの初期値設定は最初にそのタブを開いたときだけ行う）
+  function qrSwitchType(type) {
+    var cfg = QR_CONFIG[type];
+    if (!cfg) return;
+    qrActiveType = type;
+    document.getElementById('qr-title').textContent = cfg.title;
+    document.querySelectorAll('#qr-modal .qr-tab-btn').forEach(function(el) { el.classList.remove('active'); });
+    var tabBtn = document.getElementById('qr-tab-' + type);
+    if (tabBtn) tabBtn.classList.add('active');
+    document.querySelectorAll('#qr-modal .qr-group').forEach(function(el) { el.style.display = 'none'; });
+    document.getElementById(cfg.group).style.display = 'block';
+    if (!qrTypeInitialized[type]) {
+      qrTypeInitialized[type] = true;
+      qrResetType(type);
     }
   }
   function closeQrModal() {
@@ -531,6 +567,8 @@ export function quickReportModalScript(): string {
         additional_info: document.getElementById('qr-a-additional_info').value.trim() || null,
         other_party_name: document.getElementById('qr-a-other_party_name').value.trim() || null,
         other_party_phone: document.getElementById('qr-a-other_party_phone').value.trim() || null,
+        customer_name: document.getElementById('qr-a-customer_name').value.trim() || null,
+        customer_phone: document.getElementById('qr-a-customer_phone').value.trim() || null,
       };
     }
     if (qrActiveType === 'violation') {

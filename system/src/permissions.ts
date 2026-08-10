@@ -9,7 +9,7 @@
 
 // 権限キー一覧
 //   サイドバー: home / kancho-shift / handover / todo / crew-portal / newcomers / staff /
-//               vehicles / inspection / settings / announcements / line / requests
+//               vehicles / garage / inspection / settings / announcements / line / requests
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
 //   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
@@ -91,6 +91,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/sales/,        'staff'],
   [/^\/events/,       'events'],
   [/^\/vehicles/,     'vehicles'],
+  [/^\/garage/,       'garage'],
+  [/^\/api\/garage/,  'garage'],
   [/^\/inspection/,   'inspection'],
   [/^\/announcements/, 'announcements'],
   [/^\/line/,         'line'],
@@ -189,6 +191,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'staff',         label: '社員管理（詳細検索含む）' },
     { key: 'events',        label: '報告一覧' },
     { key: 'vehicles',      label: '車両検索' },
+    { key: 'garage',        label: '車庫見取り図' },
     { key: 'inspection',    label: '点検管理' },
     { key: 'announcements', label: 'お知らせ配信' },
     { key: 'line',          label: 'LINE管理' },
@@ -224,7 +227,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
 ];
 
 // HTMLレスポンスから権限のないメニュー・設定カード・マニュアル章を除去
-// layout.ts のナビ（data-nav-id）、設定トップのカードとチュートリアルの目次・章（data-perm-key、a/div/hr対応）が対象
+// layout.ts のナビ（data-nav-id）、設定トップのカードとチュートリアルの目次・章（data-perm-key、a/div/hr/button対応）が対象
 // data-perm-key はスペース区切りで複数指定可（いずれか1つでも権限があれば表示）
 export function filterHtmlByPermissions(res: Response, perms: string[]): Response {
   const remover = (attr: string) => ({
@@ -238,5 +241,6 @@ export function filterHtmlByPermissions(res: Response, perms: string[]): Respons
     .on('a[data-perm-key]', remover('data-perm-key'))
     .on('div[data-perm-key]', remover('data-perm-key'))
     .on('hr[data-perm-key]', remover('data-perm-key'))
+    .on('button[data-perm-key]', remover('data-perm-key'))
     .transform(res);
 }

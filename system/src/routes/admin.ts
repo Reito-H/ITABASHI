@@ -3146,7 +3146,7 @@ app.get('/settings/status', async (c) => {
   qr.addData(adminLoginUrl);
   qr.make();
   const qrSvg = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true })
-    .replace(/black/g, '#1e3a5f').replace(/white/g, '#ffffff');
+    .replace(/black/g, '#39ff88').replace(/white/g, '#04070a');
 
   let dbOk = false;
   let dbMsg = '';
@@ -3231,30 +3231,19 @@ app.get('/settings/status', async (c) => {
   const cfStr = (k: string) => { const v = cfInfo[k]; return v == null ? '—' : String(v); };
 
   // ===== 表示用パーツ生成 =====
-  // 日別利用バー（直近14日、0件の日も表示）
+  // 日別利用（直近14日、0件の日も表示）→ Chart.js用データ配列
   const dayList: string[] = [];
   for (let i = 13; i >= 0; i--) {
     dayList.push(new Date(Date.now() + 9 * 3600 * 1000 - i * 86400000).toISOString().slice(0, 10));
   }
   const dailyMap = new Map((dailyUsage?.results ?? []).map(r => [r.d, r.cnt]));
-  const dailyMax = Math.max(...dayList.map(d => dailyMap.get(d) ?? 0), 1);
-  const dailyBarsHtml = dayList.map(d => {
-    const v = dailyMap.get(d) ?? 0;
-    const h = v > 0 ? Math.max(Math.round(v / dailyMax * 56), 4) : 2;
-    return `<div class="ub-col" title="${d}: ${v}件"><div class="ub-val">${v > 0 ? v : ''}</div><div class="ub-bar" style="height:${h}px;"></div><div class="ub-lb">${parseInt(d.slice(8, 10))}</div></div>`;
-  }).join('');
+  const dailyLabels = dayList.map(d => `${parseInt(d.slice(5, 7))}/${parseInt(d.slice(8, 10))}`);
+  const dailyValues = dayList.map(d => dailyMap.get(d) ?? 0);
 
-  // 機能別利用トップ（直近30日）
+  // 機能別利用トップ（直近30日）→ Chart.js用データ配列
   const featList = featureTop?.results ?? [];
-  const featMax = Math.max(...featList.map(f => f.cnt), 1);
-  const featRowsHtml = featList.length === 0
-    ? '<div style="font-size:12px;color:#9ca3af;">記録なし</div>'
-    : featList.map(f => `
-      <div style="display:flex;align-items:center;gap:10px;padding:3px 0;">
-        <span style="font-size:12px;color:#475569;width:130px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.feature)}</span>
-        <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden;"><div style="height:100%;width:${Math.round(f.cnt / featMax * 100)}%;background:#2d6a9f;border-radius:4px;"></div></div>
-        <span style="font-size:12px;color:#1e293b;font-weight:700;width:52px;text-align:right;flex:none;">${f.cnt}件</span>
-      </div>`).join('');
+  const featLabels = featList.map(f => f.feature);
+  const featValues = featList.map(f => f.cnt);
 
   // DB統計
   const dbStatDefs: Array<[string, string]> = [
@@ -3271,214 +3260,295 @@ app.get('/settings/status', async (c) => {
     ['login_logs',     'ログイン記録'],
   ];
   const dbStatsHtml = dbStatDefs.map(([key, label]) => `
-      <div style="background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;padding:9px 12px;">
-        <div style="font-size:11px;color:#64748b;">${label}</div>
-        <div class="mono" style="font-size:16px;font-weight:700;color:#1e3a5f;margin-top:2px;">${dbCounts[key] != null ? (dbCounts[key] as number).toLocaleString('ja-JP') : '—'}</div>
+      <div style="background:#0d1815;border:1px solid rgba(57,255,136,.10);border-radius:5px;padding:9px 12px;">
+        <div style="font-size:10px;color:#6f9c85;">${label}</div>
+        <div class="mono" style="font-size:16px;font-weight:700;color:#39ff88;margin-top:2px;text-shadow:0 0 8px rgba(57,255,136,.35);">${dbCounts[key] != null ? (dbCounts[key] as number).toLocaleString('ja-JP') : '—'}</div>
       </div>`).join('');
 
   // 直近アクティビティ（実ログ）
   const actRowsHtml = (recentActivity?.results ?? []).length === 0
-    ? '<div style="font-size:12px;color:#9ca3af;padding:10px 14px;">記録なし</div>'
+    ? '<div style="font-size:12px;color:#456b58;padding:10px 14px;">記録なし</div>'
     : (recentActivity?.results ?? []).map(a => `
-      <div style="display:flex;gap:10px;align-items:baseline;padding:4px 14px;border-bottom:1px solid #f1f5f9;">
-        <span class="mono" style="font-size:11px;color:#94a3b8;flex:none;">${escHtml((a.created_at ?? '').slice(5, 16))}</span>
-        <span class="mono" style="font-size:10px;font-weight:700;color:${a.channel === 'liff' ? '#7c3aed' : '#0369a1'};flex:none;width:32px;">${escHtml((a.channel ?? '').toUpperCase())}</span>
-        <span style="font-size:12px;color:#334155;font-weight:600;flex:none;">${escHtml(a.feature ?? a.event_type ?? '')}</span>
-        <span style="font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml((a.detail ?? '').slice(0, 60))}</span>
+      <div style="display:flex;gap:10px;align-items:baseline;padding:4px 14px;border-bottom:1px solid rgba(57,255,136,.08);">
+        <span class="mono" style="font-size:11px;color:#456b58;flex:none;">${escHtml((a.created_at ?? '').slice(5, 16))}</span>
+        <span class="mono" style="font-size:10px;font-weight:700;color:${a.channel === 'liff' ? '#ff6fe0' : '#58e6ff'};flex:none;width:32px;">${escHtml((a.channel ?? '').toUpperCase())}</span>
+        <span style="font-size:12px;color:#d7ffe9;font-weight:600;flex:none;">${escHtml(a.feature ?? a.event_type ?? '')}</span>
+        <span class="mono" style="font-size:11px;color:#6f9c85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml((a.detail ?? '').slice(0, 60))}</span>
       </div>`).join('');
 
   // メンテナンス制御カード（adminアカウントのみ表示）
   const maintenanceCard = isAdmin ? `
-      <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">MAINTENANCE CONTROL</span><span class="sys-ps mono">ADMIN ONLY</span></div>
+      <div class="sys-panel gc-12">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>MAINTENANCE CONTROL</span><span class="sys-ps mono">ADMIN ONLY</span></div>
         <div class="sys-pb">
           <div class="sys-row" style="flex-wrap:wrap;">
             <div style="flex:1;min-width:240px;">
-              <div style="font-size:14px;font-weight:700;color:#1e3a5f;">メンテナンスモード</div>
-              <div style="font-size:12px;color:#6b7280;margin-top:4px;line-height:1.7;">
+              <div style="font-size:14px;font-weight:700;color:var(--sys-text);">メンテナンスモード</div>
+              <div style="font-size:12px;color:var(--sys-text-dim);margin-top:4px;line-height:1.7;">
                 ONにすると admin 以外の全アクセス（管理画面・LIFF・フォーム・API）にメンテナンス画面を表示します。<br>
                 LINE Botはメンテナンス中メッセージを返信し、定時通知はそのまま送信されます。
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:12px;">
-              <span id="maint-state" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.1em;color:${maintenanceOn ? '#d97706' : '#16a34a'};">${maintenanceOn ? 'MAINT ON' : 'NORMAL'}</span>
+              <span id="maint-state" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.1em;color:${maintenanceOn ? 'var(--sys-amber)' : 'var(--sys-green)'};">${maintenanceOn ? 'MAINT ON' : 'NORMAL'}</span>
               <label class="sw"><input type="checkbox" id="maint-toggle" ${maintenanceOn ? 'checked' : ''} onchange="toggleMaintenance(this)"><span class="tr"></span></label>
             </div>
           </div>
-          <div id="maint-msg" style="font-size:11px;color:#94a3b8;margin-top:8px;"></div>
+          <div id="maint-msg" style="font-size:11px;color:var(--sys-text-dim2);margin-top:8px;"></div>
         </div>
       </div>` : '';
 
   const html = settingsSubHeader('システムステータス') + `
     <style>
-      .sysc{max-width:880px;}
+      .sysc{
+        max-width:1320px;position:relative;background:#04070a;padding:18px;border-radius:12px;
+        box-shadow:0 0 0 1px rgba(57,255,136,.12),0 24px 60px rgba(0,0,0,.55);
+        font-family:'Hiragino Sans','Meiryo',-apple-system,sans-serif;
+        --sys-green:#39ff88;--sys-green-dim:#1f8a52;--sys-cyan:#58e6ff;--sys-magenta:#ff6fe0;--sys-amber:#ffb930;--sys-red:#ff3b60;
+        --sys-text:#d7ffe9;--sys-text-dim:#6f9c85;--sys-text-dim2:#456b58;--sys-bg2:#0a120f;--sys-bg3:#0d1815;
+        --sys-line:rgba(57,255,136,.22);--sys-line-soft:rgba(57,255,136,.10);
+      }
+      .sysc:before{
+        content:'';position:absolute;inset:0;pointer-events:none;border-radius:12px;z-index:2;opacity:.5;
+        background:repeating-linear-gradient(to bottom,rgba(255,255,255,.025) 0px,rgba(255,255,255,.025) 1px,transparent 1px,transparent 3px);
+      }
+      .sysc:after{
+        content:'';position:absolute;left:0;right:0;height:160px;pointer-events:none;z-index:2;opacity:.05;
+        background:linear-gradient(to bottom,transparent,var(--sys-green) 45%,transparent);
+        animation:sysScan 9s linear infinite;mix-blend-mode:screen;
+      }
+      @keyframes sysScan{0%{top:-160px}100%{top:100%}}
       .sysc .mono{font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;}
-      .sys-panel{background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 1px 4px rgba(15,23,42,.06);margin-bottom:14px;overflow:hidden;}
-      .sys-ph{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 16px;border-bottom:1px solid #eef2f7;background:linear-gradient(180deg,#fbfdff,#f5f8fb);}
-      .sys-pt{font-size:11px;letter-spacing:.14em;font-weight:700;color:#334155;}
-      .sys-ps{font-size:10px;color:#94a3b8;letter-spacing:.08em;}
-      .sys-pb{padding:14px 16px;}
-      .grid-bg{background-image:linear-gradient(rgba(30,58,95,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(30,58,95,.05) 1px,transparent 1px);background-size:22px 22px;}
+      .sysc, .sysc *{box-sizing:border-box;}
+      .sys-grid{position:relative;z-index:1;display:grid;grid-template-columns:repeat(12,1fr);gap:14px;align-items:stretch;}
+      .gc-4{grid-column:span 4;} .gc-5{grid-column:span 5;} .gc-6{grid-column:span 6;}
+      .gc-7{grid-column:span 7;} .gc-8{grid-column:span 8;} .gc-12{grid-column:span 12;}
+      @media (max-width:920px){ .gc-4,.gc-5,.gc-6,.gc-7,.gc-8{grid-column:span 12;} }
+      .sys-panel{position:relative;background:var(--sys-bg2);border:1px solid var(--sys-line);border-radius:6px;box-shadow:0 0 0 1px rgba(0,0,0,.5) inset,0 6px 22px rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column;}
+      .sys-panel:before{content:'';position:absolute;top:0;left:0;width:12px;height:12px;border-top:2px solid rgba(57,255,136,.4);border-left:2px solid rgba(57,255,136,.4);pointer-events:none;z-index:2;}
+      .sys-panel:after{content:'';position:absolute;bottom:0;right:0;width:12px;height:12px;border-bottom:2px solid rgba(57,255,136,.4);border-right:2px solid rgba(57,255,136,.4);pointer-events:none;z-index:2;}
+      .sys-ph{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;border-bottom:1px solid var(--sys-line);background:linear-gradient(180deg,rgba(57,255,136,.07),rgba(57,255,136,.015));flex:none;}
+      .sys-dots{display:inline-flex;gap:5px;margin-right:10px;}
+      .sys-dots span{width:7px;height:7px;border-radius:50%;display:inline-block;opacity:.55;}
+      .sys-dots span:nth-child(1){background:var(--sys-red);}
+      .sys-dots span:nth-child(2){background:var(--sys-amber);}
+      .sys-dots span:nth-child(3){background:var(--sys-green);}
+      .sys-pt{font-size:11px;letter-spacing:.16em;font-weight:700;color:var(--sys-green);text-shadow:0 0 8px rgba(57,255,136,.45);display:flex;align-items:center;}
+      .sys-pt:before{content:'//';color:var(--sys-text-dim2);margin-right:8px;font-weight:400;}
+      .sys-ps{font-size:10px;color:var(--sys-text-dim);letter-spacing:.08em;}
+      .sys-pb{padding:14px 16px;flex:1;display:flex;flex-direction:column;}
+      .sys-hero{position:relative;overflow:hidden;background:#030507;}
+      .matrix-rain{position:absolute;inset:0;width:100%;height:100%;opacity:.4;pointer-events:none;}
+      .sys-hero-inner{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px;flex-wrap:wrap;background:linear-gradient(90deg,rgba(3,5,7,.75),rgba(3,5,7,.35) 60%,rgba(3,5,7,.75));}
+      .sys-hero-ticker{position:relative;z-index:1;display:flex;gap:22px;flex-wrap:wrap;padding:10px 20px;border-top:1px solid var(--sys-line);background:rgba(3,5,7,.6);}
+      .sys-hero-ticker .t-item{font-size:11px;color:var(--sys-text-dim);white-space:nowrap;}
+      .sys-hero-ticker .t-item b{font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;color:var(--sys-cyan);font-size:13px;margin-left:6px;text-shadow:0 0 6px rgba(88,230,255,.4);}
       .led{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none;}
-      .led-g{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.15);animation:sysPulse 2.2s infinite;}
-      .led-a{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.2);animation:sysPulse 1.1s infinite;}
-      @keyframes sysPulse{0%,100%{opacity:1}50%{opacity:.4}}
+      .led-g{background:var(--sys-green);box-shadow:0 0 8px 2px rgba(57,255,136,.75);animation:sysPulse 2.2s infinite;}
+      .led-a{background:var(--sys-amber);box-shadow:0 0 8px 2px rgba(255,185,48,.75);animation:sysPulse 1.1s infinite;}
+      @keyframes sysPulse{0%,100%{opacity:1}50%{opacity:.35}}
       .sys-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-      .sys-badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;}
-      .b-ok{background:#dcfce7;color:#16a34a;}
-      .b-ng{background:#fee2e2;color:#dc2626;}
-      .ub-wrap{display:flex;align-items:flex-end;gap:5px;height:92px;padding-top:4px;}
-      .ub-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;min-width:0;}
-      .ub-val{font-size:10px;font-weight:700;color:#475569;line-height:1;height:10px;}
-      .ub-bar{width:100%;max-width:26px;background:#2d6a9f;border-radius:3px 3px 1px 1px;}
-      .ub-lb{font-size:9px;color:#94a3b8;}
-      .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:14px;}
-      .kpi-cell{background:#f8fafc;border:1px solid #eef2f7;border-radius:8px;padding:9px 12px;}
-      .kpi-cell .kl{font-size:11px;color:#64748b;}
-      .kpi-cell .kv{font-size:17px;font-weight:800;color:#1e3a5f;margin-top:2px;}
-      .kpi-cell .kv .ku{font-size:11px;font-weight:600;color:#94a3b8;margin-left:2px;}
+      .sys-badge{font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;font-size:10px;font-weight:700;letter-spacing:.05em;padding:3px 10px;border-radius:3px;border:1px solid;}
+      .b-ok{background:rgba(57,255,136,.08);color:var(--sys-green);border-color:rgba(57,255,136,.4);text-shadow:0 0 6px rgba(57,255,136,.5);}
+      .b-ng{background:rgba(255,59,96,.1);color:var(--sys-red);border-color:rgba(255,59,96,.45);text-shadow:0 0 6px rgba(255,59,96,.5);animation:sysPulse 1.4s infinite;}
+      .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:14px;}
+      .kpi-cell{background:var(--sys-bg3);border:1px solid var(--sys-line-soft);border-radius:5px;padding:9px 12px;}
+      .kpi-cell .kl{font-size:10px;color:var(--sys-text-dim);letter-spacing:.02em;}
+      .kpi-cell .kv{font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;font-size:17px;font-weight:800;color:var(--sys-green);margin-top:3px;text-shadow:0 0 10px rgba(57,255,136,.4);}
+      .kpi-cell .kv .ku{font-size:11px;font-weight:600;color:var(--sys-text-dim2);margin-left:2px;text-shadow:none;}
       .db-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;}
-      .sw{position:relative;display:inline-block;width:54px;height:30px;flex:none;}
+      .chart-box{position:relative;flex:1;min-height:160px;}
+      .chart-box.tall{min-height:210px;}
+      .donut-box{position:relative;height:150px;}
+      .donut-legend{display:flex;justify-content:center;gap:18px;margin-top:8px;font-size:11px;color:var(--sys-text-dim);}
+      .donut-legend b{font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;}
+      .donut-legend .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px;}
+      .gauge-box{position:relative;height:120px;}
+      .gauge-pct{position:absolute;left:0;right:0;bottom:6px;text-align:center;font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;font-size:22px;font-weight:800;color:var(--sys-green);text-shadow:0 0 10px rgba(57,255,136,.5);}
+      .gauge-label{text-align:center;font-size:10px;color:var(--sys-text-dim2);letter-spacing:.08em;margin-top:2px;}
+      .sw{position:relative;display:inline-block;width:54px;height:28px;flex:none;}
       .sw input{opacity:0;width:0;height:0;}
-      .sw .tr{position:absolute;inset:0;background:#cbd5e1;border-radius:30px;transition:.25s;cursor:pointer;}
-      .sw .tr:before{content:'';position:absolute;width:24px;height:24px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 3px rgba(0,0,0,.25);}
-      .sw input:checked + .tr{background:#f59e0b;}
-      .sw input:checked + .tr:before{transform:translateX(24px);}
+      .sw .tr{position:absolute;inset:0;background:#122019;border:1px solid var(--sys-line);border-radius:30px;transition:.25s;cursor:pointer;}
+      .sw .tr:before{content:'';position:absolute;width:20px;height:20px;left:3px;top:3px;background:var(--sys-green);border-radius:50%;transition:.25s;box-shadow:0 0 6px rgba(57,255,136,.6);}
+      .sw input:checked + .tr{background:rgba(255,185,48,.12);border-color:rgba(255,185,48,.5);}
+      .sw input:checked + .tr:before{transform:translateX(26px);background:var(--sys-amber);box-shadow:0 0 8px rgba(255,185,48,.7);}
     </style>
     <div class="sysc">
-      <!-- コンソールヘッダー -->
-      <div class="sys-panel grid-bg">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;flex-wrap:wrap;">
+      <div class="sys-grid">
+      <!-- コンソールヘッダー（マトリックスレイン演出+クイック指標ティッカー） -->
+      <div class="sys-panel gc-12 sys-hero">
+        <canvas class="matrix-rain" id="matrix-rain"></canvas>
+        <div class="sys-hero-inner">
           <div>
-            <div class="mono" style="font-size:10px;letter-spacing:.22em;color:#64748b;">BENTEN CORE // SYSTEM MONITOR</div>
-            <div style="display:flex;align-items:center;gap:9px;margin-top:7px;">
+            <div class="mono" style="font-size:10px;letter-spacing:.28em;color:var(--sys-text-dim);">BENTEN CORE // SYSTEM MONITOR</div>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
               <span class="led ${maintenanceOn ? 'led-a' : 'led-g'}" id="head-led"></span>
-              <span style="font-size:15px;font-weight:800;color:${maintenanceOn ? '#b45309' : '#1e3a5f'};letter-spacing:.02em;" id="head-state">${maintenanceOn ? 'MAINTENANCE MODE' : 'ALL SYSTEMS OPERATIONAL'}</span>
+              <span class="mono" style="font-size:16px;font-weight:800;color:${maintenanceOn ? 'var(--sys-amber)' : 'var(--sys-green)'};letter-spacing:.04em;text-shadow:0 0 12px ${maintenanceOn ? 'rgba(255,185,48,.55)' : 'rgba(57,255,136,.55)'};" id="head-state">${maintenanceOn ? '[!] MAINTENANCE MODE' : 'ALL SYSTEMS OPERATIONAL'}</span>
             </div>
           </div>
-          <div class="mono" style="text-align:right;font-size:11px;color:#64748b;line-height:1.9;">
-            <div id="sys-clock" style="font-size:13px;font-weight:700;color:#334155;">--:--:--</div>
-            <div style="color:#94a3b8;">NODE TYO-EDGE &middot; CF WORKERS &middot; D1</div>
+          <div class="mono" style="text-align:right;font-size:11px;color:var(--sys-text-dim2);line-height:1.9;">
+            <div id="sys-clock" style="font-size:14px;font-weight:700;color:var(--sys-cyan);text-shadow:0 0 8px rgba(88,230,255,.5);">--:--:--</div>
+            <div>NODE TYO-EDGE &middot; CF WORKERS &middot; D1</div>
           </div>
+        </div>
+        <div class="sys-hero-ticker">
+          <span class="t-item">本日<b>${usageStats?.today_cnt ?? 0}</b>件</span>
+          <span class="t-item">直近7日<b>${(usageStats?.week_cnt ?? 0).toLocaleString('ja-JP')}</b>件</span>
+          <span class="t-item">直近30日<b>${(usageStats?.month_cnt ?? 0).toLocaleString('ja-JP')}</b>件</span>
+          <span class="t-item">30日利用者<b>${usageStats?.month_users ?? 0}</b>名</span>
+          <span class="t-item">管理画面ログイン(30日)<b>${loginStats?.month_cnt ?? 0}</b>回</span>
         </div>
       </div>
 
       <!-- メンテナンス稼働中バナー -->
-      <div id="maint-banner" style="display:${maintenanceOn ? 'block' : 'none'};background:#fffbeb;border:1px solid #fcd34d;color:#92400e;border-radius:10px;padding:10px 16px;font-size:12px;font-weight:600;margin-bottom:14px;">
+      <div id="maint-banner" class="gc-12" style="display:${maintenanceOn ? 'block' : 'none'};background:rgba(255,185,48,.08);border:1px solid rgba(255,185,48,.4);color:var(--sys-amber);border-radius:8px;padding:10px 16px;font-size:12px;font-weight:600;font-family:'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace;">
         &#9888; メンテナンスモード稼働中 &mdash; admin 以外のアクセスにはメンテナンス画面が表示されています
       </div>
       ${maintenanceCard}
 
       <!-- サーバー・DB（サーバーサイド確認済み） -->
-      <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">CORE INFRASTRUCTURE</span><span class="sys-ps mono">SERVER / DATABASE / EDGE</span></div>
-        <div class="sys-pb" style="display:flex;flex-direction:column;gap:9px;">
+      <div class="sys-panel gc-4">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>CORE INFRASTRUCTURE</span></div>
+        <div class="sys-pb" style="gap:9px;">
           <div class="sys-row">
-            <span style="font-size:13px;color:#374151;">Cloudflare Workersサーバー</span>
+            <span style="font-size:13px;color:var(--sys-text);">Cloudflare Workers</span>
             <span class="sys-badge b-ok">正常</span>
           </div>
           <div class="sys-row">
-            <span style="font-size:13px;color:#374151;">D1 データベース接続</span>
+            <span style="font-size:13px;color:var(--sys-text);">D1 データベース</span>
             ${dbOk
               ? `<span class="sys-badge b-ok">正常（社員 ${empCount}件）</span>`
               : `<span class="sys-badge b-ng" title="${escHtml(dbMsg)}">エラー</span>`
             }
           </div>
           <div class="sys-row">
-            <span style="font-size:13px;color:#374151;">接続エッジ（データセンター）</span>
-            <span class="mono" style="font-size:12px;color:#334155;font-weight:600;">${escHtml(cfStr('colo'))} / ${escHtml(cfStr('country'))}${cfInfo['city'] ? ' ' + escHtml(cfStr('city')) : ''}</span>
+            <span style="font-size:13px;color:var(--sys-text);">接続エッジ</span>
+            <span class="mono" style="font-size:12px;color:var(--sys-cyan);font-weight:600;">${escHtml(cfStr('colo'))} / ${escHtml(cfStr('country'))}${cfInfo['city'] ? ' ' + escHtml(cfStr('city')) : ''}</span>
           </div>
           <div class="sys-row">
-            <span style="font-size:13px;color:#374151;">通信プロトコル / 暗号化</span>
-            <span class="mono" style="font-size:12px;color:#334155;font-weight:600;">${escHtml(cfStr('httpProtocol'))} / ${escHtml(cfStr('tlsVersion'))}</span>
+            <span style="font-size:13px;color:var(--sys-text);">プロトコル</span>
+            <span class="mono" style="font-size:12px;color:var(--sys-cyan);font-weight:600;">${escHtml(cfStr('httpProtocol'))} / ${escHtml(cfStr('tlsVersion'))}</span>
           </div>
           <div class="sys-row">
-            <span style="font-size:13px;color:#374151;">接続回線</span>
-            <span class="mono" style="font-size:12px;color:#334155;font-weight:600;" title="AS${escHtml(cfStr('asn'))}">${escHtml(cfStr('asOrganization'))}</span>
+            <span style="font-size:13px;color:var(--sys-text);">接続回線</span>
+            <span class="mono" style="font-size:12px;color:var(--sys-cyan);font-weight:600;" title="AS${escHtml(cfStr('asn'))}">${escHtml(cfStr('asOrganization'))}</span>
           </div>
         </div>
       </div>
 
-      <!-- 利用状況（需要データ） -->
-      <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">USAGE ANALYTICS</span><span class="sys-ps mono">LINE BOT / LIFF DEMAND</span></div>
+      <!-- トラフィック内訳（BOT/LIFF比率ドーナツ） -->
+      <div class="sys-panel gc-4">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>TRAFFIC SPLIT</span><span class="sys-ps mono">30 DAYS</span></div>
+        <div class="sys-pb" style="align-items:center;justify-content:center;">
+          <div class="donut-box" style="width:100%;"><canvas id="chart-traffic"></canvas></div>
+          <div class="donut-legend">
+            <span><span class="dot" style="background:var(--sys-cyan);"></span>BOT <b>${usageStats?.bot_cnt ?? 0}</b></span>
+            <span><span class="dot" style="background:var(--sys-magenta);"></span>LIFF <b>${usageStats?.liff_cnt ?? 0}</b></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- API稼働率ゲージ -->
+      <div class="sys-panel gc-4">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>API HEALTH</span><span class="sys-ps mono">LIVE CHECK</span></div>
+        <div class="sys-pb" style="align-items:center;justify-content:center;">
+          <div class="gauge-box" style="width:100%;">
+            <canvas id="chart-api-health"></canvas>
+            <div class="gauge-pct" id="api-health-pct">--</div>
+          </div>
+          <div class="gauge-label">ENDPOINTS OK</div>
+        </div>
+      </div>
+
+      <!-- 利用状況（需要データ + 折れ線グラフ） -->
+      <div class="sys-panel gc-8">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>USAGE ANALYTICS</span><span class="sys-ps mono">LINE BOT / LIFF DEMAND</span></div>
         <div class="sys-pb">
           <div class="kpi-grid">
             <div class="kpi-cell"><div class="kl">本日の操作</div><div class="kv">${usageStats?.today_cnt ?? 0}<span class="ku">件</span></div></div>
             <div class="kpi-cell"><div class="kl">直近7日</div><div class="kv">${(usageStats?.week_cnt ?? 0).toLocaleString('ja-JP')}<span class="ku">件</span></div></div>
             <div class="kpi-cell"><div class="kl">直近30日</div><div class="kv">${(usageStats?.month_cnt ?? 0).toLocaleString('ja-JP')}<span class="ku">件</span></div></div>
             <div class="kpi-cell"><div class="kl">30日利用者</div><div class="kv">${usageStats?.month_users ?? 0}<span class="ku">名</span></div></div>
-            <div class="kpi-cell"><div class="kl">Bot / LIFF比率</div><div class="kv">${usageStats?.bot_cnt ?? 0}<span class="ku">/</span>${usageStats?.liff_cnt ?? 0}</div></div>
-            <div class="kpi-cell"><div class="kl">管理画面ログイン(30日)</div><div class="kv">${loginStats?.month_cnt ?? 0}<span class="ku">回</span></div></div>
           </div>
-          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">日別操作件数（直近14日）</div>
-          <div class="ub-wrap">${dailyBarsHtml}</div>
-          <div style="font-size:11px;color:#94a3b8;margin:14px 0 6px;">機能別利用トップ（直近30日）</div>
-          ${featRowsHtml}
+          <div class="mono" style="font-size:10px;color:var(--sys-text-dim2);margin-bottom:6px;">日別操作件数（直近14日）</div>
+          <div class="chart-box"><canvas id="chart-daily"></canvas></div>
+        </div>
+      </div>
+
+      <!-- 機能別利用トップ（横棒グラフ） -->
+      <div class="sys-panel gc-4">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>TOP FEATURES</span><span class="sys-ps mono">30 DAYS</span></div>
+        <div class="sys-pb">
+          ${featList.length === 0
+            ? '<div style="font-size:12px;color:#456b58;">記録なし</div>'
+            : '<div class="chart-box tall"><canvas id="chart-feat"></canvas></div>'
+          }
         </div>
       </div>
 
       <!-- DB統計 -->
-      <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">DATABASE STATS</span><span class="sys-ps mono">D1 RECORD COUNT</span></div>
+      <div class="sys-panel gc-12">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>DATABASE STATS</span><span class="sys-ps mono">D1 RECORD COUNT</span></div>
         <div class="sys-pb">
           <div class="db-grid">${dbStatsHtml}</div>
         </div>
       </div>
 
-      <!-- APIエンドポイント（クライアントサイドチェック） -->
-      <div class="sys-panel">
-        <div class="sys-ph">
-          <span class="sys-pt mono">API ENDPOINT DIAGNOSTICS</span>
-          <span style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:11px;color:#9ca3af;" id="checked-at">確認中...</span>
-            <button onclick="runChecks()" style="padding:5px 13px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600;">再確認</button>
-          </span>
-        </div>
-        <div class="sys-pb" style="display:flex;flex-direction:column;gap:9px;" id="api-checks">
-          <div style="font-size:12px;color:#9ca3af;">確認中...</div>
-        </div>
-      </div>
-
       <!-- 直近アクティビティ（実ログ） -->
-      <div class="sys-panel">
+      <div class="sys-panel gc-6">
         <div class="sys-ph">
-          <span class="sys-pt mono">ACTIVITY TRACE</span>
+          <span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>ACTIVITY TRACE</span>
           <span class="sys-ps mono" style="display:flex;align-items:center;gap:6px;"><span class="led led-g" style="width:6px;height:6px;"></span>直近のLINE操作 実ログ</span>
         </div>
-        <div style="padding:6px 0;">${actRowsHtml}</div>
+        <div style="padding:6px 0;overflow-y:auto;max-height:280px;">${actRowsHtml}</div>
       </div>
 
       <!-- 通信ログ -->
-      <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">NETWORK LOG</span><span class="sys-ps mono">RECENT ACTIVITY</span></div>
+      <div class="sys-panel gc-6">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>NETWORK LOG</span><span class="sys-ps mono">RECENT ACTIVITY</span></div>
         <div class="sys-pb">
-          <div id="net-log" class="mono" style="font-size:11px;color:#6b7280;line-height:1.7;max-height:200px;overflow-y:auto;">確認中...</div>
+          <div id="net-log" class="mono" style="font-size:11px;color:var(--sys-green);line-height:1.8;max-height:230px;overflow-y:auto;text-shadow:0 0 4px rgba(57,255,136,.25);">確認中...</div>
+        </div>
+      </div>
+
+      <!-- APIエンドポイント（クライアントサイドチェック） -->
+      <div class="sys-panel gc-7">
+        <div class="sys-ph">
+          <span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>API ENDPOINT DIAGNOSTICS</span>
+          <span style="display:flex;align-items:center;gap:10px;">
+            <span class="mono" style="font-size:10px;color:var(--sys-text-dim2);" id="checked-at">確認中...</span>
+            <button onclick="runChecks()" class="mono" style="padding:5px 13px;background:rgba(57,255,136,.08);color:var(--sys-green);border:1px solid rgba(57,255,136,.4);border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;">再確認</button>
+          </span>
+        </div>
+        <div class="sys-pb" style="gap:9px;" id="api-checks">
+          <div style="font-size:12px;color:var(--sys-text-dim2);">確認中...</div>
         </div>
       </div>
 
       <!-- アクセスQRコード -->
-      <div class="sys-panel">
-        <div class="sys-ph"><span class="sys-pt mono">ACCESS QR</span><span class="sys-ps mono">ADMIN LOGIN</span></div>
+      <div class="sys-panel gc-5">
+        <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>ACCESS QR</span><span class="sys-ps mono">ADMIN LOGIN</span></div>
         <div class="sys-pb">
-          <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">このQRコードをスキャンすると管理画面のログインページが開きます</div>
+          <div style="font-size:12px;color:var(--sys-text-dim);margin-bottom:14px;">このQRコードをスキャンすると管理画面のログインページが開きます</div>
           <div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;">
             <style>#qr-container svg{width:100%;height:100%;display:block;}</style>
-            <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px;display:inline-block;line-height:0;">
-              <div id="qr-container" style="width:160px;height:160px;">${qrSvg}</div>
+            <div style="background:#04070a;border:1px solid rgba(57,255,136,.3);border-radius:8px;padding:10px;display:inline-block;line-height:0;box-shadow:0 0 20px rgba(57,255,136,.12) inset;">
+              <div id="qr-container" style="width:140px;height:140px;">${qrSvg}</div>
             </div>
             <div style="flex:1;min-width:160px;">
-              <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">アクセス先URL</div>
-              <div class="mono" style="font-size:11px;color:#374151;word-break:break-all;background:#f3f4f6;padding:6px 8px;border-radius:4px;">${escHtml(adminLoginUrl)}</div>
+              <div class="mono" style="font-size:10px;color:var(--sys-text-dim2);margin-bottom:6px;">アクセス先URL</div>
+              <div class="mono" style="font-size:11px;color:var(--sys-cyan);word-break:break-all;background:#0d1815;border:1px solid var(--sys-line-soft);padding:6px 8px;border-radius:4px;">${escHtml(adminLoginUrl)}</div>
               <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                <button onclick="downloadQR()" style="padding:6px 14px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;">保存</button>
-                <button onclick="copyUrl()" style="padding:6px 14px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;" id="copy-btn-qr">URLコピー</button>
+                <button onclick="downloadQR()" class="mono" style="padding:6px 14px;background:rgba(57,255,136,.08);color:var(--sys-green);border:1px solid rgba(57,255,136,.4);border-radius:4px;font-size:12px;cursor:pointer;font-weight:600;">保存</button>
+                <button onclick="copyUrl()" class="mono" style="padding:6px 14px;background:transparent;color:var(--sys-text-dim);border:1px solid var(--sys-line);border-radius:4px;font-size:12px;cursor:pointer;" id="copy-btn-qr">URLコピー</button>
               </div>
             </div>
           </div>
         </div>
       </div>
+      </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
     <script>
       var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
 
@@ -3488,6 +3558,127 @@ app.get('/settings/status', async (c) => {
         if (el) el.textContent = new Date().toLocaleTimeString('ja-JP', { hour12: false }) + ' JST';
       }
       setInterval(sysTick, 1000); sysTick();
+
+      // ---- マトリックスレイン演出（コンソールヘッダー背景） ----
+      (function () {
+        var canvas = document.getElementById('matrix-rain');
+        if (!canvas || !canvas.getContext) return;
+        var ctx = canvas.getContext('2d');
+        var parent = canvas.parentElement;
+        var fontSize = 14;
+        var columns = 0, drops = [];
+        function setup() {
+          canvas.width = parent.clientWidth;
+          canvas.height = parent.clientHeight;
+          columns = Math.max(1, Math.floor(canvas.width / fontSize));
+          drops = [];
+          for (var i = 0; i < columns; i++) drops.push(Math.random() * -40);
+        }
+        setup();
+        window.addEventListener('resize', setup);
+        var chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワン0123456789';
+        function draw() {
+          ctx.fillStyle = 'rgba(3,5,7,0.16)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.font = fontSize + 'px monospace';
+          for (var i = 0; i < drops.length; i++) {
+            var ch = chars[Math.floor(Math.random() * chars.length)];
+            ctx.fillStyle = 'rgba(57,255,136,0.85)';
+            ctx.fillText(ch, i * fontSize, drops[i] * fontSize);
+            if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+            drops[i]++;
+          }
+        }
+        setInterval(draw, 65);
+      })();
+
+      // ---- Chart.js ダークテーマ共通設定 ----
+      var SYS_MONO = "'SF Mono',SFMono-Regular,Menlo,Consolas,'Courier New',monospace";
+      if (window.Chart) {
+        Chart.defaults.color = '#6f9c85';
+        Chart.defaults.font.family = SYS_MONO;
+        Chart.defaults.font.size = 10;
+      }
+
+      // ---- 日別操作件数（折れ線／エリアチャート） ----
+      var DAILY_LABELS = ${JSON.stringify(dailyLabels)};
+      var DAILY_VALUES = ${JSON.stringify(dailyValues)};
+      if (window.Chart && document.getElementById('chart-daily')) {
+        new Chart(document.getElementById('chart-daily').getContext('2d'), {
+          type: 'line',
+          data: {
+            labels: DAILY_LABELS,
+            datasets: [{
+              data: DAILY_VALUES, borderColor: '#39ff88', backgroundColor: 'rgba(57,255,136,.14)',
+              fill: true, tension: .35, pointRadius: 2, pointBackgroundColor: '#39ff88', borderWidth: 2
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { color: 'rgba(57,255,136,.08)' }, ticks: { color: '#456b58', maxRotation: 0 } },
+              y: { beginAtZero: true, grid: { color: 'rgba(57,255,136,.08)' }, ticks: { color: '#456b58', precision: 0 } }
+            }
+          }
+        });
+      }
+
+      // ---- 機能別利用トップ（横棒グラフ） ----
+      var FEAT_LABELS = ${JSON.stringify(featLabels)};
+      var FEAT_VALUES = ${JSON.stringify(featValues)};
+      if (window.Chart && document.getElementById('chart-feat')) {
+        new Chart(document.getElementById('chart-feat').getContext('2d'), {
+          type: 'bar',
+          data: { labels: FEAT_LABELS, datasets: [{ data: FEAT_VALUES, backgroundColor: 'rgba(57,255,136,.55)', borderRadius: 3, barThickness: 12 }] },
+          options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { beginAtZero: true, grid: { color: 'rgba(57,255,136,.08)' }, ticks: { color: '#456b58', precision: 0 } },
+              y: { grid: { display: false }, ticks: { color: '#9fd9bb', font: { size: 10 } } }
+            }
+          }
+        });
+      }
+
+      // ---- トラフィック内訳（BOT/LIFF ドーナツ） ----
+      var TRAFFIC_BOT = ${JSON.stringify(usageStats?.bot_cnt ?? 0)};
+      var TRAFFIC_LIFF = ${JSON.stringify(usageStats?.liff_cnt ?? 0)};
+      if (window.Chart && document.getElementById('chart-traffic')) {
+        new Chart(document.getElementById('chart-traffic').getContext('2d'), {
+          type: 'doughnut',
+          data: { labels: ['BOT', 'LIFF'], datasets: [{ data: [TRAFFIC_BOT, TRAFFIC_LIFF], backgroundColor: ['#58e6ff', '#ff6fe0'], borderColor: '#0a120f', borderWidth: 3 }] },
+          options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false } } }
+        });
+      }
+
+      // ---- API稼働率ゲージ（半円ドーナツ、チェック結果で更新） ----
+      var apiHealthChart = null;
+      function renderApiHealthChart(okCount, total) {
+        if (!window.Chart || !document.getElementById('chart-api-health')) return;
+        var pct = total > 0 ? Math.round(okCount / total * 100) : 0;
+        var data = {
+          labels: ['正常', '異常'],
+          datasets: [{ data: [okCount, Math.max(total - okCount, 0)], backgroundColor: ['#39ff88', '#ff3b60'], borderColor: '#0a120f', borderWidth: 3 }]
+        };
+        if (apiHealthChart) {
+          apiHealthChart.data = data;
+          apiHealthChart.update();
+        } else {
+          apiHealthChart = new Chart(document.getElementById('chart-api-health').getContext('2d'), {
+            type: 'doughnut',
+            data: data,
+            options: {
+              responsive: true, maintainAspectRatio: false, cutout: '72%',
+              rotation: -90, circumference: 180,
+              plugins: { legend: { display: false } }
+            }
+          });
+        }
+        var pctEl = document.getElementById('api-health-pct');
+        if (pctEl) { pctEl.textContent = pct + '%'; pctEl.style.color = pct >= 100 ? '#39ff88' : (pct >= 50 ? '#ffb930' : '#ff3b60'); }
+      }
 
       // ---- APIエンドポイントチェック ----
       var API_TARGETS = [
@@ -3527,7 +3718,7 @@ app.get('/settings/status', async (c) => {
       }
 
       async function runChecks() {
-        document.getElementById('api-checks').innerHTML = '<div style="font-size:12px;color:#9ca3af;">確認中...</div>';
+        document.getElementById('api-checks').innerHTML = '<div style="font-size:12px;color:#456b58;">確認中...</div>';
         document.getElementById('net-log').textContent = '確認中...';
         logs = [];
 
@@ -3536,7 +3727,7 @@ app.get('/settings/status', async (c) => {
           var r = results[i];
           var note = r.err ? 'ネットワークエラー' : (r.status != null ? ('HTTP ' + r.status) : null);
           return '<div class="sys-row">' +
-            '<span style="font-size:13px;color:#374151;">' + t.label + '</span>' +
+            '<span style="font-size:13px;color:#d7ffe9;">' + t.label + '</span>' +
             statusBadge(r.ok, r.ms, r.ok ? null : note) +
             '</div>';
         }).join('');
@@ -3545,6 +3736,8 @@ app.get('/settings/status', async (c) => {
           return '<div>' + l + '</div>';
         }).join('');
         document.getElementById('checked-at').textContent = '最終確認: ' + new Date().toLocaleString('ja-JP');
+        var okCount = results.filter(function(r) { return r.ok; }).length;
+        renderApiHealthChart(okCount, results.length);
       }
 
       runChecks();
@@ -3573,11 +3766,15 @@ app.get('/settings/status', async (c) => {
       }
       function applyMaintState(on) {
         var st = document.getElementById('maint-state');
-        if (st) { st.textContent = on ? 'MAINT ON' : 'NORMAL'; st.style.color = on ? '#d97706' : '#16a34a'; }
+        if (st) { st.textContent = on ? 'MAINT ON' : 'NORMAL'; st.style.color = on ? '#ffb930' : '#39ff88'; }
         var led = document.getElementById('head-led');
         if (led) { led.className = 'led ' + (on ? 'led-a' : 'led-g'); }
         var hs = document.getElementById('head-state');
-        if (hs) { hs.textContent = on ? 'MAINTENANCE MODE' : 'ALL SYSTEMS OPERATIONAL'; hs.style.color = on ? '#b45309' : '#1e3a5f'; }
+        if (hs) {
+          hs.textContent = on ? '[!] MAINTENANCE MODE' : 'ALL SYSTEMS OPERATIONAL';
+          hs.style.color = on ? '#ffb930' : '#39ff88';
+          hs.style.textShadow = on ? '0 0 12px rgba(255,185,48,.55)' : '0 0 12px rgba(57,255,136,.55)';
+        }
         var bn = document.getElementById('maint-banner');
         if (bn) { bn.style.display = on ? 'block' : 'none'; }
         var msg = document.getElementById('maint-msg');

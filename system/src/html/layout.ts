@@ -26,7 +26,7 @@ function showToast(msg) {
 }
 
 // フローティング新規報告ボタンを表示しないページ（設定・点検管理・班長シフト）
-const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift']);
+const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'garage']);
 
 export function layout(title: string, content: string, activePage: string = '', headerExtra: string = ''): string {
   const showReportFab = !REPORT_FAB_HIDDEN_PAGES.has(activePage);
@@ -42,7 +42,9 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/crew-portal`,   label: '乗務員ポータル',  id: 'crew-portal' },
     { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
+    { href: `${ADMIN_PATH}/driver-reports`, label: 'ドライバー報告', id: 'driver-reports' },
     { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
+    { href: `${ADMIN_PATH}/garage`,        label: '車庫',            id: 'garage' },
     { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
@@ -285,15 +287,10 @@ export function layout(title: string, content: string, activePage: string = '', 
   </div>
 
   ${showReportFab ? `
-  <div id="report-fab-wrap" style="position:fixed;right:20px;bottom:20px;z-index:60;">
-    <div id="report-fab-menu" style="display:none;position:absolute;bottom:66px;right:0;background:white;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.22);min-width:220px;overflow:hidden;border:1px solid #e5e7eb;">
-      <a href="javascript:void(0)" onclick="openQrModal('lost');return false;" data-perm-key="settings.lost-items" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">忘れ物報告</a>
-      <a href="javascript:void(0)" onclick="openQrModal('accident');return false;" data-perm-key="settings.accidents" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">事故報告</a>
-      <a href="javascript:void(0)" onclick="openQrModal('violation');return false;" data-perm-key="settings.violations" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">違反報告</a>
-      <a href="javascript:void(0)" onclick="openQrModal('general');return false;" data-perm-key="settings.general-reports" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;border-bottom:1px solid #f3f4f6;">一般報告</a>
-      <a href="javascript:void(0)" onclick="createHandoverMemoFromFab();return false;" data-perm-key="settings.handover-memos" style="display:block;padding:18px 22px;font-size:17px;font-weight:600;color:#1e3a5f;text-decoration:none;">引き継ぎメモ</a>
-    </div>
-    <button id="report-fab-btn" onclick="toggleReportFab()" aria-label="新規報告" title="新規報告"
+  <div id="report-fab-wrap" style="position:fixed;right:20px;bottom:20px;z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:10px;">
+    <a href="javascript:void(0)" id="report-fab-memo-btn" onclick="createHandoverMemoFromFab();return false;" data-perm-key="settings.handover-memos" aria-label="引き継ぎメモを新規作成" title="引き継ぎメモを新規作成"
+      style="width:40px;height:40px;border-radius:50%;background:#fff;color:#1e3a5f;border:2px solid #1e3a5f;box-shadow:0 4px 10px rgba(0,0,0,0.2);font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none;">メモ</a>
+    <button id="report-fab-btn" onclick="openQrModal()" aria-label="新規報告" title="新規報告"
       style="width:54px;height:54px;border-radius:50%;background:#1e3a5f;color:#fff;border:none;box-shadow:0 4px 14px rgba(0,0,0,0.3);font-size:26px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;">＋</button>
   </div>
   ${quickReportModalHtml()}
@@ -464,13 +461,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     }
     loadBellUnreadCount();
 
-    function toggleReportFab() {
-      const menu = document.getElementById('report-fab-menu');
-      if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
-    }
     function createHandoverMemoFromFab() {
-      const menu = document.getElementById('report-fab-menu');
-      if (menu) menu.style.display = 'none';
       fetch('${ADMIN_PATH}/api/handover-memos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
       })
@@ -481,16 +472,13 @@ export function layout(title: string, content: string, activePage: string = '', 
       })
       .catch(function() { alert('通信エラーが発生しました'); });
     }
-    document.addEventListener('click', function (e) {
-      const wrap = document.getElementById('report-fab-wrap');
-      const menu = document.getElementById('report-fab-menu');
-      if (wrap && menu && menu.style.display === 'block' && !wrap.contains(e.target)) menu.style.display = 'none';
-    });
     (function () {
-      // 権限フィルタで全リンクが除去された場合はボタンごと非表示にする
+      // 権限フィルタでタブが1つも残らなかった場合は「＋」ボタンごと非表示にする
       const wrap = document.getElementById('report-fab-wrap');
-      const menu = document.getElementById('report-fab-menu');
-      if (wrap && menu && !menu.querySelector('a')) wrap.style.display = 'none';
+      const reportBtn = document.getElementById('report-fab-btn');
+      const hasAnyTab = ['lost', 'accident', 'violation', 'general'].some(function (t) { return !!document.getElementById('qr-tab-' + t); });
+      if (reportBtn && !hasAnyTab) reportBtn.style.display = 'none';
+      if (wrap && !hasAnyTab && !document.getElementById('report-fab-memo-btn')) wrap.style.display = 'none';
     })();
     ${showReportFab ? quickReportModalScript() : ''}
   </script>

@@ -53,6 +53,8 @@ import adminRequestsRoutes from './routes/admin_requests';
 import adminCcListRoutes from './routes/admin_cc_list';
 import adminBenriRoutes from './routes/admin_benri';
 import adminNojicoRoutes from './routes/admin_nojico';
+import adminGarageRoutes from './routes/admin_garage';
+import adminDriverReportsRoutes from './routes/admin_driver_reports';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -237,6 +239,8 @@ app.route(`/${SECRET}/admin`, adminRequestsRoutes);
 app.route(`/${SECRET}/admin`, adminCcListRoutes);
 app.route(`/${SECRET}/admin`, adminBenriRoutes);
 app.route(`/${SECRET}/admin`, adminNojicoRoutes);
+app.route(`/${SECRET}/admin`, adminGarageRoutes);
+app.route(`/${SECRET}/admin`, adminDriverReportsRoutes);
 
 // =====================
 // API（認証必須）

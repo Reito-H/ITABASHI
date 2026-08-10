@@ -5,6 +5,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { logLineActivity } from '../utils/activity_log';
+import { issueCaseNoIfEmpty } from '../utils/report_case_no';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -539,13 +540,14 @@ app.post('/api/liff/lost-item', async (c) => {
   }>();
 
   const reportType = body.report_type === 'customer' ? 'customer' : 'staff';
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
 
   await c.env.DB.prepare(`
     INSERT INTO lost_item_reports
       (report_type, received_at, vehicle_no, employee_name, employee_emp_no,
        employee_division, employee_team, item_description, pickup_location, dropoff_location,
-       customer_name, customer_phone, return_method, notes, reported_by_uid)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       customer_name, customer_phone, return_method, notes, reported_by_uid, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     reportType,
     body.received_at ?? null,
@@ -562,6 +564,7 @@ app.post('/api/liff/lost-item', async (c) => {
     body.return_method ?? null,
     body.notes ?? null,
     uid,
+    caseNo,
   ).run();
 
   await logLineActivity(c.env.DB, uid, 'liff', 'api', '忘れ物報告送信',
@@ -603,17 +606,21 @@ app.post('/api/liff/accident', async (c) => {
     additional_info?: string;
     other_party_name?: string;
     other_party_phone?: string;
+    customer_name?: string;
+    customer_phone?: string;
   }>();
 
   const summary = buildAccidentSummary(body);
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
 
   await c.env.DB.prepare(`
     INSERT INTO accident_reports
       (received_at, vehicle_no, employee_name, employee_emp_no,
        employee_division, employee_team, accident_type, location, car_status,
        substitute_requested, police_notified, passenger_delivered,
-       additional_info, other_party_name, other_party_phone, summary_text, reported_by_uid)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       additional_info, other_party_name, other_party_phone, summary_text, reported_by_uid,
+       customer_name, customer_phone, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.received_at ?? null,
     body.vehicle_no ?? null,
@@ -632,6 +639,9 @@ app.post('/api/liff/accident', async (c) => {
     body.other_party_phone ?? null,
     summary,
     uid,
+    body.customer_name ?? null,
+    body.customer_phone ?? null,
+    caseNo,
   ).run();
 
   await logLineActivity(c.env.DB, uid, 'liff', 'api', '事故報告送信',
@@ -715,13 +725,15 @@ app.post('/api/liff/violation', async (c) => {
     }
   }
 
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
+
   await c.env.DB.prepare(`
     INSERT INTO violation_reports
       (received_at, vehicle_no, violation_at, employee_name, employee_emp_no,
        employee_division, employee_team, violation_type_id, violation_type_name,
        violation_points, violation_fine_amount, location, travel_from, travel_to,
-       car_status, substitute_needed, notes, reported_by_uid)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       car_status, substitute_needed, notes, reported_by_uid, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.received_at ?? null,
     body.vehicle_no ?? null,
@@ -741,6 +753,7 @@ app.post('/api/liff/violation', async (c) => {
     substituteNeeded,
     body.notes ?? null,
     uid,
+    caseNo,
   ).run();
 
   await logLineActivity(c.env.DB, uid, 'liff', 'api', '違反報告送信',
@@ -788,11 +801,13 @@ app.post('/api/liff/general-report', async (c) => {
     content?: string;
   }>();
 
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
+
   await c.env.DB.prepare(`
     INSERT INTO general_reports
       (title, received_at, vehicle_no, location, route_from, route_to, employee_name, employee_emp_no,
-       employee_division, employee_team, customer_name, customer_phone, content, reported_by_uid)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       employee_division, employee_team, customer_name, customer_phone, content, reported_by_uid, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.title ?? null,
     body.received_at ?? null,
@@ -808,6 +823,7 @@ app.post('/api/liff/general-report', async (c) => {
     body.customer_phone ?? null,
     body.content ?? null,
     uid,
+    caseNo,
   ).run();
 
   await logLineActivity(c.env.DB, uid, 'liff', 'api', '一般報告送信',
@@ -860,6 +876,9 @@ function buildAccidentSummary(body: Record<string, unknown>): string {
   if (body.accident_type) lines.push(`事故形態: ${body.accident_type}`);
   if (body.car_status)    lines.push(`状態: ${body.car_status}`);
   if (body.location)      lines.push(`場所: ${body.location}`);
+  if (body.customer_name || body.customer_phone) {
+    lines.push(`乗客(お客様): ${body.customer_name ?? ''} ${body.customer_phone ?? ''}`.trim());
+  }
   if (body.other_party_name || body.other_party_phone) {
     lines.push(`事故相手: ${body.other_party_name ?? ''} ${body.other_party_phone ?? ''}`.trim());
   }
@@ -2322,6 +2341,11 @@ function liffReport2Page(liffId: string): string {
           <div class="field"><label>事故相手の電話番号</label><input type="tel" id="ac-other_party_phone" placeholder="090-0000-0000"></div>
         </div>
         <div class="card">
+          <div class="card-title">乗車中のお客様（任意）</div>
+          <div class="field"><label>お客様氏名</label><input type="text" id="ac-customer_name" placeholder="例: 田中 一郎"></div>
+          <div class="field"><label>お客様電話番号</label><input type="tel" id="ac-customer_phone" placeholder="090-0000-0000" inputmode="tel"></div>
+        </div>
+        <div class="card">
           <div class="card-title">乗客・代車対応</div>
           <div id="ac-passenger-check" class="check-row" style="display:none;">
             <input type="checkbox" id="ac-passenger_delivered"><label for="ac-passenger_delivered">乗客を目的地まで送り届けた</label>
@@ -2655,6 +2679,8 @@ function liffReport2Page(liffId: string): string {
         additional_info: val('ac-additional_info'),
         other_party_name: val('ac-other_party_name'),
         other_party_phone: val('ac-other_party_phone'),
+        customer_name: val('ac-customer_name'),
+        customer_phone: val('ac-customer_phone'),
       };
     } else if (type === 'violation') {
       var viEmp = selectedEmp.violation;

@@ -10,8 +10,9 @@ import { getAdminPermissions } from '../permissions';
 import { renderReportPrintPage, type ReportPrintField } from '../html/report_print';
 import { renderReportPrintBulkPage, type ReportPrintBulkItem } from '../html/report_print_bulk';
 import { saveToastHtml, saveToastScript } from '../html/layout';
+import { issueCaseNoIfEmpty } from '../utils/report_case_no';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
 export const ROLE_LABELS: Record<string, string> = {
   general_manager:     '統括管理者',
@@ -58,41 +59,201 @@ async function getAdminName(c: { req: { header: (n: string) => string | undefine
   return adminRow?.username ?? '管理者';
 }
 
-// 忘れ物・事故・違反・一般・引き継ぎメモ 共通のタブナビ（権限のないタブは data-perm-key で自動的に非表示になる）
-function reportTabs(active: 'lost' | 'accident' | 'violation' | 'general' | 'memo'): string {
-  const tabs = [
-    { key: 'lost',      href: `${ADMIN_PATH}/settings/lost-items`,      perm: 'settings.lost-items',      label: '忘れ物' },
-    { key: 'accident',  href: `${ADMIN_PATH}/settings/accidents`,       perm: 'settings.accidents',       label: '事故' },
-    { key: 'violation', href: `${ADMIN_PATH}/settings/violations`,      perm: 'settings.violations',      label: '違反' },
-    { key: 'general',   href: `${ADMIN_PATH}/settings/general-reports`, perm: 'settings.general-reports', label: '一般報告' },
-    { key: 'memo',      href: `${ADMIN_PATH}/settings/handover-memos`,  perm: 'settings.handover-memos',  label: '引き継ぎメモ' },
+// 報告センター・引き継ぎメモの簡易ナビ（旧5タブreportTabs()の後継。権限のない項目はdata-perm-keyで自動非表示）
+function reportCenterNav(active: 'reports' | 'memo'): string {
+  const items: Array<{ key: string; href: string; perm: string; label: string }> = [
+    { key: 'reports', href: `${ADMIN_PATH}/settings/reports`,        perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports', label: '報告一覧' },
+    { key: 'memo',    href: `${ADMIN_PATH}/settings/handover-memos`, perm: 'settings.handover-memos', label: '引き継ぎメモ' },
   ];
   return `<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e5e7eb;">
-    ${tabs.map(t => `<a href="${t.href}" data-perm-key="${t.perm}" style="padding:8px 20px;font-size:14px;text-decoration:none;font-weight:600;margin-bottom:-2px;${t.key === active
+    ${items.map(t => `<a href="${t.href}" data-perm-key="${t.perm}" style="padding:8px 20px;font-size:14px;text-decoration:none;font-weight:600;margin-bottom:-2px;${t.key === active
       ? 'color:#1e3a5f;border-bottom:2px solid #1e3a5f;'
       : 'color:#9ca3af;border-bottom:2px solid transparent;'}">${escHtml(t.label)}</a>`).join('')}
   </div>`;
 }
 
-// GET /settings/reports — 報告センターの入口。権限のある最初のタブへリダイレクト
-// （設定トップのカードを1枚に集約したため、アカウントごとに見えるタブが違っても入口は共通）
+// 統合報告一覧が扱う4種別のマスタ（URLスラッグ⇔種別キー⇔権限キー⇔ラベル⇔印刷URL）
+const REPORT_LIST_KINDS: Array<{
+  slug: string; kind: string; permKey: string; label: string; resolvedLabel: string; printPath: string;
+}> = [
+  { slug: 'lost-items',      kind: 'lost_item', permKey: 'settings.lost-items',      label: '忘れ物',   resolvedLabel: '解決済', printPath: '/settings/lost-items/print' },
+  { slug: 'accidents',       kind: 'accident',  permKey: 'settings.accidents',       label: '事故',     resolvedLabel: '解決済', printPath: '/settings/accidents/print' },
+  { slug: 'violations',      kind: 'violation', permKey: 'settings.violations',      label: '違反',     resolvedLabel: '対応済', printPath: '/settings/violations/print' },
+  { slug: 'general-reports', kind: 'general',   permKey: 'settings.general-reports', label: '一般報告', resolvedLabel: '対応済', printPath: '/settings/general-reports/print' },
+];
+
+// 4テーブルを正規化列に揃えるUNION ALL用の1ブランチ分SQL（WHERE句は呼び出し側で付与）
+const REPORT_BRANCH_SQL: Record<string, string> = {
+  'lost-items': `
+    SELECT 'lost_item' AS kind, r.id, r.case_no, r.vehicle_no, r.created_at, r.status,
+      CASE WHEN r.report_type = 'customer' THEN r.customer_name ELSE NULL END AS customer_name,
+      CASE WHEN r.report_type = 'customer' THEN r.customer_phone ELSE NULL END AS customer_phone,
+      NULL AS secondary_name, NULL AS secondary_phone,
+      CASE WHEN r.report_type = 'staff' THEN '乗務社員からの忘れ物申告' ELSE COALESCE(r.item_description, '') END AS content_text
+    FROM lost_item_reports r`,
+  'accidents': `
+    SELECT 'accident' AS kind, r.id, r.case_no, r.vehicle_no, r.created_at, r.status,
+      r.customer_name, r.customer_phone,
+      r.other_party_name AS secondary_name, r.other_party_phone AS secondary_phone,
+      COALESCE(r.accident_type, '') AS content_text
+    FROM accident_reports r`,
+  'violations': `
+    SELECT 'violation' AS kind, r.id, r.case_no, r.vehicle_no, r.created_at, r.status,
+      NULL AS customer_name, NULL AS customer_phone, NULL AS secondary_name, NULL AS secondary_phone,
+      COALESCE(r.violation_type_name, '') AS content_text
+    FROM violation_reports r`,
+  'general-reports': `
+    SELECT 'general' AS kind, r.id, r.case_no, r.vehicle_no, r.created_at, r.status,
+      r.customer_name, r.customer_phone, NULL AS secondary_name, NULL AS secondary_phone,
+      COALESCE(NULLIF(r.title, ''), substr(COALESCE(r.content, ''), 1, 60)) AS content_text
+    FROM general_reports r`,
+};
+
+interface UnifiedReportRow {
+  kind: string; id: number; case_no: string | null; vehicle_no: string | null;
+  created_at: string; status: string;
+  customer_name: string | null; customer_phone: string | null;
+  secondary_name: string | null; secondary_phone: string | null;
+  content_text: string;
+}
+
+// 日付表示（年は省略。MM/DD HH:MM）
+function formatDateNoYear(createdAt: string): string {
+  return `${createdAt.slice(5, 10).replace('-', '/')} ${createdAt.slice(11, 16)}`;
+}
+
+// 案件ID表示（車番があればそのまま、なければ登録時採番した4桁をNo.形式で）
+function caseIdDisplay(vehicleNo: string | null, caseNo: string | null): string {
+  if (vehicleNo) return escHtml(vehicleNo);
+  if (caseNo) return `No.${escHtml(caseNo)}`;
+  return '<span style="color:#d1d5db;">—</span>';
+}
+
+// お客様TEL・お客様名セル（事故で乗客・事故相手の両方があれば2行表示）
+function unifiedCustomerCellHtml(r: UnifiedReportRow): string {
+  const lines: string[] = [];
+  if (r.customer_name || r.customer_phone) lines.push(`お客様: ${[r.customer_name, r.customer_phone].filter(Boolean).join(' / ')}`);
+  if (r.secondary_name || r.secondary_phone) lines.push(`事故相手: ${[r.secondary_name, r.secondary_phone].filter(Boolean).join(' / ')}`);
+  return lines.length ? lines.map(escHtml).join('<br>') : '<span style="color:#d1d5db;">—</span>';
+}
+
+const REPORT_PAGE_SIZE = 100;
+
+// GET /settings/reports — 報告センターの統合一覧（忘れ物/事故/違反/一般報告を横断して1画面に表示）
 app.get('/settings/reports', async (c) => {
-  const orderedPerms = ['settings.lost-items', 'settings.accidents', 'settings.violations', 'settings.general-reports', 'settings.handover-memos'];
-  const hrefs: Record<string, string> = {
-    'settings.lost-items':      `${ADMIN_PATH}/settings/lost-items`,
-    'settings.accidents':       `${ADMIN_PATH}/settings/accidents`,
-    'settings.violations':      `${ADMIN_PATH}/settings/violations`,
-    'settings.general-reports': `${ADMIN_PATH}/settings/general-reports`,
-    'settings.handover-memos':  `${ADMIN_PATH}/settings/handover-memos`,
+  const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
+  const allowed = perms === null ? REPORT_LIST_KINDS : REPORT_LIST_KINDS.filter(k => perms.includes(k.permKey));
+  if (allowed.length === 0) {
+    return c.html(layout('報告センター', `${reportSubHeader('報告センター')}<p style="color:#6b7280;">表示できる報告がありません。</p>`, 'report-center'));
+  }
+
+  const typeFilterRaw = c.req.query('type') ?? '';
+  const typeFilter = allowed.some(k => k.slug === typeFilterRaw) ? typeFilterRaw : '';
+  const statusFilter = c.req.query('status') ?? '';
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1', 10) || 1);
+
+  const activeKinds = typeFilter ? allowed.filter(k => k.slug === typeFilter) : allowed;
+  const hasStatusFilter = statusFilter === 'open' || statusFilter === 'resolved';
+  const branches = activeKinds.map(k => REPORT_BRANCH_SQL[k.slug] + (hasStatusFilter ? ' WHERE r.status = ?' : ''));
+  const unionSql = branches.join(' UNION ALL ');
+  const statusBinds: string[] = hasStatusFilter ? activeKinds.map(() => statusFilter) : [];
+
+  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM (${unionSql}) u`)
+    .bind(...statusBinds).first<{ cnt: number }>();
+  const total = countRow?.cnt ?? 0;
+
+  const offset = (page - 1) * REPORT_PAGE_SIZE;
+  const result = await c.env.DB.prepare(`SELECT * FROM (${unionSql}) u ORDER BY u.created_at DESC, u.id DESC LIMIT ? OFFSET ?`)
+    .bind(...statusBinds, REPORT_PAGE_SIZE, offset).all<UnifiedReportRow>();
+  const rows = result.results ?? [];
+
+  const kindBySlugMap = new Map(REPORT_LIST_KINDS.map(k => [k.kind, k]));
+
+  let lastYear: string | null = null;
+  const rowsHtml = rows.map(r => {
+    const info = kindBySlugMap.get(r.kind)!;
+    const year = r.created_at.slice(0, 4);
+    const yearSep = year !== lastYear
+      ? `<tr><td colspan="5" style="padding:14px 12px 4px;font-size:12px;font-weight:700;color:#6b7280;border-top:1px solid #e5e7eb;">${escHtml(year)}年</td></tr>`
+      : '';
+    lastYear = year;
+    const href = `${ADMIN_PATH}${info.printPath}/${r.id}`;
+    return `${yearSep}<tr onclick="location.href='${href}'" style="cursor:pointer;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+      <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap;">${escHtml(formatDateNoYear(r.created_at))}</td>
+      <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;white-space:nowrap;">${caseIdDisplay(r.vehicle_no, r.case_no)}</td>
+      <td style="padding:12px 16px;border-bottom:1px solid #f3f4f6;font-size:15px;font-weight:700;color:#111827;line-height:1.5;">${unifiedCustomerCellHtml(r)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:320px;">${contentCellHtml(r.content_text)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">${statusCellHtml(r.status === 'resolved', info.resolvedLabel)}</td>
+    </tr>`;
+  }).join('');
+
+  const buildUrl = (t: string, s: string) => `${ADMIN_PATH}/settings/reports?type=${t}&status=${s}`;
+  const typeChip = (label: string, slug: string) => {
+    const active = typeFilter === slug;
+    return `<a href="${buildUrl(slug, statusFilter)}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
+      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
   };
-  const cookie = c.req.header('Cookie') ?? null;
-  const sid = getSessionFromCookie(cookie);
-  const adminId = sid ? await validateSession(c.env.DB, sid) : null;
-  const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
-  // perms === null は全権限アカウント
-  const key = perms === null ? orderedPerms[0] : orderedPerms.find(k => perms.includes(k));
-  if (!key) return c.redirect(`${ADMIN_PATH}/settings`);
-  return c.redirect(hrefs[key]);
+  const statusChip = (label: string, s: string) => {
+    const active = statusFilter === s;
+    return `<a href="${buildUrl(typeFilter, s)}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
+      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
+  };
+
+  const totalPages = Math.max(1, Math.ceil(total / REPORT_PAGE_SIZE));
+  const pager = totalPages > 1 ? `<div style="display:flex;gap:8px;align-items:center;justify-content:center;padding:14px;">
+    ${page > 1 ? `<a href="${ADMIN_PATH}/settings/reports?type=${typeFilter}&status=${statusFilter}&page=${page - 1}" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;font-size:13px;text-decoration:none;">← 前へ</a>` : ''}
+    <span style="font-size:13px;color:#6b7280;">${page} / ${totalPages}ページ</span>
+    ${page < totalPages ? `<a href="${ADMIN_PATH}/settings/reports?type=${typeFilter}&status=${statusFilter}&page=${page + 1}" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;font-size:13px;text-decoration:none;">次へ →</a>` : ''}
+  </div>` : '';
+
+  const content = `
+    ${reportSubHeader('報告センター')}
+    ${reportCenterNav('reports')}
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+      ${typeChip('すべて', '')}
+      ${allowed.map(k => typeChip(k.label, k.slug)).join('')}
+      ${statusChip('対応中', 'open')}
+      ${statusChip('解決済み', 'resolved')}
+      ${unifiedNewReportButtonsHtml(allowed)}
+    </div>
+
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
+      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
+        <span style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${total}件</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;min-width:700px;">
+          <thead style="background:#f9fafb;">
+            <tr>
+              <th style="padding:8px 6px;text-align:left;font-size:10px;color:#9ca3af;font-weight:600;">日付</th>
+              <th style="padding:8px 6px;text-align:left;font-size:10px;color:#9ca3af;font-weight:600;">案件ID</th>
+              <th style="padding:8px 16px;text-align:left;font-size:13px;color:#4b5563;font-weight:700;">お客様TEL・お客様名</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">内容</th>
+              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="5" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+      ${pager}
+    </div>
+
+    ${unifiedNewReportModalHtml(allowed)}
+    <script>
+      function toggleReportContent(btn) {
+        var box = btn.previousElementSibling;
+        var expanded = box.style.maxHeight === 'none';
+        box.style.maxHeight = expanded ? '2.6em' : 'none';
+        btn.textContent = expanded ? '続きを見る' : '閉じる';
+      }
+      ${unifiedNewReportScript(allowed)}
+    </script>
+  `;
+
+  return c.html(layout('報告センター', content, 'report-center'));
 });
 
 // 状態セルのHTML（resolvedLabel: 忘れ物・事故=解決済 / 違反=対応済）
@@ -100,125 +261,6 @@ function statusCellHtml(resolved: boolean, resolvedLabel: string): string {
   const label = resolved ? resolvedLabel : '対応中';
   const color = resolved ? '#059669' : '#d97706';
   return `<span style="color:${color};font-size:12px;font-weight:600;">${label}</span>`;
-}
-
-// 対応者セルのHTML（誰が・いつ対応したか）
-function resolverCellHtml(resolvedByName: string | null, resolvedAt: string | null): string {
-  if (!resolvedByName) return '<span style="color:#d1d5db;font-size:12px;">—</span>';
-  return `<span style="color:#059669;font-size:12px;font-weight:600;">${escHtml(resolvedByName)}</span>
-    ${resolvedAt ? `<div style="font-size:11px;color:#9ca3af;margin-top:1px;">${escHtml(resolvedAt.slice(5, 16))}</div>` : ''}`;
-}
-
-// 行内で状態切替・削除・履歴表示を行う共通スクリプト（ページ再読み込みなしで行だけ更新する）
-function reportRowScript(apiPath: string, deleteLabel: string, resolvedLabel: string, bulkPrintPath: string): string {
-  return `
-    var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
-    function toggleAllChecks(master) {
-      document.querySelectorAll('.report-chk').forEach(function(cb){ cb.checked = master.checked; });
-      updateBulkPrintBtn();
-    }
-    function updateBulkPrintBtn() {
-      var checked = document.querySelectorAll('.report-chk:checked');
-      var btn = document.getElementById('bulk-print-btn');
-      var cnt = document.getElementById('bulk-print-count');
-      if (btn) { btn.disabled = checked.length === 0; btn.style.opacity = checked.length ? '1' : '.5'; }
-      if (cnt) cnt.textContent = checked.length + '件選択中';
-    }
-    function openBulkPrint() {
-      var ids = Array.prototype.map.call(document.querySelectorAll('.report-chk:checked'), function(cb){ return cb.value; });
-      if (ids.length === 0) return;
-      window.open(ADMIN_PATH + '${bulkPrintPath}?ids=' + ids.join(','), '_blank');
-    }
-    async function toggleReportStatus(id, btn) {
-      var current = btn.dataset.status;
-      var next = current === 'resolved' ? 'open' : 'resolved';
-      var res = await fetch(ADMIN_PATH + '${apiPath}/' + id + '/status', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next }),
-      });
-      if (!res.ok) { alert('更新に失敗しました'); return; }
-      var j = await res.json().catch(function(){ return {}; });
-      var name = j.adminName || '管理者';
-      btn.dataset.status = next;
-      btn.textContent = next === 'resolved' ? '再開' : '${resolvedLabel}にする';
-      var st = document.getElementById('st-' + id);
-      if (st) {
-        st.innerHTML = next === 'resolved'
-          ? '<span style="color:#059669;font-size:12px;font-weight:600;">${resolvedLabel}</span>'
-          : '<span style="color:#d97706;font-size:12px;font-weight:600;">対応中</span>';
-      }
-      var rc = document.getElementById('res-' + id);
-      if (rc) {
-        rc.innerHTML = '';
-        var span = document.createElement('span');
-        if (next === 'resolved') {
-          span.style.cssText = 'color:#059669;font-size:12px;font-weight:600;';
-          span.textContent = name;
-        } else {
-          span.style.cssText = 'color:#d1d5db;font-size:12px;';
-          span.textContent = '—';
-        }
-        rc.appendChild(span);
-      }
-    }
-    async function deleteReport(id, label) {
-      if (!confirm('この${deleteLabel}を削除しますか？\\n「' + label + '」\\n※削除しても「誰がいつ削除したか」は履歴に残ります')) return;
-      var res = await fetch(ADMIN_PATH + '${apiPath}/' + id, { method: 'DELETE' });
-      if (!res.ok) { alert('削除に失敗しました'); return; }
-      var row = document.getElementById('report-row-' + id);
-      if (row) row.remove();
-      var cnt = document.getElementById('report-count');
-      if (cnt) cnt.textContent = '報告 ' + Math.max(0, parseInt(cnt.textContent.replace(/[^0-9]/g, '') || '1') - 1) + '件';
-      updateBulkPrintBtn();
-    }
-    function escLog(s) {
-      return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-    async function showReportLogs(id) {
-      var res = await fetch(ADMIN_PATH + '${apiPath}/' + id + '/logs');
-      if (!res.ok) { alert('履歴の取得に失敗しました'); return; }
-      var j = await res.json();
-      var logs = j.logs || [];
-      var body = document.getElementById('report-log-body');
-      if (logs.length === 0) {
-        body.innerHTML = '<div style="color:#9ca3af;font-size:13px;padding:12px 0;">まだ履歴がありません（履歴の記録開始前の操作は残っていません）</div>';
-      } else {
-        body.innerHTML = logs.map(function(l) {
-          return '<div style="padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px;">'
-            + '<span style="color:#9ca3af;font-size:11px;">' + escLog(l.created_at) + '</span><br>'
-            + '<strong>' + escLog(l.admin_name) + '</strong> さんが ' + escLog(l.action_label)
-            + (l.summary ? '<div style="font-size:11px;color:#6b7280;margin-top:1px;">対象: ' + escLog(l.summary) + '</div>' : '')
-            + '</div>';
-        }).join('');
-      }
-      document.getElementById('report-log-modal').style.display = 'flex';
-    }
-    function closeReportLogs() { document.getElementById('report-log-modal').style.display = 'none'; }
-    async function copyHandoverLink(btn) {
-      var fullUrl = location.origin + btn.dataset.url;
-      var titleText = 'タイトル：' + btn.dataset.title + 'の件';
-      var summaryText = btn.dataset.summary ? ('概要：' + btn.dataset.summary) : '';
-      var html = '<a href="' + fullUrl + '" target="_blank" rel="noopener" style="color:#1d4ed8;font-weight:700;text-decoration:underline;">'
-        + escLog(titleText) + (summaryText ? '<br>' + escLog(summaryText) : '') + '</a>';
-      var plain = titleText + (summaryText ? ('\\n' + summaryText) : '') + '\\n' + fullUrl;
-      try {
-        if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
-          await navigator.clipboard.write([new ClipboardItem({
-            'text/html': new Blob([html], { type: 'text/html' }),
-            'text/plain': new Blob([plain], { type: 'text/plain' }),
-          })]);
-        } else {
-          await navigator.clipboard.writeText(plain);
-        }
-        var orig = btn.textContent;
-        btn.textContent = 'コピーしました';
-        btn.disabled = true;
-        setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1500);
-      } catch (e) {
-        alert('コピーに失敗しました（ブラウザの設定をご確認ください）');
-      }
-    }`;
 }
 
 // 乗務員の「n課n班 氏名（社員番号）」表示（帳票印刷ページとも共用・社員番号はホシコン内のみ表示）
@@ -242,13 +284,8 @@ function contentCellHtml(content: string | null): string {
   if (content.length <= 60) return `<div style="white-space:pre-wrap;word-break:break-word;">${escaped}</div>`;
   return `
     <div class="gr-content" style="white-space:pre-wrap;word-break:break-word;max-height:2.6em;overflow:hidden;">${escaped}</div>
-    <button type="button" onclick="toggleReportContent(this)"
+    <button type="button" onclick="event.stopPropagation();toggleReportContent(this)"
       style="margin-top:4px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;">続きを見る</button>`;
-}
-
-// 帳票印刷ページの宛先の初期値（報告に紐づく乗務員の課・班から班長を推測）
-function suggestedTo(division: number | null, team: number | null): string {
-  return division ? `${division}課${team ? team + '班' : ''}班長` : '';
 }
 
 // 帳票のフィールド一覧を「ラベル: 値」の1行サマリーに圧縮する（まとめ帳票の内容欄用）
@@ -265,68 +302,10 @@ function parseBulkIds(idsParam: string | undefined): number[] {
     .slice(0, 50);
 }
 
-// 一覧の行アクションに追加する「帳票印刷」ボタン（新しいタブで印刷/画像保存ページを開く）
-function printLinkHtml(printPath: string, id: number): string {
-  return `<a href="${ADMIN_PATH}${printPath}/${id}" target="_blank"
-    style="padding:3px 8px;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;text-decoration:none;display:inline-block;">帳票</a>`;
-}
-
-// 長文を指定文字数に切り詰める（引継リンクの概要文用）
-function truncateSummary(s: string | null | undefined, n: number = 80): string {
-  const v = (s ?? '').trim();
-  return v.length > n ? v.slice(0, n) + '…' : v;
-}
-
-// 一覧の行アクションに追加する「引継リンク」ボタン（クリックで案件の帳票ページ＝報告センターの概要ページへのリンクを
-// 「タイトル：○○の件 / 概要：△△」形式のリッチテキストとしてクリップボードへコピーする。
-// 引き継ぎシートのメイン欄はcontenteditableで貼り付けたHTMLをそのまま受け付けるため、貼り付けるだけでクリック可能なリンクになる）
-function handoverLinkButtonHtml(printPath: string, id: number, title: string, summary: string): string {
-  const url = `${ADMIN_PATH}${printPath}/${id}`;
-  return `<button type="button" data-url="${escHtml(url)}" data-title="${escHtml(title)}" data-summary="${escHtml(summary)}"
-    onclick="copyHandoverLink(this)"
-    style="padding:3px 8px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">引継リンク</button>`;
-}
-
-// 一覧上部の「まとめて帳票印刷」バー（チェックした複数件をA4横1枚にまとめて印刷/画像保存するページを新しいタブで開く）
-function bulkPrintBarHtml(): string {
-  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
-    <button id="bulk-print-btn" onclick="openBulkPrint()" disabled style="opacity:.5;padding:7px 16px;background:#059669;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">📋 まとめて帳票印刷</button>
-    <span id="bulk-print-count" style="font-size:12px;color:#6b7280;">0件選択中</span>
-  </div>`;
-}
-
-// 一覧テーブルの選択チェックボックス列（ヘッダー用・行用）
-function reportCheckboxTh(): string {
-  return `<th style="padding:8px 12px;"><input type="checkbox" onchange="toggleAllChecks(this)"></th>`;
-}
-function reportCheckboxTd(id: number): string {
-  return `<td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;"><input type="checkbox" class="report-chk" value="${id}" onchange="updateBulkPrintBtn()"></td>`;
-}
-
-// 履歴モーダル（各報告一覧ページ共通）
-function reportLogModalHtml(): string {
-  return `
-  <div id="report-log-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)closeReportLogs()">
-    <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;margin:0;">対応履歴</h3>
-        <button onclick="closeReportLogs()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
-      </div>
-      <div id="report-log-body"></div>
-    </div>
-  </div>`;
-}
-
 // ===================================================
 // 報告センター：ブラウザから直接報告するモーダル（LINEを使わない管理者・事務側の入力用）
 //   忘れ物/事故/違反/一般報告の4フォーム共通の骨組み・乗務員検索を提供する。
-//   1ページに1モーダルしか出さない前提で、要素IDは "nr-" 固定にして共通化している。
 // ===================================================
-
-// 一覧ページ上部の「＋ 新規報告」ボタン（クリックでモーダルを開く）
-function newReportButtonHtml(label: string): string {
-  return `<button onclick="openNewReportModal()" style="margin-left:auto;padding:7px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ ${escHtml(label)}</button>`;
-}
 
 // モーダルの外枠（タイトル・閉じるボタン・フォーム本体・送信ボタン）
 function newReportModalHtml(title: string, bodyHtml: string, submitLabel: string): string {
@@ -395,81 +374,362 @@ function nrEmpSearchFieldHtml(): string {
     </div>`;
 }
 
-// モーダル共通JS：開閉・エラー表示・乗務員検索（各ページのフォーム別JSから submitNewReport() を定義して使う）
-// empSearchPath: 一覧ページごとに権限キーが違うため、そのタブ自身の権限（settings.lost-items等）で
-// 通る専用パスを渡す（settings.liff権限がなくても各報告タブの権限だけで乗務員検索できるようにするため）
-function newReportModalCoreJs(empSearchPath: string): string {
+// ===================================================
+// 報告センター統合一覧：種別セグメント切替の単一新規登録モーダル
+//   1ページに4種を同居させるため、受電時刻・車番・乗務員検索は共有フィールド、
+//   種別固有フィールドのみ li-/ac-/vi-/ge- のプレフィックスでID衝突を避ける
+//   （quick_report_modal.ts のフローティングモーダルと同じ設計パターン）
+// ===================================================
+
+const NR_CONFIG: Record<string, { title: string; group: string; postPath: string; empSearch: string }> = {
+  'lost-items':      { title: '忘れ物報告の新規登録', group: 'nr-group-lost',      postPath: '/api/liff/lost-items',       empSearch: '/api/liff/lost-items/employee-search' },
+  'accidents':       { title: '事故報告の新規登録',   group: 'nr-group-accident',  postPath: '/api/liff/accident-reports', empSearch: '/api/liff/accident-reports/employee-search' },
+  'violations':      { title: '違反報告の新規登録',   group: 'nr-group-violation', postPath: '/api/liff/violation-reports', empSearch: '/api/liff/violation-reports/employee-search' },
+  'general-reports': { title: '一般報告の新規登録',   group: 'nr-group-general',   postPath: '/api/liff/general-reports',   empSearch: '/api/liff/general-reports/employee-search' },
+};
+
+// 一覧上部の「＋新規報告」ボタン群（権限のある種別だけ表示）
+function unifiedNewReportButtonsHtml(allowed: typeof REPORT_LIST_KINDS): string {
+  return allowed.map(k =>
+    `<button data-perm-key="${k.permKey}" onclick="openNewReportModal('${k.slug}')" style="margin-left:${k === allowed[0] ? 'auto' : '0'};padding:7px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ ${escHtml(k.label)}を登録</button>`
+  ).join('');
+}
+
+// 単一モーダル内に4種のフォームを全部同居させ、JSでdisplay切替する
+function unifiedNewReportModalHtml(allowed: typeof REPORT_LIST_KINDS): string {
+  const bodyHtml = `
+    <div class="nr-row2 nr-field">
+      <div><label>受電時刻</label><input type="time" id="nr-received_at"></div>
+      <div><label>車番</label><input type="text" id="nr-vehicle_no" placeholder="例: 5232" inputmode="numeric"></div>
+    </div>
+    ${nrEmpSearchFieldHtml()}
+
+    <div id="nr-group-lost" class="nr-group" style="display:none;">
+      <div class="nr-field">
+        <label>種別</label>
+        <div class="nr-toggle-group">
+          <button type="button" class="nr-toggle-btn active" id="nr-li-type-staff" onclick="nrSetLostType('staff')">社員からの報告</button>
+          <button type="button" class="nr-toggle-btn" id="nr-li-type-customer" onclick="nrSetLostType('customer')">客からの問い合わせ</button>
+        </div>
+      </div>
+      <div class="nr-field"><label>忘れ物の内容</label><textarea id="nr-li-item_description" placeholder="例: 黒い財布、iPhone"></textarea></div>
+      <div class="nr-row2 nr-field">
+        <div><label>乗車地</label><input type="text" id="nr-li-pickup_location" placeholder="例: 板橋駅"></div>
+        <div><label>降車地</label><input type="text" id="nr-li-dropoff_location" placeholder="例: 池袋駅"></div>
+      </div>
+      <div id="nr-li-customer-section" style="display:none;">
+        <div class="nr-row2 nr-field">
+          <div><label>お客様氏名</label><input type="text" id="nr-li-customer_name" placeholder="田中 一郎"></div>
+          <div><label>お客様電話番号</label><input type="tel" id="nr-li-customer_phone" placeholder="090-0000-0000"></div>
+        </div>
+        <div class="nr-field">
+          <label>返却方法</label>
+          <div class="nr-toggle-group">
+            <button type="button" class="nr-toggle-btn" id="nr-li-return-cod" onclick="nrSetReturnMethod('着払い')">着払い</button>
+            <button type="button" class="nr-toggle-btn" id="nr-li-return-pickup" onclick="nrSetReturnMethod('来社受け取り')">来社受け取り</button>
+          </div>
+        </div>
+      </div>
+      <div class="nr-field"><label>備考</label><textarea id="nr-li-notes" placeholder="その他、特記事項があれば"></textarea></div>
+    </div>
+
+    <div id="nr-group-accident" class="nr-group" style="display:none;">
+      <div class="nr-field">
+        <label>乗車状態</label>
+        <div class="nr-toggle-group">
+          <button type="button" class="nr-toggle-btn" id="nr-ac-cs-kusha" onclick="nrSetAccidentCarStatus('空車')">空車</button>
+          <button type="button" class="nr-toggle-btn" id="nr-ac-cs-jissha" onclick="nrSetAccidentCarStatus('実車')">実車</button>
+          <button type="button" class="nr-toggle-btn" id="nr-ac-cs-geisha" onclick="nrSetAccidentCarStatus('迎車')">迎車</button>
+        </div>
+      </div>
+      <div class="nr-field"><label>事故形態</label><input type="text" id="nr-ac-accident_type" placeholder="例: 単独接触事故、追突事故"></div>
+      <div class="nr-field"><label>事故発生場所</label><input type="text" id="nr-ac-location" placeholder="例: 足立区栗原3丁目の住宅街"></div>
+      <div class="nr-row2 nr-field">
+        <div><label>乗車中のお客様の氏名</label><input type="text" id="nr-ac-customer_name" placeholder="例: 田中 一郎"></div>
+        <div><label>乗車中のお客様の電話番号</label><input type="tel" id="nr-ac-customer_phone" placeholder="090-0000-0000"></div>
+      </div>
+      <div class="nr-row2 nr-field">
+        <div><label>事故相手の名前</label><input type="text" id="nr-ac-other_party_name" placeholder="例: 田中 一郎"></div>
+        <div><label>事故相手の電話番号</label><input type="tel" id="nr-ac-other_party_phone" placeholder="090-0000-0000"></div>
+      </div>
+      <div id="nr-ac-passenger-check" class="nr-check-row" style="display:none;">
+        <input type="checkbox" id="nr-ac-passenger_delivered"><label for="nr-ac-passenger_delivered">乗客を目的地まで送り届けた</label>
+      </div>
+      <div class="nr-check-row"><input type="checkbox" id="nr-ac-substitute_requested"><label for="nr-ac-substitute_requested">代車要請は済んでいる</label></div>
+      <div class="nr-check-row"><input type="checkbox" id="nr-ac-police_notified"><label for="nr-ac-police_notified">警察対応するよう指示した</label></div>
+      <div class="nr-field"><label>追加情報・メモ</label><textarea id="nr-ac-additional_info" placeholder="経緯・詳細など"></textarea></div>
+    </div>
+
+    <div id="nr-group-violation" class="nr-group" style="display:none;">
+      <div class="nr-row2 nr-field">
+        <div><label>違反発生日</label><input type="date" id="nr-vi-violation_date"></div>
+        <div><label>違反発生時刻</label><input type="time" id="nr-vi-violation_time"></div>
+      </div>
+      <div class="nr-field">
+        <label>違反の種類</label>
+        <select id="nr-vi-violation_type_id"><option value="">選択してください</option></select>
+      </div>
+      <div class="nr-field"><label>住所（違反発生場所）</label><input type="text" id="nr-vi-location" placeholder="例: 板橋区大山東町51-1 付近"></div>
+      <div class="nr-row2 nr-field">
+        <div><label>どこから</label><input type="text" id="nr-vi-travel_from" placeholder="例: 池袋駅"></div>
+        <div><label>どこへ進行中</label><input type="text" id="nr-vi-travel_to" placeholder="例: 成増方面"></div>
+      </div>
+      <div class="nr-field">
+        <label>乗車状態</label>
+        <div class="nr-toggle-group">
+          <button type="button" class="nr-toggle-btn" id="nr-vi-cs-kusha" onclick="nrSetViolationCarStatus('空車')">空車</button>
+          <button type="button" class="nr-toggle-btn" id="nr-vi-cs-jissha" onclick="nrSetViolationCarStatus('実車')">実車</button>
+          <button type="button" class="nr-toggle-btn" id="nr-vi-cs-geisha" onclick="nrSetViolationCarStatus('迎車')">迎車</button>
+        </div>
+        <div id="nr-vi-substitute-row" class="nr-check-row" style="display:none;">
+          <input type="checkbox" id="nr-vi-substitute_needed"><label for="nr-vi-substitute_needed">代車要請が必要</label>
+        </div>
+      </div>
+      <div class="nr-field"><label>備考</label><textarea id="nr-vi-notes" placeholder="その他、特記事項があれば"></textarea></div>
+    </div>
+
+    <div id="nr-group-general" class="nr-group" style="display:none;">
+      <div class="nr-field">
+        <label>タイトル（あれば）</label>
+        <input type="text" id="nr-ge-title" list="nr-ge-title-suggestions" placeholder="例: 社内汚損">
+        <datalist id="nr-ge-title-suggestions">
+          <option value="社内汚損"><option value="車両トラブル"><option value="苦情対応">
+          <option value="遅延"><option value="お客様からの着電"><option value="その他連絡">
+        </datalist>
+      </div>
+      <div class="nr-field"><label>住所（あれば）</label><input type="text" id="nr-ge-location" placeholder="例: 板橋区大山東町51-1 付近"></div>
+      <div class="nr-row2 nr-field">
+        <div><label>お客様名（着電があれば）</label><input type="text" id="nr-ge-customer_name" placeholder="例: 田中 一郎"></div>
+        <div><label>電話番号</label><input type="tel" id="nr-ge-customer_phone" placeholder="090-0000-0000"></div>
+      </div>
+      <div class="nr-row2 nr-field">
+        <div><label>出発地（あれば）</label><input type="text" id="nr-ge-route_from" placeholder="例: 板橋営業所"></div>
+        <div><label>到着地</label><input type="text" id="nr-ge-route_to" placeholder="例: 東京駅"></div>
+      </div>
+      <div class="nr-field"><label>報告内容</label><textarea id="nr-ge-content" placeholder="報告したい内容を自由に入力してください"></textarea></div>
+    </div>
+  `;
+  return `${NR_FIELD_STYLE}${newReportModalHtml('新規報告の登録', bodyHtml, '登録する')}`;
+}
+
+// 統合モーダルのJS：種別切替（openNewReportModal）・乗務員検索・種別ごとのpayload組み立て・送信
+function unifiedNewReportScript(allowed: typeof REPORT_LIST_KINDS): string {
+  const configJson = safeJson(Object.fromEntries(allowed.map(k => [k.slug, NR_CONFIG[k.slug]])));
   return `
-  var nrSelectedEmp = null;
-  var nrEmpSearchTimer = null;
+    var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
+    var NR_CONFIG = ${configJson};
+    var nrActiveKind = null;
+    var nrSelectedEmp = null;
+    var nrEmpSearchTimer = null;
+    var nrViolationTypesLoaded = false;
 
-  function openNewReportModal() {
-    document.getElementById('nr-form').reset();
-    document.getElementById('nr-error').style.display = 'none';
-    nrSelectedEmp = null;
-    var sel = document.getElementById('nr-emp-selected');
-    if (sel) { sel.style.display = 'none'; sel.textContent = ''; }
-    if (typeof resetNewReportExtra === 'function') resetNewReportExtra();
-    document.getElementById('nr-modal').style.display = 'flex';
-  }
-  function closeNewReportModal() {
-    document.getElementById('nr-modal').style.display = 'none';
-  }
-  function nrShowError(msg) {
-    var box = document.getElementById('nr-error');
-    box.textContent = msg;
-    box.style.display = 'block';
-  }
+    function openNewReportModal(slug) {
+      var cfg = NR_CONFIG[slug];
+      if (!cfg) return;
+      nrActiveKind = slug;
+      document.getElementById('nr-form').reset();
+      document.getElementById('nr-error').style.display = 'none';
+      document.querySelector('#nr-modal h3').textContent = cfg.title;
+      document.querySelectorAll('#nr-modal .nr-group').forEach(function(el) { el.style.display = 'none'; });
+      document.getElementById(cfg.group).style.display = 'block';
+      nrSelectedEmp = null;
+      var sel = document.getElementById('nr-emp-selected');
+      if (sel) { sel.style.display = 'none'; sel.textContent = ''; }
+      if (slug === 'lost-items') nrSetLostType('staff');
+      if (slug === 'accidents') nrSetAccidentCarStatus('');
+      if (slug === 'violations') {
+        nrSetViolationCarStatus('');
+        if (!nrViolationTypesLoaded) {
+          nrViolationTypesLoaded = true;
+          fetch(ADMIN_PATH + '/api/liff/violation-reports/violation-types').then(function(r){return r.json();}).then(function(data){
+            var selEl = document.getElementById('nr-vi-violation_type_id');
+            (data || []).forEach(function(vt) {
+              var opt = document.createElement('option');
+              opt.value = vt.id; opt.textContent = vt.name;
+              selEl.appendChild(opt);
+            });
+          });
+        }
+      }
+      document.getElementById('nr-modal').style.display = 'flex';
+    }
+    function closeNewReportModal() { document.getElementById('nr-modal').style.display = 'none'; }
+    function nrShowError(msg) {
+      var box = document.getElementById('nr-error');
+      box.textContent = msg;
+      box.style.display = 'block';
+    }
 
-  function nrEmpSearchDebounce() {
-    clearTimeout(nrEmpSearchTimer);
-    nrEmpSearchTimer = setTimeout(nrDoEmpSearch, 300);
-  }
-  function nrDoEmpSearch() {
-    var q = document.getElementById('nr-emp-search').value.trim();
-    var sug = document.getElementById('nr-emp-suggestions');
-    if (q.length < 1) { sug.style.display = 'none'; return; }
-    fetch('${ADMIN_PATH}${empSearchPath}?q=' + encodeURIComponent(q))
+    function nrSetLostType(t) {
+      document.getElementById('nr-li-type-staff').className = 'nr-toggle-btn' + (t === 'staff' ? ' active' : '');
+      document.getElementById('nr-li-type-customer').className = 'nr-toggle-btn' + (t === 'customer' ? ' active' : '');
+      document.getElementById('nr-li-customer-section').style.display = t === 'customer' ? 'block' : 'none';
+      nrLostType = t;
+    }
+    var nrLostType = 'staff';
+    var nrReturnMethod = '';
+    function nrSetReturnMethod(m) {
+      nrReturnMethod = m;
+      document.getElementById('nr-li-return-cod').className = 'nr-toggle-btn' + (m === '着払い' ? ' active' : '');
+      document.getElementById('nr-li-return-pickup').className = 'nr-toggle-btn' + (m === '来社受け取り' ? ' active' : '');
+    }
+
+    var nrAccidentCarStatus = '';
+    function nrSetAccidentCarStatus(s) {
+      nrAccidentCarStatus = s;
+      ['kusha','jissha','geisha'].forEach(function(id) { document.getElementById('nr-ac-cs-' + id).className = 'nr-toggle-btn'; });
+      var map = { '空車': 'kusha', '実車': 'jissha', '迎車': 'geisha' };
+      if (map[s]) document.getElementById('nr-ac-cs-' + map[s]).className = 'nr-toggle-btn active';
+      document.getElementById('nr-ac-passenger-check').style.display = (s === '実車' || s === '迎車') ? 'flex' : 'none';
+    }
+
+    var nrViolationCarStatus = '';
+    function nrSetViolationCarStatus(s) {
+      nrViolationCarStatus = s;
+      ['kusha','jissha','geisha'].forEach(function(id) { document.getElementById('nr-vi-cs-' + id).className = 'nr-toggle-btn'; });
+      var map = { '空車': 'kusha', '実車': 'jissha', '迎車': 'geisha' };
+      if (map[s]) document.getElementById('nr-vi-cs-' + map[s]).className = 'nr-toggle-btn active';
+      document.getElementById('nr-vi-substitute-row').style.display = (s === '実車' || s === '迎車') ? 'flex' : 'none';
+    }
+
+    function nrEmpSearchDebounce() {
+      clearTimeout(nrEmpSearchTimer);
+      nrEmpSearchTimer = setTimeout(nrDoEmpSearch, 300);
+    }
+    function nrDoEmpSearch() {
+      var q = document.getElementById('nr-emp-search').value.trim();
+      var sug = document.getElementById('nr-emp-suggestions');
+      if (q.length < 1) { sug.style.display = 'none'; return; }
+      var cfg = NR_CONFIG[nrActiveKind];
+      if (!cfg) return;
+      fetch(ADMIN_PATH + cfg.empSearch + '?q=' + encodeURIComponent(q))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var list = (data && data.results) || [];
+          if (!list.length) { sug.style.display = 'none'; return; }
+          sug.innerHTML = list.map(function(e) {
+            var div = e.division ? e.division + '課' : '';
+            var team = e.team ? e.team + '班' : '';
+            return '<div class="nr-emp-item" onclick="nrSelectEmp(' + JSON.stringify(e).replace(/</g,'\\\\u003c').replace(/"/g,'&quot;') + ')">'
+              + '<div>' + e.name + '</div><div class="nr-emp-meta">' + div + team + ' / ' + e.emp_no + '</div></div>';
+          }).join('');
+          sug.style.display = 'block';
+        })
+        .catch(function() { sug.style.display = 'none'; });
+    }
+    function nrSelectEmp(e) {
+      nrSelectedEmp = e;
+      document.getElementById('nr-emp-search').value = '';
+      document.getElementById('nr-emp-suggestions').style.display = 'none';
+      var div = e.division ? e.division + '課' : '';
+      var team = e.team ? e.team + '班' : '';
+      var sel = document.getElementById('nr-emp-selected');
+      sel.style.display = 'block';
+      sel.textContent = '選択中: ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
+      document.getElementById('nr-employee_division').value = e.division || '';
+      document.getElementById('nr-employee_team').value = e.team || '';
+    }
+    document.addEventListener('click', function(e) {
+      var sug = document.getElementById('nr-emp-suggestions');
+      var input = document.getElementById('nr-emp-search');
+      if (sug && input && !input.contains(e.target) && !sug.contains(e.target)) sug.style.display = 'none';
+    });
+
+    function nrBuildPayload() {
+      var base = {
+        received_at: document.getElementById('nr-received_at').value || null,
+        vehicle_no: document.getElementById('nr-vehicle_no').value.trim() || null,
+        employee_name: nrSelectedEmp ? nrSelectedEmp.name : null,
+        employee_emp_no: nrSelectedEmp ? nrSelectedEmp.emp_no : null,
+        employee_division: nrSelectedEmp ? nrSelectedEmp.division : null,
+        employee_team: nrSelectedEmp ? nrSelectedEmp.team : null,
+      };
+      if (nrActiveKind === 'lost-items') {
+        return Object.assign(base, {
+          report_type: nrLostType,
+          item_description: document.getElementById('nr-li-item_description').value.trim() || null,
+          pickup_location: document.getElementById('nr-li-pickup_location').value.trim() || null,
+          dropoff_location: document.getElementById('nr-li-dropoff_location').value.trim() || null,
+          customer_name: document.getElementById('nr-li-customer_name').value.trim() || null,
+          customer_phone: document.getElementById('nr-li-customer_phone').value.trim() || null,
+          return_method: nrReturnMethod || null,
+          notes: document.getElementById('nr-li-notes').value.trim() || null,
+        });
+      }
+      if (nrActiveKind === 'accidents') {
+        return Object.assign(base, {
+          accident_type: document.getElementById('nr-ac-accident_type').value.trim() || null,
+          location: document.getElementById('nr-ac-location').value.trim() || null,
+          car_status: nrAccidentCarStatus || null,
+          substitute_requested: document.getElementById('nr-ac-substitute_requested').checked,
+          police_notified: document.getElementById('nr-ac-police_notified').checked,
+          passenger_delivered: document.getElementById('nr-ac-passenger_delivered').checked,
+          additional_info: document.getElementById('nr-ac-additional_info').value.trim() || null,
+          other_party_name: document.getElementById('nr-ac-other_party_name').value.trim() || null,
+          other_party_phone: document.getElementById('nr-ac-other_party_phone').value.trim() || null,
+          customer_name: document.getElementById('nr-ac-customer_name').value.trim() || null,
+          customer_phone: document.getElementById('nr-ac-customer_phone').value.trim() || null,
+        });
+      }
+      if (nrActiveKind === 'violations') {
+        var vDate = document.getElementById('nr-vi-violation_date').value;
+        var vTime = document.getElementById('nr-vi-violation_time').value;
+        return Object.assign(base, {
+          violation_at: vDate ? (vDate + (vTime ? ' ' + vTime : '')) : null,
+          violation_type_id: document.getElementById('nr-vi-violation_type_id').value || null,
+          location: document.getElementById('nr-vi-location').value.trim() || null,
+          travel_from: document.getElementById('nr-vi-travel_from').value.trim() || null,
+          travel_to: document.getElementById('nr-vi-travel_to').value.trim() || null,
+          car_status: nrViolationCarStatus || null,
+          substitute_needed: document.getElementById('nr-vi-substitute_needed').checked,
+          notes: document.getElementById('nr-vi-notes').value.trim() || null,
+        });
+      }
+      if (nrActiveKind === 'general-reports') {
+        return Object.assign(base, {
+          title: document.getElementById('nr-ge-title').value.trim() || null,
+          location: document.getElementById('nr-ge-location').value.trim() || null,
+          customer_name: document.getElementById('nr-ge-customer_name').value.trim() || null,
+          customer_phone: document.getElementById('nr-ge-customer_phone').value.trim() || null,
+          route_from: document.getElementById('nr-ge-route_from').value.trim() || null,
+          route_to: document.getElementById('nr-ge-route_to').value.trim() || null,
+          content: document.getElementById('nr-ge-content').value.trim() || null,
+        });
+      }
+      return base;
+    }
+
+    function submitNewReport() {
+      var cfg = NR_CONFIG[nrActiveKind];
+      if (!cfg) return;
+      var btn = document.getElementById('nr-submit-btn');
+      btn.disabled = true;
+      fetch(ADMIN_PATH + cfg.postPath, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nrBuildPayload()),
+      })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        var list = (data && data.results) || [];
-        if (!list.length) { sug.style.display = 'none'; return; }
-        sug.innerHTML = list.map(function(e) {
-          var div = e.division ? e.division + '課' : '';
-          var team = e.team ? e.team + '班' : '';
-          return '<div class="nr-emp-item" onclick="nrSelectEmp(' + JSON.stringify(e).replace(/</g,'\\\\u003c').replace(/"/g,'&quot;') + ')">'
-            + '<div>' + e.name + '</div><div class="nr-emp-meta">' + div + team + ' / ' + e.emp_no + '</div></div>';
-        }).join('');
-        sug.style.display = 'block';
+        btn.disabled = false;
+        if (data.ok) { location.reload(); }
+        else { nrShowError(data.error || '登録に失敗しました'); }
       })
-      .catch(function() { sug.style.display = 'none'; });
-  }
-  function nrSelectEmp(e) {
-    nrSelectedEmp = e;
-    document.getElementById('nr-emp-search').value = '';
-    document.getElementById('nr-emp-suggestions').style.display = 'none';
-    var div = e.division ? e.division + '課' : '';
-    var team = e.team ? e.team + '班' : '';
-    var sel = document.getElementById('nr-emp-selected');
-    sel.style.display = 'block';
-    sel.textContent = '選択中: ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
-    document.getElementById('nr-employee_division').value = e.division || '';
-    document.getElementById('nr-employee_team').value = e.team || '';
-  }
-  document.addEventListener('click', function(e) {
-    var sug = document.getElementById('nr-emp-suggestions');
-    var input = document.getElementById('nr-emp-search');
-    if (sug && input && !input.contains(e.target) && !sug.contains(e.target)) sug.style.display = 'none';
-  });
-  // フローティング新規報告ボタン（?new=1）から遷移してきた場合はモーダルを自動で開く
-  if (new URLSearchParams(location.search).get('new') === '1') {
-    openNewReportModal();
-    if (window.history && window.history.replaceState) {
-      var nrCleanUrl = new URL(location.href);
-      nrCleanUrl.searchParams.delete('new');
-      window.history.replaceState({}, '', nrCleanUrl.toString());
+      .catch(function() { btn.disabled = false; nrShowError('通信エラーが発生しました'); });
     }
-  }
+
+    // フローティング新規報告ボタン（?new=1&kind=lost-items 等）から遷移してきた場合はモーダルを自動で開く
+    (function() {
+      var params = new URLSearchParams(location.search);
+      if (params.get('new') === '1') {
+        var kindParam = params.get('kind');
+        openNewReportModal(NR_CONFIG[kindParam] ? kindParam : Object.keys(NR_CONFIG)[0]);
+        if (window.history && window.history.replaceState) {
+          var cleanUrl = new URL(location.href);
+          cleanUrl.searchParams.delete('new');
+          cleanUrl.searchParams.delete('kind');
+          window.history.replaceState({}, '', cleanUrl.toString());
+        }
+      }
+    })();
   `;
 }
 
@@ -961,829 +1221,15 @@ app.get('/settings/liff', async (c) => {
 });
 
 // ===================================================
-// GET /settings/lost-items — 忘れ物報告一覧
+// 忘れ物/事故/違反/一般報告の一覧ページは統合一覧 GET /settings/reports に一本化した。
+// 旧URL（ブックマーク・引き継ぎメモに貼られたリンク等）は常に「すべて」（種別絞り込みなし）へ遷移する
+// （種別の絞り込みはユーザーが一覧上で手動でチップを選んだ時だけかかるようにするため、自動セットはしない）。
+// print/print-bulk・/api/liff/* のパスは変更していないため無傷。
 // ===================================================
-app.get('/settings/lost-items', async (c) => {
-  const typeFilter = c.req.query('type') ?? '';
-  const statusFilter = c.req.query('status') ?? '';
-
-  let where = 'WHERE 1=1';
-  const binds: string[] = [];
-  if (typeFilter === 'staff' || typeFilter === 'customer') {
-    where += ' AND r.report_type = ?'; binds.push(typeFilter);
-  }
-  if (statusFilter === 'open' || statusFilter === 'resolved') {
-    where += ' AND r.status = ?'; binds.push(statusFilter);
-  }
-
-  const reports = await c.env.DB.prepare(
-    `SELECT r.*, u.name AS reporter_name
-     FROM lost_item_reports r
-     LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
-     ${where} ORDER BY r.created_at DESC LIMIT 200`
-  ).bind(...binds).all<{
-    id: number; report_type: string; received_at: string | null;
-    vehicle_no: string | null; employee_name: string | null;
-    employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
-    item_description: string | null; pickup_location: string | null; dropoff_location: string | null;
-    customer_name: string | null; customer_phone: string | null; return_method: string | null;
-    notes: string | null; status: string; created_at: string;
-    resolved_by_name: string | null; resolved_at: string | null;
-    reporter_name: string | null; reported_by_admin: string | null;
-  }>();
-
-  const all = reports.results ?? [];
-
-  const rows = all.map(r => {
-    const isCustomer = r.report_type === 'customer';
-    const typeLabel = isCustomer ? '客問い合わせ' : '社員報告';
-    const typeColor = isCustomer ? '#7c3aed' : '#1d4ed8';
-    const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
-    const handoverTitle = `${r.vehicle_no ?? '車番不明'} の忘れ物報告`;
-    const handoverSummary = truncateSummary(r.item_description);
-    return `<tr id="report-row-${r.id}">
-      ${reportCheckboxTd(r.id)}
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        <span style="background:${typeColor};color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">${escHtml(typeLabel)}</span>
-      </td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(r.item_description ?? '')}">${escHtml(r.item_description ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(reporterDisplay(r.reporter_name, r.reported_by_admin))}</td>
-      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${statusCellHtml(r.status === 'resolved', '解決済')}
-      </td>
-      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
-          style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
-          ${r.status === 'resolved' ? '再開' : '解決済にする'}
-        </button>
-        <button onclick="showReportLogs(${r.id})"
-          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
-        <button onclick="deleteReport(${r.id},'${escHtml((r.item_description ?? '').slice(0, 20))}')"
-          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
-        ${printLinkHtml('/settings/lost-items/print', r.id)}
-        ${handoverLinkButtonHtml('/settings/lost-items/print', r.id, handoverTitle, handoverSummary)}
-      </td>
-    </tr>`;
-  }).join('');
-
-  const buildUrl = (t: string, s: string) =>
-    `${ADMIN_PATH}/settings/lost-items?type=${t}&status=${s}`;
-
-  const filterBtn = (label: string, t: string, s: string) => {
-    const active = typeFilter === t && statusFilter === s;
-    return `<a href="${buildUrl(t, s)}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
-      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
-  };
-
-  const content = `
-    ${reportSubHeader('報告センター')}
-    ${reportTabs('lost')}
-
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
-      ${filterBtn('すべて', '', '')}
-      ${filterBtn('社員報告', 'staff', '')}
-      ${filterBtn('客問い合わせ', 'customer', '')}
-      ${filterBtn('対応中', '', 'open')}
-      ${filterBtn('解決済', '', 'resolved')}
-      ${newReportButtonHtml('新規報告')}
-    </div>
-
-    ${bulkPrintBarHtml()}
-
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:700px;">
-          <thead style="background:#f9fafb;">
-            <tr>
-              ${reportCheckboxTh()}
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">登録日時</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">種別</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">受電</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">車番</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">忘れ物</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
-              <th style="padding:8px 12px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="11" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    ${reportLogModalHtml()}
-    ${NR_FIELD_STYLE}
-    ${newReportModalHtml('忘れ物報告の新規登録', `
-      <div class="nr-field">
-        <label>種別</label>
-        <div class="nr-toggle-group">
-          <button type="button" class="nr-toggle-btn active" id="nr-type-staff" onclick="nrSetLostType('staff')">社員からの報告</button>
-          <button type="button" class="nr-toggle-btn" id="nr-type-customer" onclick="nrSetLostType('customer')">客からの問い合わせ</button>
-        </div>
-      </div>
-      <div class="nr-row2 nr-field">
-        <div><label>受電時刻</label><input type="time" id="nr-received_at"></div>
-        <div><label>車番</label><input type="text" id="nr-vehicle_no" placeholder="例: 5232" inputmode="numeric"></div>
-      </div>
-      ${nrEmpSearchFieldHtml()}
-      <div class="nr-field"><label>忘れ物の内容</label><textarea id="nr-item_description" placeholder="例: 黒い財布、iPhone"></textarea></div>
-      <div class="nr-row2 nr-field">
-        <div><label>乗車地</label><input type="text" id="nr-pickup_location" placeholder="例: 板橋駅"></div>
-        <div><label>降車地</label><input type="text" id="nr-dropoff_location" placeholder="例: 池袋駅"></div>
-      </div>
-      <div id="nr-customer-section" style="display:none;">
-        <div class="nr-row2 nr-field">
-          <div><label>お客様氏名</label><input type="text" id="nr-customer_name" placeholder="田中 一郎"></div>
-          <div><label>お客様電話番号</label><input type="tel" id="nr-customer_phone" placeholder="090-0000-0000"></div>
-        </div>
-        <div class="nr-field">
-          <label>返却方法</label>
-          <div class="nr-toggle-group">
-            <button type="button" class="nr-toggle-btn" id="nr-return-cod" onclick="nrSetReturnMethod('着払い')">着払い</button>
-            <button type="button" class="nr-toggle-btn" id="nr-return-pickup" onclick="nrSetReturnMethod('来社受け取り')">来社受け取り</button>
-          </div>
-        </div>
-      </div>
-      <div class="nr-field"><label>備考</label><textarea id="nr-notes" placeholder="その他、特記事項があれば"></textarea></div>
-    `, '登録する')}
-    <script>
-    ${reportRowScript('/api/liff/lost-items', '忘れ物報告', '解決済', '/settings/lost-items/print-bulk')}
-    ${newReportModalCoreJs('/api/liff/lost-items/employee-search')}
-    var nrLostType = 'staff';
-    var nrReturnMethod = '';
-    function nrSetLostType(t) {
-      nrLostType = t;
-      document.getElementById('nr-type-staff').className = 'nr-toggle-btn' + (t === 'staff' ? ' active' : '');
-      document.getElementById('nr-type-customer').className = 'nr-toggle-btn' + (t === 'customer' ? ' active' : '');
-      document.getElementById('nr-customer-section').style.display = t === 'customer' ? 'block' : 'none';
-    }
-    function nrSetReturnMethod(m) {
-      nrReturnMethod = m;
-      document.getElementById('nr-return-cod').className = 'nr-toggle-btn' + (m === '着払い' ? ' active' : '');
-      document.getElementById('nr-return-pickup').className = 'nr-toggle-btn' + (m === '来社受け取り' ? ' active' : '');
-    }
-    function resetNewReportExtra() {
-      nrSetLostType('staff');
-      nrReturnMethod = '';
-      document.getElementById('nr-return-cod').className = 'nr-toggle-btn';
-      document.getElementById('nr-return-pickup').className = 'nr-toggle-btn';
-    }
-    function submitNewReport() {
-      var btn = document.getElementById('nr-submit-btn');
-      btn.disabled = true;
-      var payload = {
-        report_type: nrLostType,
-        received_at: document.getElementById('nr-received_at').value || null,
-        vehicle_no: document.getElementById('nr-vehicle_no').value.trim() || null,
-        employee_name: nrSelectedEmp ? nrSelectedEmp.name : null,
-        employee_emp_no: nrSelectedEmp ? nrSelectedEmp.emp_no : null,
-        employee_division: nrSelectedEmp ? nrSelectedEmp.division : null,
-        employee_team: nrSelectedEmp ? nrSelectedEmp.team : null,
-        item_description: document.getElementById('nr-item_description').value.trim() || null,
-        pickup_location: document.getElementById('nr-pickup_location').value.trim() || null,
-        dropoff_location: document.getElementById('nr-dropoff_location').value.trim() || null,
-        customer_name: document.getElementById('nr-customer_name').value.trim() || null,
-        customer_phone: document.getElementById('nr-customer_phone').value.trim() || null,
-        return_method: nrReturnMethod || null,
-        notes: document.getElementById('nr-notes').value.trim() || null,
-      };
-      fetch('${ADMIN_PATH}/api/liff/lost-items', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        btn.disabled = false;
-        if (data.ok) { location.reload(); }
-        else { nrShowError(data.error || '登録に失敗しました'); }
-      })
-      .catch(function() { btn.disabled = false; nrShowError('通信エラーが発生しました'); });
-    }
-    </script>
-  `;
-
-  return c.html(layout('忘れ物報告一覧', content, 'report-center'));
-});
-
-// ===================================================
-// GET /settings/accidents — 事故報告一覧
-// ===================================================
-app.get('/settings/accidents', async (c) => {
-  const statusFilter = c.req.query('status') ?? '';
-
-  let where = '';
-  const binds: string[] = [];
-  if (statusFilter === 'open' || statusFilter === 'resolved') {
-    where = 'WHERE r.status = ?'; binds.push(statusFilter);
-  }
-
-  const reports = await c.env.DB.prepare(`
-    SELECT r.*, u.name AS reporter_name
-    FROM accident_reports r
-    LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
-    ${where} ORDER BY r.created_at DESC LIMIT 200
-  `).bind(...binds).all<{
-    id: number; received_at: string | null; vehicle_no: string | null;
-    employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
-    accident_type: string | null; location: string | null; car_status: string | null;
-    other_party_name: string | null; other_party_phone: string | null;
-    summary_text: string | null; status: string; created_at: string;
-    resolved_by_name: string | null; resolved_at: string | null;
-    reporter_name: string | null; reported_by_admin: string | null;
-  }>();
-
-  const all = reports.results ?? [];
-
-  const rows = all.map(r => {
-    const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
-    const otherPartyStr = (r.other_party_name || r.other_party_phone) ? `${r.other_party_name ?? ''} ${r.other_party_phone ?? ''}`.trim() : '—';
-    const handoverTitle = `${r.vehicle_no ?? '車番不明'} の事故報告`;
-    const handoverSummary = truncateSummary(r.summary_text || r.accident_type || r.location);
-    return `<tr id="report-row-${r.id}">
-      ${reportCheckboxTd(r.id)}
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.accident_type ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(r.location ?? '')}">${escHtml(r.location ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;">${escHtml(r.car_status ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;white-space:nowrap;">${escHtml(otherPartyStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(reporterDisplay(r.reporter_name, r.reported_by_admin))}</td>
-      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${statusCellHtml(r.status === 'resolved', '解決済')}
-      </td>
-      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
-          style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
-          ${r.status === 'resolved' ? '再開' : '解決済にする'}
-        </button>
-        <button onclick="showReportLogs(${r.id})"
-          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
-        <button onclick="deleteReport(${r.id},'${escHtml((r.vehicle_no ?? '車番不明') + (r.accident_type ? ' / ' + r.accident_type : ''))}')"
-          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
-        ${printLinkHtml('/settings/accidents/print', r.id)}
-        ${handoverLinkButtonHtml('/settings/accidents/print', r.id, handoverTitle, handoverSummary)}
-      </td>
-    </tr>`;
-  }).join('');
-
-  const filterBtn = (label: string, s: string) => {
-    const active = statusFilter === s;
-    return `<a href="${ADMIN_PATH}/settings/accidents?status=${s}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
-      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
-  };
-
-  const content = `
-    ${reportSubHeader('報告センター')}
-    ${reportTabs('accident')}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
-      ${filterBtn('すべて', '')}
-      ${filterBtn('対応中', 'open')}
-      ${filterBtn('解決済', 'resolved')}
-      ${newReportButtonHtml('新規報告')}
-    </div>
-    ${bulkPrintBarHtml()}
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:900px;">
-          <thead style="background:#f9fafb;">
-            <tr>
-              ${reportCheckboxTh()}
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">登録日時</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">受電</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">車番</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">事故形態</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">場所</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">事故相手</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
-              <th style="padding:8px 12px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="13" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    ${reportLogModalHtml()}
-    ${NR_FIELD_STYLE}
-    ${newReportModalHtml('事故報告の新規登録', `
-      <div class="nr-row2 nr-field">
-        <div><label>受電時刻</label><input type="time" id="nr-received_at"></div>
-        <div><label>車番</label><input type="text" id="nr-vehicle_no" placeholder="例: 5232" inputmode="numeric"></div>
-      </div>
-      ${nrEmpSearchFieldHtml()}
-      <div class="nr-field">
-        <label>乗車状態</label>
-        <div class="nr-toggle-group">
-          <button type="button" class="nr-toggle-btn" id="nr-cs-kusha" onclick="nrSetCarStatus('空車')">空車</button>
-          <button type="button" class="nr-toggle-btn" id="nr-cs-jissha" onclick="nrSetCarStatus('実車')">実車</button>
-          <button type="button" class="nr-toggle-btn" id="nr-cs-geisha" onclick="nrSetCarStatus('迎車')">迎車</button>
-        </div>
-      </div>
-      <div class="nr-field"><label>事故形態</label><input type="text" id="nr-accident_type" placeholder="例: 単独接触事故、追突事故"></div>
-      <div class="nr-field"><label>事故発生場所</label><input type="text" id="nr-location" placeholder="例: 足立区栗原3丁目の住宅街"></div>
-      <div class="nr-row2 nr-field">
-        <div><label>事故相手の名前</label><input type="text" id="nr-other_party_name" placeholder="例: 田中 一郎"></div>
-        <div><label>事故相手の電話番号</label><input type="tel" id="nr-other_party_phone" placeholder="090-0000-0000"></div>
-      </div>
-      <div id="nr-passenger-check" class="nr-check-row" style="display:none;">
-        <input type="checkbox" id="nr-passenger_delivered"><label for="nr-passenger_delivered">乗客を目的地まで送り届けた</label>
-      </div>
-      <div class="nr-check-row"><input type="checkbox" id="nr-substitute_requested"><label for="nr-substitute_requested">代車要請は済んでいる</label></div>
-      <div class="nr-check-row"><input type="checkbox" id="nr-police_notified"><label for="nr-police_notified">警察対応するよう指示した</label></div>
-      <div class="nr-field"><label>追加情報・メモ</label><textarea id="nr-additional_info" placeholder="経緯・詳細など"></textarea></div>
-    `, '登録する')}
-    <script>
-    ${reportRowScript('/api/liff/accident-reports', '事故報告', '解決済', '/settings/accidents/print-bulk')}
-    ${newReportModalCoreJs('/api/liff/accident-reports/employee-search')}
-    var nrCarStatus = '';
-    function nrSetCarStatus(s) {
-      nrCarStatus = s;
-      ['kusha','jissha','geisha'].forEach(function(id) { document.getElementById('nr-cs-' + id).className = 'nr-toggle-btn'; });
-      var map = { '空車': 'kusha', '実車': 'jissha', '迎車': 'geisha' };
-      if (map[s]) document.getElementById('nr-cs-' + map[s]).className = 'nr-toggle-btn active';
-      document.getElementById('nr-passenger-check').style.display = (s === '実車' || s === '迎車') ? 'flex' : 'none';
-    }
-    function resetNewReportExtra() {
-      nrCarStatus = '';
-      ['kusha','jissha','geisha'].forEach(function(id) { document.getElementById('nr-cs-' + id).className = 'nr-toggle-btn'; });
-      document.getElementById('nr-passenger-check').style.display = 'none';
-    }
-    function submitNewReport() {
-      var btn = document.getElementById('nr-submit-btn');
-      btn.disabled = true;
-      var payload = {
-        received_at: document.getElementById('nr-received_at').value || null,
-        vehicle_no: document.getElementById('nr-vehicle_no').value.trim() || null,
-        employee_name: nrSelectedEmp ? nrSelectedEmp.name : null,
-        employee_emp_no: nrSelectedEmp ? nrSelectedEmp.emp_no : null,
-        employee_division: nrSelectedEmp ? nrSelectedEmp.division : null,
-        employee_team: nrSelectedEmp ? nrSelectedEmp.team : null,
-        accident_type: document.getElementById('nr-accident_type').value.trim() || null,
-        location: document.getElementById('nr-location').value.trim() || null,
-        car_status: nrCarStatus || null,
-        substitute_requested: document.getElementById('nr-substitute_requested').checked,
-        police_notified: document.getElementById('nr-police_notified').checked,
-        passenger_delivered: document.getElementById('nr-passenger_delivered').checked,
-        additional_info: document.getElementById('nr-additional_info').value.trim() || null,
-        other_party_name: document.getElementById('nr-other_party_name').value.trim() || null,
-        other_party_phone: document.getElementById('nr-other_party_phone').value.trim() || null,
-      };
-      fetch('${ADMIN_PATH}/api/liff/accident-reports', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        btn.disabled = false;
-        if (data.ok) { location.reload(); }
-        else { nrShowError(data.error || '登録に失敗しました'); }
-      })
-      .catch(function() { btn.disabled = false; nrShowError('通信エラーが発生しました'); });
-    }
-    </script>
-  `;
-
-  return c.html(layout('事故報告一覧', content, 'report-center'));
-});
-
-// ===================================================
-// GET /settings/violations — 違反報告一覧ページ
-// ===================================================
-app.get('/settings/violations', async (c) => {
-  const statusFilter = c.req.query('status') ?? '';
-
-  let where = '';
-  const binds: string[] = [];
-  if (statusFilter === 'open' || statusFilter === 'resolved') {
-    where = 'WHERE r.status = ?'; binds.push(statusFilter);
-  }
-
-  const reports = await c.env.DB.prepare(`
-    SELECT r.*, u.name AS reporter_name
-    FROM violation_reports r
-    LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
-    ${where} ORDER BY r.created_at DESC LIMIT 200
-  `).bind(...binds).all<{
-    id: number; received_at: string | null; vehicle_no: string | null; violation_at: string | null;
-    employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
-    violation_type_name: string | null; violation_points: number | null; violation_fine_amount: number | null;
-    location: string | null; travel_from: string | null; travel_to: string | null;
-    car_status: string | null; substitute_needed: number | null;
-    status: string; created_at: string;
-    resolved_by_name: string | null; resolved_at: string | null;
-    reporter_name: string | null; reported_by_admin: string | null;
-  }>();
-
-  const all = reports.results ?? [];
-
-  const rows = all.map(r => {
-    const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
-    const violationStr = r.violation_type_name
-      ? `${r.violation_type_name}${typeof r.violation_points === 'number' ? `（${r.violation_points}点/${(r.violation_fine_amount ?? 0).toLocaleString()}円）` : ''}`
-      : '—';
-    const placeParts: string[] = [];
-    if (r.location) placeParts.push(escHtml(r.location));
-    if (r.travel_from || r.travel_to) placeParts.push(escHtml(`${r.travel_from ?? '?'}→${r.travel_to ?? '?'}`));
-    if (r.car_status) {
-      let cs = r.car_status;
-      if ((r.car_status === '実車' || r.car_status === '迎車') && r.substitute_needed !== null) {
-        cs += ` / 代車${r.substitute_needed ? '要' : '不要'}`;
-      }
-      placeParts.push(escHtml(cs));
-    }
-    const placeStr = placeParts.length ? placeParts.join('<br>') : '—';
-    const handoverTitle = `${r.vehicle_no ?? '車番不明'} の違反報告`;
-    const handoverSummary = truncateSummary(violationStr !== '—' ? violationStr : r.location);
-    return `<tr id="report-row-${r.id}">
-      ${reportCheckboxTd(r.id)}
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.violation_at ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(violationStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${placeStr}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(reporterDisplay(r.reporter_name, r.reported_by_admin))}</td>
-      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${statusCellHtml(r.status === 'resolved', '対応済')}
-      </td>
-      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
-          style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
-          ${r.status === 'resolved' ? '再開' : '対応済にする'}
-        </button>
-        <button onclick="showReportLogs(${r.id})"
-          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
-        <button onclick="deleteReport(${r.id},'${escHtml((r.vehicle_no ?? '車番不明') + (r.violation_type_name ? ' / ' + r.violation_type_name : ''))}')"
-          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
-        ${printLinkHtml('/settings/violations/print', r.id)}
-        ${handoverLinkButtonHtml('/settings/violations/print', r.id, handoverTitle, handoverSummary)}
-      </td>
-    </tr>`;
-  }).join('');
-
-  const filterBtn = (label: string, s: string) => {
-    const active = statusFilter === s;
-    return `<a href="${ADMIN_PATH}/settings/violations?status=${s}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
-      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
-  };
-
-  const content = `
-    ${reportSubHeader('報告センター')}
-    ${reportTabs('violation')}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
-      ${filterBtn('すべて', '')}
-      ${filterBtn('対応中', 'open')}
-      ${filterBtn('対応済', 'resolved')}
-      ${newReportButtonHtml('新規報告')}
-    </div>
-    ${bulkPrintBarHtml()}
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:800px;">
-          <thead style="background:#f9fafb;">
-            <tr>
-              ${reportCheckboxTh()}
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">登録日時</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">受電</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">車番</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反発生日時</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">違反種類（点数/反則金）</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">場所・状態</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
-              <th style="padding:8px 12px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="12" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    ${reportLogModalHtml()}
-    ${NR_FIELD_STYLE}
-    ${newReportModalHtml('違反報告の新規登録', `
-      <div class="nr-row2 nr-field">
-        <div><label>受電時刻</label><input type="time" id="nr-received_at"></div>
-        <div><label>車番</label><input type="text" id="nr-vehicle_no" placeholder="例: 5232" inputmode="numeric"></div>
-      </div>
-      <div class="nr-row2 nr-field">
-        <div><label>違反発生日</label><input type="date" id="nr-violation_date"></div>
-        <div><label>違反発生時刻</label><input type="time" id="nr-violation_time"></div>
-      </div>
-      ${nrEmpSearchFieldHtml()}
-      <div class="nr-field">
-        <label>違反の種類</label>
-        <select id="nr-violation_type_id"><option value="">選択してください</option></select>
-      </div>
-      <div class="nr-field"><label>住所（違反発生場所）</label><input type="text" id="nr-location" placeholder="例: 板橋区大山東町51-1 付近"></div>
-      <div class="nr-row2 nr-field">
-        <div><label>どこから</label><input type="text" id="nr-travel_from" placeholder="例: 池袋駅"></div>
-        <div><label>どこへ進行中</label><input type="text" id="nr-travel_to" placeholder="例: 成増方面"></div>
-      </div>
-      <div class="nr-field">
-        <label>乗車状態</label>
-        <div class="nr-toggle-group">
-          <button type="button" class="nr-toggle-btn" id="nr-cs-kusha" onclick="nrSetCarStatus('空車')">空車</button>
-          <button type="button" class="nr-toggle-btn" id="nr-cs-jissha" onclick="nrSetCarStatus('実車')">実車</button>
-          <button type="button" class="nr-toggle-btn" id="nr-cs-geisha" onclick="nrSetCarStatus('迎車')">迎車</button>
-        </div>
-        <div id="nr-substitute-row" class="nr-check-row" style="display:none;">
-          <input type="checkbox" id="nr-substitute_needed"><label for="nr-substitute_needed">代車要請が必要</label>
-        </div>
-      </div>
-      <div class="nr-field"><label>備考</label><textarea id="nr-notes" placeholder="その他、特記事項があれば"></textarea></div>
-    `, '登録する')}
-    <script>
-    ${reportRowScript('/api/liff/violation-reports', '違反報告', '対応済', '/settings/violations/print-bulk')}
-    ${newReportModalCoreJs('/api/liff/violation-reports/employee-search')}
-    var nrCarStatus = '';
-    var nrViolationTypes = [];
-    fetch('${ADMIN_PATH}/api/liff/violation-reports/violation-types').then(function(r){return r.json();}).then(function(data){
-      nrViolationTypes = data || [];
-      var sel = document.getElementById('nr-violation_type_id');
-      nrViolationTypes.forEach(function(vt) {
-        var opt = document.createElement('option');
-        opt.value = vt.id; opt.textContent = vt.name;
-        sel.appendChild(opt);
-      });
-    });
-    function nrSetCarStatus(s) {
-      nrCarStatus = s;
-      ['kusha','jissha','geisha'].forEach(function(id) { document.getElementById('nr-cs-' + id).className = 'nr-toggle-btn'; });
-      var map = { '空車': 'kusha', '実車': 'jissha', '迎車': 'geisha' };
-      if (map[s]) document.getElementById('nr-cs-' + map[s]).className = 'nr-toggle-btn active';
-      var row = document.getElementById('nr-substitute-row');
-      if (s === '実車' || s === '迎車') { row.style.display = 'flex'; }
-      else { row.style.display = 'none'; document.getElementById('nr-substitute_needed').checked = false; }
-    }
-    function resetNewReportExtra() {
-      nrCarStatus = '';
-      ['kusha','jissha','geisha'].forEach(function(id) { document.getElementById('nr-cs-' + id).className = 'nr-toggle-btn'; });
-      document.getElementById('nr-substitute-row').style.display = 'none';
-      var now = new Date();
-      var yyyy = now.getFullYear();
-      var mo = String(now.getMonth() + 1).padStart(2, '0');
-      var dd = String(now.getDate()).padStart(2, '0');
-      document.getElementById('nr-violation_date').value = yyyy + '-' + mo + '-' + dd;
-    }
-    function submitNewReport() {
-      var btn = document.getElementById('nr-submit-btn');
-      btn.disabled = true;
-      var vDate = document.getElementById('nr-violation_date').value;
-      var vTime = document.getElementById('nr-violation_time').value;
-      var violationAt = vDate ? (vDate + (vTime ? ' ' + vTime : '')) : null;
-      var payload = {
-        received_at: document.getElementById('nr-received_at').value || null,
-        vehicle_no: document.getElementById('nr-vehicle_no').value.trim() || null,
-        violation_at: violationAt,
-        employee_name: nrSelectedEmp ? nrSelectedEmp.name : null,
-        employee_emp_no: nrSelectedEmp ? nrSelectedEmp.emp_no : null,
-        employee_division: nrSelectedEmp ? nrSelectedEmp.division : null,
-        employee_team: nrSelectedEmp ? nrSelectedEmp.team : null,
-        violation_type_id: document.getElementById('nr-violation_type_id').value || null,
-        location: document.getElementById('nr-location').value.trim() || null,
-        travel_from: document.getElementById('nr-travel_from').value.trim() || null,
-        travel_to: document.getElementById('nr-travel_to').value.trim() || null,
-        car_status: nrCarStatus || null,
-        substitute_needed: document.getElementById('nr-substitute_needed').checked,
-        notes: document.getElementById('nr-notes').value.trim() || null,
-      };
-      fetch('${ADMIN_PATH}/api/liff/violation-reports', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        btn.disabled = false;
-        if (data.ok) { location.reload(); }
-        else { nrShowError(data.error || '登録に失敗しました'); }
-      })
-      .catch(function() { btn.disabled = false; nrShowError('通信エラーが発生しました'); });
-    }
-    </script>
-  `;
-
-  return c.html(layout('違反報告一覧', content, 'report-center'));
-});
-
-// ===================================================
-// GET /settings/general-reports — 一般報告一覧ページ
-// ===================================================
-app.get('/settings/general-reports', async (c) => {
-  const statusFilter = c.req.query('status') ?? '';
-
-  let where = '';
-  const binds: string[] = [];
-  if (statusFilter === 'open' || statusFilter === 'resolved') {
-    where = 'WHERE r.status = ?'; binds.push(statusFilter);
-  }
-
-  const reports = await c.env.DB.prepare(`
-    SELECT r.*, u.name AS reporter_name
-    FROM general_reports r
-    LEFT JOIN line_liff_users u ON u.line_uid = r.reported_by_uid
-    ${where} ORDER BY r.created_at DESC LIMIT 200
-  `).bind(...binds).all<{
-    id: number; title: string | null; received_at: string | null; vehicle_no: string | null;
-    location: string | null; route_from: string | null; route_to: string | null;
-    employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
-    customer_name: string | null; customer_phone: string | null;
-    content: string | null; status: string; created_at: string;
-    resolved_by_name: string | null; resolved_at: string | null;
-    reporter_name: string | null; reported_by_admin: string | null;
-  }>();
-
-  const all = reports.results ?? [];
-
-  const rows = all.map(r => {
-    const empStr = empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no);
-    const routeStr = (r.route_from || r.route_to) ? `${r.route_from ?? '?'} → ${r.route_to ?? '?'}` : '—';
-    const customerStr = (r.customer_name || r.customer_phone) ? `${r.customer_name ?? ''} ${r.customer_phone ?? ''}`.trim() : '—';
-    const handoverTitle = r.title ?? (r.vehicle_no ? `${r.vehicle_no} の一般報告` : '一般報告');
-    const handoverSummary = truncateSummary(r.content);
-    return `<tr id="report-row-${r.id}">
-      ${reportCheckboxTd(r.id)}
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(r.created_at.slice(0, 16))}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.title ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(r.received_at ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">${escHtml(r.vehicle_no ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(r.location ?? '')}">${escHtml(r.location ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;white-space:nowrap;">${escHtml(routeStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;">${escHtml(empStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;white-space:nowrap;">${escHtml(customerStr)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:360px;">${contentCellHtml(r.content)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(reporterDisplay(r.reporter_name, r.reported_by_admin))}</td>
-      <td id="st-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${statusCellHtml(r.status === 'resolved', '対応済')}
-      </td>
-      <td id="res-${r.id}" style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">
-        ${resolverCellHtml(r.resolved_by_name, r.resolved_at)}
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <button onclick="toggleReportStatus(${r.id},this)" data-status="${r.status}"
-          style="padding:3px 8px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:4px;font-size:11px;cursor:pointer;">
-          ${r.status === 'resolved' ? '再開' : '対応済にする'}
-        </button>
-        <button onclick="showReportLogs(${r.id})"
-          style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">履歴</button>
-        <button onclick="deleteReport(${r.id},'${escHtml((r.title ?? r.vehicle_no ?? '車番なし') + (r.content ? ' / ' + r.content.slice(0, 20) : ''))}')"
-          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
-        ${printLinkHtml('/settings/general-reports/print', r.id)}
-        ${handoverLinkButtonHtml('/settings/general-reports/print', r.id, handoverTitle, handoverSummary)}
-      </td>
-    </tr>`;
-  }).join('');
-
-  const filterBtn = (label: string, s: string) => {
-    const active = statusFilter === s;
-    return `<a href="${ADMIN_PATH}/settings/general-reports?status=${s}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
-      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
-  };
-
-  const content = `
-    ${reportSubHeader('報告センター')}
-    ${reportTabs('general')}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
-      ${filterBtn('すべて', '')}
-      ${filterBtn('対応中', 'open')}
-      ${filterBtn('対応済', 'resolved')}
-      ${newReportButtonHtml('新規報告')}
-    </div>
-    ${bulkPrintBarHtml()}
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span id="report-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${all.length}件</span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:1100px;">
-          <thead style="background:#f9fafb;">
-            <tr>
-              ${reportCheckboxTh()}
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">登録日時</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">タイトル</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">受電</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">車番</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">住所</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">区間</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">乗務員</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">お客様</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告内容</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">報告者</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">進捗</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">対応者</th>
-              <th style="padding:8px 12px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="14" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    ${reportLogModalHtml()}
-    ${NR_FIELD_STYLE}
-    ${newReportModalHtml('一般報告の新規登録', `
-      <div class="nr-field">
-        <label>タイトル（あれば）</label>
-        <input type="text" id="nr-title" list="nr-title-suggestions" placeholder="例: 社内汚損">
-        <datalist id="nr-title-suggestions">
-          <option value="社内汚損"><option value="車両トラブル"><option value="苦情対応">
-          <option value="遅延"><option value="お客様からの着電"><option value="その他連絡">
-        </datalist>
-      </div>
-      <div class="nr-row2 nr-field">
-        <div><label>受電時刻</label><input type="time" id="nr-received_at"></div>
-        <div><label>車番（あれば）</label><input type="text" id="nr-vehicle_no" placeholder="例: 5232" inputmode="numeric"></div>
-      </div>
-      <div class="nr-field"><label>住所（あれば）</label><input type="text" id="nr-location" placeholder="例: 板橋区大山東町51-1 付近"></div>
-      <div class="nr-row2 nr-field">
-        <div><label>お客様名（着電があれば）</label><input type="text" id="nr-customer_name" placeholder="例: 田中 一郎"></div>
-        <div><label>電話番号</label><input type="tel" id="nr-customer_phone" placeholder="090-0000-0000"></div>
-      </div>
-      <div class="nr-row2 nr-field">
-        <div><label>出発地（あれば）</label><input type="text" id="nr-route_from" placeholder="例: 板橋営業所"></div>
-        <div><label>到着地</label><input type="text" id="nr-route_to" placeholder="例: 東京駅"></div>
-      </div>
-      ${nrEmpSearchFieldHtml()}
-      <div class="nr-field"><label>報告内容</label><textarea id="nr-content" placeholder="報告したい内容を自由に入力してください"></textarea></div>
-    `, '登録する')}
-    <script>
-    ${reportRowScript('/api/liff/general-reports', '一般報告', '対応済', '/settings/general-reports/print-bulk')}
-    function toggleReportContent(btn) {
-      var box = btn.previousElementSibling;
-      var expanded = box.style.maxHeight === 'none';
-      box.style.maxHeight = expanded ? '2.6em' : 'none';
-      btn.textContent = expanded ? '続きを見る' : '閉じる';
-    }
-    ${newReportModalCoreJs('/api/liff/general-reports/employee-search')}
-    function submitNewReport() {
-      var btn = document.getElementById('nr-submit-btn');
-      btn.disabled = true;
-      var payload = {
-        title: document.getElementById('nr-title').value.trim() || null,
-        received_at: document.getElementById('nr-received_at').value || null,
-        vehicle_no: document.getElementById('nr-vehicle_no').value.trim() || null,
-        location: document.getElementById('nr-location').value.trim() || null,
-        route_from: document.getElementById('nr-route_from').value.trim() || null,
-        route_to: document.getElementById('nr-route_to').value.trim() || null,
-        employee_name: nrSelectedEmp ? nrSelectedEmp.name : null,
-        employee_emp_no: nrSelectedEmp ? nrSelectedEmp.emp_no : null,
-        employee_division: nrSelectedEmp ? nrSelectedEmp.division : null,
-        employee_team: nrSelectedEmp ? nrSelectedEmp.team : null,
-        customer_name: document.getElementById('nr-customer_name').value.trim() || null,
-        customer_phone: document.getElementById('nr-customer_phone').value.trim() || null,
-        content: document.getElementById('nr-content').value.trim() || null,
-      };
-      fetch('${ADMIN_PATH}/api/liff/general-reports', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        btn.disabled = false;
-        if (data.ok) { location.reload(); }
-        else { nrShowError(data.error || '登録に失敗しました'); }
-      })
-      .catch(function() { btn.disabled = false; nrShowError('通信エラーが発生しました'); });
-    }
-    </script>
-  `;
-
-  return c.html(layout('一般報告一覧', content, 'report-center'));
-});
+app.get('/settings/lost-items', (c) => c.redirect(`${ADMIN_PATH}/settings/reports`));
+app.get('/settings/accidents', (c) => c.redirect(`${ADMIN_PATH}/settings/reports`));
+app.get('/settings/violations', (c) => c.redirect(`${ADMIN_PATH}/settings/reports`));
+app.get('/settings/general-reports', (c) => c.redirect(`${ADMIN_PATH}/settings/reports`));
 
 // ===================================================
 // 引き継ぎメモ（報告センターの5つ目のタブ）
@@ -2071,7 +1517,7 @@ app.get('/settings/handover-memos', async (c) => {
 
   const content = `
     ${reportSubHeader('報告センター')}
-    ${reportTabs('memo')}
+    ${reportCenterNav('memo')}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
       <button onclick="createMemo()" style="padding:7px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ 新規メモを作成</button>
     </div>
@@ -2139,7 +1585,7 @@ app.get('/settings/handover-memos/:id', async (c) => {
 
   const content = `
     ${reportSubHeader('報告センター')}
-    ${reportTabs('memo')}
+    ${reportCenterNav('memo')}
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
       <a href="${ADMIN_PATH}/settings/handover-memos" style="color:#6b7280;font-size:13px;text-decoration:none;white-space:nowrap;">← メモ一覧に戻る</a>
       <input type="text" id="memo-title" oninput="markDirty()" value="${escHtml(memo.title)}" placeholder="メモのタイトル"
@@ -2275,7 +1721,7 @@ app.get('/api/handover-memos/employee-by-car', async (c) => {
 
 // ===================================================
 // 帳票印刷ページ（忘れ物/事故/違反/一般報告 共通・A4横1枚）
-//   宛先・追加備考はページ側で自由入力するのみで、DBには保存しない
+//   宛先はページ側で自由入力するのみでDBには保存しない。追加備考(print_notes)は他の項目と同じく自動保存する
 // ===================================================
 
 app.get('/settings/lost-items/print/:id', async (c) => {
@@ -2291,7 +1737,7 @@ app.get('/settings/lost-items/print/:id', async (c) => {
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     item_description: string | null; pickup_location: string | null; dropoff_location: string | null;
     customer_name: string | null; customer_phone: string | null; return_method: string | null;
-    notes: string | null; status: string; created_at: string;
+    notes: string | null; print_notes: string | null; status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
   }>();
@@ -2299,16 +1745,19 @@ app.get('/settings/lost-items/print/:id', async (c) => {
 
   const fields: ReportPrintField[] = [
     { label: '種別', value: r.report_type === 'customer' ? '客問い合わせ' : '社員報告' },
-    { label: '受電時刻', value: r.received_at ?? '' },
-    { label: '車番', value: r.vehicle_no ?? '' },
-    { label: '乗務員', value: empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no) },
-    { label: '忘れ物の内容', value: r.item_description ?? '', full: true },
-    { label: '乗車地', value: r.pickup_location ?? '' },
-    { label: '降車地', value: r.dropoff_location ?? '' },
-    { label: '客氏名', value: r.customer_name ?? '' },
-    { label: '客電話番号', value: r.customer_phone ?? '' },
-    { label: '返却方法', value: r.return_method ?? '' },
-    { label: '備考', value: r.notes ?? '', full: true },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
+    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
+    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
+    { label: '忘れ物の内容', value: r.item_description ?? '', full: true, field: 'item_description', input: 'textarea' },
+    { label: '乗車地', value: r.pickup_location ?? '', field: 'pickup_location' },
+    { label: '降車地', value: r.dropoff_location ?? '', field: 'dropoff_location' },
+    { label: '客氏名', value: r.customer_name ?? '', field: 'customer_name' },
+    { label: '客電話番号', value: r.customer_phone ?? '', field: 'customer_phone' },
+    { label: '返却方法', value: r.return_method ?? '', field: 'return_method' },
+    { label: '備考', value: r.notes ?? '', full: true, field: 'notes', input: 'textarea' },
   ];
 
   return c.html(renderReportPrintPage({
@@ -2319,8 +1768,11 @@ app.get('/settings/lost-items/print/:id', async (c) => {
     status: r.status, resolvedLabel: '解決済',
     resolvedByName: r.resolved_by_name, resolvedAt: r.resolved_at,
     reporterName: reporterDisplay(r.reporter_name, r.reported_by_admin),
-    suggestedTo: suggestedTo(r.employee_division, r.employee_team),
-    backHref: `${ADMIN_PATH}/settings/lost-items`,
+    suggestedTo: '',
+    printNotes: r.print_notes ?? '',
+    apiPath: `${ADMIN_PATH}/api/liff/lost-items`,
+    deleteLabel: '忘れ物報告',
+    listHref: `${ADMIN_PATH}/settings/reports`,
   }));
 });
 
@@ -2337,8 +1789,9 @@ app.get('/settings/accidents/print/:id', async (c) => {
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     accident_type: string | null; location: string | null; car_status: string | null;
     other_party_name: string | null; other_party_phone: string | null;
+    customer_name: string | null; customer_phone: string | null;
     substitute_requested: number | null; police_notified: number | null; passenger_delivered: number | null;
-    additional_info: string | null; summary_text: string | null;
+    additional_info: string | null; summary_text: string | null; print_notes: string | null;
     status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
@@ -2346,18 +1799,23 @@ app.get('/settings/accidents/print/:id', async (c) => {
   if (!r) return c.text('報告が見つかりません', 404);
 
   const fields: ReportPrintField[] = [
-    { label: '受電時刻', value: r.received_at ?? '' },
-    { label: '車番', value: r.vehicle_no ?? '' },
-    { label: '乗務員', value: empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no) },
-    { label: '事故形態', value: r.accident_type ?? '' },
-    { label: '発生場所', value: r.location ?? '' },
-    { label: '車両状態', value: r.car_status ?? '' },
-    { label: '事故相手の名前', value: r.other_party_name ?? '' },
-    { label: '事故相手の電話番号', value: r.other_party_phone ?? '' },
-    { label: '代車要請', value: r.substitute_requested ? '要請済み' : '未要請' },
-    { label: '警察対応', value: r.police_notified ? '指示済み' : '未指示' },
-    { label: '乗客対応', value: r.passenger_delivered ? '送り届け済み' : '未対応' },
-    { label: '追加情報', value: r.additional_info ?? '', full: true },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
+    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
+    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
+    { label: '事故形態', value: r.accident_type ?? '', field: 'accident_type' },
+    { label: '発生場所', value: r.location ?? '', field: 'location' },
+    { label: '車両状態', value: r.car_status ?? '', field: 'car_status' },
+    { label: '乗車中のお客様氏名', value: r.customer_name ?? '', field: 'customer_name' },
+    { label: '乗車中のお客様電話番号', value: r.customer_phone ?? '', field: 'customer_phone' },
+    { label: '事故相手の名前', value: r.other_party_name ?? '', field: 'other_party_name' },
+    { label: '事故相手の電話番号', value: r.other_party_phone ?? '', field: 'other_party_phone' },
+    { label: '代車要請', value: '要請済み', field: 'substitute_requested', input: 'checkbox', checked: !!r.substitute_requested },
+    { label: '警察対応', value: '指示済み', field: 'police_notified', input: 'checkbox', checked: !!r.police_notified },
+    { label: '乗客対応', value: '送り届け済み', field: 'passenger_delivered', input: 'checkbox', checked: !!r.passenger_delivered },
+    { label: '追加情報', value: r.additional_info ?? '', full: true, field: 'additional_info', input: 'textarea' },
     { label: '報告書まとめ', value: r.summary_text ?? '', full: true },
   ];
 
@@ -2369,8 +1827,11 @@ app.get('/settings/accidents/print/:id', async (c) => {
     status: r.status, resolvedLabel: '解決済',
     resolvedByName: r.resolved_by_name, resolvedAt: r.resolved_at,
     reporterName: reporterDisplay(r.reporter_name, r.reported_by_admin),
-    suggestedTo: suggestedTo(r.employee_division, r.employee_team),
-    backHref: `${ADMIN_PATH}/settings/accidents`,
+    suggestedTo: '',
+    printNotes: r.print_notes ?? '',
+    apiPath: `${ADMIN_PATH}/api/liff/accident-reports`,
+    deleteLabel: '事故報告',
+    listHref: `${ADMIN_PATH}/settings/reports`,
   }));
 });
 
@@ -2387,31 +1848,30 @@ app.get('/settings/violations/print/:id', async (c) => {
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     violation_type_name: string | null; violation_points: number | null; violation_fine_amount: number | null;
     location: string | null; travel_from: string | null; travel_to: string | null;
-    car_status: string | null; substitute_needed: number | null; notes: string | null;
+    car_status: string | null; substitute_needed: number | null; notes: string | null; print_notes: string | null;
     status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
   }>();
   if (!r) return c.text('報告が見つかりません', 404);
 
-  const violationStr = r.violation_type_name
-    ? `${r.violation_type_name}${typeof r.violation_points === 'number' ? `（${r.violation_points}点/${(r.violation_fine_amount ?? 0).toLocaleString()}円）` : ''}`
-    : '';
-  const routeStr = (r.travel_from || r.travel_to) ? `${r.travel_from ?? '?'} → ${r.travel_to ?? '?'}` : '';
-  const substituteStr = (r.car_status === '実車' || r.car_status === '迎車') && r.substitute_needed !== null
-    ? (r.substitute_needed ? '要' : '不要') : '';
-
   const fields: ReportPrintField[] = [
-    { label: '受電時刻', value: r.received_at ?? '' },
-    { label: '車番', value: r.vehicle_no ?? '' },
-    { label: '違反発生日時', value: r.violation_at ?? '' },
-    { label: '乗務員', value: empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no) },
-    { label: '違反種類', value: violationStr },
-    { label: '発生場所', value: r.location ?? '' },
-    { label: '進行区間', value: routeStr },
-    { label: '車両状態', value: r.car_status ?? '' },
-    { label: '代車要否', value: substituteStr },
-    { label: '備考', value: r.notes ?? '', full: true },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
+    { label: '違反発生日時', value: r.violation_at ?? '', field: 'violation_at' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
+    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
+    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
+    { label: '違反種類', value: r.violation_type_name ?? '', field: 'violation_type_name' },
+    { label: '点数', value: r.violation_points != null ? String(r.violation_points) : '', field: 'violation_points' },
+    { label: '反則金', value: r.violation_fine_amount != null ? String(r.violation_fine_amount) : '', field: 'violation_fine_amount' },
+    { label: '発生場所', value: r.location ?? '', field: 'location' },
+    { label: 'どこから', value: r.travel_from ?? '', field: 'travel_from' },
+    { label: 'どこへ進行中', value: r.travel_to ?? '', field: 'travel_to' },
+    { label: '車両状態', value: r.car_status ?? '', field: 'car_status' },
+    { label: '代車要請が必要', value: '必要', field: 'substitute_needed', input: 'checkbox', checked: !!r.substitute_needed },
+    { label: '備考', value: r.notes ?? '', full: true, field: 'notes', input: 'textarea' },
   ];
 
   return c.html(renderReportPrintPage({
@@ -2422,8 +1882,11 @@ app.get('/settings/violations/print/:id', async (c) => {
     status: r.status, resolvedLabel: '対応済',
     resolvedByName: r.resolved_by_name, resolvedAt: r.resolved_at,
     reporterName: reporterDisplay(r.reporter_name, r.reported_by_admin),
-    suggestedTo: suggestedTo(r.employee_division, r.employee_team),
-    backHref: `${ADMIN_PATH}/settings/violations`,
+    suggestedTo: '',
+    printNotes: r.print_notes ?? '',
+    apiPath: `${ADMIN_PATH}/api/liff/violation-reports`,
+    deleteLabel: '違反報告',
+    listHref: `${ADMIN_PATH}/settings/reports`,
   }));
 });
 
@@ -2440,23 +1903,26 @@ app.get('/settings/general-reports/print/:id', async (c) => {
     location: string | null; route_from: string | null; route_to: string | null;
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     customer_name: string | null; customer_phone: string | null;
-    content: string | null; status: string; created_at: string;
+    content: string | null; print_notes: string | null; status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
   }>();
   if (!r) return c.text('報告が見つかりません', 404);
 
-  const routeStr = (r.route_from || r.route_to) ? `${r.route_from ?? '?'} → ${r.route_to ?? '?'}` : '';
-
   const fields: ReportPrintField[] = [
-    { label: 'タイトル', value: r.title ?? '' },
-    { label: '受電時刻', value: r.received_at ?? '' },
-    { label: '車番', value: r.vehicle_no ?? '' },
-    { label: '住所', value: r.location ?? '' },
-    { label: '区間', value: routeStr },
-    { label: '乗務員', value: empDisplay(r.employee_name, r.employee_division, r.employee_team, r.employee_emp_no) },
-    { label: 'お客様', value: `${r.customer_name ?? ''} ${r.customer_phone ?? ''}`.trim() },
-    { label: '報告内容', value: r.content ?? '', full: true },
+    { label: 'タイトル', value: r.title ?? '', field: 'title' },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
+    { label: '住所', value: r.location ?? '', field: 'location' },
+    { label: '出発地', value: r.route_from ?? '', field: 'route_from' },
+    { label: '到着地', value: r.route_to ?? '', field: 'route_to' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
+    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
+    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
+    { label: 'お客様名', value: r.customer_name ?? '', field: 'customer_name' },
+    { label: 'お客様電話番号', value: r.customer_phone ?? '', field: 'customer_phone' },
+    { label: '報告内容', value: r.content ?? '', full: true, field: 'content', input: 'textarea' },
   ];
 
   return c.html(renderReportPrintPage({
@@ -2467,8 +1933,11 @@ app.get('/settings/general-reports/print/:id', async (c) => {
     status: r.status, resolvedLabel: '対応済',
     resolvedByName: r.resolved_by_name, resolvedAt: r.resolved_at,
     reporterName: reporterDisplay(r.reporter_name, r.reported_by_admin),
-    suggestedTo: suggestedTo(r.employee_division, r.employee_team),
-    backHref: `${ADMIN_PATH}/settings/general-reports`,
+    suggestedTo: '',
+    printNotes: r.print_notes ?? '',
+    apiPath: `${ADMIN_PATH}/api/liff/general-reports`,
+    deleteLabel: '一般報告',
+    listHref: `${ADMIN_PATH}/settings/reports`,
   }));
 });
 
@@ -2536,6 +2005,7 @@ app.get('/settings/accidents/print-bulk', async (c) => {
     employee_name: string | null; employee_division: number | null; employee_team: number | null; employee_emp_no: string | null;
     accident_type: string | null; location: string | null; car_status: string | null;
     other_party_name: string | null; other_party_phone: string | null;
+    customer_name: string | null; customer_phone: string | null;
     substitute_requested: number | null; police_notified: number | null; passenger_delivered: number | null;
     additional_info: string | null; summary_text: string | null;
     status: string; created_at: string;
@@ -2548,6 +2018,7 @@ app.get('/settings/accidents/print-bulk', async (c) => {
       { label: '事故形態', value: r.accident_type ?? '' },
       { label: '発生場所', value: r.location ?? '' },
       { label: '車両状態', value: r.car_status ?? '' },
+      { label: '乗車中のお客様', value: `${r.customer_name ?? ''} ${r.customer_phone ?? ''}`.trim() },
       { label: '事故相手', value: `${r.other_party_name ?? ''} ${r.other_party_phone ?? ''}`.trim() },
       { label: '代車要請', value: r.substitute_requested ? '要請済み' : '未要請' },
       { label: '警察対応', value: r.police_notified ? '指示済み' : '未指示' },
@@ -2855,7 +2326,61 @@ async function logReportAction(
   ).bind(kind, reportId, action, adminName, summary).run();
 }
 
-async function handleReportStatus(c: Context<{ Bindings: Env }>, kind: string) {
+// 詳細画面（帳票拡張ページ）から自由編集できる列のホワイトリスト（id/status/reported_by_*/created_at/resolved_*/case_noは対象外）
+const REPORT_EDITABLE_FIELDS: Record<string, string[]> = {
+  lost_item: ['report_type', 'received_at', 'vehicle_no', 'employee_name', 'employee_emp_no', 'employee_division', 'employee_team',
+    'item_description', 'pickup_location', 'dropoff_location', 'customer_name', 'customer_phone', 'return_method', 'notes', 'print_notes'],
+  accident: ['received_at', 'vehicle_no', 'employee_name', 'employee_emp_no', 'employee_division', 'employee_team',
+    'accident_type', 'location', 'car_status', 'substitute_requested', 'police_notified', 'passenger_delivered',
+    'additional_info', 'other_party_name', 'other_party_phone', 'customer_name', 'customer_phone', 'print_notes'],
+  violation: ['received_at', 'vehicle_no', 'violation_at', 'employee_name', 'employee_emp_no', 'employee_division', 'employee_team',
+    'violation_type_name', 'violation_points', 'violation_fine_amount', 'location', 'travel_from', 'travel_to',
+    'car_status', 'substitute_needed', 'notes', 'print_notes'],
+  general: ['title', 'received_at', 'vehicle_no', 'location', 'route_from', 'route_to', 'employee_name', 'employee_emp_no',
+    'employee_division', 'employee_team', 'customer_name', 'customer_phone', 'content', 'print_notes'],
+};
+const REPORT_EDITABLE_BOOL_FIELDS = new Set(['substitute_requested', 'police_notified', 'passenger_delivered', 'substitute_needed']);
+const REPORT_EDITABLE_NUMERIC_FIELDS = new Set(['employee_division', 'employee_team', 'violation_points', 'violation_fine_amount']);
+
+async function handleReportFieldsUpdate(c: Context<{ Bindings: Env; Variables: { adminId: number } }>, kind: string) {
+  const info = REPORT_KINDS[kind];
+  const id = parseInt(c.req.param('id') ?? '');
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
+  const body = await c.req.json<{ fields?: Record<string, unknown> }>();
+  const submitted = body.fields ?? {};
+  const allowedCols = REPORT_EDITABLE_FIELDS[kind] ?? [];
+
+  const setClauses: string[] = [];
+  const binds: (string | number | null)[] = [];
+  for (const col of allowedCols) {
+    if (!(col in submitted)) continue;
+    const raw = submitted[col];
+    let v: string | number | null;
+    if (REPORT_EDITABLE_BOOL_FIELDS.has(col)) {
+      v = raw ? 1 : 0;
+    } else if (REPORT_EDITABLE_NUMERIC_FIELDS.has(col)) {
+      v = (raw === '' || raw === null || raw === undefined) ? null : Number(raw);
+      if (v !== null && Number.isNaN(v)) v = null;
+    } else {
+      v = (typeof raw === 'string' ? raw.trim() : String(raw ?? '')) || null;
+    }
+    setClauses.push(`${col} = ?`);
+    binds.push(v);
+  }
+  if (setClauses.length === 0) return c.json({ ok: true });
+
+  await c.env.DB.prepare(`UPDATE ${info.table} SET ${setClauses.join(', ')} WHERE id = ?`).bind(...binds, id).run();
+
+  const adminName = await getAdminName(c);
+  const row = await c.env.DB.prepare(
+    `SELECT id, ${info.summarySql} AS summary FROM ${info.table} WHERE id = ?`
+  ).bind(id).first<{ id: number; summary: string }>();
+  await logReportAction(c.env.DB, kind, id, 'edited', adminName, row?.summary ?? null);
+
+  return c.json({ ok: true });
+}
+
+async function handleReportStatus(c: Context<{ Bindings: Env; Variables: { adminId: number } }>, kind: string) {
   const info = REPORT_KINDS[kind];
   const id = parseInt(c.req.param('id') ?? '');
   if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
@@ -2882,7 +2407,7 @@ async function handleReportStatus(c: Context<{ Bindings: Env }>, kind: string) {
   return c.json({ ok: true, adminName });
 }
 
-async function handleReportDelete(c: Context<{ Bindings: Env }>, kind: string) {
+async function handleReportDelete(c: Context<{ Bindings: Env; Variables: { adminId: number } }>, kind: string) {
   const info = REPORT_KINDS[kind];
   const id = parseInt(c.req.param('id') ?? '');
   if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
@@ -2912,20 +2437,21 @@ app.post('/api/liff/lost-items', async (c) => {
     customer_name?: string; customer_phone?: string; return_method?: string; notes?: string;
   }>();
   const reportType = body.report_type === 'customer' ? 'customer' : 'staff';
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
 
   const result = await c.env.DB.prepare(`
     INSERT INTO lost_item_reports
       (report_type, received_at, vehicle_no, employee_name, employee_emp_no,
        employee_division, employee_team, item_description, pickup_location, dropoff_location,
-       customer_name, customer_phone, return_method, notes, reported_by_admin)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       customer_name, customer_phone, return_method, notes, reported_by_admin, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     reportType, body.received_at ?? null, body.vehicle_no ?? null,
     body.employee_name ?? null, body.employee_emp_no ?? null,
     body.employee_division ?? null, body.employee_team ?? null,
     body.item_description ?? null, body.pickup_location ?? null, body.dropoff_location ?? null,
     body.customer_name ?? null, body.customer_phone ?? null, body.return_method ?? null,
-    body.notes ?? null, adminName,
+    body.notes ?? null, adminName, caseNo,
   ).run();
 
   await logReportAction(c.env.DB, 'lost_item', result.meta.last_row_id as number, 'created', adminName,
@@ -2943,15 +2469,18 @@ app.post('/api/liff/accident-reports', async (c) => {
     substitute_requested?: boolean; police_notified?: boolean; passenger_delivered?: boolean;
     additional_info?: string;
     other_party_name?: string; other_party_phone?: string;
+    customer_name?: string; customer_phone?: string;
   }>();
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
 
   const result = await c.env.DB.prepare(`
     INSERT INTO accident_reports
       (received_at, vehicle_no, employee_name, employee_emp_no,
        employee_division, employee_team, accident_type, location, car_status,
        substitute_requested, police_notified, passenger_delivered,
-       additional_info, other_party_name, other_party_phone, reported_by_admin)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       additional_info, other_party_name, other_party_phone, reported_by_admin,
+       customer_name, customer_phone, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.received_at ?? null, body.vehicle_no ?? null,
     body.employee_name ?? null, body.employee_emp_no ?? null,
@@ -2959,6 +2488,7 @@ app.post('/api/liff/accident-reports', async (c) => {
     body.accident_type ?? null, body.location ?? null, body.car_status ?? null,
     body.substitute_requested ? 1 : 0, body.police_notified ? 1 : 0, body.passenger_delivered ? 1 : 0,
     body.additional_info ?? null, body.other_party_name ?? null, body.other_party_phone ?? null, adminName,
+    body.customer_name ?? null, body.customer_phone ?? null, caseNo,
   ).run();
 
   await logReportAction(c.env.DB, 'accident', result.meta.last_row_id as number, 'created', adminName,
@@ -2995,20 +2525,22 @@ app.post('/api/liff/violation-reports', async (c) => {
     }
   }
 
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
+
   const result = await c.env.DB.prepare(`
     INSERT INTO violation_reports
       (received_at, vehicle_no, violation_at, employee_name, employee_emp_no,
        employee_division, employee_team, violation_type_id, violation_type_name,
        violation_points, violation_fine_amount, location, travel_from, travel_to,
-       car_status, substitute_needed, notes, reported_by_admin)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       car_status, substitute_needed, notes, reported_by_admin, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.received_at ?? null, body.vehicle_no ?? null, body.violation_at ?? null,
     body.employee_name ?? null, body.employee_emp_no ?? null,
     body.employee_division ?? null, body.employee_team ?? null,
     body.violation_type_id ?? null, violationTypeName, violationPoints, violationFineAmount,
     body.location ?? null, body.travel_from ?? null, body.travel_to ?? null,
-    carStatus, substituteNeeded, body.notes ?? null, adminName,
+    carStatus, substituteNeeded, body.notes ?? null, adminName, caseNo,
   ).run();
 
   await logReportAction(c.env.DB, 'violation', result.meta.last_row_id as number, 'created', adminName,
@@ -3026,17 +2558,19 @@ app.post('/api/liff/general-reports', async (c) => {
     customer_name?: string; customer_phone?: string; content?: string;
   }>();
 
+  const caseNo = await issueCaseNoIfEmpty(c.env.DB, body.vehicle_no ?? null);
+
   const result = await c.env.DB.prepare(`
     INSERT INTO general_reports
       (title, received_at, vehicle_no, location, route_from, route_to, employee_name, employee_emp_no,
-       employee_division, employee_team, customer_name, customer_phone, content, reported_by_admin)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       employee_division, employee_team, customer_name, customer_phone, content, reported_by_admin, case_no)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     body.title ?? null, body.received_at ?? null, body.vehicle_no ?? null, body.location ?? null,
     body.route_from ?? null, body.route_to ?? null,
     body.employee_name ?? null, body.employee_emp_no ?? null,
     body.employee_division ?? null, body.employee_team ?? null,
-    body.customer_name ?? null, body.customer_phone ?? null, body.content ?? null, adminName,
+    body.customer_name ?? null, body.customer_phone ?? null, body.content ?? null, adminName, caseNo,
   ).run();
 
   await logReportAction(c.env.DB, 'general', result.meta.last_row_id as number, 'created', adminName,
@@ -3045,19 +2579,23 @@ app.post('/api/liff/general-reports', async (c) => {
 });
 
 app.put('/api/liff/lost-items/:id/status',        (c) => handleReportStatus(c, 'lost_item'));
+app.put('/api/liff/lost-items/:id/fields',        (c) => handleReportFieldsUpdate(c, 'lost_item'));
 app.delete('/api/liff/lost-items/:id',            (c) => handleReportDelete(c, 'lost_item'));
 app.put('/api/liff/accident-reports/:id/status',  (c) => handleReportStatus(c, 'accident'));
+app.put('/api/liff/accident-reports/:id/fields',  (c) => handleReportFieldsUpdate(c, 'accident'));
 app.delete('/api/liff/accident-reports/:id',      (c) => handleReportDelete(c, 'accident'));
 app.put('/api/liff/violation-reports/:id/status', (c) => handleReportStatus(c, 'violation'));
+app.put('/api/liff/violation-reports/:id/fields', (c) => handleReportFieldsUpdate(c, 'violation'));
 app.delete('/api/liff/violation-reports/:id',     (c) => handleReportDelete(c, 'violation'));
 app.put('/api/liff/general-reports/:id/status',   (c) => handleReportStatus(c, 'general'));
+app.put('/api/liff/general-reports/:id/fields',   (c) => handleReportFieldsUpdate(c, 'general'));
 app.delete('/api/liff/general-reports/:id',       (c) => handleReportDelete(c, 'general'));
 
 // 対応履歴の取得（行の「履歴」ボタン用）
 // パスを既存の権限マッピング（/api/liff/lost-items 等の前方一致）に乗せるため種別ごとに定義
-const ACTION_LABELS: Record<string, string> = { created: '管理画面から登録した', resolved: '解決済にした', reopened: '再開した', deleted: '削除した' };
+const ACTION_LABELS: Record<string, string> = { created: '管理画面から登録した', resolved: '解決済にした', reopened: '再開した', deleted: '削除した', edited: '内容を編集した' };
 
-async function handleReportLogs(c: Context<{ Bindings: Env }>, kind: string) {
+async function handleReportLogs(c: Context<{ Bindings: Env; Variables: { adminId: number } }>, kind: string) {
   const id = parseInt(c.req.param('id') ?? '');
   if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
   const rows = await c.env.DB.prepare(
