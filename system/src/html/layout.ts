@@ -26,7 +26,7 @@ function showToast(msg) {
 }
 
 // フローティング新規報告ボタンを表示しないページ（設定・点検管理・班長シフト）
-const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'garage']);
+const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'garage', 'vehicle-deadlines']);
 
 export function layout(title: string, content: string, activePage: string = '', headerExtra: string = ''): string {
   const showReportFab = !REPORT_FAB_HIDDEN_PAGES.has(activePage);
@@ -47,6 +47,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
     { href: `${ADMIN_PATH}/garage`,        label: '車庫',            id: 'garage' },
     { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
+    { href: `${ADMIN_PATH}/vehicle-deadlines`, label: 'メーター検査・車検', id: 'vehicle-deadlines' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
 
@@ -186,6 +187,28 @@ export function layout(title: string, content: string, activePage: string = '', 
       .sidebar { width: 180px; }
       .main-content { margin-left: 180px; }
     }
+    /* リミット到達アラート（引き継ぎシート＋メーター検査・車検の期限通知が共用。PCの大画面で見やすいよう大きめに表示する） */
+    .limit-alert-card {
+      background: #fff; border-radius: 20px; padding: 40px 40px 34px; width: 100%;
+      max-width: 960px; max-height: 86vh; overflow-y: auto; box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+    }
+    .limit-alert-card .limit-alert-heading { font-size: 30px; font-weight: 800; color: #dc2626; }
+    .limit-alert-card .limit-alert-icon { font-size: 34px; }
+    .limit-alert-card .limit-alert-sub { font-size: 14px; color: #6b7280; margin-top: 6px; margin-bottom: 22px; }
+    .limit-alert-item { font-size: 17px; padding: 18px 22px; }
+    .limit-alert-item .limit-alert-item-title { font-size: 16px; }
+    .limit-alert-item .limit-alert-item-body { font-size: 18px; }
+    .limit-alert-item button { font-size: 15px; padding: 10px 20px; }
+    @media (max-width: 1024px) {
+      .limit-alert-card { max-width: 480px; padding: 26px 24px; border-radius: 16px; }
+      .limit-alert-card .limit-alert-heading { font-size: 19px; }
+      .limit-alert-card .limit-alert-icon { font-size: 28px; }
+      .limit-alert-card .limit-alert-sub { font-size: 12px; margin-bottom: 14px; }
+      .limit-alert-item { font-size: 13px; padding: 12px 14px; }
+      .limit-alert-item .limit-alert-item-title { font-size: 13px; }
+      .limit-alert-item .limit-alert-item-body { font-size: 14px; }
+      .limit-alert-item button { font-size: 13px; padding: 8px 14px; }
+    }
   </style>
 </head>
 <body>
@@ -275,14 +298,14 @@ export function layout(title: string, content: string, activePage: string = '', 
     </div>
   </div>
 
-  <!-- リミット到達ポップアップ（引き継ぎシートで設定した締切タスクの通知。全ページ共通・所属課ベースでサーバ側フィルタ済み） -->
+  <!-- リミット到達ポップアップ（引き継ぎシートの締切タスク＋メーター検査・車検の期限通知。全ページ共通・所属課ベースでサーバ側フィルタ済み） -->
   <div id="limit-alert-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:2000;align-items:center;justify-content:center;padding:16px;">
-    <div style="background:#fff;border-radius:16px;padding:26px 24px;width:100%;max-width:480px;max-height:82vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+    <div class="limit-alert-card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-        <span style="font-size:28px;line-height:1;">⏰</span>
-        <span style="font-size:19px;font-weight:800;color:#dc2626;">リミット到達</span>
+        <span class="limit-alert-icon" style="line-height:1;">⏰</span>
+        <span class="limit-alert-heading">リミット到達</span>
       </div>
-      <div style="font-size:12px;color:#6b7280;margin-bottom:14px;">設定した時刻になりました。対応が終わったタスクは「完了」を押してください。</div>
+      <div class="limit-alert-sub">設定した期限になりました。対応が終わったものは「完了」または「一旦閉じる」を押してください。</div>
       <div id="limit-alert-list"></div>
     </div>
   </div>
@@ -293,6 +316,19 @@ export function layout(title: string, content: string, activePage: string = '', 
       style="width:40px;height:40px;border-radius:50%;background:#fff;color:#1e3a5f;border:2px solid #1e3a5f;box-shadow:0 4px 10px rgba(0,0,0,0.2);font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none;">メモ</a>
     <button id="report-fab-btn" onclick="openQrModal()" aria-label="新規報告" title="新規報告"
       style="width:54px;height:54px;border-radius:50%;background:#1e3a5f;color:#fff;border:none;box-shadow:0 4px 14px rgba(0,0,0,0.3);font-size:26px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;">＋</button>
+  </div>
+  <div id="phone-search-wrap" style="position:fixed;right:84px;bottom:20px;z-index:60;display:flex;align-items:flex-end;gap:8px;">
+    <div id="phone-search-panel" style="display:none;background:#fff;border-radius:10px;box-shadow:0 4px 14px rgba(0,0,0,0.25);padding:8px;flex-direction:column;gap:6px;width:260px;max-width:calc(100vw - 140px);">
+      <div style="display:flex;gap:6px;">
+        <input id="phone-search-input" type="tel" inputmode="tel" placeholder="電話番号で案件検索" autocomplete="off"
+          style="flex:1;min-width:0;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;font-size:14px;"
+          onkeydown="if(event.key==='Enter'){searchReportByPhone();}">
+        <button onclick="searchReportByPhone()" style="background:#1e3a5f;color:#fff;border:none;border-radius:6px;padding:0 14px;font-size:13px;font-weight:600;cursor:pointer;">検索</button>
+      </div>
+      <div id="phone-search-results" style="display:none;max-height:280px;overflow-y:auto;border-top:1px solid #f3f4f6;"></div>
+    </div>
+    <button id="phone-search-toggle-btn" onclick="togglePhoneSearchPanel(event)" aria-label="電話番号で案件検索" title="電話番号で案件検索"
+      style="width:44px;height:44px;border-radius:50%;background:#fff;color:#1e3a5f;border:2px solid #1e3a5f;box-shadow:0 4px 10px rgba(0,0,0,0.2);font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;">TEL</button>
   </div>
   ${quickReportModalHtml()}
   ` : ''}
@@ -323,31 +359,64 @@ export function layout(title: string, content: string, activePage: string = '', 
     function escLimitText(s) {
       return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
+    var VEHICLE_ALERT_STYLES = {
+      notice:   { bg: '#eff6ff', border: '#bfdbfe', text: '#1e3a8a', tag: '【予告】' },
+      warning:  { bg: '#fffbeb', border: '#fde68a', text: '#92400e', tag: '【注意】' },
+      critical: { bg: '#fef2f2', border: '#fecaca', text: '#7f1d1d', tag: '【警告】' },
+    };
+    function vehicleDaysLabel(days) {
+      if (days < 0) return '期限を' + (-days) + '日超過しています';
+      if (days === 0) return '本日が期限です';
+      if (days === 1) return '明日が期限です（前日）';
+      return 'あと' + days + '日です';
+    }
     function renderLimitAlerts(items) {
       var wrap = document.getElementById('limit-alert-overlay');
       var list = document.getElementById('limit-alert-list');
       if (!items || !items.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
       list.innerHTML = items.map(function (l) {
-        return '<div style="display:flex;align-items:flex-start;gap:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:12px 14px;margin-bottom:10px;">'
+        if (l.kind === 'vehicle') {
+          var st = VEHICLE_ALERT_STYLES[l.severity] || VEHICLE_ALERT_STYLES.notice;
+          return '<div class="limit-alert-item" style="display:flex;align-items:flex-start;gap:10px;background:' + st.bg + ';border:1px solid ' + st.border + ';border-radius:10px;margin-bottom:10px;">'
+            + '<div style="flex:1;min-width:0;">'
+            + '<div class="limit-alert-item-title" style="font-weight:800;color:' + st.text + ';">板橋' + l.ka + '課・車番 ' + escLimitText(l.car_no) + '・' + escLimitText(l.field_label) + '</div>'
+            + '<div class="limit-alert-item-body" style="color:#111;margin-top:4px;word-break:break-all;">' + st.tag + ' ' + vehicleDaysLabel(l.days_remaining) + '（期限: ' + escLimitText(l.limit_date) + '）</div>'
+            + '</div>'
+            + '<button onclick="snoozeVehicleAlert(\\'' + l.source + '\\', ' + l.record_id + ')" style="flex-shrink:0;background:#4b5563;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">一旦閉じる</button>'
+            + '</div>';
+        }
+        return '<div class="limit-alert-item" style="display:flex;align-items:flex-start;gap:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;margin-bottom:10px;">'
           + '<div style="flex:1;min-width:0;">'
-          + '<div style="font-size:13px;font-weight:800;color:#7f1d1d;">板橋' + l.division + '課・' + escLimitText(l.limit_time) + 'まで</div>'
-          + '<div style="font-size:14px;color:#111;margin-top:4px;word-break:break-all;">' + escLimitText(l.task) + '</div>'
+          + '<div class="limit-alert-item-title" style="font-weight:800;color:#7f1d1d;">板橋' + l.division + '課・' + escLimitText(l.limit_time) + 'まで</div>'
+          + '<div class="limit-alert-item-body" style="color:#111;margin-top:4px;word-break:break-all;">' + escLimitText(l.task) + '</div>'
           + '</div>'
-          + '<button onclick="dismissLimitAlert(' + l.id + ')" style="flex-shrink:0;background:#16a34a;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;">完了</button>'
+          + '<button onclick="dismissLimitAlert(' + l.id + ')" style="flex-shrink:0;background:#16a34a;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">完了</button>'
           + '</div>';
       }).join('');
       wrap.style.display = 'flex';
     }
     async function checkLimits() {
       try {
-        var res = await fetch('${ADMIN_PATH}/api/limits/pending');
-        if (!res.ok) return;
-        var data = await res.json();
-        renderLimitAlerts(data.limits || []);
+        var results = await Promise.all([
+          fetch('${ADMIN_PATH}/api/limits/pending').then(function (r) { return r.ok ? r.json() : { limits: [] }; }).catch(function () { return { limits: [] }; }),
+          fetch('${ADMIN_PATH}/api/vehicle-deadlines/alerts/pending').then(function (r) { return r.ok ? r.json() : { alerts: [] }; }).catch(function () { return { alerts: [] }; }),
+        ]);
+        var handoverItems = (results[0].limits || []).map(function (l) { l.kind = 'handover'; return l; });
+        var vehicleItems = (results[1].alerts || []).map(function (l) { l.kind = 'vehicle'; return l; });
+        renderLimitAlerts(handoverItems.concat(vehicleItems));
       } catch (e) { /* 通信エラー時は次回ポーリングに委ねる */ }
     }
     async function dismissLimitAlert(id) {
       try { await fetch('${ADMIN_PATH}/api/limits/' + id + '/dismiss', { method: 'POST' }); } catch (e) {}
+      checkLimits();
+    }
+    async function snoozeVehicleAlert(source, recordId) {
+      try {
+        await fetch('${ADMIN_PATH}/api/vehicle-deadlines/alerts/snooze', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: source, record_id: recordId }),
+        });
+      } catch (e) {}
       checkLimits();
     }
     var _limitsInterval = null;
@@ -481,6 +550,66 @@ export function layout(title: string, content: string, activePage: string = '', 
       if (reportBtn && !hasAnyTab) reportBtn.style.display = 'none';
       if (wrap && !hasAnyTab && !document.getElementById('report-fab-memo-btn')) wrap.style.display = 'none';
     })();
+    function escPhoneSearchHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+    function togglePhoneSearchPanel(ev) {
+      if (ev) ev.stopPropagation();
+      const panel = document.getElementById('phone-search-panel');
+      const opening = panel.style.display !== 'flex';
+      panel.style.display = opening ? 'flex' : 'none';
+      if (opening) {
+        document.getElementById('phone-search-input').focus();
+      } else {
+        document.getElementById('phone-search-results').style.display = 'none';
+        document.getElementById('phone-search-results').innerHTML = '';
+      }
+    }
+    document.addEventListener('click', function (ev) {
+      const wrap = document.getElementById('phone-search-wrap');
+      if (wrap && wrap.style.display !== 'none' && !wrap.contains(ev.target)) {
+        const panel = document.getElementById('phone-search-panel');
+        if (panel) panel.style.display = 'none';
+      }
+    });
+    function searchReportByPhone() {
+      const input = document.getElementById('phone-search-input');
+      const phone = input.value.trim();
+      const resultsBox = document.getElementById('phone-search-results');
+      if (!phone) { return; }
+      resultsBox.style.display = 'block';
+      resultsBox.innerHTML = '<div style="padding:10px;font-size:12px;color:#9ca3af;">検索中...</div>';
+      fetch('${ADMIN_PATH}/settings/reports/search-by-phone?phone=' + encodeURIComponent(phone))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          const results = data.results || [];
+          if (results.length === 0) {
+            resultsBox.innerHTML = '<div style="padding:10px;font-size:12px;color:#9ca3af;">該当する案件が見つかりませんでした</div>';
+            return;
+          }
+          if (results.length === 1) {
+            window.open(results[0].href, '_blank');
+          }
+          resultsBox.innerHTML = results.map(function (r) {
+            const dateStr = (r.createdAt || '').slice(5, 16).replace('-', '/');
+            return '<div class="phone-search-result-row" data-href="' + escPhoneSearchHtml(r.href) + '" '
+              + 'style="padding:8px 6px;border-bottom:1px solid #f3f4f6;cursor:pointer;font-size:12px;">'
+              + '<div style="font-weight:700;color:#111827;">[' + escPhoneSearchHtml(r.kindLabel) + '] ' + escPhoneSearchHtml(r.name || '(名前なし)') + ' ' + escPhoneSearchHtml(r.phone || '') + '</div>'
+              + '<div style="color:#9ca3af;">' + escPhoneSearchHtml(dateStr) + '　' + escPhoneSearchHtml(r.caseId || '') + '　' + (r.resolved ? '対応済' : '対応中') + '</div>'
+              + '</div>';
+          }).join('');
+          resultsBox.querySelectorAll('.phone-search-result-row').forEach(function (row) {
+            row.addEventListener('mouseover', function () { row.style.background = '#f9fafb'; });
+            row.addEventListener('mouseout', function () { row.style.background = ''; });
+            row.addEventListener('click', function () { window.open(row.getAttribute('data-href'), '_blank'); });
+          });
+        })
+        .catch(function () {
+          resultsBox.innerHTML = '<div style="padding:10px;font-size:12px;color:#dc2626;">通信エラーが発生しました</div>';
+        });
+    }
     ${showReportFab ? quickReportModalScript() : ''}
   </script>
 </body>

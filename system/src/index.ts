@@ -33,6 +33,7 @@ import adminLiffRoutes from './routes/admin_liff';
 import adminLineUsageRoutes from './routes/admin_line_usage';
 import adminBentenRoutes from './routes/admin_benten';
 import adminInspectionRoutes from './routes/admin_inspection';
+import adminVehicleDeadlinesRoutes from './routes/admin_vehicle_deadlines';
 import inspectionApi from './routes/api/inspection';
 import adminDocumentsRoutes from './routes/admin_documents';
 import documentsApi from './routes/api/documents';
@@ -178,6 +179,8 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   if (isPublicAdminSubPath(subPath)) return next();
   // リミット機能のグローバル通知は所属課だけで判定するため、ページ権限(handover等)の有無に関わらず全アカウントが利用できる
   if (subPath.startsWith('/api/limits/')) return next();
+  // メーター検査・車検の大画面アラートも同様に、ページ権限(vehicle-deadlines)の有無に関わらず所属課だけで判定する
+  if (subPath.startsWith('/api/vehicle-deadlines/alerts/')) return next();
   // 班長個人別確認: 書き込み(その他メモ保存)も含めて閲覧権限(kancho-shift)だけで利用可能にする
   // （<key>.edit を要求する既定ルールを外し、ルート側で kancho-shift の有無だけをチェックする）
   if (subPath.startsWith('/api/kancho-personal/')) return next();
@@ -224,6 +227,7 @@ app.route(`/${SECRET}/admin`, adminLiffRoutes);
 app.route(`/${SECRET}/admin`, adminLineUsageRoutes);
 app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
+app.route(`/${SECRET}/admin`, adminVehicleDeadlinesRoutes);
 app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoWishRoutes);

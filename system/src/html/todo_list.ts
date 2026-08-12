@@ -20,6 +20,19 @@ export type TodoTaskRow = {
   done_at: string | null;
 };
 
+export type TodoWorkerCheckRow = {
+  id: number;
+  ka: number | null;
+  date: string;
+  work_type: string;
+  employee_id: number | null;
+  employee_name: string;
+  is_done: number;
+  done_by: string | null;
+  done_at: string | null;
+  sort_order: number;
+};
+
 const WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
 
 function weekdaysLabel(weekdays: string | null): string {
@@ -55,6 +68,39 @@ function editRowHtml(t: TodoTaskRow): string {
   </div>`;
 }
 
+function workerCheckRowHtml(w: TodoWorkerCheckRow, editable: boolean): string {
+  const done = !!w.is_done;
+  return `<div class="wc-row${done ? ' done' : ''}" data-wc-id="${w.id}">
+    <input type="checkbox" class="wc-check" data-wc-id="${w.id}" ${done ? 'checked' : ''}>
+    <span class="wc-name">${escHtml(w.employee_name)}</span>
+    ${done && w.done_by ? `<span class="wc-doneby">${escHtml(w.done_by)}が完了</span>` : ''}
+    ${editable ? `<button class="wc-del" data-wc-del="${w.id}" title="削除">×</button>` : ''}
+  </div>`;
+}
+
+function workerChecklistHtml(workerChecks: TodoWorkerCheckRow[], editable: boolean): string {
+  const groups: Array<{ workType: string; rows: TodoWorkerCheckRow[] }> = [];
+  for (const w of workerChecks) {
+    const g = groups.find(g => g.workType === w.work_type);
+    if (g) g.rows.push(w); else groups.push({ workType: w.work_type, rows: [w] });
+  }
+  const groupsHtml = groups.length > 0
+    ? groups.map(g => `<div class="wc-group">
+        <div class="wc-group-title">${escHtml(g.workType)}</div>
+        ${g.rows.map(w => workerCheckRowHtml(w, editable)).join('')}
+      </div>`).join('')
+    : '<div style="padding:12px 4px;color:#9ca3af;font-size:13px;">勤務者が登録されていません</div>';
+
+  return `
+  <div class="wc-wrap">
+    <div class="wc-header">
+      <span class="wc-heading">勤務者チェックリスト（本日）</span>
+      ${editable ? `<button class="todo-btn primary" id="wc-add-btn">＋勤務者を追加</button>` : ''}
+    </div>
+    <div id="wc-list">${groupsHtml}</div>
+  </div>`;
+}
+
 const KA_TABS: Array<{ key: string; label: string }> = [
   { key: '1', label: '1課' },
   { key: '2', label: '2課' },
@@ -71,9 +117,10 @@ export function todoListPage(params: {
   todayDate: string;
   dateLabel: string;
   tasks: TodoTaskRow[];
+  workerChecks: TodoWorkerCheckRow[];
   editable: boolean;
 }): string {
-  const { ka, date, prevDate, nextDate, todayDate, dateLabel, tasks, editable } = params;
+  const { ka, date, prevDate, nextDate, todayDate, dateLabel, tasks, workerChecks, editable } = params;
   const dt = new Date(`${date}T00:00:00Z`);
   const todayWeekday = dt.getUTCDay();
   const todayDom = dt.getUTCDate();
@@ -118,6 +165,23 @@ export function todoListPage(params: {
   .todo-wd-chips { display:flex; gap:6px; flex-wrap:wrap; }
   .todo-wd-chip { display:flex; align-items:center; gap:3px; font-size:12px; border:1px solid #d1d5db; border-radius:5px; padding:3px 8px; cursor:pointer; }
   .todo-modal-btns { display:flex; gap:8px; margin-top:16px; }
+  .wc-wrap { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; margin-top:6px; }
+  .wc-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .wc-heading { font-size:13.5px; font-weight:700; color:#1a3a5c; }
+  .wc-group { margin-bottom:10px; }
+  .wc-group:last-child { margin-bottom:0; }
+  .wc-group-title { font-size:11.5px; font-weight:700; color:#fff; background:#6b7280; border-radius:4px; padding:2px 8px; display:inline-block; margin-bottom:4px; }
+  .wc-row { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid #f1f5f9; }
+  .wc-row:last-child { border-bottom:none; }
+  .wc-row.done .wc-name { color:#9ca3af; text-decoration:line-through; }
+  .wc-check { width:18px; height:18px; flex-shrink:0; }
+  .wc-name { font-size:13.5px; color:#1f2937; }
+  .wc-doneby { margin-left:auto; font-size:11px; color:#9ca3af; }
+  .wc-del { border:none; background:none; color:#b91c1c; cursor:pointer; font-size:15px; line-height:1; padding:2px 4px; }
+  .wc-search-results { display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #e5e7eb; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.12); margin-top:4px; max-height:220px; overflow-y:auto; z-index:70; }
+  .wc-search-result { padding:8px 10px; font-size:13px; cursor:pointer; border-bottom:1px solid #f3f4f6; }
+  .wc-search-result:last-child { border-bottom:none; }
+  .wc-search-result:hover { background:#f9fafb; }
 </style>
 
 <div class="todo-wrap">
@@ -142,6 +206,8 @@ export function todoListPage(params: {
     <div id="todo-edit-list">${tasks.map(editRowHtml).join('')}</div>
     <div style="margin-top:10px;"><button class="todo-btn primary" id="todo-add-btn">＋タスクを追加</button></div>
   </div>` : ''}
+
+  ${workerChecklistHtml(workerChecks, editable)}
 </div>
 
 <div class="todo-modal-bg" id="todo-modal-bg">
@@ -195,6 +261,173 @@ if (EDITABLE) {
     if (btn) openTaskModal(Number(btn.dataset.editId));
   });
   attachDragHandlers();
+
+  document.getElementById('wc-add-btn').addEventListener('click', openWorkerModal);
+  document.addEventListener('click', function(e) {
+    var delBtn = e.target.closest ? e.target.closest('[data-wc-del]') : null;
+    if (delBtn) deleteWorkerCheck(Number(delBtn.dataset.wcDel));
+  });
+}
+
+document.addEventListener('change', function(e) {
+  var cb = e.target.closest ? e.target.closest('.wc-check') : null;
+  if (!cb) return;
+  var id = Number(cb.dataset.wcId);
+  var isDone = cb.checked;
+  var row = cb.closest('.wc-row');
+  row.classList.toggle('done', isDone);
+  fetch(API + '/worker-checks/' + id + '/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_done: isDone })
+  }).then(function(r) {
+    if (!r.ok) { cb.checked = !isDone; row.classList.toggle('done', !isDone); alert('更新に失敗しました'); }
+  }).catch(function() {
+    cb.checked = !isDone;
+    row.classList.toggle('done', !isDone);
+    alert('通信エラーが発生しました');
+  });
+});
+
+function deleteWorkerCheck(id) {
+  if (!confirm('この勤務者を削除しますか？')) return;
+  fetch(API + '/worker-checks/' + id + '/delete', { method: 'POST' })
+    .then(function(r) { if (r.ok) { location.reload(); } else { alert('削除に失敗しました'); } })
+    .catch(function() { alert('通信エラーが発生しました'); });
+}
+
+var wcSelectedEmp = null;
+
+function openWorkerModal() {
+  wcSelectedEmp = null;
+  var modal = document.getElementById('todo-modal');
+  modal.innerHTML = '';
+  modal.appendChild(buildWorkerModalForm());
+  document.getElementById('todo-modal-bg').style.display = 'block';
+  fetch(API + '/worker-checks/work-types?ka=' + encodeURIComponent(KA)).then(function(r) {
+    return r.ok ? r.json() : [];
+  }).then(function(list) {
+    var dl = document.getElementById('wc-worktype-list');
+    if (!dl) return;
+    dl.innerHTML = '';
+    (list || []).forEach(function(v) {
+      var opt = document.createElement('option');
+      opt.value = v;
+      dl.appendChild(opt);
+    });
+  }).catch(function() {});
+}
+
+function buildWorkerModalForm() {
+  var wrap = document.createElement('div');
+  wrap.className = 'todo-modal-inner';
+
+  var h = document.createElement('h3');
+  h.style.margin = '0';
+  h.textContent = '勤務者を追加';
+  wrap.appendChild(h);
+
+  var wtLabel = document.createElement('label');
+  wtLabel.textContent = '勤務種別（例: 日勤A）';
+  wrap.appendChild(wtLabel);
+  var wtInput = document.createElement('input');
+  wtInput.type = 'text';
+  wtInput.id = 'wc-worktype';
+  wtInput.setAttribute('list', 'wc-worktype-list');
+  wrap.appendChild(wtInput);
+  var datalist = document.createElement('datalist');
+  datalist.id = 'wc-worktype-list';
+  wrap.appendChild(datalist);
+
+  var nameLabel = document.createElement('label');
+  nameLabel.textContent = '勤務者（氏名・社員番号で検索）';
+  wrap.appendChild(nameLabel);
+  var searchWrap = document.createElement('div');
+  searchWrap.style.position = 'relative';
+  var searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.id = 'wc-emp-search';
+  searchInput.autocomplete = 'off';
+  searchInput.placeholder = '氏名・社員番号で検索...';
+  searchWrap.appendChild(searchInput);
+  var results = document.createElement('div');
+  results.id = 'wc-emp-results';
+  results.className = 'wc-search-results';
+  searchWrap.appendChild(results);
+  wrap.appendChild(searchWrap);
+
+  var selected = document.createElement('div');
+  selected.id = 'wc-selected-emp';
+  selected.style.marginTop = '6px';
+  selected.style.fontSize = '12.5px';
+  selected.style.color = '#374151';
+  wrap.appendChild(selected);
+
+  var timer = null;
+  searchInput.addEventListener('input', function() {
+    var q = searchInput.value.trim();
+    clearTimeout(timer);
+    if (!q) { results.style.display = 'none'; results.innerHTML = ''; return; }
+    timer = setTimeout(function() {
+      fetch(API + '/employees/search?q=' + encodeURIComponent(q)).then(function(r) {
+        return r.ok ? r.json() : [];
+      }).then(function(list) {
+        if (!list.length) {
+          results.innerHTML = '<div class="wc-search-result">該当する社員がいません</div>';
+        } else {
+          results.innerHTML = list.map(function(e) {
+            return '<div class="wc-search-result" data-emp-id="' + e.id + '" data-emp-name="' + String(e.name).replace(/"/g, '&quot;') + '">'
+              + '<span style="font-weight:600;">' + e.name + '</span>'
+              + '<span style="color:#9ca3af;margin-left:8px;font-size:11.5px;">' + e.emp_no + '</span></div>';
+          }).join('');
+        }
+        results.style.display = 'block';
+      }).catch(function() {});
+    }, 200);
+  });
+  results.addEventListener('click', function(e) {
+    var row = e.target.closest ? e.target.closest('.wc-search-result') : null;
+    if (!row || !row.dataset.empId) return;
+    wcSelectedEmp = { id: Number(row.dataset.empId), name: row.dataset.empName };
+    selected.textContent = '選択中: ' + wcSelectedEmp.name;
+    results.style.display = 'none';
+    searchInput.value = '';
+  });
+
+  var btnRow = document.createElement('div');
+  btnRow.className = 'todo-modal-btns';
+  var saveBtn = document.createElement('button');
+  saveBtn.className = 'todo-btn primary';
+  saveBtn.textContent = '追加';
+  saveBtn.addEventListener('click', saveWorkerModal);
+  btnRow.appendChild(saveBtn);
+  var cancelBtn = document.createElement('button');
+  cancelBtn.className = 'todo-btn';
+  cancelBtn.textContent = 'キャンセル';
+  cancelBtn.addEventListener('click', closeTaskModal);
+  btnRow.appendChild(cancelBtn);
+  wrap.appendChild(btnRow);
+
+  return wrap;
+}
+
+function saveWorkerModal() {
+  var workType = document.getElementById('wc-worktype').value.trim();
+  if (!workType) { alert('勤務種別を入力してください'); return; }
+  if (!wcSelectedEmp) { alert('勤務者を検索して選択してください'); return; }
+  var payload = {
+    ka: KA === 'toban' ? null : Number(KA),
+    date: DATE,
+    work_type: workType,
+    employee_id: wcSelectedEmp.id
+  };
+  fetch(API + '/worker-checks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, d: d }; }); })
+    .then(function(res) {
+      if (!res.ok) { alert(res.d && res.d.error ? res.d.error : '追加に失敗しました'); return; }
+      location.reload();
+    })
+    .catch(function() { alert('通信エラーが発生しました'); });
 }
 
 function openTaskModal(id) {

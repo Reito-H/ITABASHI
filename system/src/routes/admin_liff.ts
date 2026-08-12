@@ -256,6 +256,42 @@ app.get('/settings/reports', async (c) => {
   return c.html(layout('報告センター', content, 'report-center'));
 });
 
+// GET /settings/reports/search-by-phone — フローティング電話番号検索欄からの呼び出し用（JSON）
+// お客様TEL/事故相手TELをハイフン等除去のうえ部分一致で横断検索する
+app.get('/settings/reports/search-by-phone', async (c) => {
+  const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
+  const allowed = perms === null ? REPORT_LIST_KINDS : REPORT_LIST_KINDS.filter(k => perms.includes(k.permKey));
+  const normalized = (c.req.query('phone') ?? '').replace(/[^0-9]/g, '');
+  if (!normalized || allowed.length === 0) {
+    return c.json({ results: [] });
+  }
+
+  const digitsOnly = (col: string) =>
+    `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(${col}, ''), '-', ''), ' ', ''), '(', ''), ')', '')`;
+  const unionSql = allowed.map(k => REPORT_BRANCH_SQL[k.slug]).join(' UNION ALL ');
+  const sql = `SELECT * FROM (${unionSql}) u
+    WHERE ${digitsOnly('u.customer_phone')} LIKE ? OR ${digitsOnly('u.secondary_phone')} LIKE ?
+    ORDER BY u.created_at DESC LIMIT 20`;
+  const like = `%${normalized}%`;
+  const result = await c.env.DB.prepare(sql).bind(like, like).all<UnifiedReportRow>();
+  const rows = result.results ?? [];
+
+  const kindBySlugMap = new Map(REPORT_LIST_KINDS.map(k => [k.kind, k]));
+  const results = rows.map(r => {
+    const info = kindBySlugMap.get(r.kind)!;
+    return {
+      href: `${ADMIN_PATH}${info.printPath}/${r.id}`,
+      kindLabel: info.label,
+      caseId: r.vehicle_no || (r.case_no ? `No.${r.case_no}` : ''),
+      name: r.customer_name || r.secondary_name || '',
+      phone: r.customer_phone || r.secondary_phone || '',
+      createdAt: r.created_at,
+      resolved: r.status === 'resolved',
+    };
+  });
+  return c.json({ results });
+});
+
 // 状態セルのHTML（resolvedLabel: 忘れ物・事故=解決済 / 違反=対応済）
 function statusCellHtml(resolved: boolean, resolvedLabel: string): string {
   const label = resolved ? resolvedLabel : '対応中';
@@ -1744,20 +1780,20 @@ app.get('/settings/lost-items/print/:id', async (c) => {
   if (!r) return c.text('報告が見つかりません', 404);
 
   const fields: ReportPrintField[] = [
-    { label: '種別', value: r.report_type === 'customer' ? '客問い合わせ' : '社員報告' },
-    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
-    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
-    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
-    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
-    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
-    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
-    { label: '忘れ物の内容', value: r.item_description ?? '', full: true, field: 'item_description', input: 'textarea' },
+    { label: '種別', value: r.report_type === 'customer' ? '客問い合わせ' : '社員報告', width: 'quarter' },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no', width: 'quarter' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
+    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', width: 'quarter' },
+    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team', width: 'quarter' },
+    { label: '忘れ物の内容', value: r.item_description ?? '', width: 'full', field: 'item_description', input: 'textarea' },
     { label: '乗車地', value: r.pickup_location ?? '', field: 'pickup_location' },
     { label: '降車地', value: r.dropoff_location ?? '', field: 'dropoff_location' },
-    { label: '客氏名', value: r.customer_name ?? '', field: 'customer_name' },
-    { label: '客電話番号', value: r.customer_phone ?? '', field: 'customer_phone' },
-    { label: '返却方法', value: r.return_method ?? '', field: 'return_method' },
-    { label: '備考', value: r.notes ?? '', full: true, field: 'notes', input: 'textarea' },
+    { label: '客氏名', value: r.customer_name ?? '', field: 'customer_name', width: 'third' },
+    { label: '客電話番号', value: r.customer_phone ?? '', field: 'customer_phone', width: 'third' },
+    { label: '返却方法', value: r.return_method ?? '', field: 'return_method', width: 'third' },
+    { label: '備考', value: r.notes ?? '', width: 'full', field: 'notes', input: 'textarea' },
   ];
 
   return c.html(renderReportPrintPage({
@@ -1792,6 +1828,7 @@ app.get('/settings/accidents/print/:id', async (c) => {
     customer_name: string | null; customer_phone: string | null;
     substitute_requested: number | null; police_notified: number | null; passenger_delivered: number | null;
     additional_info: string | null; summary_text: string | null; print_notes: string | null;
+    confirm_name: string | null; confirm_date: string | null;
     status: string; created_at: string;
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
@@ -1799,24 +1836,23 @@ app.get('/settings/accidents/print/:id', async (c) => {
   if (!r) return c.text('報告が見つかりません', 404);
 
   const fields: ReportPrintField[] = [
-    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
-    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
-    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
-    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
-    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
-    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
-    { label: '事故形態', value: r.accident_type ?? '', field: 'accident_type' },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no', width: 'quarter' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
+    { label: '課-班', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', comboField: 'employee_team', comboValue: r.employee_team != null ? String(r.employee_team) : '', width: 'quarter' },
+    { label: '車両状態', value: r.car_status ?? '', field: 'car_status', width: 'quarter' },
+    { label: '事故形態', value: r.accident_type ?? '', field: 'accident_type', width: 'half' },
     { label: '発生場所', value: r.location ?? '', field: 'location' },
-    { label: '車両状態', value: r.car_status ?? '', field: 'car_status' },
     { label: '乗車中のお客様氏名', value: r.customer_name ?? '', field: 'customer_name' },
-    { label: '乗車中のお客様電話番号', value: r.customer_phone ?? '', field: 'customer_phone' },
+    { label: '乗客TEL', value: r.customer_phone ?? '', field: 'customer_phone' },
     { label: '事故相手の名前', value: r.other_party_name ?? '', field: 'other_party_name' },
-    { label: '事故相手の電話番号', value: r.other_party_phone ?? '', field: 'other_party_phone' },
-    { label: '代車要請', value: '要請済み', field: 'substitute_requested', input: 'checkbox', checked: !!r.substitute_requested },
-    { label: '警察対応', value: '指示済み', field: 'police_notified', input: 'checkbox', checked: !!r.police_notified },
-    { label: '乗客対応', value: '送り届け済み', field: 'passenger_delivered', input: 'checkbox', checked: !!r.passenger_delivered },
-    { label: '追加情報', value: r.additional_info ?? '', full: true, field: 'additional_info', input: 'textarea' },
-    { label: '報告書まとめ', value: r.summary_text ?? '', full: true },
+    { label: '事故相手TEL', value: r.other_party_phone ?? '', field: 'other_party_phone' },
+    { label: '代車要請', value: '要請済み', field: 'substitute_requested', input: 'checkbox', checked: !!r.substitute_requested, width: 'third' },
+    { label: '警察対応', value: '指示済み', field: 'police_notified', input: 'checkbox', checked: !!r.police_notified, width: 'third' },
+    { label: '乗客対応', value: '送り届け済み', field: 'passenger_delivered', input: 'checkbox', checked: !!r.passenger_delivered, width: 'third' },
+    { label: '追加情報', value: r.additional_info ?? '', width: 'full', field: 'additional_info', input: 'textarea' },
+    { label: '報告書まとめ', value: r.summary_text ?? '', width: 'full', field: 'summary_text', input: 'textarea', compact: true },
   ];
 
   return c.html(renderReportPrintPage({
@@ -1832,6 +1868,8 @@ app.get('/settings/accidents/print/:id', async (c) => {
     apiPath: `${ADMIN_PATH}/api/liff/accident-reports`,
     deleteLabel: '事故報告',
     listHref: `${ADMIN_PATH}/settings/reports`,
+    signConfirmField: 'confirm_name', signConfirmValue: r.confirm_name ?? '',
+    signDateField: 'confirm_date', signDateValue: r.confirm_date ?? '',
   }));
 });
 
@@ -1856,22 +1894,22 @@ app.get('/settings/violations/print/:id', async (c) => {
   if (!r) return c.text('報告が見つかりません', 404);
 
   const fields: ReportPrintField[] = [
-    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
-    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
-    { label: '違反発生日時', value: r.violation_at ?? '', field: 'violation_at' },
-    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
-    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
-    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
-    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
-    { label: '違反種類', value: r.violation_type_name ?? '', field: 'violation_type_name' },
-    { label: '点数', value: r.violation_points != null ? String(r.violation_points) : '', field: 'violation_points' },
-    { label: '反則金', value: r.violation_fine_amount != null ? String(r.violation_fine_amount) : '', field: 'violation_fine_amount' },
-    { label: '発生場所', value: r.location ?? '', field: 'location' },
-    { label: 'どこから', value: r.travel_from ?? '', field: 'travel_from' },
-    { label: 'どこへ進行中', value: r.travel_to ?? '', field: 'travel_to' },
-    { label: '車両状態', value: r.car_status ?? '', field: 'car_status' },
-    { label: '代車要請が必要', value: '必要', field: 'substitute_needed', input: 'checkbox', checked: !!r.substitute_needed },
-    { label: '備考', value: r.notes ?? '', full: true, field: 'notes', input: 'textarea' },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no', width: 'quarter' },
+    { label: '違反発生日時', value: r.violation_at ?? '', field: 'violation_at', width: 'quarter' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
+    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', width: 'quarter' },
+    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team', width: 'quarter' },
+    { label: '違反種類', value: r.violation_type_name ?? '', field: 'violation_type_name', width: 'quarter' },
+    { label: '点数', value: r.violation_points != null ? String(r.violation_points) : '', field: 'violation_points', width: 'quarter' },
+    { label: '反則金', value: r.violation_fine_amount != null ? String(r.violation_fine_amount) : '', field: 'violation_fine_amount', width: 'quarter' },
+    { label: '車両状態', value: r.car_status ?? '', field: 'car_status', width: 'quarter' },
+    { label: '代車要請が必要', value: '必要', field: 'substitute_needed', input: 'checkbox', checked: !!r.substitute_needed, width: 'quarter' },
+    { label: '発生場所', value: r.location ?? '', field: 'location', width: 'third' },
+    { label: 'どこから', value: r.travel_from ?? '', field: 'travel_from', width: 'third' },
+    { label: 'どこへ進行中', value: r.travel_to ?? '', field: 'travel_to', width: 'third' },
+    { label: '備考', value: r.notes ?? '', width: 'full', field: 'notes', input: 'textarea' },
   ];
 
   return c.html(renderReportPrintPage({
@@ -1911,18 +1949,18 @@ app.get('/settings/general-reports/print/:id', async (c) => {
 
   const fields: ReportPrintField[] = [
     { label: 'タイトル', value: r.title ?? '', field: 'title' },
-    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at' },
-    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no' },
+    { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
+    { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no', width: 'quarter' },
     { label: '住所', value: r.location ?? '', field: 'location' },
-    { label: '出発地', value: r.route_from ?? '', field: 'route_from' },
-    { label: '到着地', value: r.route_to ?? '', field: 'route_to' },
-    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name' },
-    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no' },
-    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division' },
-    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team' },
+    { label: '出発地', value: r.route_from ?? '', field: 'route_from', width: 'quarter' },
+    { label: '到着地', value: r.route_to ?? '', field: 'route_to', width: 'quarter' },
+    { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
+    { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
+    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', width: 'quarter' },
+    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team', width: 'quarter' },
     { label: 'お客様名', value: r.customer_name ?? '', field: 'customer_name' },
     { label: 'お客様電話番号', value: r.customer_phone ?? '', field: 'customer_phone' },
-    { label: '報告内容', value: r.content ?? '', full: true, field: 'content', input: 'textarea' },
+    { label: '報告内容', value: r.content ?? '', width: 'full', field: 'content', input: 'textarea' },
   ];
 
   return c.html(renderReportPrintPage({
@@ -2332,7 +2370,8 @@ const REPORT_EDITABLE_FIELDS: Record<string, string[]> = {
     'item_description', 'pickup_location', 'dropoff_location', 'customer_name', 'customer_phone', 'return_method', 'notes', 'print_notes'],
   accident: ['received_at', 'vehicle_no', 'employee_name', 'employee_emp_no', 'employee_division', 'employee_team',
     'accident_type', 'location', 'car_status', 'substitute_requested', 'police_notified', 'passenger_delivered',
-    'additional_info', 'other_party_name', 'other_party_phone', 'customer_name', 'customer_phone', 'print_notes'],
+    'additional_info', 'other_party_name', 'other_party_phone', 'customer_name', 'customer_phone', 'print_notes', 'summary_text',
+    'confirm_name', 'confirm_date'],
   violation: ['received_at', 'vehicle_no', 'violation_at', 'employee_name', 'employee_emp_no', 'employee_division', 'employee_team',
     'violation_type_name', 'violation_points', 'violation_fine_amount', 'location', 'travel_from', 'travel_to',
     'car_status', 'substitute_needed', 'notes', 'print_notes'],
