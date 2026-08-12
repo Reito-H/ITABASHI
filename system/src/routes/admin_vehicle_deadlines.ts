@@ -1,7 +1,8 @@
 // メーター検査（仮検査/本検査）・車検管理のAPI
 // ページ本体は「点検管理」(/inspection, admin_inspection.ts)の中の2タブとして表示される（このファイルはページを持たない）
-// 車両行はvehicle_teams(car_no, team 1-8)を正として自動反映する。team→課/班の対応は既存のinsTeamNum()/line_bot.tsと同じ:
-//   ka = ceil(team/2)、han = team - (ka-1)*2（1,2班=1課 / 3,4班=2課 / 5,6班=3課 / 7,8班=4課）
+// 車両行はvehicle_teams(car_no, team 1-8)を正として自動反映する。team→課の対応は既存のinsTeamNum()/line_bot.tsと同じ:
+//   ka = ceil(team/2)（1,2班=1課 / 3,4班=2課 / 5,6班=3課 / 7,8班=4課）
+// 班番号(team)は課ごとに1-2へ振り直さず、会社全体の実際の番号(1-8)をそのまま表示・フィルタに使う
 // 大画面アラート（10日前/5日前/前日で表示、課ベースで絞り込み）: /api/vehicle-deadlines/alerts/*
 //   ページ権限に依存せず全アカウントが使える（index.tsでバイパス設定。引き継ぎリミットの/api/limits/と同じ扱い）
 import { Hono } from 'hono';
@@ -13,15 +14,18 @@ function isValidDate(v: unknown): v is string {
   return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
-// ka(1-4)+team(1-2、省略可)から対象team範囲を返す。ka='all'または不正値はnull（絞り込みなし）
-function teamRangeFromQuery(ka: string | undefined, han: string | undefined): [number, number] | null {
+// ka(1-4)+team(実際の班番号1-8、省略可)から対象team範囲を返す。ka='all'または不正値はnull（絞り込みなし）
+// 班番号は課ごとに1-2へ振り直さず、会社全体の実際の番号(1-8)をそのまま使う（例: 2課の班は3班・4班）
+function teamRangeFromQuery(ka: string | undefined, team: string | undefined): [number, number] | null {
   if (!ka || !/^[1-4]$/.test(ka)) return null;
   const kaNum = parseInt(ka, 10);
-  if (han && /^[1-2]$/.test(han)) {
-    const t = (kaNum - 1) * 2 + parseInt(han, 10);
-    return [t, t];
+  const lo = (kaNum - 1) * 2 + 1;
+  const hi = (kaNum - 1) * 2 + 2;
+  if (team && /^[1-8]$/.test(team)) {
+    const t = parseInt(team, 10);
+    if (t === lo || t === hi) return [t, t];
   }
-  return [(kaNum - 1) * 2 + 1, (kaNum - 1) * 2 + 2];
+  return [lo, hi];
 }
 
 // ===== 社員検索（担当者オートコンプリート用） =====
@@ -48,7 +52,7 @@ type MeterRow = {
 };
 
 app.get('/api/vehicle-deadlines/meter', async (c) => {
-  const range = teamRangeFromQuery(c.req.query('ka'), c.req.query('han'));
+  const range = teamRangeFromQuery(c.req.query('ka'), c.req.query('team'));
   const where = range ? 'WHERE vt.team BETWEEN ? AND ?' : '';
   const rows = await c.env.DB.prepare(
     `SELECT vt.car_no, vt.team,
@@ -62,11 +66,7 @@ app.get('/api/vehicle-deadlines/meter', async (c) => {
      ORDER BY COALESCE(mi.tentative_limit, '9999-12-31') ASC, CAST(vt.car_no AS INTEGER) ASC`
   ).bind(...(range ?? [])).all<MeterRow>();
 
-  const results = (rows.results ?? []).map(r => ({
-    ...r,
-    ka: Math.ceil(r.team / 2),
-    han: r.team - (Math.ceil(r.team / 2) - 1) * 2,
-  }));
+  const results = (rows.results ?? []).map(r => ({ ...r, ka: Math.ceil(r.team / 2) }));
   return c.json({ rows: results });
 });
 
@@ -114,7 +114,7 @@ type ShakenRow = {
 };
 
 app.get('/api/vehicle-deadlines/shaken', async (c) => {
-  const range = teamRangeFromQuery(c.req.query('ka'), c.req.query('han'));
+  const range = teamRangeFromQuery(c.req.query('ka'), c.req.query('team'));
   const where = range ? 'WHERE vt.team BETWEEN ? AND ?' : '';
   const rows = await c.env.DB.prepare(
     `SELECT vt.car_no, vt.team, sr.shaken_date, sr.shaken_limit, sr.cert_exchange_limit
@@ -125,11 +125,7 @@ app.get('/api/vehicle-deadlines/shaken', async (c) => {
        CAST(vt.car_no AS INTEGER) ASC`
   ).bind(...(range ?? [])).all<ShakenRow>();
 
-  const results = (rows.results ?? []).map(r => ({
-    ...r,
-    ka: Math.ceil(r.team / 2),
-    han: r.team - (Math.ceil(r.team / 2) - 1) * 2,
-  }));
+  const results = (rows.results ?? []).map(r => ({ ...r, ka: Math.ceil(r.team / 2) }));
   return c.json({ rows: results });
 });
 

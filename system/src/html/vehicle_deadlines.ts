@@ -13,11 +13,11 @@ export function meterPanelHtml(): string {
         <button class="dept-btn" data-ka="4">4課</button>
         <button class="dept-btn" data-ka="all">全課</button>
       </div>
-      <span style="color:#bbb" class="vd-han-sep">｜</span>
-      <div class="dept-tabs vd-han-tabs">
-        <button class="dept-btn active" data-han="">全班</button>
-        <button class="dept-btn" data-han="1">1班</button>
-        <button class="dept-btn" data-han="2">2班</button>
+      <span style="color:#bbb" class="vd-team-sep">｜</span>
+      <div class="dept-tabs vd-team-tabs">
+        <button class="dept-btn active" data-team="">全班</button>
+        <button class="dept-btn" data-team="1">1班</button>
+        <button class="dept-btn" data-team="2">2班</button>
       </div>
     </div>
     <div style="font-size:12px;color:#888;margin:-4px 0 10px 2px;">板橋営業所の全車両を表示します。仮検査までの期限が近い車両から順に上に表示されます。</div>
@@ -45,11 +45,11 @@ export function shakenPanelHtml(): string {
         <button class="dept-btn" data-ka="4">4課</button>
         <button class="dept-btn" data-ka="all">全課</button>
       </div>
-      <span style="color:#bbb" class="vd-han-sep">｜</span>
-      <div class="dept-tabs vd-han-tabs">
-        <button class="dept-btn active" data-han="">全班</button>
-        <button class="dept-btn" data-han="1">1班</button>
-        <button class="dept-btn" data-han="2">2班</button>
+      <span style="color:#bbb" class="vd-team-sep">｜</span>
+      <div class="dept-tabs vd-team-tabs">
+        <button class="dept-btn active" data-team="">全班</button>
+        <button class="dept-btn" data-team="1">1班</button>
+        <button class="dept-btn" data-team="2">2班</button>
       </div>
     </div>
     <div style="font-size:12px;color:#888;margin:-4px 0 10px 2px;">板橋営業所の全車両を表示します。3つの期限のうち最も近いものが近い車両から順に上に表示されます。</div>
@@ -66,8 +66,26 @@ export function shakenPanelHtml(): string {
 
 export function vehicleDeadlinesClientScript(adminPath: string): string {
   return `
-    var VD = { meter: { ka: '1', han: '' }, shaken: { ka: '1', han: '' } };
+    var VD = { meter: { ka: '1', team: '' }, shaken: { ka: '1', team: '' } };
     var VD_LOADED = { meter: false, shaken: false };
+
+    // 班番号(1-8)は課ごとに1-2へ振り直さず、会社全体の実際の番号をそのまま使う（例: 2課は3班・4班）
+    function vdTeamsForKa(ka) {
+      var kaNum = parseInt(ka, 10);
+      if (!(kaNum >= 1 && kaNum <= 4)) return [];
+      var lo = (kaNum - 1) * 2 + 1;
+      return [lo, lo + 1];
+    }
+    function vdRebuildTeamButtons(kind) {
+      var root = document.querySelector('[data-kind="' + kind + '"]');
+      if (!root) return;
+      var wrap = root.querySelector('.vd-team-tabs');
+      if (!wrap) return;
+      var teams = vdTeamsForKa(VD[kind].ka);
+      var html = '<button class="dept-btn active" data-team="">全班</button>';
+      teams.forEach(function (t) { html += '<button class="dept-btn" data-team="' + t + '">' + t + '班</button>'; });
+      wrap.innerHTML = html;
+    }
 
     function vdEscAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function vdEscText(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -76,7 +94,7 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
       if (VD_LOADED[kind] === 'loading') return;
       VD_LOADED[kind] = 'loading';
       var s = VD[kind];
-      var url = '${adminPath}/api/vehicle-deadlines/' + kind + '?ka=' + encodeURIComponent(s.ka) + (s.han ? '&han=' + s.han : '');
+      var url = '${adminPath}/api/vehicle-deadlines/' + kind + '?ka=' + encodeURIComponent(s.ka) + (s.team ? '&team=' + s.team : '');
       fetch(url).then(function (res) {
         if (!res.ok) throw new Error('failed');
         return res.json();
@@ -118,7 +136,7 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
     function vdMeterRowHtml(r) {
       return '<tr data-car-no="' + vdEscAttr(r.car_no) + '">'
         + '<td style="padding:6px 8px;text-align:center;font-weight:700;">' + vdEscText(r.car_no) + '</td>'
-        + '<td style="padding:6px 8px;text-align:center;color:#666;">' + r.ka + '課' + r.han + '班</td>'
+        + '<td style="padding:6px 8px;text-align:center;color:#666;">' + r.ka + '課' + r.team + '班</td>'
         + vdTextTd('registration_no', r.registration_no, '110px')
         + vdTextTd('meter_device_no', r.meter_device_no, '90px')
         + vdDateTd('tentative_limit', r.tentative_limit)
@@ -136,7 +154,7 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
     function vdShakenRowHtml(r) {
       return '<tr data-car-no="' + vdEscAttr(r.car_no) + '">'
         + '<td style="padding:6px 8px;text-align:center;font-weight:700;">' + vdEscText(r.car_no) + '</td>'
-        + '<td style="padding:6px 8px;text-align:center;color:#666;">' + r.ka + '課' + r.han + '班</td>'
+        + '<td style="padding:6px 8px;text-align:center;color:#666;">' + r.ka + '課' + r.team + '班</td>'
         + '<td style="padding:6px 8px;"><input type="date" class="vd-field" data-field="shaken_date" value="' + (r.shaken_date || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>'
         + '<td style="padding:6px 8px;"><input type="date" class="vd-field" data-field="shaken_limit" value="' + (r.shaken_limit || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>'
         + '<td style="padding:6px 8px;"><input type="date" class="vd-field" data-field="cert_exchange_limit" value="' + (r.cert_exchange_limit || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>'
@@ -159,12 +177,12 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
       var root = document.querySelector('[data-kind="' + kind + '"]');
       if (!root) return;
       root.querySelectorAll('[data-ka]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-ka') === s.ka); });
-      root.querySelectorAll('[data-han]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-han') === s.han); });
+      root.querySelectorAll('[data-team]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-team') === s.team); });
       var show = s.ka !== 'all';
-      var hanTabs = root.querySelector('.vd-han-tabs');
-      var hanSep = root.querySelector('.vd-han-sep');
-      if (hanTabs) hanTabs.style.display = show ? '' : 'none';
-      if (hanSep) hanSep.style.display = show ? '' : 'none';
+      var teamTabs = root.querySelector('.vd-team-tabs');
+      var teamSep = root.querySelector('.vd-team-sep');
+      if (teamTabs) teamTabs.style.display = show ? '' : 'none';
+      if (teamSep) teamSep.style.display = show ? '' : 'none';
     }
 
     async function vdSaveFields(kind, carNo, fields) {
@@ -201,17 +219,18 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
         if (!kindEl) return;
         var kind = kindEl.getAttribute('data-kind');
         VD[kind].ka = kaBtn.getAttribute('data-ka');
-        VD[kind].han = '';
+        VD[kind].team = '';
+        vdRebuildTeamButtons(kind);
         vdUpdateActiveButtons(kind);
         vdRefresh(kind);
         return;
       }
-      var hanBtn = ev.target.closest('.dept-tabs [data-han]');
-      if (hanBtn) {
-        var kindEl2 = hanBtn.closest('[data-kind]');
+      var teamBtn = ev.target.closest('.dept-tabs [data-team]');
+      if (teamBtn) {
+        var kindEl2 = teamBtn.closest('[data-kind]');
         if (!kindEl2) return;
         var kind2 = kindEl2.getAttribute('data-kind');
-        VD[kind2].han = hanBtn.getAttribute('data-han');
+        VD[kind2].team = teamBtn.getAttribute('data-team');
         vdUpdateActiveButtons(kind2);
         vdRefresh(kind2);
         return;
