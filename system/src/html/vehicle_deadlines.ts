@@ -1,265 +1,285 @@
-// メーター検査（仮検査/本検査）・車検管理のページ本体
-import { ADMIN_PATH } from '../config';
-import { escHtml, saveToastHtml, saveToastScript } from './layout';
+// メーター検査（仮検査/本検査）・車検管理の「点検管理」ページ内タブ用パネル＋クライアントスクリプト
+// 車両行はvehicle_teams(car_no, team)から自動反映されるため、車番の手入力・追加削除UIは持たない。
+// 課(1-4/全課)＋班(1/2/全班)の絞り込みと、期限が近い順の並び替えはAPI側(admin_vehicle_deadlines.ts)で行う。
 
-export interface MeterInspectionRow {
-  id: number;
-  ka: number;
-  car_no: string;
-  tentative_limit: string | null;
-  tentative_assignee_id: number | null;
-  tentative_assignee_name: string | null;
-  honkensa_limit: string | null;
-  honkensa_assignee_id: number | null;
-  honkensa_assignee_name: string | null;
-}
-
-export interface ShakenRow {
-  id: number;
-  ka: number;
-  car_no: string;
-  shaken_date: string | null;
-  shaken_limit: string | null;
-  cert_exchange_limit: string | null;
-}
-
-type Tab = 'meter' | 'shaken';
-
-function tabNav(activeTab: Tab, ka: number): string {
-  const tabs: Array<{ id: Tab; label: string }> = [
-    { id: 'meter', label: 'メーター検査' },
-    { id: 'shaken', label: '車検管理' },
-  ];
-  return `<div style="display:flex;gap:6px;margin-bottom:12px;">
-    ${tabs.map(t => `<a href="${ADMIN_PATH}/vehicle-deadlines?tab=${t.id}&ka=${ka}"
-      style="padding:9px 20px;border-radius:8px 8px 0 0;font-size:14px;font-weight:700;text-decoration:none;
-        ${activeTab === t.id ? 'background:#fff;color:#1a3a5c;box-shadow:0 -2px 6px rgba(0,0,0,0.06);' : 'background:#e5e7eb;color:#6b7280;'}">
-      ${t.label}</a>`).join('')}
-  </div>`;
-}
-
-function kaNav(activeTab: Tab, ka: number): string {
-  const items = [1, 2, 3, 4].map(k => `<a href="${ADMIN_PATH}/vehicle-deadlines?tab=${activeTab}&ka=${k}"
-    style="padding:7px 16px;border-radius:6px;font-size:13px;font-weight:600;text-decoration:none;
-      ${ka === k ? 'background:#1a3a5c;color:#fff;' : 'background:#f3f4f6;color:#4b5563;'}">${k}課</a>`).join('');
-  return `<div style="display:flex;gap:6px;margin-bottom:14px;">${items}</div>`;
-}
-
-function assigneeCell(table: Tab, id: number, field: 'tentative_assignee' | 'honkensa_assignee', assigneeId: number | null, assigneeName: string | null): string {
-  const name = assigneeName ?? '';
-  return `<td style="position:relative;padding:6px 8px;border-bottom:1px solid #f1f5f9;min-width:140px;">
-    <input type="text" class="assignee-input" data-table="${table}" data-id="${id}" data-field="${field}"
-      data-selected-id="${assigneeId ?? ''}" data-selected-name="${escHtml(name)}"
-      value="${escHtml(name)}" placeholder="検索して選択" autocomplete="off"
-      style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;box-sizing:border-box;">
-    <div class="assignee-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;z-index:30;"></div>
-  </td>`;
-}
-
-function meterTable(ka: number, rows: MeterInspectionRow[]): string {
-  const body = rows.map(r => `
-    <tr id="row-meter-${r.id}">
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">
-        <input type="text" value="${escHtml(r.car_no)}" onchange="saveField('meter', ${r.id}, 'car_no', this.value)"
-          style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;box-sizing:border-box;">
-      </td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">
-        <input type="date" value="${r.tentative_limit ?? ''}" onchange="saveField('meter', ${r.id}, 'tentative_limit', this.value)"
-          style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
-      </td>
-      ${assigneeCell('meter', r.id, 'tentative_assignee', r.tentative_assignee_id, r.tentative_assignee_name)}
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">
-        <input type="date" value="${r.honkensa_limit ?? ''}" onchange="saveField('meter', ${r.id}, 'honkensa_limit', this.value)"
-          style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
-      </td>
-      ${assigneeCell('meter', r.id, 'honkensa_assignee', r.honkensa_assignee_id, r.honkensa_assignee_name)}
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:center;">
-        <button onclick="deleteRow('meter', ${r.id})" style="padding:5px 10px;background:#fee2e2;color:#991b1b;border:none;border-radius:6px;font-size:12px;cursor:pointer;">削除</button>
-      </td>
-    </tr>`).join('');
-
+export function meterPanelHtml(): string {
   return `
-    <div style="background:white;border-radius:0 12px 12px 12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);overflow:auto;">
-      <table style="width:100%;border-collapse:collapse;">
-        <thead style="background:#f9fafb;">
-          <tr>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">車番</th>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">仮検査までの期限</th>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">仮検査担当者</th>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">本検査までの期限</th>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">本検査担当者</th>
-            <th style="padding:9px 8px;border-bottom:1px solid #e5e7eb;width:60px;"></th>
-          </tr>
-        </thead>
-        <tbody>${body || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">データがありません</td></tr>'}</tbody>
-      </table>
-    </div>
-    <button onclick="addRow('meter', ${ka})" style="margin-top:12px;padding:9px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ 車両を追加</button>
-  `;
-}
-
-function shakenTable(ka: number, rows: ShakenRow[]): string {
-  const body = rows.map(r => `
-    <tr id="row-shaken-${r.id}">
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">
-        <input type="text" value="${escHtml(r.car_no)}" onchange="saveField('shaken', ${r.id}, 'car_no', this.value)"
-          style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;box-sizing:border-box;">
-      </td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">
-        <input type="date" value="${r.shaken_date ?? ''}" onchange="saveField('shaken', ${r.id}, 'shaken_date', this.value)"
-          style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
-      </td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">
-        <input type="date" value="${r.shaken_limit ?? ''}" onchange="saveField('shaken', ${r.id}, 'shaken_limit', this.value)"
-          style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
-      </td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">
-        <input type="date" value="${r.cert_exchange_limit ?? ''}" onchange="saveField('shaken', ${r.id}, 'cert_exchange_limit', this.value)"
-          style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">
-      </td>
-      <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:center;">
-        <button onclick="deleteRow('shaken', ${r.id})" style="padding:5px 10px;background:#fee2e2;color:#991b1b;border:none;border-radius:6px;font-size:12px;cursor:pointer;">削除</button>
-      </td>
-    </tr>`).join('');
-
-  return `
-    <div style="background:white;border-radius:0 12px 12px 12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);overflow:auto;">
-      <table style="width:100%;border-collapse:collapse;">
-        <thead style="background:#f9fafb;">
-          <tr>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">車番</th>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">車検日</th>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">車検リミット</th>
-            <th style="padding:9px 8px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">車検証交換リミット</th>
-            <th style="padding:9px 8px;border-bottom:1px solid #e5e7eb;width:60px;"></th>
-          </tr>
-        </thead>
-        <tbody>${body || '<tr><td colspan="5" style="padding:24px;text-align:center;color:#9ca3af;">データがありません</td></tr>'}</tbody>
-      </table>
-    </div>
-    <button onclick="addRow('shaken', ${ka})" style="margin-top:12px;padding:9px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ 車両を追加</button>
-  `;
-}
-
-export function vehicleDeadlinesPage(tab: Tab, ka: number, meterRows: MeterInspectionRow[], shakenRows: ShakenRow[]): string {
-  return `
-    <div style="max-width:1100px;">
-      <div style="font-size:12.5px;color:#6b7280;margin-bottom:14px;line-height:1.7;">
-        課ごとに車両のメーター検査・車検の期限と担当者を管理します。期限の10日前/5日前/前日になると、どの画面を開いていても大画面で警告が表示されます。
+    <div class="ins-controls" data-kind="meter">
+      <label>課：</label>
+      <div class="dept-tabs">
+        <button class="dept-btn active" data-ka="1">1課</button>
+        <button class="dept-btn" data-ka="2">2課</button>
+        <button class="dept-btn" data-ka="3">3課</button>
+        <button class="dept-btn" data-ka="4">4課</button>
+        <button class="dept-btn" data-ka="all">全課</button>
       </div>
-      ${tabNav(tab, ka)}
-      ${kaNav(tab, ka)}
-      ${tab === 'meter' ? meterTable(ka, meterRows) : shakenTable(ka, shakenRows)}
+      <span style="color:#bbb" class="vd-han-sep">｜</span>
+      <div class="dept-tabs vd-han-tabs">
+        <button class="dept-btn active" data-han="">全班</button>
+        <button class="dept-btn" data-han="1">1班</button>
+        <button class="dept-btn" data-han="2">2班</button>
+      </div>
     </div>
-    ${saveToastHtml()}
-    <script>
-    ${saveToastScript()}
+    <div style="font-size:12px;color:#888;margin:-4px 0 10px 2px;">板橋営業所の全車両を表示します。仮検査までの期限が近い車両から順に上に表示されます。</div>
+    <div class="ins-table-wrap">
+      <table class="ins-table" data-vd-table="meter">
+        <thead><tr>
+          <th>車番</th><th>課・班</th><th>登録番号</th><th>メーター器NO</th>
+          <th>仮検査までの期限</th><th>仮検査担当者</th><th>本検査までの期限</th><th>本検査担当者</th>
+          <th>前年受検日</th><th>受検日</th><th>検査済票番号</th><th>更新/交換/代替</th><th>点検者</th>
+        </tr></thead>
+        <tbody id="vd-meter-tbody"><tr><td colspan="13" style="padding:20px;text-align:center;color:#9ca3af;">読み込み中...</td></tr></tbody>
+      </table>
+    </div>
+  `;
+}
 
-    function escAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-    function escText(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+export function shakenPanelHtml(): string {
+  return `
+    <div class="ins-controls" data-kind="shaken">
+      <label>課：</label>
+      <div class="dept-tabs">
+        <button class="dept-btn active" data-ka="1">1課</button>
+        <button class="dept-btn" data-ka="2">2課</button>
+        <button class="dept-btn" data-ka="3">3課</button>
+        <button class="dept-btn" data-ka="4">4課</button>
+        <button class="dept-btn" data-ka="all">全課</button>
+      </div>
+      <span style="color:#bbb" class="vd-han-sep">｜</span>
+      <div class="dept-tabs vd-han-tabs">
+        <button class="dept-btn active" data-han="">全班</button>
+        <button class="dept-btn" data-han="1">1班</button>
+        <button class="dept-btn" data-han="2">2班</button>
+      </div>
+    </div>
+    <div style="font-size:12px;color:#888;margin:-4px 0 10px 2px;">板橋営業所の全車両を表示します。3つの期限のうち最も近いものが近い車両から順に上に表示されます。</div>
+    <div class="ins-table-wrap">
+      <table class="ins-table" data-vd-table="shaken">
+        <thead><tr>
+          <th>車番</th><th>課・班</th><th>車検日</th><th>車検リミット</th><th>車検証交換リミット</th>
+        </tr></thead>
+        <tbody id="vd-shaken-tbody"><tr><td colspan="5" style="padding:20px;text-align:center;color:#9ca3af;">読み込み中...</td></tr></tbody>
+      </table>
+    </div>
+  `;
+}
 
-    async function saveFields(table, id, fields) {
+export function vehicleDeadlinesClientScript(adminPath: string): string {
+  return `
+    var VD = { meter: { ka: '1', han: '' }, shaken: { ka: '1', han: '' } };
+    var VD_LOADED = { meter: false, shaken: false };
+
+    function vdEscAttr(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function vdEscText(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function vdRefresh(kind) {
+      if (VD_LOADED[kind] === 'loading') return;
+      VD_LOADED[kind] = 'loading';
+      var s = VD[kind];
+      var url = '${adminPath}/api/vehicle-deadlines/' + kind + '?ka=' + encodeURIComponent(s.ka) + (s.han ? '&han=' + s.han : '');
+      fetch(url).then(function (res) {
+        if (!res.ok) throw new Error('failed');
+        return res.json();
+      }).then(function (data) {
+        vdRenderRows(kind, data.rows || []);
+        VD_LOADED[kind] = true;
+      }).catch(function () {
+        VD_LOADED[kind] = false;
+        var tbody = document.getElementById('vd-' + kind + '-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#dc2626;">読み込みに失敗しました</td></tr>';
+      });
+    }
+
+    function vdAssigneeTd(field, id, name) {
+      var n = name || '';
+      return '<td style="position:relative;min-width:150px;">'
+        + '<input type="text" class="vd-assignee-input" data-field="' + field + '" data-selected-id="' + (id || '') + '" data-selected-name="' + vdEscAttr(n) + '"'
+        + ' value="' + vdEscAttr(n) + '" placeholder="検索して選択" autocomplete="off"'
+        + ' style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;box-sizing:border-box;">'
+        + '<div class="vd-assignee-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;z-index:30;"></div>'
+        + '</td>';
+    }
+
+    function vdTextTd(field, value, width) {
+      return '<td style="padding:6px 8px;"><input type="text" class="vd-field" data-field="' + field + '" value="' + vdEscAttr(value || '') + '" style="width:' + (width || '90px') + ';border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;box-sizing:border-box;"></td>';
+    }
+    function vdDateTd(field, value) {
+      return '<td style="padding:6px 8px;"><input type="date" class="vd-field" data-field="' + field + '" value="' + (value || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>';
+    }
+    var VD_UPDATE_KIND_LABELS = { renewal: '更新', exchange: '交換', substitute: '代替' };
+    function vdUpdateKindTd(value) {
+      var opts = ['', 'renewal', 'exchange', 'substitute'].map(function (k) {
+        var label = k === '' ? '－' : VD_UPDATE_KIND_LABELS[k];
+        return '<option value="' + k + '"' + (value === k || (!value && k === '') ? ' selected' : '') + '>' + label + '</option>';
+      }).join('');
+      return '<td style="padding:6px 8px;"><select class="vd-field" data-field="update_kind" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 4px;font-size:13px;">' + opts + '</select></td>';
+    }
+
+    function vdMeterRowHtml(r) {
+      return '<tr data-car-no="' + vdEscAttr(r.car_no) + '">'
+        + '<td style="padding:6px 8px;text-align:center;font-weight:700;">' + vdEscText(r.car_no) + '</td>'
+        + '<td style="padding:6px 8px;text-align:center;color:#666;">' + r.ka + '課' + r.han + '班</td>'
+        + vdTextTd('registration_no', r.registration_no, '110px')
+        + vdTextTd('meter_device_no', r.meter_device_no, '90px')
+        + vdDateTd('tentative_limit', r.tentative_limit)
+        + vdAssigneeTd('tentative_assignee', r.tentative_assignee_id, r.tentative_assignee_name)
+        + vdDateTd('honkensa_limit', r.honkensa_limit)
+        + vdAssigneeTd('honkensa_assignee', r.honkensa_assignee_id, r.honkensa_assignee_name)
+        + vdDateTd('prev_inspection_date', r.prev_inspection_date)
+        + vdDateTd('inspection_date', r.inspection_date)
+        + vdTextTd('cert_no', r.cert_no, '80px')
+        + vdUpdateKindTd(r.update_kind)
+        + vdTextTd('checker_name', r.checker_name, '70px')
+        + '</tr>';
+    }
+
+    function vdShakenRowHtml(r) {
+      return '<tr data-car-no="' + vdEscAttr(r.car_no) + '">'
+        + '<td style="padding:6px 8px;text-align:center;font-weight:700;">' + vdEscText(r.car_no) + '</td>'
+        + '<td style="padding:6px 8px;text-align:center;color:#666;">' + r.ka + '課' + r.han + '班</td>'
+        + '<td style="padding:6px 8px;"><input type="date" class="vd-field" data-field="shaken_date" value="' + (r.shaken_date || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>'
+        + '<td style="padding:6px 8px;"><input type="date" class="vd-field" data-field="shaken_limit" value="' + (r.shaken_limit || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>'
+        + '<td style="padding:6px 8px;"><input type="date" class="vd-field" data-field="cert_exchange_limit" value="' + (r.cert_exchange_limit || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>'
+        + '</tr>';
+    }
+
+    function vdRenderRows(kind, rows) {
+      var tbody = document.getElementById('vd-' + kind + '-tbody');
+      if (!tbody) return;
+      if (!rows.length) {
+        var cols = kind === 'meter' ? 13 : 5;
+        tbody.innerHTML = '<tr><td colspan="' + cols + '" style="padding:20px;text-align:center;color:#9ca3af;">該当する車両がありません</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(kind === 'meter' ? vdMeterRowHtml : vdShakenRowHtml).join('');
+    }
+
+    function vdUpdateActiveButtons(kind) {
+      var s = VD[kind];
+      var root = document.querySelector('[data-kind="' + kind + '"]');
+      if (!root) return;
+      root.querySelectorAll('[data-ka]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-ka') === s.ka); });
+      root.querySelectorAll('[data-han]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-han') === s.han); });
+      var show = s.ka !== 'all';
+      var hanTabs = root.querySelector('.vd-han-tabs');
+      var hanSep = root.querySelector('.vd-han-sep');
+      if (hanTabs) hanTabs.style.display = show ? '' : 'none';
+      if (hanSep) hanSep.style.display = show ? '' : 'none';
+    }
+
+    async function vdSaveFields(kind, carNo, fields) {
       try {
-        const res = await fetch('${ADMIN_PATH}/api/vehicle-deadlines/' + table + '/' + id, {
+        var res = await fetch('${adminPath}/api/vehicle-deadlines/' + kind + '/' + encodeURIComponent(carNo), {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields)
         });
         if (!res.ok) { alert('保存に失敗しました'); return; }
         showToast('保存しました');
       } catch (e) { alert('通信エラーが発生しました'); }
     }
-    function saveField(table, id, field, value) {
-      const o = {};
+    function vdSaveField(kind, carNo, field, value) {
+      var o = {};
       o[field] = value === '' ? null : value;
-      saveFields(table, id, o);
+      vdSaveFields(kind, carNo, o);
     }
-
-    async function addRow(table, ka) {
-      try {
-        const res = await fetch('${ADMIN_PATH}/api/vehicle-deadlines/' + table, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ka: ka })
-        });
-        if (res.ok) { location.reload(); } else { alert('追加に失敗しました'); }
-      } catch (e) { alert('通信エラーが発生しました'); }
-    }
-    async function deleteRow(table, id) {
-      if (!confirm('この行を削除しますか？\\nこの操作は取り消せません。')) return;
-      try {
-        const res = await fetch('${ADMIN_PATH}/api/vehicle-deadlines/' + table + '/' + id, { method: 'DELETE' });
-        if (res.ok) {
-          const el = document.getElementById('row-' + table + '-' + id);
-          if (el) el.remove();
-        } else { alert('削除に失敗しました'); }
-      } catch (e) { alert('通信エラーが発生しました'); }
-    }
-
-    function saveAssignee(input, id, name) {
-      const table = input.getAttribute('data-table');
-      const rowId = input.getAttribute('data-id');
-      const field = input.getAttribute('data-field');
-      const body = {};
+    function vdCommitAssignee(input, id, name) {
+      var tr = input.closest('tr[data-car-no]');
+      var table = input.closest('table[data-vd-table]');
+      if (!tr || !table) return;
+      var carNo = tr.getAttribute('data-car-no');
+      var kind = table.getAttribute('data-vd-table');
+      var field = input.getAttribute('data-field');
+      var body = {};
       body[field + '_id'] = id === '' ? null : Number(id);
       body[field + '_name'] = name === '' ? null : name;
-      saveFields(table, rowId, body);
+      vdSaveFields(kind, carNo, body);
     }
 
-    document.addEventListener('input', function (ev) {
-      const el = ev.target;
-      if (!el.classList || !el.classList.contains('assignee-input')) return;
-      clearTimeout(el._searchTimer);
-      const q = el.value.trim();
-      const results = el.nextElementSibling;
-      if (!q) { results.style.display = 'none'; results.innerHTML = ''; return; }
-      el._searchTimer = setTimeout(async function () {
-        try {
-          const res = await fetch('${ADMIN_PATH}/api/vehicle-deadlines/search-employees?q=' + encodeURIComponent(q));
-          if (!res.ok) return;
-          const list = await res.json();
-          results.innerHTML = list.length
-            ? list.map(function (e) {
-                return '<div class="assignee-result" data-id="' + e.id + '" data-name="' + escAttr(e.name) + '" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid #f3f4f6;">'
-                  + escText(e.name) + '<span style="color:#9ca3af;margin-left:6px;font-size:11px;">' + escText(e.emp_no) + '</span></div>';
-              }).join('')
-            : '<div style="padding:8px 10px;font-size:12px;color:#9ca3af;">該当する社員がいません</div>';
-          results.style.display = 'block';
-        } catch (e) { /* 通信エラー時は次回入力で再試行 */ }
-      }, 200);
-    });
-
     document.addEventListener('click', function (ev) {
-      const resultRow = ev.target.closest('.assignee-result');
+      var kaBtn = ev.target.closest('.dept-tabs [data-ka]');
+      if (kaBtn) {
+        var kindEl = kaBtn.closest('[data-kind]');
+        if (!kindEl) return;
+        var kind = kindEl.getAttribute('data-kind');
+        VD[kind].ka = kaBtn.getAttribute('data-ka');
+        VD[kind].han = '';
+        vdUpdateActiveButtons(kind);
+        vdRefresh(kind);
+        return;
+      }
+      var hanBtn = ev.target.closest('.dept-tabs [data-han]');
+      if (hanBtn) {
+        var kindEl2 = hanBtn.closest('[data-kind]');
+        if (!kindEl2) return;
+        var kind2 = kindEl2.getAttribute('data-kind');
+        VD[kind2].han = hanBtn.getAttribute('data-han');
+        vdUpdateActiveButtons(kind2);
+        vdRefresh(kind2);
+        return;
+      }
+      var resultRow = ev.target.closest('.vd-assignee-result');
       if (resultRow) {
-        const results = resultRow.parentElement;
-        const input = results.previousElementSibling;
-        const id = resultRow.getAttribute('data-id');
-        const name = resultRow.getAttribute('data-name');
+        var results = resultRow.parentElement;
+        var input = results.previousElementSibling;
+        var id = resultRow.getAttribute('data-id');
+        var name = resultRow.getAttribute('data-name');
         input.value = name;
         input.setAttribute('data-selected-id', id);
         input.setAttribute('data-selected-name', name);
         results.style.display = 'none';
-        saveAssignee(input, id, name);
+        vdCommitAssignee(input, id, name);
         return;
       }
-      if (!ev.target.classList || !ev.target.classList.contains('assignee-input')) {
-        document.querySelectorAll('.assignee-results').forEach(function (r) { r.style.display = 'none'; });
+      if (!ev.target.classList || !ev.target.classList.contains('vd-assignee-input')) {
+        document.querySelectorAll('.vd-assignee-results').forEach(function (r) { r.style.display = 'none'; });
       }
     });
 
+    document.addEventListener('change', function (ev) {
+      var el = ev.target;
+      if (!el.classList || !el.classList.contains('vd-field')) return;
+      var tr = el.closest('tr[data-car-no]');
+      var table = el.closest('table[data-vd-table]');
+      if (!tr || !table) return;
+      vdSaveField(table.getAttribute('data-vd-table'), tr.getAttribute('data-car-no'), el.getAttribute('data-field'), el.value);
+    });
+
+    document.addEventListener('input', function (ev) {
+      var el = ev.target;
+      if (!el.classList || !el.classList.contains('vd-assignee-input')) return;
+      clearTimeout(el._searchTimer);
+      var q = el.value.trim();
+      var results = el.nextElementSibling;
+      if (!q) { results.style.display = 'none'; results.innerHTML = ''; return; }
+      el._searchTimer = setTimeout(function () {
+        fetch('${adminPath}/api/vehicle-deadlines/search-employees?q=' + encodeURIComponent(q))
+          .then(function (res) { return res.ok ? res.json() : []; })
+          .then(function (list) {
+            results.innerHTML = list.length
+              ? list.map(function (e) {
+                  return '<div class="vd-assignee-result" data-id="' + e.id + '" data-name="' + vdEscAttr(e.name) + '" style="padding:8px 10px;font-size:13px;cursor:pointer;border-bottom:1px solid #f3f4f6;">'
+                    + vdEscText(e.name) + '<span style="color:#9ca3af;margin-left:6px;font-size:11px;">' + vdEscText(e.emp_no) + '</span></div>';
+                }).join('')
+              : '<div style="padding:8px 10px;font-size:12px;color:#9ca3af;">該当する社員がいません</div>';
+            results.style.display = 'block';
+          }).catch(function () {});
+      }, 200);
+    });
+
     document.addEventListener('blur', function (ev) {
-      const el = ev.target;
-      if (!el.classList || !el.classList.contains('assignee-input')) return;
+      var el = ev.target;
+      if (!el.classList || !el.classList.contains('vd-assignee-input')) return;
       setTimeout(function () {
-        const selectedName = el.getAttribute('data-selected-name') || '';
+        var selectedName = el.getAttribute('data-selected-name') || '';
         if (el.value.trim() === '') {
           if (selectedName !== '') {
             el.setAttribute('data-selected-id', '');
             el.setAttribute('data-selected-name', '');
-            saveAssignee(el, '', '');
+            vdCommitAssignee(el, '', '');
           }
         } else if (el.value !== selectedName) {
           el.value = selectedName;
         }
       }, 150);
     }, true);
-    </script>
   `;
 }

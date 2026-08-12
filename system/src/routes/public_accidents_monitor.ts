@@ -1,8 +1,8 @@
-// 事故モニター表示（ログイン不要・完全公開・専用パスワードで保護）
+// 事故モニター表示（ログイン不要・完全公開・パスワードなしで直接表示）
 // ページ: {MONITOR_ACCIDENTS_PATH}   API: /api/public/accidents-monitor
 // 管理画面ログイン（24時間でセッション切れ）だと、モニターに映しっぱなしにする用途では
 // 翌日に再ログインが必要になり運用が崩れるため、通常のadmin認証を一切通さない別ルートにしている。
-// 代わりに開くたび・APIを叩くたびに専用パスワードをヘッダーで要求する（cc-listと同じ方式）。
+// URLの推測困難なランダム文字列自体をアクセス制御として扱う。
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { MONITOR_ACCIDENTS_PATH } from '../config';
@@ -10,12 +10,6 @@ import { accidentsMonitorPage } from '../html/accidents_monitor';
 import { bucketHourBands } from '../html/accidents';
 
 const app = new Hono<{ Bindings: Env }>();
-
-const MONITOR_PASSWORD = '5931';
-
-function checkPassword(c: { req: { header: (n: string) => string | undefined } }): boolean {
-  return c.req.header('X-Monitor-Password') === MONITOR_PASSWORD;
-}
 
 function prevYm(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
@@ -25,8 +19,6 @@ function prevYm(ym: string): string {
 app.get(MONITOR_ACCIDENTS_PATH, (c) => c.html(accidentsMonitorPage()));
 
 app.get('/api/public/accidents-monitor', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
-
   const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const ym = jstNow.toISOString().slice(0, 7);
   const prevYmStr = prevYm(ym);

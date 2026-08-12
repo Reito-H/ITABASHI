@@ -21,30 +21,6 @@ export function accidentsMonitorPage(): string {
     overflow: hidden;
   }
 
-  /* ===== パスワードゲート ===== */
-  #gate {
-    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: #f4f6f8;
-  }
-  #gate-box {
-    background: #ffffff; border: 1px solid #dde3ea; border-radius: 16px;
-    box-shadow: 0 2px 16px rgba(20,30,45,.06);
-    padding: 40px 36px; width: 100%; max-width: 340px; text-align: center;
-  }
-  #gate-box .icon { font-size: 30px; margin-bottom: 10px; }
-  #gate-box h1 { font-size: 16px; font-weight: 700; margin: 0 0 18px; color: #111827; }
-  #gate-box input {
-    width: 100%; background: #f7f8fa; border: 1px solid #ccd4dd; border-radius: 8px;
-    color: #111827; font-size: 20px; text-align: center; letter-spacing: .3em;
-    padding: 12px; margin-bottom: 12px; outline: none;
-  }
-  #gate-box input:focus { border-color: #dc2626; }
-  #gate-error { display: none; color: #dc2626; font-weight: 700; font-size: 12.5px; margin-bottom: 10px; }
-  #gate-box button {
-    width: 100%; padding: 12px; background: #111827; color: #fff; border: none;
-    border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer;
-  }
-
   /* ===== 表示本体 ===== */
   #board { display: none; height: 100vh; padding: clamp(16px, 2.6vw, 36px); flex-direction: column; }
   #board.show { display: flex; }
@@ -127,16 +103,6 @@ export function accidentsMonitorPage(): string {
 
 <div id="err-banner"></div>
 
-<div id="gate">
-  <div id="gate-box">
-    <div class="icon">&#128274;</div>
-    <h1>事故モニター表示にはパスワードが必要です</h1>
-    <input type="password" id="gate-input" inputmode="numeric" placeholder="表示用パスワード" autofocus>
-    <div id="gate-error">パスワードが違います</div>
-    <button type="button" id="gate-submit">表示する</button>
-  </div>
-</div>
-
 <div id="board">
   <div class="top-row">
     <div class="month-label" id="month-label">&nbsp;</div>
@@ -172,7 +138,6 @@ export function accidentsMonitorPage(): string {
 
 <script>
 (function () {
-  var STORAGE_KEY = 'accidents_monitor_pw';
   var REFRESH_MS = 5 * 60 * 1000;
   var BAND_HOURS = 2;
   var BAND_COUNT = 12;
@@ -272,18 +237,11 @@ export function accidentsMonitorPage(): string {
     document.getElementById('foot-updated').textContent =
       'データ更新: ' + fmt2(gen.getHours()) + ':' + fmt2(gen.getMinutes());
 
-    document.getElementById('gate').style.display = 'none';
     document.getElementById('board').classList.add('show');
   }
 
-  async function loadData(password) {
-    var res = await fetch('/api/public/accidents-monitor', {
-      headers: { 'X-Monitor-Password': password }
-    });
-    if (res.status === 401) {
-      localStorage.removeItem(STORAGE_KEY);
-      throw new Error('unauthorized');
-    }
+  async function loadData() {
+    var res = await fetch('/api/public/accidents-monitor');
     if (!res.ok) throw new Error('http ' + res.status);
     return res.json();
   }
@@ -293,37 +251,18 @@ export function accidentsMonitorPage(): string {
     setTimeout(function () { location.reload(); }, REFRESH_MS);
   }
 
-  async function boot(password) {
+  async function boot() {
     try {
-      var data = await loadData(password);
-      localStorage.setItem(STORAGE_KEY, password);
+      var data = await loadData();
       renderData(data);
       scheduleRefresh();
     } catch (e) {
-      if (e.message === 'unauthorized') {
-        document.getElementById('gate-error').style.display = 'block';
-        document.getElementById('board').classList.remove('show');
-        document.getElementById('gate').style.display = 'flex';
-      } else {
-        showError('データの取得に失敗しました。しばらくして自動で再試行します。');
-        setTimeout(function () { location.reload(); }, 30000);
-      }
+      showError('データの取得に失敗しました。しばらくして自動で再試行します。');
+      setTimeout(function () { location.reload(); }, 30000);
     }
   }
 
-  document.getElementById('gate-submit').addEventListener('click', function () {
-    var pw = document.getElementById('gate-input').value.trim();
-    if (!pw) return;
-    boot(pw);
-  });
-  document.getElementById('gate-input').addEventListener('keydown', function (ev) {
-    if (ev.key === 'Enter') document.getElementById('gate-submit').click();
-  });
-
-  var saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    boot(saved);
-  }
+  boot();
 })();
 </script>
 </body>

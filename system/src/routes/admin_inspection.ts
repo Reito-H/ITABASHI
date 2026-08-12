@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import { layout } from '../html/layout';
+import { layout, saveToastHtml, saveToastScript } from '../html/layout';
+import { meterPanelHtml, shakenPanelHtml, vehicleDeadlinesClientScript } from '../html/vehicle_deadlines';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 
@@ -83,6 +84,8 @@ function inspectionPage(adminPath: string): string {
 <div class="ins-tab-bar">
   <button class="ins-tab active" onclick="insShowTab('input')">月次入力（定期点検表）</button>
   <button class="ins-tab" onclick="insShowTab('output')">日次出力・過去データ（点検車検確認表）</button>
+  <button class="ins-tab" onclick="insShowTab('meter')">メーター検査</button>
+  <button class="ins-tab" onclick="insShowTab('shaken')">車検管理</button>
 </div>
 
 <!-- ===== 月次入力 ===== -->
@@ -144,6 +147,18 @@ function inspectionPage(adminPath: string): string {
     <canvas id="ins-canvas" style="max-width:100%;height:auto;display:block;border:1px solid #e0e8f4;border-radius:4px"></canvas>
   </div>
 </div>
+
+<!-- ===== メーター検査 ===== -->
+<div id="ins-panel-meter" class="ins-panel">
+  ${meterPanelHtml()}
+</div>
+
+<!-- ===== 車検管理 ===== -->
+<div id="ins-panel-shaken" class="ins-panel">
+  ${shakenPanelHtml()}
+</div>
+
+${saveToastHtml()}
 
 <!-- モーダル -->
 <div id="ins-modal" class="ins-modal-overlay" style="display:none" onclick="if(event.target===this)insCloseModal()">
@@ -229,12 +244,16 @@ function insUpdateDays(){
 }
 
 // ===== タブ =====
+const INS_TABS=['input','output','meter','shaken'];
 function insShowTab(tab){
-  ['input','output'].forEach(t=>{
+  const idx=INS_TABS.indexOf(tab);
+  INS_TABS.forEach(t=>{
     document.getElementById('ins-panel-'+t).classList.toggle('active',t===tab);
-    document.querySelectorAll('.ins-tab').forEach((b,i)=>b.classList.toggle('active',i===(tab==='input'?0:1)));
   });
+  document.querySelectorAll('.ins-tab').forEach((b,i)=>b.classList.toggle('active',i===idx));
   if(tab==='output') insRenderCanvas();
+  if(tab==='meter') vdRefresh('meter');
+  if(tab==='shaken') vdRefresh('shaken');
 }
 
 // ===== 課選択 =====
@@ -904,6 +923,9 @@ async function insAiRegister(){
     btn.disabled=false;btn.textContent='✓ 登録';
   }
 }
+
+${saveToastScript()}
+${vehicleDeadlinesClientScript(adminPath)}
 </script>`;
 }
 

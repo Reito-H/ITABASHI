@@ -179,7 +179,7 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   if (isPublicAdminSubPath(subPath)) return next();
   // リミット機能のグローバル通知は所属課だけで判定するため、ページ権限(handover等)の有無に関わらず全アカウントが利用できる
   if (subPath.startsWith('/api/limits/')) return next();
-  // メーター検査・車検の大画面アラートも同様に、ページ権限(vehicle-deadlines)の有無に関わらず所属課だけで判定する
+  // メーター検査・車検の大画面アラートも同様に、ページ権限(inspection)の有無に関わらず所属課だけで判定する
   if (subPath.startsWith('/api/vehicle-deadlines/alerts/')) return next();
   // 班長個人別確認: 書き込み(その他メモ保存)も含めて閲覧権限(kancho-shift)だけで利用可能にする
   // （<key>.edit を要求する既定ルールを外し、ルート側で kancho-shift の有無だけをチェックする）

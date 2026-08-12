@@ -1779,14 +1779,16 @@ app.get('/settings/lost-items/print/:id', async (c) => {
   }>();
   if (!r) return c.text('報告が見つかりません', 404);
 
+  // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、表示する課は班から都度算出する
+  const derivedDivision = r.employee_team != null ? Math.ceil(r.employee_team / 2) : r.employee_division;
+
   const fields: ReportPrintField[] = [
     { label: '種別', value: r.report_type === 'customer' ? '客問い合わせ' : '社員報告', width: 'quarter' },
     { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
     { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no', width: 'quarter' },
     { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
     { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
-    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', width: 'quarter' },
-    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team', width: 'quarter' },
+    { label: '課-班', value: derivedDivision != null ? String(derivedDivision) : '', field: 'employee_division', comboField: 'employee_team', comboValue: r.employee_team != null ? String(r.employee_team) : '', comboDeriveDivision: true, width: 'quarter' },
     { label: '忘れ物の内容', value: r.item_description ?? '', width: 'full', field: 'item_description', input: 'textarea' },
     { label: '乗車地', value: r.pickup_location ?? '', field: 'pickup_location' },
     { label: '降車地', value: r.dropoff_location ?? '', field: 'dropoff_location' },
@@ -1835,12 +1837,16 @@ app.get('/settings/accidents/print/:id', async (c) => {
   }>();
   if (!r) return c.text('報告が見つかりません', 404);
 
+  // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、
+  // 表示する課は保存済みの値をそのまま信じず、班から都度算出する（社員マスタ側の不整合を帳票上で自動補正する）
+  const derivedDivision = r.employee_team != null ? Math.ceil(r.employee_team / 2) : r.employee_division;
+
   const fields: ReportPrintField[] = [
     { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
     { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no', width: 'quarter' },
     { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
     { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
-    { label: '課-班', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', comboField: 'employee_team', comboValue: r.employee_team != null ? String(r.employee_team) : '', width: 'quarter' },
+    { label: '課-班', value: derivedDivision != null ? String(derivedDivision) : '', field: 'employee_division', comboField: 'employee_team', comboValue: r.employee_team != null ? String(r.employee_team) : '', comboDeriveDivision: true, width: 'quarter' },
     { label: '車両状態', value: r.car_status ?? '', field: 'car_status', width: 'quarter' },
     { label: '事故形態', value: r.accident_type ?? '', field: 'accident_type', width: 'half' },
     { label: '発生場所', value: r.location ?? '', field: 'location' },
@@ -1893,14 +1899,16 @@ app.get('/settings/violations/print/:id', async (c) => {
   }>();
   if (!r) return c.text('報告が見つかりません', 404);
 
+  // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、表示する課は班から都度算出する
+  const derivedDivision = r.employee_team != null ? Math.ceil(r.employee_team / 2) : r.employee_division;
+
   const fields: ReportPrintField[] = [
     { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
     { label: '車番', value: r.vehicle_no ?? '', field: 'vehicle_no', width: 'quarter' },
     { label: '違反発生日時', value: r.violation_at ?? '', field: 'violation_at', width: 'quarter' },
     { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
     { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
-    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', width: 'quarter' },
-    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team', width: 'quarter' },
+    { label: '課-班', value: derivedDivision != null ? String(derivedDivision) : '', field: 'employee_division', comboField: 'employee_team', comboValue: r.employee_team != null ? String(r.employee_team) : '', comboDeriveDivision: true, width: 'quarter' },
     { label: '違反種類', value: r.violation_type_name ?? '', field: 'violation_type_name', width: 'quarter' },
     { label: '点数', value: r.violation_points != null ? String(r.violation_points) : '', field: 'violation_points', width: 'quarter' },
     { label: '反則金', value: r.violation_fine_amount != null ? String(r.violation_fine_amount) : '', field: 'violation_fine_amount', width: 'quarter' },
@@ -1947,6 +1955,9 @@ app.get('/settings/general-reports/print/:id', async (c) => {
   }>();
   if (!r) return c.text('報告が見つかりません', 404);
 
+  // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、表示する課は班から都度算出する
+  const derivedDivision = r.employee_team != null ? Math.ceil(r.employee_team / 2) : r.employee_division;
+
   const fields: ReportPrintField[] = [
     { label: 'タイトル', value: r.title ?? '', field: 'title' },
     { label: '受電時刻', value: r.received_at ?? '', field: 'received_at', width: 'quarter' },
@@ -1956,8 +1967,7 @@ app.get('/settings/general-reports/print/:id', async (c) => {
     { label: '到着地', value: r.route_to ?? '', field: 'route_to', width: 'quarter' },
     { label: '乗務員氏名', value: r.employee_name ?? '', field: 'employee_name', width: 'quarter' },
     { label: '社員番号', value: r.employee_emp_no ?? '', field: 'employee_emp_no', width: 'quarter' },
-    { label: '課', value: r.employee_division != null ? String(r.employee_division) : '', field: 'employee_division', width: 'quarter' },
-    { label: '班', value: r.employee_team != null ? String(r.employee_team) : '', field: 'employee_team', width: 'quarter' },
+    { label: '課-班', value: derivedDivision != null ? String(derivedDivision) : '', field: 'employee_division', comboField: 'employee_team', comboValue: r.employee_team != null ? String(r.employee_team) : '', comboDeriveDivision: true, width: 'quarter' },
     { label: 'お客様名', value: r.customer_name ?? '', field: 'customer_name' },
     { label: 'お客様電話番号', value: r.customer_phone ?? '', field: 'customer_phone' },
     { label: '報告内容', value: r.content ?? '', width: 'full', field: 'content', input: 'textarea' },

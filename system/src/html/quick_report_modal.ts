@@ -237,6 +237,7 @@ export function quickReportModalScript(): string {
   var QR_ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
   var qrActiveType = null;
   var qrSelectedEmp = null;
+  var qrPrefillPhone = '';
   var qrEmpSearchTimer = null;
   var qrCarSearchTimer = null;
   var qrViolationTypesLoaded = false;
@@ -266,12 +267,13 @@ export function quickReportModalScript(): string {
     return null;
   }
 
-  function openQrModal(type) {
+  function openQrModal(type, prefillPhone) {
     if (!type) type = qrFirstAvailableType();
     var cfg = QR_CONFIG[type];
     if (!cfg) return;
     qrSelectedEmp = null;
     qrTypeInitialized = {};
+    qrPrefillPhone = prefillPhone || '';
     document.getElementById('qr-form').reset();
     document.getElementById('qr-error').style.display = 'none';
     document.getElementById('qr-form-body').style.display = '';
@@ -387,9 +389,13 @@ export function quickReportModalScript(): string {
 
   function qrResetType(type) {
     if (type === 'lost') {
-      qrSetLostType('staff');
+      qrSetLostType(qrPrefillPhone ? 'customer' : 'staff');
+      if (qrPrefillPhone) document.getElementById('qr-l-customer_phone').value = qrPrefillPhone;
     } else if (type === 'accident') {
       qrSetAccidentCarStatus('');
+      if (qrPrefillPhone) document.getElementById('qr-a-customer_phone').value = qrPrefillPhone;
+    } else if (type === 'general') {
+      if (qrPrefillPhone) document.getElementById('qr-g-customer_phone').value = qrPrefillPhone;
     } else if (type === 'violation') {
       qrSetViolationCarStatus('');
       if (!qrViolationTypesLoaded) {

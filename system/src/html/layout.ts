@@ -26,7 +26,7 @@ function showToast(msg) {
 }
 
 // フローティング新規報告ボタンを表示しないページ（設定・点検管理・班長シフト）
-const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'garage', 'vehicle-deadlines']);
+const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'garage']);
 
 export function layout(title: string, content: string, activePage: string = '', headerExtra: string = ''): string {
   const showReportFab = !REPORT_FAB_HIDDEN_PAGES.has(activePage);
@@ -47,7 +47,6 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
     { href: `${ADMIN_PATH}/garage`,        label: '車庫',            id: 'garage' },
     { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
-    { href: `${ADMIN_PATH}/vehicle-deadlines`, label: 'メーター検査・車検', id: 'vehicle-deadlines' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
 
@@ -115,7 +114,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     * { box-sizing: border-box; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #f5f5f5; margin: 0; }
     .sidebar {
-      width: 200px; min-height: 100vh; background: var(--color-primary);
+      width: 200px; height: 100vh; background: var(--color-primary);
       position: fixed; top: 0; left: 0; z-index: 40;
       display: flex; flex-direction: column;
       transition: transform 0.25s ease;
@@ -242,7 +241,7 @@ export function layout(title: string, content: string, activePage: string = '', 
       <div style="color:white;font-weight:700;font-size:13px;letter-spacing:0.04em;">ホシコン</div>
       <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" aria-label="サイドバーを折りたたむ" title="折りたたむ">«</button>
     </div>
-    <nav style="flex:1;overflow-y:auto;padding:6px 0;">
+    <nav style="flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 0;">
       ${navItems.map(item => `
         <a href="${item.href}" data-nav-id="${item.permKey ?? item.id}" class="nav-item${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
           ${escHtml(item.label)}
@@ -382,7 +381,7 @@ export function layout(title: string, content: string, activePage: string = '', 
             + '<div class="limit-alert-item-title" style="font-weight:800;color:' + st.text + ';">板橋' + l.ka + '課・車番 ' + escLimitText(l.car_no) + '・' + escLimitText(l.field_label) + '</div>'
             + '<div class="limit-alert-item-body" style="color:#111;margin-top:4px;word-break:break-all;">' + st.tag + ' ' + vehicleDaysLabel(l.days_remaining) + '（期限: ' + escLimitText(l.limit_date) + '）</div>'
             + '</div>'
-            + '<button onclick="snoozeVehicleAlert(\\'' + l.source + '\\', ' + l.record_id + ')" style="flex-shrink:0;background:#4b5563;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">一旦閉じる</button>'
+            + '<button onclick="snoozeVehicleAlert(\\'' + l.source + '\\', \\'' + l.car_no + '\\')" style="flex-shrink:0;background:#4b5563;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">一旦閉じる</button>'
             + '</div>';
         }
         return '<div class="limit-alert-item" style="display:flex;align-items:flex-start;gap:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;margin-bottom:10px;">'
@@ -410,11 +409,11 @@ export function layout(title: string, content: string, activePage: string = '', 
       try { await fetch('${ADMIN_PATH}/api/limits/' + id + '/dismiss', { method: 'POST' }); } catch (e) {}
       checkLimits();
     }
-    async function snoozeVehicleAlert(source, recordId) {
+    async function snoozeVehicleAlert(source, carNo) {
       try {
         await fetch('${ADMIN_PATH}/api/vehicle-deadlines/alerts/snooze', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ source: source, record_id: recordId }),
+          body: JSON.stringify({ source: source, car_no: carNo }),
         });
       } catch (e) {}
       checkLimits();
@@ -586,7 +585,8 @@ export function layout(title: string, content: string, activePage: string = '', 
         .then(function (data) {
           const results = data.results || [];
           if (results.length === 0) {
-            resultsBox.innerHTML = '<div style="padding:10px;font-size:12px;color:#9ca3af;">該当する案件が見つかりませんでした</div>';
+            resultsBox.innerHTML = '<div style="padding:10px;font-size:12px;color:#9ca3af;">該当する案件が見つかりませんでした</div>'
+              + '<div style="padding:0 10px 10px;"><button type="button" onclick="openReportFromPhoneSearch()" style="width:100%;padding:8px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">この電話番号で新規報告を追加</button></div>';
             return;
           }
           if (results.length === 1) {
@@ -609,6 +609,14 @@ export function layout(title: string, content: string, activePage: string = '', 
         .catch(function () {
           resultsBox.innerHTML = '<div style="padding:10px;font-size:12px;color:#dc2626;">通信エラーが発生しました</div>';
         });
+    }
+    function openReportFromPhoneSearch() {
+      const phone = document.getElementById('phone-search-input').value.trim();
+      const panel = document.getElementById('phone-search-panel');
+      if (panel) panel.style.display = 'none';
+      const resultsBox = document.getElementById('phone-search-results');
+      if (resultsBox) { resultsBox.style.display = 'none'; resultsBox.innerHTML = ''; }
+      if (typeof openQrModal === 'function') openQrModal(null, phone);
     }
     ${showReportFab ? quickReportModalScript() : ''}
   </script>

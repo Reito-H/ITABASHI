@@ -15,6 +15,8 @@ export interface ReportPrintField {
   comboField?: string; // 指定すると同じマス内に2つ目の入力欄（DB列名）を「-」区切りで並べる（例: 課-班を1マスにまとめる）
   comboValue?: string;
   comboPlaceholder?: string;
+  comboDeriveDivision?: boolean; // trueの場合、fieldは課（読み取り専用・自動計算）、comboFieldは班（編集可）とし、班番号から課=Math.ceil(班/2)を自動算出して両方保存する。
+    // 班は課に対して固定（1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班）で自由な組み合わせは存在しないため、課を独立入力させない
 }
 
 export interface ReportPrintOptions {
@@ -46,7 +48,13 @@ const TO_PRESETS = ['１課班長', '２課班長', '３課班長', '４課班�
 export function renderReportPrintPage(o: ReportPrintOptions): string {
   const fieldRows = o.fields.map(f => {
     let valueHtml: string;
-    if (f.field && f.comboField) {
+    if (f.field && f.comboField && f.comboDeriveDivision) {
+      // 班番号は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、班のみ編集可にし課は自動算出の読み取り専用にする
+      valueHtml = `<span class="f-derived-division" id="derived-division-display">${escHtml(f.value || '?')}</span>課`
+        + `<span class="f-combo-sep">-</span>`
+        + `<input type="text" class="f-edit f-edit-combo" data-field="${escHtml(f.comboField)}" value="${escHtml(f.comboValue ?? '')}" oninput="updateDerivedDivision(this.value)">班`
+        + `<input type="hidden" data-field="${escHtml(f.field)}" id="derived-division-hidden" value="${escHtml(f.value)}">`;
+    } else if (f.field && f.comboField) {
       valueHtml = `<input type="text" class="f-edit f-edit-combo" data-field="${escHtml(f.field)}" value="${escHtml(f.value)}" placeholder="${escHtml(f.comboPlaceholder ?? '')}">`
         + `<span class="f-combo-sep">-</span>`
         + `<input type="text" class="f-edit f-edit-combo" data-field="${escHtml(f.comboField)}" value="${escHtml(f.comboValue ?? '')}">`;
@@ -132,8 +140,9 @@ export function renderReportPrintPage(o: ReportPrintOptions): string {
   .f-edit { width: 100%; border: 1px solid transparent; border-radius: 3px; background: transparent; font: inherit; color: #111827; padding: 2px 4px; outline: none; }
   .f-edit:hover { border-color: #d1d5db; }
   .f-edit:focus { border-color: #1e3a5f; background: #eff6ff; }
-  .f-edit-combo { width: 32px; flex: 0 0 auto; text-align: center; }
+  .f-edit-combo { width: 24px; flex: 0 0 auto; text-align: center; }
   .f-combo-sep { color: #9ca3af; padding: 0 2px; }
+  .f-derived-division { font-weight: 700; }
   .f-edit-area { resize: none; overflow: hidden; min-height: 16px; white-space: pre-wrap; }
   .f-edit-compact { font-size: 10px; line-height: 1.35; }
   .f-row.compact .f-value { padding: 2px 8px; }
@@ -254,6 +263,16 @@ export function renderReportPrintPage(o: ReportPrintOptions): string {
     document.getElementById('issued-at').textContent = new Date().toLocaleString('ja-JP');
     function setTo(text) {
       document.getElementById('to-field').textContent = text;
+    }
+    // 班番号は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、
+    // 班の入力から課=Math.ceil(班/2)を自動算出し、表示と保存用hidden inputの両方に反映する
+    function updateDerivedDivision(teamStr) {
+      var n = parseInt(teamStr, 10);
+      var div = (Number.isInteger(n) && n >= 1) ? Math.ceil(n / 2) : null;
+      var disp = document.getElementById('derived-division-display');
+      var hidden = document.getElementById('derived-division-hidden');
+      if (disp) disp.textContent = div === null ? '?' : String(div);
+      if (hidden) hidden.value = div === null ? '' : String(div);
     }
     // .sheetは常にA4横(297mm x 210mm)固定。中身の自然な高さが枠を超える場合は
     // #sheet-fitを縮小し、はみ出た分は2枚目に流れず必ず1枚に収まるようにする。
