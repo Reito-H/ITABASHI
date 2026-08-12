@@ -13,6 +13,7 @@ import type {
 import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH } from '../config';
 import qrcode from 'qrcode-generator';
 import { getMaintenanceMode, setMaintenanceMode, isAdminAccount } from '../utils/maintenance';
+import { triggerAccidentsMonitorForceRefresh } from './public_accidents_monitor';
 import { agoLabel } from './admin_line_usage';
 import { bucketCoarseBands, COARSE_BAND_LABELS } from '../html/accidents';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
@@ -1057,8 +1058,9 @@ app.get('/settings', (c) => {
       { href: `${ADMIN}/request-review`,                perm: 'settings.requests-admin',       title: '要望欄（収集一覧）', desc: '設定ページ「要望欄」から寄せられた要望・意見の一覧（フル権限adminのみ）' },
     ]},
   ];
-  const cardHtml = (card: SettingCard) => `
-          <a href="${card.href}" ${card.newTab ? 'target="_blank" rel="noopener"' : ''} data-perm-key="${card.perm}" style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
+  const cardHtml = (card: SettingCard) => {
+    const linkTag = `
+          <a href="${card.href}" ${card.newTab ? 'target="_blank" rel="noopener"' : ''} ${card.href === MONITOR_ACCIDENTS_PATH ? '' : `data-perm-key="${card.perm}"`} style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
             onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
             <div>
               <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};margin-bottom:3px;">${card.title}</div>
@@ -1066,6 +1068,16 @@ app.get('/settings', (c) => {
             </div>
             <div style="margin-left:auto;color:#9ca3af;font-size:18px;">›</div>
           </a>`;
+    if (card.href !== MONITOR_ACCIDENTS_PATH) return linkTag;
+    return `
+          <div data-perm-key="${card.perm}" style="display:flex;flex-direction:column;gap:8px;">
+            ${linkTag}
+            <button type="button" id="monitor-force-refresh-btn" onclick="forceRefreshAccidentsMonitor(this)"
+              style="align-self:flex-start;font-size:12px;font-weight:700;color:#b45309;background:#fef3c7;border:1px solid #f4d35e;border-radius:8px;padding:8px 14px;cursor:pointer;">
+              【強制更新】表示中のモニター画面を今すぐリロード
+            </button>
+          </div>`;
+  };
   const html = `
     <div style="max-width:560px;">
       <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
@@ -1077,8 +1089,35 @@ app.get('/settings', (c) => {
           ${g.cards.map(cardHtml).join('')}
         </div>
       </div>`).join('')}
-    </div>`;
+    </div>
+    <script>
+      var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
+      function forceRefreshAccidentsMonitor(btn) {
+        var original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '更新をリクエスト中…';
+        fetch(ADMIN_PATH + '/api/accidents-monitor-force-refresh', { method: 'POST', credentials: 'include' })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            btn.disabled = false;
+            btn.textContent = original;
+            if (!res.ok) { alert(res.j.error || '強制更新に失敗しました'); return; }
+            alert('モニター画面に更新をリクエストしました。反映まで少し時間がかかる場合があります。');
+          })
+          .catch(function () {
+            btn.disabled = false;
+            btn.textContent = original;
+            alert('通信エラーで強制更新できませんでした');
+          });
+      }
+    </script>`;
   return c.html(layout('設定', html, 'settings'));
+});
+
+// 事故モニターの強制更新（設定ページの「事故モニター表示」カードから実行）
+app.post('/api/accidents-monitor-force-refresh', async (c) => {
+  await triggerAccidentsMonitorForceRefresh(c.env.DB);
+  return c.json({ ok: true });
 });
 
 // ===== 設定サブページ共通ヘッダー =====

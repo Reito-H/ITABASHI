@@ -37,10 +37,15 @@ export function accidentsMonitorPage(): string {
   }
 
   .total-panel {
-    background: #ffffff; border: 2px solid #f1c3c3; border-radius: 18px;
+    background: #ffffff; border: 4px solid #dc2626; border-radius: 18px;
     padding: clamp(14px, 2vh, 26px) clamp(20px, 2.4vw, 40px);
     display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
     flex: 0 0 auto;
+    animation: warn-border-blink .9s step-end infinite;
+  }
+  @keyframes warn-border-blink {
+    0%, 49% { border-color: #dc2626; }
+    50%, 100% { border-color: #facc15; }
   }
   .total-label { font-size: clamp(18px, 2vw, 26px); color: #111827; font-weight: 700; letter-spacing: .04em; margin-bottom: 4px; }
   .total-count-row { display: flex; align-items: baseline; }
@@ -73,13 +78,22 @@ export function accidentsMonitorPage(): string {
 
   .band-title { font-size: clamp(17px, 1.8vw, 24px); color: #111827; font-weight: 700; letter-spacing: .06em; margin-bottom: 10px; flex: none; }
   .bands {
-    flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); grid-auto-rows: 1fr;
-    gap: clamp(6px, 1vw, 12px); min-height: 0;
+    flex: 1; position: relative; min-height: 0; overflow: hidden;
     background: #ffffff; border: 1px solid #e2e7ee; border-radius: 16px;
-    padding: clamp(10px, 1.6vh, 18px);
   }
   .bands.empty { display: flex; align-items: center; justify-content: center; }
   .bands-empty-msg { font-size: clamp(20px, 2.6vw, 32px); color: #4b5563; font-weight: 700; }
+
+  .band-view {
+    position: absolute; inset: 0; padding: clamp(10px, 1.6vh, 18px);
+    opacity: 0; transition: opacity .4s ease; pointer-events: none;
+  }
+  .band-view.show { opacity: 1; }
+
+  .band-grid-view {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); grid-auto-rows: 1fr;
+    gap: clamp(6px, 1vw, 12px);
+  }
   .band-cell {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     border-radius: 10px; background: #fafafa; border: 1px solid #eef0f3;
@@ -90,6 +104,17 @@ export function accidentsMonitorPage(): string {
   .band-count { font-size: clamp(38px, 7vw, 100px); font-weight: 800; color: #111827; line-height: 1.15; font-variant-numeric: tabular-nums; }
   .band-cell.peak .band-count { color: #dc2626; }
   .band-unit { font-size: clamp(14px, 1.4vw, 19px); color: #4b5563; font-weight: 600; margin-left: 2px; }
+
+  .band-hero-view {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  }
+  .band-hero-main {
+    display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap;
+    gap: clamp(4px, 1vw, 12px); max-width: 100%;
+  }
+  .band-hero-range { font-size: clamp(40px, 6.5vw, 110px); font-weight: 800; color: #dc2626; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .band-hero-label { font-size: clamp(26px, 3.6vw, 60px); font-weight: 800; color: #dc2626; line-height: 1.1; }
+  .band-hero-count { font-size: clamp(18px, 2vw, 28px); color: #6b7280; font-weight: 700; margin-top: clamp(10px, 1.6vh, 18px); }
 
   .foot { display: flex; justify-content: space-between; align-items: center; margin-top: clamp(8px, 1.4vh, 16px); font-size: clamp(13px, 1.2vw, 16px); color: #6b7280; flex: none; }
 
@@ -127,7 +152,7 @@ export function accidentsMonitorPage(): string {
     </div>
   </div>
 
-  <div class="band-title">発生時間帯（2時間刻み）</div>
+  <div class="band-title">発生時間帯（最多）</div>
   <div class="bands" id="bands"></div>
 
   <div class="foot">
@@ -138,7 +163,7 @@ export function accidentsMonitorPage(): string {
 
 <script>
 (function () {
-  var REFRESH_MS = 5 * 60 * 1000;
+  var REFRESH_MS = 3 * 60 * 60 * 1000;
   var BAND_HOURS = 2;
   var BAND_COUNT = 12;
 
@@ -180,9 +205,13 @@ export function accidentsMonitorPage(): string {
     });
   }
 
-  // 棒グラフではなく文字（件数）で読み取れるよう、時間帯ごとのマス目で表示する。
-  // 0件の時間帯は表示せず、事故が発生した時間帯だけを並べる。最多の時間帯だけ赤で目立たせる。
+  // 「全時間帯のグリッド表示」と「最多の時間帯だけを大きく見せる表示」を3秒ごとに
+  // 交互に切り替える。0件の時間帯はグリッドから除外し、最多の時間帯だけ赤で目立たせる。
+  var bandCycleTimer = null;
+
   function renderBands(bands) {
+    if (bandCycleTimer) { clearInterval(bandCycleTimer); bandCycleTimer = null; }
+
     var max = 0;
     for (var i = 0; i < BAND_COUNT; i++) if ((bands[i] || 0) > max) max = bands[i] || 0;
 
@@ -196,10 +225,17 @@ export function accidentsMonitorPage(): string {
     }
     wrap.className = 'bands';
 
+    var peaks = [];
     for (var j = 0; j < BAND_COUNT; j++) {
-      var cnt = bands[j] || 0;
+      if ((bands[j] || 0) === max) peaks.push(j);
+    }
+
+    var gridView = document.createElement('div');
+    gridView.className = 'band-view band-grid-view show';
+    for (var k = 0; k < BAND_COUNT; k++) {
+      var cnt = bands[k] || 0;
       if (cnt === 0) continue;
-      var from = j * BAND_HOURS;
+      var from = k * BAND_HOURS;
       var to = from + BAND_HOURS;
       var isPeak = cnt === max;
       var cell = document.createElement('div');
@@ -207,8 +243,28 @@ export function accidentsMonitorPage(): string {
       cell.innerHTML =
         '<div class="band-range">' + from + '-' + to + '時</div>' +
         '<div><span class="band-count">' + cnt + '</span><span class="band-unit">件</span></div>';
-      wrap.appendChild(cell);
+      gridView.appendChild(cell);
     }
+    wrap.appendChild(gridView);
+
+    var rangeText = peaks.map(function (idx) {
+      return (idx * BAND_HOURS) + '時から' + (idx * BAND_HOURS + BAND_HOURS) + '時';
+    }).join('・');
+
+    var heroView = document.createElement('div');
+    heroView.className = 'band-view band-hero-view';
+    heroView.innerHTML =
+      '<div class="band-hero-main">' +
+        '<span class="band-hero-range">' + rangeText + '</span>' +
+        '<span class="band-hero-label">が最多です！</span>' +
+      '</div>' +
+      '<div class="band-hero-count">' + max + '件発生</div>';
+    wrap.appendChild(heroView);
+
+    bandCycleTimer = setInterval(function () {
+      gridView.classList.toggle('show');
+      heroView.classList.toggle('show');
+    }, 3000);
   }
 
   function renderData(data) {
@@ -251,6 +307,26 @@ export function accidentsMonitorPage(): string {
     setTimeout(function () { location.reload(); }, REFRESH_MS);
   }
 
+  // 設定ページの「強制更新」ボタンが押されたら、通常の更新間隔を待たずにリロードする。
+  // モニターは別デバイスのためサーバー経由の合図が必要 → 軽量なフラグだけを短い間隔でポーリングする。
+  var FORCE_REFRESH_POLL_MS = 30 * 1000;
+  var forceRefreshBaseline = null;
+
+  async function checkForceRefresh() {
+    try {
+      var res = await fetch('/api/public/accidents-monitor-refresh-flag');
+      if (!res.ok) return;
+      var data = await res.json();
+      if (forceRefreshBaseline === null) {
+        forceRefreshBaseline = data.updatedAt;
+        return;
+      }
+      if (data.updatedAt && data.updatedAt !== forceRefreshBaseline) {
+        location.reload();
+      }
+    } catch (e) { /* 通信エラーは無視し次回のポーリングに任せる */ }
+  }
+
   async function boot() {
     try {
       var data = await loadData();
@@ -263,6 +339,8 @@ export function accidentsMonitorPage(): string {
   }
 
   boot();
+  checkForceRefresh();
+  setInterval(checkForceRefresh, FORCE_REFRESH_POLL_MS);
 })();
 </script>
 </body>

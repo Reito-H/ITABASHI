@@ -43,6 +43,8 @@ export type Env = {
   DOCUMENTS_BUCKET: R2Bucket;
   // LINE連携統合ページ: 氏名入力+QR読取での登録LIFF
   LIFF_ID_REGISTER?: string;
+  // 事故データCSVの無人アップロード用（社内PCの監視スクリプトから使う専用キー）
+  ACCIDENTS_UPLOAD_KEY?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

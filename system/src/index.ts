@@ -61,6 +61,7 @@ import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import publicAccidentsMonitorRoutes from './routes/public_accidents_monitor';
+import publicAccidentsUploadRoutes from './routes/public_accidents_upload';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { getMaintenanceMode, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
@@ -349,6 +350,7 @@ app.route('', liffKanchoRoutes);
 // 完全公開ページ（ログイン不要・LINEログインも不要）
 app.route('', publicKanchoWishRoutes);
 app.route('', publicAccidentsMonitorRoutes);
+app.route('', publicAccidentsUploadRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { layout } from '../html/layout';
 import { accidentsPage, type AccidentRecord } from '../html/accidents';
+import { upsertAccidentRecords, type AccidentImportRow } from '../utils/accident_csv';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -58,38 +59,6 @@ app.get('/accidents', async (c) => {
 
 // ===== API =====
 
-interface AccidentImportRow {
-  accident_no?: string;
-  office?: string | null;
-  vehicle_code?: string | null;
-  plate_no?: string | null;
-  division?: number | null;
-  team?: string | null;
-  emp_no?: string | null;
-  emp_name?: string | null;
-  accident_category?: string | null;
-  occurred_date?: string;
-  occurred_time?: string | null;
-  weather?: string | null;
-  loc_city?: string | null;
-  loc_town?: string | null;
-  loc_addr?: string | null;
-  fault_pct_planned?: number | null;
-  fault_pct_final?: number | null;
-  damage_amount?: number | null;
-  accident_target?: string | null;
-  accident_form?: string | null;
-  road_condition?: string | null;
-  business_status?: string | null;
-  emp_age?: number | null;
-  emp_tenure_years?: number | null;
-  memo?: string | null;
-  past3y_accident_count?: number | null;
-  road_shape?: string | null;
-  cause_reason?: string | null;
-  cause_direct?: string | null;
-}
-
 app.post('/api/accidents/import', async (c) => {
   let data: { records?: AccidentImportRow[] };
   try {
@@ -99,54 +68,9 @@ app.post('/api/accidents/import', async (c) => {
   }
 
   const rows = Array.isArray(data?.records) ? data.records : [];
-  const valid = rows.filter(r => r.accident_no && /^\d{4}-\d{2}-\d{2}$/.test(r.occurred_date ?? ''));
-  if (valid.length === 0) return c.json({ error: '有効なデータがありません' }, 400);
-
-  type D1Stmt = ReturnType<typeof c.env.DB.prepare>;
-  const statements: D1Stmt[] = valid.map(r => c.env.DB.prepare(`
-    INSERT INTO accident_records (
-      accident_no, office, vehicle_code, plate_no, division, team, emp_no, emp_name,
-      accident_category, occurred_date, occurred_time, weather, loc_city, loc_town, loc_addr,
-      fault_pct_planned, fault_pct_final, damage_amount, accident_target, accident_form,
-      road_condition, business_status, emp_age, emp_tenure_years, memo, past3y_accident_count,
-      road_shape, cause_reason, cause_direct, updated_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, datetime('now','localtime'))
-    ON CONFLICT(accident_no) DO UPDATE SET
-      office = excluded.office, vehicle_code = excluded.vehicle_code, plate_no = excluded.plate_no,
-      division = excluded.division, team = excluded.team, emp_no = excluded.emp_no, emp_name = excluded.emp_name,
-      accident_category = excluded.accident_category, occurred_date = excluded.occurred_date,
-      occurred_time = excluded.occurred_time, weather = excluded.weather,
-      loc_city = excluded.loc_city, loc_town = excluded.loc_town, loc_addr = excluded.loc_addr,
-      fault_pct_planned = excluded.fault_pct_planned, fault_pct_final = excluded.fault_pct_final,
-      damage_amount = excluded.damage_amount, accident_target = excluded.accident_target,
-      accident_form = excluded.accident_form, road_condition = excluded.road_condition,
-      business_status = excluded.business_status, emp_age = excluded.emp_age,
-      emp_tenure_years = excluded.emp_tenure_years, memo = excluded.memo,
-      past3y_accident_count = excluded.past3y_accident_count, road_shape = excluded.road_shape,
-      cause_reason = excluded.cause_reason, cause_direct = excluded.cause_direct,
-      updated_at = datetime('now','localtime')
-  `).bind(
-    String(r.accident_no), r.office ?? null, r.vehicle_code ?? null, r.plate_no ?? null,
-    r.division ?? null, r.team ?? null, r.emp_no ?? null, r.emp_name ?? null,
-    r.accident_category ?? null, String(r.occurred_date), r.occurred_time ?? null, r.weather ?? null,
-    r.loc_city ?? null, r.loc_town ?? null, r.loc_addr ?? null,
-    r.fault_pct_planned ?? null, r.fault_pct_final ?? null, r.damage_amount ?? null,
-    r.accident_target ?? null, r.accident_form ?? null, r.road_condition ?? null, r.business_status ?? null,
-    r.emp_age ?? null, r.emp_tenure_years ?? null, r.memo ?? null, r.past3y_accident_count ?? null,
-    r.road_shape ?? null, r.cause_reason ?? null, r.cause_direct ?? null
-  ));
-
-  const CHUNK = 50;
-  const errors: string[] = [];
-  for (let i = 0; i < statements.length; i += CHUNK) {
-    try {
-      await c.env.DB.batch(statements.slice(i, i + CHUNK));
-    } catch (e) {
-      errors.push(`batch[${i}-${i + CHUNK - 1}]: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-
-  return c.json({ ok: errors.length === 0, imported: valid.length, errors });
+  const result = await upsertAccidentRecords(c.env.DB, rows);
+  if (!result.ok && result.imported === 0) return c.json({ error: result.errors[0] ?? '有効なデータがありません' }, 400);
+  return c.json(result);
 });
 
 app.delete('/api/accidents/:id', async (c) => {

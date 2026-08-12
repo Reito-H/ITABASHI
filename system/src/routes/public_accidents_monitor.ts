@@ -16,7 +16,32 @@ function prevYm(ym: string): string {
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
+// 設定ページの「強制更新」ボタンから呼ばれる。system_settings の updated_at を更新するだけで、
+// 実際のリロードはモニター画面側が /api/public/accidents-monitor-refresh-flag をポーリングして行う
+// （モニターは別デバイスのため、サーバー経由でしか合図を送れない）
+export async function triggerAccidentsMonitorForceRefresh(db: D1Database): Promise<void> {
+  await db.prepare(`
+    INSERT INTO system_settings (key, value, updated_at)
+    VALUES ('accidents_monitor_force_refresh_at', '1', datetime('now', 'localtime'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run();
+}
+
+async function getForceRefreshUpdatedAt(db: D1Database): Promise<string> {
+  try {
+    const row = await db.prepare("SELECT updated_at FROM system_settings WHERE key = 'accidents_monitor_force_refresh_at'")
+      .first<{ updated_at: string }>();
+    return row?.updated_at ?? '';
+  } catch {
+    return '';
+  }
+}
+
 app.get(MONITOR_ACCIDENTS_PATH, (c) => c.html(accidentsMonitorPage()));
+
+app.get('/api/public/accidents-monitor-refresh-flag', async (c) => {
+  return c.json({ updatedAt: await getForceRefreshUpdatedAt(c.env.DB) });
+});
 
 app.get('/api/public/accidents-monitor', async (c) => {
   const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
