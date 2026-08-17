@@ -57,6 +57,9 @@ import adminNojicoRoutes from './routes/admin_nojico';
 import adminGarageRoutes from './routes/admin_garage';
 import adminDriverReportsRoutes from './routes/admin_driver_reports';
 import adminAccidentsRoutes from './routes/admin_accidents';
+import adminAccidentsAnalysisRoutes from './routes/admin_accidents_analysis';
+import adminAccidentsForecastRoutes from './routes/admin_accidents_forecast';
+import adminAccidentsTrainingRoutes from './routes/admin_accidents_training';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -256,6 +259,9 @@ app.route(`/${SECRET}/admin`, adminNojicoRoutes);
 app.route(`/${SECRET}/admin`, adminGarageRoutes);
 app.route(`/${SECRET}/admin`, adminDriverReportsRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsRoutes);
+app.route(`/${SECRET}/admin`, adminAccidentsAnalysisRoutes);
+app.route(`/${SECRET}/admin`, adminAccidentsForecastRoutes);
+app.route(`/${SECRET}/admin`, adminAccidentsTrainingRoutes);
 
 // =====================
 // API（認証必須）

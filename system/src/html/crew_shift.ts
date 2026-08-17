@@ -678,18 +678,41 @@ async function openHistory() {
 
 ${editable ? `
 // ===== PDFアップロード =====
+// PDF解析はブラウザ側で行い（CPU時間に制限がないため）、結果を小分けにして
+// サーバーへ送信する（Worker側のCPU時間上限に収まる件数ずつ）。
+var CHUNK_MEMBERS = 300;
+var CHUNK_SHIFTS = 3000;
+var _pdfParserLoadPromise = null;
+function loadPdfParser() {
+  if (window.parseCrewShiftPdf) return Promise.resolve();
+  if (_pdfParserLoadPromise) return _pdfParserLoadPromise;
+  _pdfParserLoadPromise = new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = API + '/pdf-parser.js';
+    s.onload = function() { resolve(); };
+    s.onerror = function() { reject(new Error('解析ライブラリの読込に失敗しました')); };
+    document.head.appendChild(s);
+  });
+  return _pdfParserLoadPromise;
+}
+function chunkArray(arr, size) {
+  var out = [];
+  for (var i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+async function postJson(url, body) {
+  var res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  var d = await res.json().catch(function(){ return {}; });
+  if (!res.ok) throw new Error(d.error || 'server');
+  return d;
+}
 function openImport() {
   sel('#import-result').textContent = '';
   sel('#import-file').value = '';
   sel('#import-modal').style.display = 'flex';
 }
-function fileToBase64(file) {
-  return new Promise(function(resolve, reject) {
-    var reader = new FileReader();
-    reader.onload = function() { resolve(reader.result.split(',')[1]); };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+function setImportProgress(text) {
+  sel('#import-result').innerHTML = '<span style="color:#374151;">' + escH(text) + '</span>';
 }
 async function doImport() {
   var f = sel('#import-file').files[0];
@@ -698,16 +721,65 @@ async function doImport() {
   btn.disabled = true; btn.textContent = '取込中...';
   sel('#import-result').textContent = '';
   try {
-    var b64 = await fileToBase64(f);
-    var res = await fetch(API + '/import-pdf', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ file_name: f.name, data: b64 }) });
-    var d = await res.json();
-    if (!res.ok) throw new Error(d.error || '取込に失敗しました');
-    var divLabel = (d.divisions && d.divisions.length) ? d.divisions.join('・') : '';
-    var msg = '取込完了: ' + d.member_count + '名 / ' + d.cell_count + '件（' + d.start_date + '〜' + d.end_date + '）' + (divLabel ? '<br>対象: ' + escH(divLabel) : '');
-    if (d.warnings && d.warnings.length) msg += '<br><span style="color:#d97706;">' + d.warnings.map(escH).join('<br>') + '</span>';
+    setImportProgress('解析ライブラリ読込中...');
+    await loadPdfParser();
+
+    setImportProgress('PDF解析中...');
+    var buf = await f.arrayBuffer();
+    var parsed = await window.parseCrewShiftPdf(new Uint8Array(buf));
+    if (!parsed.members.length) {
+      var noDataMsg = 'PDFから乗務員データを読み取れませんでした。「月初勤務予定表」形式のPDFか確認してください';
+      if (parsed.warnings && parsed.warnings.length) noDataMsg += '<br><span style="color:#d97706;">' + parsed.warnings.map(escH).join('<br>') + '</span>';
+      sel('#import-result').innerHTML = '<span style="color:#dc2626;">' + noDataMsg + '</span>';
+      return;
+    }
+
+    var divisions = Array.from(new Set(parsed.members.map(function(m){ return m.division; }))).sort();
+    var empDivision = {};
+    var memberCountByDivision = {};
+    parsed.members.forEach(function(m) {
+      empDivision[m.emp_code] = m.division;
+      memberCountByDivision[m.division] = (memberCountByDivision[m.division] || 0) + 1;
+    });
+    var cellCountByDivision = {};
+    parsed.shifts.forEach(function(s) {
+      var div = empDivision[s.emp_code] || '';
+      cellCountByDivision[div] = (cellCountByDivision[div] || 0) + 1;
+    });
+
+    var memberChunks = chunkArray(parsed.members.map(function(m, i) {
+      return { emp_code: m.emp_code, name: m.name, car_no: m.car_no, division: m.division, team: m.team, sort_order: (i + 1) * 10 };
+    }), CHUNK_MEMBERS);
+    for (var mi = 0; mi < memberChunks.length; mi++) {
+      setImportProgress('乗務員登録中... (' + (mi + 1) + '/' + memberChunks.length + ')');
+      await postJson(API + '/import/members', { members: memberChunks[mi] });
+    }
+
+    setImportProgress('既存シフトのクリア中...');
+    await postJson(API + '/import/clear', { divisions: divisions, start_date: parsed.startDate, end_date: parsed.endDate });
+
+    var shiftChunks = chunkArray(parsed.shifts, CHUNK_SHIFTS);
+    for (var si = 0; si < shiftChunks.length; si++) {
+      setImportProgress('シフト登録中... (' + (si + 1) + '/' + shiftChunks.length + ')');
+      await postJson(API + '/import/shifts', { shifts: shiftChunks[si] });
+    }
+
+    setImportProgress('仕上げ処理中...');
+    await postJson(API + '/import/finish', {
+      file_name: f.name,
+      start_date: parsed.startDate,
+      end_date: parsed.endDate,
+      divisions: divisions.map(function(div) {
+        return { division: div, member_count: memberCountByDivision[div] || 0, cell_count: cellCountByDivision[div] || 0 };
+      }),
+    });
+
+    var divLabel = divisions.join('・');
+    var msg = '取込完了: ' + parsed.members.length + '名 / ' + parsed.shifts.length + '件（' + parsed.startDate + '〜' + parsed.endDate + '）' + (divLabel ? '<br>対象: ' + escH(divLabel) : '');
+    if (parsed.warnings && parsed.warnings.length) msg += '<br><span style="color:#d97706;">' + parsed.warnings.map(escH).join('<br>') + '</span>';
     sel('#import-result').innerHTML = '<span style="color:#166534;">' + msg + '</span>';
-    var nextDivision = (d.divisions && d.divisions.indexOf(CUR_DIVISION) === -1) ? d.divisions[0] : CUR_DIVISION;
-    setTimeout(function() { location.href = '${ADMIN_PATH}/crew-shift?division=' + encodeURIComponent(nextDivision) + '&start=' + d.start_date + '&end=' + d.end_date; }, 1200);
+    var nextDivision = (divisions.indexOf(CUR_DIVISION) === -1) ? divisions[0] : CUR_DIVISION;
+    setTimeout(function() { location.href = '${ADMIN_PATH}/crew-shift?division=' + encodeURIComponent(nextDivision) + '&start=' + parsed.startDate + '&end=' + parsed.endDate; }, 1200);
   } catch (e) {
     sel('#import-result').innerHTML = '<span style="color:#dc2626;">' + escH(e.message || '取込に失敗しました') + '</span>';
   } finally {

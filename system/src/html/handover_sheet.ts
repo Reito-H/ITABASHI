@@ -179,6 +179,13 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-stale-banner.show{display:flex;}
 @media (max-width:768px){ #ho-stale-banner{top:auto;bottom:64px;right:12px;} }
 
+#ho-accident-alert{position:fixed;top:16px;right:16px;z-index:960;display:none;align-items:center;gap:10px;
+                    background:#fff;border:1px solid #fecaca;color:#991b1b;font-size:13px;font-weight:700;
+                    padding:12px 14px;border-radius:10px;box-shadow:0 10px 30px rgba(153,27,27,.25);max-width:300px;}
+#ho-accident-alert.show{display:flex;}
+#ho-accident-alert .ho-aa-close{border:none;background:none;color:#991b1b;font-size:18px;line-height:1;cursor:pointer;padding:0 0 0 4px;flex:none;}
+@media (max-width:768px){ #ho-accident-alert{top:auto;bottom:110px;right:12px;} }
+
 #ho-suggest{position:fixed;z-index:650;background:#fff;border:1px solid #ccc;border-radius:6px;
             box-shadow:0 6px 18px rgba(0,0,0,.18);max-height:180px;overflow-y:auto;display:none;min-width:110px;}
 .ho-suggest-item{padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap;color:#111;}
@@ -360,6 +367,10 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 <div id="ho-save-dot"></div>
 <div id="ho-toast"></div>
 <button type="button" id="ho-stale-banner">⚠ 他の端末で更新されています。クリックして更新</button>
+<div id="ho-accident-alert" role="alert">
+  <span>⚠ 本日は事故多発日です</span>
+  <button type="button" class="ho-aa-close" id="ho-accident-alert-close" aria-label="閉じる">×</button>
+</div>
 
 <div id="ho-todo-float" class="ho-todo-float" hidden>
   <div class="ho-todo-float-head" id="ho-todo-float-head">
@@ -1470,6 +1481,84 @@ async function reloadStaleSheet(){
 }
 document.getElementById('ho-stale-banner').addEventListener('click', reloadStaleSheet);
 
+// ===== 事故多発日ポップアップ（事故データ予測AI：統計的な日別リスクスコアによる警告）=====
+// 1日7回まで・不規則なタイミング・最低3時間間隔で表示する。端末/タブ単位のアラート疲れ防止が目的で
+// 監査価値のある業務データではないため、DBではなくlocalStorageで表示回数・時刻のみ管理する。
+const ACCIDENT_FORECAST_API = ${safeJson(`${ADMIN_PATH}/api/accidents/forecast-today`)};
+const AA_STORAGE_KEY = 'ho_accident_alert_state';
+const AA_WINDOW_START_MIN = 5 * 60;  // 当日05:00
+const AA_WINDOW_END_MIN = 25 * 60;   // 翌日01:00（20時間の稼働窓）
+const AA_MIN_GAP_MIN = 180;          // 最低3時間間隔
+const AA_MAX_SHOWS = 7;
+const AA_POLL_INTERVAL_MS = 300000;  // 5分（3時間精度の判定なので粗くてよい）
+
+function aaTodayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function aaLoadState(){
+  try { return JSON.parse(localStorage.getItem(AA_STORAGE_KEY) || 'null'); } catch(e) { return null; }
+}
+function aaSaveState(state){
+  try { localStorage.setItem(AA_STORAGE_KEY, JSON.stringify(state)); } catch(e) {}
+}
+function aaMinutesToIso(mins){
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setMinutes(mins);
+  return d.toISOString();
+}
+// 不規則な7回の予定時刻を生成する。8箇所の間隔にランダムな余白を配分することで
+// 最低3時間間隔（AA_MIN_GAP_MIN）を必ず保ちつつ、見た目には不規則なタイミングになる。
+function aaGeneratePlannedTimes(){
+  const n = AA_MAX_SHOWS;
+  const windowLen = AA_WINDOW_END_MIN - AA_WINDOW_START_MIN;
+  const slack = Math.max(0, windowLen - (n - 1) * AA_MIN_GAP_MIN);
+  const raw = Array.from({length: n + 1}, () => Math.random());
+  const sum = raw.reduce((a, b) => a + b, 0) || 1;
+  const gaps = raw.map(r => r / sum * slack);
+  const times = [];
+  let cursor = AA_WINDOW_START_MIN + gaps[0];
+  for (let i = 0; i < n; i++) {
+    times.push(aaMinutesToIso(cursor));
+    cursor += AA_MIN_GAP_MIN + gaps[i + 1];
+  }
+  return times;
+}
+async function aaEnsureTodayState(){
+  const today = aaTodayStr();
+  let state = aaLoadState();
+  if (!state || state.date !== today) {
+    state = { date: today, highRiskToday: false, plannedTimes: [], shownCount: 0, lastShownAt: null };
+    try {
+      const res = await fetch(ACCIDENT_FORECAST_API);
+      const data = await res.json();
+      state.highRiskToday = !!(data && data.isAlert);
+    } catch(e) { state.highRiskToday = false; }
+    if (state.highRiskToday) state.plannedTimes = aaGeneratePlannedTimes();
+    aaSaveState(state);
+  }
+  return state;
+}
+function aaShowPopup(){ document.getElementById('ho-accident-alert').classList.add('show'); }
+function aaHidePopup(){ document.getElementById('ho-accident-alert').classList.remove('show'); }
+async function checkAccidentAlert(){
+  const state = await aaEnsureTodayState();
+  if (!state.highRiskToday || state.plannedTimes.length === 0) return;
+  const now = Date.now();
+  const duePassed = state.plannedTimes.filter(t => new Date(t).getTime() <= now).length;
+  const gapOk = !state.lastShownAt || (now - new Date(state.lastShownAt).getTime()) >= AA_MIN_GAP_MIN * 60000;
+  if (duePassed > state.shownCount && gapOk) {
+    state.shownCount++;
+    state.lastShownAt = new Date().toISOString();
+    aaSaveState(state);
+    aaShowPopup();
+  }
+}
+// 閉じるボタンはDOM非表示にするだけでshownCount/lastShownAtは変更しない
+// （＝閉じても、次の予定時刻が来ればまた表示される）
+document.getElementById('ho-accident-alert-close').addEventListener('click', aaHidePopup);
+
 // ===== 表示セクション（右カラム）のHTML構築 =====
 // 特別枠5項目（当欠/事故車/点検/車両異常/乗務希望）は既存の入力補助を保つため
 // idやフィールド名を固定のまま、ラベル文言と高さだけH.sectionsの設定値に差し替える。
@@ -1928,6 +2017,21 @@ startStalePolling();
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { stopStalePolling(); }
   else { checkStaleVersion(); startStalePolling(); }
+});
+
+let _accidentAlertInterval = null;
+function startAccidentAlertPolling(){
+  if (_accidentAlertInterval) return;
+  checkAccidentAlert();
+  _accidentAlertInterval = setInterval(checkAccidentAlert, AA_POLL_INTERVAL_MS);
+}
+function stopAccidentAlertPolling(){
+  if (_accidentAlertInterval) { clearInterval(_accidentAlertInterval); _accidentAlertInterval = null; }
+}
+startAccidentAlertPolling();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopAccidentAlertPolling(); }
+  else { checkAccidentAlert(); startAccidentAlertPolling(); }
 });
 })();
 </script>

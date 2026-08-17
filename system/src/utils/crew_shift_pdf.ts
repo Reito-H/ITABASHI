@@ -52,9 +52,15 @@ export async function parseCrewShiftPdf(bytes: Uint8Array): Promise<ParsedCrewSh
   let periodEnd = '';
 
   for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    const items = (content.items as Item[]).filter(i => 'str' in i && i.str.trim() !== '');
+    let items: Item[];
+    try {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      items = (content.items as Item[]).filter(i => 'str' in i && i.str.trim() !== '');
+    } catch (err) {
+      warnings.push(`${p}ページ目: 破損したデータのため読み取れませんでした。このページはスキップします（${err instanceof Error ? err.message : String(err)}）`);
+      continue;
+    }
     if (items.length === 0) continue;
 
     const sorted = [...items].sort((a, b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]);

@@ -9,7 +9,8 @@
     "db:init:remote": "wrangler d1 execute benten-db --file=src/db/schema.sql",
     "db:seed": "wrangler d1 execute benten-db --local --file=src/db/seed.sql",
     "setup-admin": "wrangler d1 execute benten-db --local --file=src/db/setup_admin.sql",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:crew-shift-pdf-bundle": "node scripts/build_crew_shift_pdf_bundle.mjs"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

@@ -9,8 +9,8 @@ import { todayJST } from '../benten';
 import { summerReportPage, type SummerReportPeriod, type SummerReportDailyRow, type ForecastByDate } from '../html/summer_report';
 import { crewPortalSubNav } from '../html/crew_portal_nav';
 import { getAdminPermissions } from '../permissions';
-import { parseCrewShiftPdf } from '../utils/crew_shift_pdf';
 import { renderUtilizationReportPage, type UtilizationCapacityRow, type UtilizationReportRow, type UtilizationAutoRow } from '../html/vehicle_utilization_report';
+import { CREW_SHIFT_PDF_CLIENT_JS_BASE64 } from '../assets/crew_shift_pdf_client_bundle';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -181,120 +181,91 @@ app.post('/api/crew-shift/shifts/batch', async (c) => {
   return c.json({ ok: true, saved });
 });
 
-// ===== API: PDF取込 =====
-app.post('/api/crew-shift/import-pdf', async (c) => {
-  const body = await c.req.json<{ file_name?: string; data?: string }>();
-  if (!body.data) return c.json({ error: 'PDFデータがありません' }, 400);
+// ===== PDF解析用バンドル配信 =====
+// PDF解析（座標マッチング等の重い処理）はサーバーではなくブラウザ側で実行する。
+// 無料プランのWorker CPU時間上限（10ms）では、大きいPDFの解析+大量DB書き込みを
+// 1リクエストで完結させると確実に超過してしまうため。
+// src/utils/crew_shift_pdf.ts を編集したら `npm run build:crew-shift-pdf-bundle` で再生成すること。
+app.get('/api/crew-shift/pdf-parser.js', (c) => {
+  const bytes = Uint8Array.from(atob(CREW_SHIFT_PDF_CLIENT_JS_BASE64), (ch) => ch.charCodeAt(0));
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'public, max-age=604800, immutable',
+    },
+  });
+});
 
-  let bytes: Uint8Array;
-  try {
-    const bin = atob(body.data);
-    bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  } catch {
-    return c.json({ error: 'PDFファイルの読み込みに失敗しました' }, 400);
-  }
+// ===== API: PDF取込（ブラウザ側で解析済みのデータをチャンク分割で受け取る） =====
+// 1リクエストが確実にCPU予算内に収まるよう、メンバー登録→既存シフト削除→シフト登録→
+// 完了ログ記録の4段階に分割。呼び出し側（crew_shift.ts）が順番に呼び出す。
 
-  let parsed;
-  try {
-    parsed = await parseCrewShiftPdf(bytes);
-  } catch (err) {
-    console.error('crew-shift pdf parse error', err);
-    return c.json({ error: `PDFの解析に失敗しました: ${err instanceof Error ? err.message : String(err)}` }, 400);
-  }
-  if (parsed.members.length === 0) {
-    return c.json({ error: 'PDFから乗務員データを読み取れませんでした。「月初勤務予定表」形式のPDFか確認してください', warnings: parsed.warnings }, 400);
-  }
+app.post('/api/crew-shift/import/members', async (c) => {
+  const body = await c.req.json<{
+    members: Array<{ emp_code: string; name: string; car_no: string | null; division: string; team: number; sort_order: number }>;
+  }>();
+  const members = body.members ?? [];
+  if (members.length === 0) return c.json({ ok: true });
+
+  const stmts = members.map(m => c.env.DB.prepare(
+    `INSERT INTO crew_shift_members (emp_code, name, car_no, division, team, sort_order) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(emp_code) DO UPDATE SET name = excluded.name, car_no = excluded.car_no, division = excluded.division, team = excluded.team,
+       is_active = 1, updated_at = datetime('now','localtime')`
+  ).bind(m.emp_code, m.name, m.car_no, m.division, m.team, m.sort_order));
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true });
+});
+
+app.post('/api/crew-shift/import/clear', async (c) => {
+  const body = await c.req.json<{ divisions?: string[]; start_date?: string; end_date?: string }>();
+  const divisions = body.divisions ?? [];
+  if (divisions.length === 0 || !body.start_date || !body.end_date) return c.json({ error: 'パラメータ不足' }, 400);
+
+  // 同一期間は上書き（対象課ごとに、期間内の既存シフトを削除してから入れ直す）
+  const stmts = divisions.map(div => c.env.DB.prepare(
+    `DELETE FROM crew_shifts WHERE date BETWEEN ? AND ? AND member_id IN (SELECT id FROM crew_shift_members WHERE division = ?)`
+  ).bind(body.start_date, body.end_date, div));
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true });
+});
+
+app.post('/api/crew-shift/import/shifts', async (c) => {
+  const body = await c.req.json<{ shifts: Array<{ emp_code: string; date: string; code: string }> }>();
+  const shifts = body.shifts ?? [];
+  if (shifts.length === 0) return c.json({ ok: true, saved: 0 });
+
+  // emp_code→member_idの事前引きを省くため、INSERT...SELECTでその場で解決する
+  const stmts = shifts.map(s => c.env.DB.prepare(
+    `INSERT INTO crew_shifts (member_id, date, code, updated_at, updated_by)
+     SELECT id, ?, ?, datetime('now','localtime'), 'pdf-import' FROM crew_shift_members WHERE emp_code = ?
+     ON CONFLICT(member_id, date) DO UPDATE SET code = excluded.code, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
+  ).bind(s.date, s.code, s.emp_code));
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true, saved: shifts.length });
+});
+
+app.post('/api/crew-shift/import/finish', async (c) => {
+  const body = await c.req.json<{
+    file_name?: string;
+    start_date?: string;
+    end_date?: string;
+    divisions?: Array<{ division: string; member_count: number; cell_count: number }>;
+  }>();
+  const divisions = body.divisions ?? [];
+  if (divisions.length === 0 || !body.start_date || !body.end_date) return c.json({ error: 'パラメータ不足' }, 400);
 
   const { id: adminId, name } = await adminName(c);
-
-  // PDFに含まれる課（1課〜4課など複数のことがある）ごとに削除・集計を行う
-  const divisions = [...new Set(parsed.members.map(m => m.division))].sort();
-  const empDivision = new Map(parsed.members.map(m => [m.emp_code, m.division]));
-
-  try {
-    // メンバーをupsert（emp_codeで一意）。既存は氏名・車両コード・班を最新化
-    // まとめてbatch実行し、その後emp_code→idをまとめて引く（1件ずつ往復しない）
-    const UPSERT_BATCH = 100;
-    let sortBase = 0;
-    const memberStmts = parsed.members.map(m => {
-      sortBase += 10;
-      return c.env.DB.prepare(
-        `INSERT INTO crew_shift_members (emp_code, name, car_no, division, team, sort_order) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(emp_code) DO UPDATE SET name = excluded.name, car_no = excluded.car_no, division = excluded.division, team = excluded.team,
-           is_active = 1, updated_at = datetime('now','localtime')`
-      ).bind(m.emp_code, m.name, m.car_no, m.division, m.team, sortBase);
-    });
-    for (let i = 0; i < memberStmts.length; i += UPSERT_BATCH) {
-      await c.env.DB.batch(memberStmts.slice(i, i + UPSERT_BATCH));
-    }
-
-    const empIdMap = new Map<string, number>();
-    const empCodes = parsed.members.map(m => m.emp_code);
-    const LOOKUP_BATCH = 100;
-    for (let i = 0; i < empCodes.length; i += LOOKUP_BATCH) {
-      const chunk = empCodes.slice(i, i + LOOKUP_BATCH);
-      const placeholders = chunk.map(() => '?').join(',');
-      const rows = await c.env.DB.prepare(`SELECT id, emp_code FROM crew_shift_members WHERE emp_code IN (${placeholders})`)
-        .bind(...chunk).all<{ id: number; emp_code: string }>();
-      for (const r of (rows.results ?? [])) empIdMap.set(r.emp_code, r.id);
-    }
-
-    // 同一期間は上書き（対象課ごとに、期間内の既存シフトを削除してから入れ直す）
-    for (const div of divisions) {
-      await c.env.DB.prepare(
-        `DELETE FROM crew_shifts WHERE date BETWEEN ? AND ? AND member_id IN (SELECT id FROM crew_shift_members WHERE division = ?)`
-      ).bind(parsed.startDate, parsed.endDate, div).run();
-    }
-
-    const SHIFT_BATCH = 100;
-    let cellCount = 0;
-    const cellCountByDivision = new Map<string, number>();
-    for (let i = 0; i < parsed.shifts.length; i += SHIFT_BATCH) {
-      const chunk = parsed.shifts.slice(i, i + SHIFT_BATCH);
-      const stmts = chunk.map(s => {
-        const memberId = empIdMap.get(s.emp_code);
-        if (!memberId) return null;
-        cellCount++;
-        const div = empDivision.get(s.emp_code) ?? '';
-        cellCountByDivision.set(div, (cellCountByDivision.get(div) ?? 0) + 1);
-        return c.env.DB.prepare(
-          `INSERT INTO crew_shifts (member_id, date, code, updated_at, updated_by) VALUES (?, ?, ?, datetime('now','localtime'), 'pdf-import')
-           ON CONFLICT(member_id, date) DO UPDATE SET code = excluded.code, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
-        ).bind(memberId, s.date, s.code);
-      }).filter((x): x is NonNullable<typeof x> => x !== null);
-      if (stmts.length) await c.env.DB.batch(stmts);
-    }
-
-    const memberCountByDivision = new Map<string, number>();
-    for (const m of parsed.members) memberCountByDivision.set(m.division, (memberCountByDivision.get(m.division) ?? 0) + 1);
-
-    const logStmts = [];
-    for (const div of divisions) {
-      const mCount = memberCountByDivision.get(div) ?? 0;
-      const cCount = cellCountByDivision.get(div) ?? 0;
-      logStmts.push(c.env.DB.prepare(
-        'INSERT INTO crew_shift_imports (division, team, start_date, end_date, file_name, member_count, cell_count, imported_by) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)'
-      ).bind(div, parsed.startDate, parsed.endDate, body.file_name ?? '', mCount, cCount, name));
-      logStmts.push(c.env.DB.prepare(
-        'INSERT INTO crew_shift_edit_logs (admin_id, admin_name, action, target, date, new_value) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(adminId, name, 'import', `${div} / ${body.file_name ?? 'PDF'}`, parsed.startDate, `${mCount}名 / ${cCount}件 取込（〜${parsed.endDate}）`));
-    }
-    await c.env.DB.batch(logStmts);
-
-    return c.json({
-      ok: true,
-      member_count: parsed.members.length,
-      cell_count: cellCount,
-      start_date: parsed.startDate,
-      end_date: parsed.endDate,
-      divisions,
-      warnings: parsed.warnings,
-    });
-  } catch (err) {
-    console.error('crew-shift pdf import error', err);
-    return c.json({ error: `PDFの取込中にエラーが発生しました: ${err instanceof Error ? err.message : String(err)}` }, 500);
+  const stmts: ReturnType<typeof c.env.DB.prepare>[] = [];
+  for (const d of divisions) {
+    stmts.push(c.env.DB.prepare(
+      'INSERT INTO crew_shift_imports (division, team, start_date, end_date, file_name, member_count, cell_count, imported_by) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)'
+    ).bind(d.division, body.start_date, body.end_date, body.file_name ?? '', d.member_count, d.cell_count, name));
+    stmts.push(c.env.DB.prepare(
+      'INSERT INTO crew_shift_edit_logs (admin_id, admin_name, action, target, date, new_value) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(adminId, name, 'import', `${d.division} / ${body.file_name ?? 'PDF'}`, body.start_date, `${d.member_count}名 / ${d.cell_count}件 取込（〜${body.end_date}）`));
   }
+  await c.env.DB.batch(stmts);
+  return c.json({ ok: true });
 });
 
 // ===== API: 整合性チェック（隔勤の翌日に予定が入っていないか） =====

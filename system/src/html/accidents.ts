@@ -72,11 +72,39 @@ export function bucketCoarseBands(times: Array<string | null | undefined>): numb
   return bands;
 }
 
-function faultBand(pct: number | null): '50%以上' | '1〜49%' | '0%' | '未確定' {
+export function faultBand(pct: number | null): '50%以上' | '1〜49%' | '0%' | '未確定' {
   if (pct === null || pct === undefined) return '未確定';
   if (pct >= 50) return '50%以上';
   if (pct >= 1) return '1〜49%';
   return '0%';
+}
+
+// occurred_date ("YYYY-MM-DD") の配列から曜日別件数（長さ7、0=日〜6=土）を作る。
+// タイムゾーン起因のズレを避けるため必ずDate.UTCで厳密パースする。
+export const WEEKDAY_LABELS_JA = ['日', '月', '火', '水', '木', '金', '土'];
+export function bucketWeekday(dates: Array<string | null | undefined>): number[] {
+  const bands = new Array(7).fill(0);
+  for (const dstr of dates) {
+    if (!dstr) continue;
+    const m = dstr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) continue;
+    const w = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+    bands[w]++;
+  }
+  return bands;
+}
+
+// 事故データ配下4画面（月次一覧/分析・ランキング/予測カレンダー/研修案内印刷）共通のタブナビ
+export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'training'): string {
+  const tabs: Array<{ id: typeof active; label: string; href: string }> = [
+    { id: 'list', label: '月次一覧', href: `${ADMIN_PATH}/accidents` },
+    { id: 'analysis', label: '分析・ランキング', href: `${ADMIN_PATH}/accidents/analysis` },
+    { id: 'forecast', label: '予測カレンダー', href: `${ADMIN_PATH}/accidents/forecast` },
+    { id: 'training', label: '事故研修案内', href: `${ADMIN_PATH}/accidents/training` },
+  ];
+  return `<div class="ac-tabnav">` + tabs.map(t =>
+    `<a class="ac-tab-link${t.id === active ? ' active' : ''}" href="${t.href}">${t.label}</a>`
+  ).join('') + `</div>`;
 }
 
 function monthLabel(ym: string): string {
@@ -149,6 +177,10 @@ export function accidentsPage(opts: AccidentsPageOpts): string {
   return `
 <style>
   .ac { font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; }
+  .ac-tabnav { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid #e5e7eb; }
+  .ac-tab-link { padding:9px 16px; font-size:13px; font-weight:600; color:#64748b; text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .ac-tab-link:hover { color:#1a3a5c; }
+  .ac-tab-link.active { color:#1a3a5c; border-bottom-color:#1a3a5c; }
   .ac-top { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; }
   .ac-month-select { border:1px solid #d1d5db; border-radius:8px; padding:9px 12px; font-size:14px; background:#fff; }
   .ac-kpis { display:grid; grid-template-columns:1.2fr 1fr 1.6fr; gap:14px; margin-bottom:16px; }
@@ -191,6 +223,7 @@ export function accidentsPage(opts: AccidentsPageOpts): string {
   @media (max-width:900px) { .ac-kpis { grid-template-columns:1fr; } }
 </style>
 <div class="ac">
+  ${accidentsTabNav('list')}
   <div class="ac-top">
     <select class="ac-month-select" id="ac-month-select" onchange="location.href='${ADMIN_PATH}/accidents?month='+this.value">
       ${monthOptions}
