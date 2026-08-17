@@ -77,7 +77,7 @@ app.get('/crew-shift', async (c) => {
   const dates = dateRange(start!, end!);
   const editable = await canEdit(c);
   const html = crewShiftPage(membersRes.results ?? [], typesRes.results ?? [], shiftMap, dates, division, start!, end!, editable, periods, divisions, todayJST());
-  return c.html(layout('乗務員シフト', crewPortalSubNav('crew-shift') + html, 'crew-portal'));
+  return c.html(layout('乗務員シフト', crewPortalSubNav('crew-shift') + html, 'staff'));
 });
 
 // ===== ページ: 夏季稼働計画対実績 =====
@@ -100,7 +100,7 @@ app.get('/summer-report', async (c) => {
   const periodListRes = await c.env.DB.prepare('SELECT * FROM summer_report_periods WHERE division = ? ORDER BY fiscal_year DESC').bind(DIVISION).all<SummerReportPeriod>();
 
   if (!period) {
-    return c.html(layout('夏季稼働計画対実績', crewPortalSubNav('crew-shift') + summerReportPage(null, [], {}, {}, false, periodListRes.results ?? []), 'crew-portal'));
+    return c.html(layout('夏季稼働計画対実績', crewPortalSubNav('crew-shift') + summerReportPage(null, [], {}, {}, false, periodListRes.results ?? []), 'staff'));
   }
 
   const dates = dateRange(period.start_date, period.end_date);
@@ -130,7 +130,7 @@ app.get('/summer-report', async (c) => {
 
   const editable = await canEdit(c);
   const html = summerReportPage(period, dates, daily, forecast, editable, periodListRes.results ?? []);
-  return c.html(layout('夏季稼働計画対実績', crewPortalSubNav('crew-shift') + html, 'crew-portal'));
+  return c.html(layout('夏季稼働計画対実績', crewPortalSubNav('crew-shift') + html, 'staff'));
 });
 
 // ===== API: シフト一括保存 =====

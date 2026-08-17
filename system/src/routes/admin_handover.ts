@@ -400,6 +400,98 @@ app.delete('/api/handover/:division/sections/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// ===== メーター検査フローティング表（引き継ぎシート専用の簡易台帳） =====
+// 点検管理ページの meter_inspections（vehicle_teams連動の全社共通台帳）とは完全に独立したデータ。
+// 車番も手入力で、行の追加・削除も自由に行える（紙の台帳をそのままデジタル化したもの）。
+type MeterEntryRow = {
+  id: number; division: number; team: number; car_no: string;
+  tentative_assignee_name: string | null; inspection_date: string | null; tentative_limit: string | null;
+  honkensa_assignee_name: string | null; honkensa_limit: string | null; sort_order: number;
+};
+const METER_ENTRY_FIELDS = ['car_no', 'tentative_assignee_name', 'inspection_date', 'tentative_limit', 'honkensa_assignee_name', 'honkensa_limit'] as const;
+type MeterEntryField = typeof METER_ENTRY_FIELDS[number];
+const METER_ENTRY_DATE_FIELDS = new Set(['inspection_date', 'tentative_limit', 'honkensa_limit']);
+
+function teamsForDivision(divNum: number): [number, number] {
+  const lo = (divNum - 1) * 2 + 1;
+  return [lo, lo + 1];
+}
+
+app.get('/api/handover/:division/meter-entries', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const [t1, t2] = teamsForDivision(parseInt(division, 10));
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM handover_meter_entries WHERE team IN (?, ?) ORDER BY team, sort_order, id'
+  ).bind(t1, t2).all<MeterEntryRow>();
+  return c.json({ entries: rows.results ?? [] });
+});
+
+app.post('/api/handover/:division/meter-entries', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const divNum = parseInt(division, 10);
+  const [t1, t2] = teamsForDivision(divNum);
+  const b = await c.req.json<{ team?: number }>().catch(() => ({}) as { team?: number });
+  const team = b.team === t1 || b.team === t2 ? b.team : t1;
+
+  const maxRow = await c.env.DB.prepare(
+    'SELECT MAX(sort_order) AS m FROM handover_meter_entries WHERE team = ?'
+  ).bind(team).first<{ m: number | null }>();
+  const sortOrder = (maxRow?.m ?? -1) + 1;
+
+  const r = await c.env.DB.prepare(
+    `INSERT INTO handover_meter_entries (division, team, sort_order, updated_at) VALUES (?, ?, ?, datetime('now','localtime'))`
+  ).bind(divNum, team, sortOrder).run();
+  return c.json({ ok: true, id: r.meta.last_row_id });
+});
+
+app.patch('/api/handover/:division/meter-entries/:id', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+
+  type MeterEntryBody = Partial<Record<MeterEntryField, string | null>>;
+  const body = await c.req.json<MeterEntryBody>().catch(() => ({}) as MeterEntryBody);
+
+  const sets: string[] = [];
+  const values: (string | null)[] = [];
+  for (const field of METER_ENTRY_FIELDS) {
+    if (!(field in body)) continue;
+    const v = body[field];
+    if (METER_ENTRY_DATE_FIELDS.has(field) && v != null && !isValidDate(v)) {
+      return c.json({ error: '日付の形式が不正です' }, 400);
+    }
+    if (field === 'car_no' && v == null) {
+      return c.json({ error: '車番を入力してください' }, 400);
+    }
+    sets.push(`${field} = ?`);
+    values.push(v === undefined ? null : v);
+  }
+  if (!sets.length) return c.json({ error: '更新項目がありません' }, 400);
+
+  const r = await c.env.DB.prepare(
+    `UPDATE handover_meter_entries SET ${sets.join(', ')}, updated_at = datetime('now','localtime') WHERE id = ? AND division = ?`
+  ).bind(...values, id, parseInt(division, 10)).run();
+  if (r.meta.changes === 0) return c.json({ error: 'データが存在しません' }, 404);
+  return c.json({ ok: true });
+});
+
+app.delete('/api/handover/:division/meter-entries/:id', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+
+  const r = await c.env.DB.prepare(
+    'DELETE FROM handover_meter_entries WHERE id = ? AND division = ?'
+  ).bind(id, parseInt(division, 10)).run();
+  if (r.meta.changes === 0) return c.json({ error: 'データが存在しません' }, 404);
+  return c.json({ ok: true });
+});
+
 // カスタムセクションの日次内容の保存（項目単位PATCHと同じ発想のupsert）
 app.patch('/api/handover/:division/:date/section-content/:sectionId', async (c) => {
   const division = c.req.param('division');

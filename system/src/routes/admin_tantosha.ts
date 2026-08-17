@@ -41,7 +41,7 @@ async function loadGroups(db: D1Database): Promise<TantoshaGroupData[]> {
 app.get('/tantosha', async (c) => {
   const groups = await loadGroups(c.env.DB);
   const editable = await canEdit(c);
-  return c.html(layout('担当車表', crewPortalSubNav('tantosha') + tantoshaPage(groups, editable), 'crew-portal'));
+  return c.html(layout('担当車表', crewPortalSubNav('tantosha') + tantoshaPage(groups, editable), 'staff'));
 });
 
 app.get('/tantosha/print', async (c) => {

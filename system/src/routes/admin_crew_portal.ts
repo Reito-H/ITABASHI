@@ -1,5 +1,4 @@
-// 乗務員ポータル: 個人データ参照（日別明細・売上分析・稼働）のハブページ
-// 乗務員シフト・売上分析（全社）・担当車表への入口も兼ねる（サイドバー1項目に集約）
+// 個人データ参照（日別明細・売上分析・稼働）— 社員管理の一覧・詳細ページから遷移する
 import { Hono } from 'hono';
 import { layout, escHtml } from '../html/layout';
 import { crewPortalSubNav } from '../html/crew_portal_nav';
@@ -10,45 +9,8 @@ const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
 type EmpRow = { id: number; name: string; emp_no: string; division: number | null; team: number | null };
 
-// ===== ページ: 乗務員ポータル（社員選択） =====
-app.get('/crew-portal', async (c) => {
-  const rows = (await c.env.DB.prepare(
-    'SELECT id, name, emp_no, division, team FROM employees WHERE is_active = 1 ORDER BY division, team, name'
-  ).all<EmpRow>()).results ?? [];
-
-  const listHtml = rows.map(e => `
-    <a href="${ADMIN_PATH}/crew-portal/employee/${e.id}" data-name="${escHtml(e.name)}"
-       style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;text-decoration:none;color:#1f2937;border-bottom:1px solid #f3f4f6;">
-      <span style="font-weight:600;">${escHtml(e.name)}</span>
-      <span style="font-size:12px;color:#9ca3af;">${e.division ?? '—'}課${e.team ? e.team + '班' : ''} ／ ${escHtml(e.emp_no)}</span>
-    </a>`).join('');
-
-  const content = `
-<div style="max-width:900px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
-  <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0 0 4px;">乗務員ポータル</h2>
-  <p style="font-size:12px;color:#6b7280;margin:0 0 16px;">乗務員ごとの日報実績・シフト・売上をまとめて参照できます。</p>
-  ${crewPortalSubNav('portal')}
-
-  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;">
-    <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 12px;">個人データ参照 — 社員を選択</h3>
-    <input type="text" id="emp-search" placeholder="氏名で検索" oninput="filterEmpList()"
-      style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px 12px;font-size:13px;margin-bottom:12px;">
-    <div id="emp-list" style="max-height:520px;overflow-y:auto;border:1px solid #f3f4f6;border-radius:8px;">
-      ${listHtml || '<div style="padding:16px;color:#9ca3af;font-size:13px;">在籍中の社員がいません</div>'}
-    </div>
-  </div>
-</div>
-<script>
-function filterEmpList() {
-  const q = document.getElementById('emp-search').value.trim();
-  document.querySelectorAll('#emp-list a').forEach(a => {
-    a.style.display = (!q || a.getAttribute('data-name').includes(q)) ? '' : 'none';
-  });
-}
-</script>`;
-
-  return c.html(layout('乗務員ポータル', content, 'crew-portal'));
-});
+// 旧・乗務員ポータル（社員選択一覧）は社員管理の一覧に統合したため、社員管理へリダイレクト
+app.get('/crew-portal', (c) => c.redirect(`${ADMIN_PATH}/staff`));
 
 // ===== ページ: 個人データ参照（日別明細・売上分析） =====
 app.get('/crew-portal/employee/:id', async (c) => {
@@ -61,12 +23,12 @@ app.get('/crew-portal/employee/:id', async (c) => {
 
   const content = `
 <div style="max-width:900px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
-  <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0 0 4px;">乗務員ポータル</h2>
-  <p style="font-size:12px;color:#6b7280;margin:0 0 16px;">乗務員ごとの日報実績・シフト・売上をまとめて参照できます。</p>
-  ${crewPortalSubNav('portal')}
+  <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0 0 4px;">個人データ参照</h2>
+  <p style="font-size:12px;color:#6b7280;margin:0 0 16px;">乗務員ごとの日報実績・売上をまとめて参照できます。</p>
+  ${crewPortalSubNav('none')}
 
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-    <a href="${ADMIN_PATH}/crew-portal" style="color:#2563eb;font-size:13px;text-decoration:none;">← 社員選択に戻る</a>
+    <a href="${ADMIN_PATH}/staff" style="color:#2563eb;font-size:13px;text-decoration:none;">← 社員一覧に戻る</a>
     <a href="${ADMIN_PATH}/staff/${emp.id}" style="color:#6b7280;font-size:12px;text-decoration:none;">社員情報を編集 →</a>
   </div>
 
@@ -244,7 +206,7 @@ function renderDailyDetail() {
 loadSalesAnalytics();
 </script>`;
 
-  return c.html(layout(`${emp.name} — 個人データ参照`, content, 'crew-portal'));
+  return c.html(layout(`${emp.name} — 個人データ参照`, content, 'staff'));
 });
 
 export default app;

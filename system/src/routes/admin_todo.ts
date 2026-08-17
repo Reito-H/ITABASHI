@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { layout } from '../html/layout';
-import { todoListPage, type TodoTaskRow, type TodoWorkerCheckRow } from '../html/todo_list';
+import { todoListPage, todoCombinedPage, type TodoTaskRow, type TodoWorkerCheckRow } from '../html/todo_list';
 import { getAdminPermissions } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -49,6 +49,27 @@ function cookieValue(cookieHeader: string | undefined, name: string): string | u
   return cookieHeader?.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`))?.[1];
 }
 
+// 指定ka（1〜4|null=当直）・日付のタスク一覧＋勤務者チェックリストをまとめて取得
+async function fetchTodoGroup(db: Env['DB'], ka: number | null, date: string): Promise<{ tasks: TodoTaskRow[]; workerChecks: TodoWorkerCheckRow[] }> {
+  const rows = await db.prepare(
+    `SELECT t.id, t.ka, t.title, t.time_label, t.weekdays, t.note, t.note_day_of_month, t.sort_order,
+            c.is_done, c.done_by, c.done_at
+     FROM todo_tasks t
+     LEFT JOIN todo_completions c ON c.task_id = t.id AND c.date = ?
+     WHERE t.is_active = 1 AND (t.ka = ? OR (? IS NULL AND t.ka IS NULL))
+     ORDER BY t.sort_order, t.id`
+  ).bind(date, ka, ka).all<TodoTaskRow>();
+
+  const workerRows = await db.prepare(
+    `SELECT id, ka, date, work_type, employee_id, employee_name, is_done, done_by, done_at, sort_order
+     FROM todo_worker_checks
+     WHERE date = ? AND (ka = ? OR (? IS NULL AND ka IS NULL))
+     ORDER BY work_type, sort_order, id`
+  ).bind(date, ka, ka).all<TodoWorkerCheckRow>();
+
+  return { tasks: rows.results ?? [], workerChecks: workerRows.results ?? [] };
+}
+
 // ===== ページ =====
 app.get('/todo', async (c) => {
   // ?ka= が無い場合は前回開いた課をCookieから復元する（無ければ1課）
@@ -56,24 +77,36 @@ app.get('/todo', async (c) => {
   const parsedKa = parseKaParam(c.req.query('ka')) ?? parseKaParam(kaCookie) ?? { ka: 1, kaParam: '1' };
   const dateRaw = c.req.query('date') ?? '';
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw) ? dateRaw : todayUtcStr();
-
-  const rows = await c.env.DB.prepare(
-    `SELECT t.id, t.ka, t.title, t.time_label, t.weekdays, t.note, t.note_day_of_month, t.sort_order,
-            c.is_done, c.done_by, c.done_at
-     FROM todo_tasks t
-     LEFT JOIN todo_completions c ON c.task_id = t.id AND c.date = ?
-     WHERE t.is_active = 1 AND (t.ka = ? OR (? IS NULL AND t.ka IS NULL))
-     ORDER BY t.sort_order, t.id`
-  ).bind(date, parsedKa.ka, parsedKa.ka).all<TodoTaskRow>();
-
-  const workerRows = await c.env.DB.prepare(
-    `SELECT id, ka, date, work_type, employee_id, employee_name, is_done, done_by, done_at, sort_order
-     FROM todo_worker_checks
-     WHERE date = ? AND (ka = ? OR (? IS NULL AND ka IS NULL))
-     ORDER BY work_type, sort_order, id`
-  ).bind(date, parsedKa.ka, parsedKa.ka).all<TodoWorkerCheckRow>();
+  const embed = c.req.query('embed') === '1';
+  // 引き継ぎシートのフローティングパネル専用: 開いている課＋当直のやることリストを
+  // タブ切り替え無しで1画面にまとめて表示する（当直そのものを開いている時は組み合わせ不要なので通常表示）
+  const combined = embed && c.req.query('combined') === '1' && parsedKa.ka !== null;
 
   const editable = await canEdit(c);
+
+  if (combined) {
+    const [divisionGroup, tobanGroup] = await Promise.all([
+      fetchTodoGroup(c.env.DB, parsedKa.ka, date),
+      fetchTodoGroup(c.env.DB, null, date),
+    ]);
+    const html = todoCombinedPage({
+      division: parsedKa.ka as number,
+      date,
+      prevDate: shiftDate(date, -1),
+      nextDate: shiftDate(date, 1),
+      todayDate: todayUtcStr(),
+      dateLabel: formatDateLabel(date),
+      divisionTasks: divisionGroup.tasks,
+      divisionWorkerChecks: divisionGroup.workerChecks,
+      tobanTasks: tobanGroup.tasks,
+      tobanWorkerChecks: tobanGroup.workerChecks,
+    });
+    const res = c.html(layout('やることリスト', html, 'todo', '', true));
+    res.headers.append('Set-Cookie', `todo_ka=${parsedKa.kaParam}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=15552000`);
+    return res;
+  }
+
+  const group = await fetchTodoGroup(c.env.DB, parsedKa.ka, date);
   const html = todoListPage({
     ka: parsedKa.kaParam,
     date,
@@ -81,11 +114,12 @@ app.get('/todo', async (c) => {
     nextDate: shiftDate(date, 1),
     todayDate: todayUtcStr(),
     dateLabel: formatDateLabel(date),
-    tasks: rows.results ?? [],
-    workerChecks: workerRows.results ?? [],
+    tasks: group.tasks,
+    workerChecks: group.workerChecks,
     editable,
+    embed,
   });
-  const res = c.html(layout('やることリスト', html, 'todo'));
+  const res = c.html(layout('やることリスト', html, 'todo', '', embed));
   res.headers.append('Set-Cookie', `todo_ka=${parsedKa.kaParam}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=15552000`);
   return res;
 });

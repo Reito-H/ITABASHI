@@ -85,6 +85,41 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
               padding:3px 11px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 .ho-limit-btn:hover{border-color:#999;}
 
+/* やることリスト起動ボタン（動態欄の右隣）とフローティングパネル */
+.ho-todo-float-btn{display:inline-flex;align-items:center;gap:5px;border:1px solid #c7d2fe;background:#eef2ff;
+                   color:#3730a3;border-radius:14px;padding:3px 11px 3px 8px;font-size:12px;font-weight:700;
+                   cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,color .15s;}
+.ho-todo-float-btn:hover{background:#e0e7ff;border-color:#a5b4fc;}
+.ho-todo-float-btn.active{background:#4f46e5;border-color:#4f46e5;color:#fff;}
+.ho-todo-float-btn svg{flex-shrink:0;}
+.ho-todo-float{position:fixed;z-index:950;width:420px;height:560px;min-width:320px;min-height:280px;
+               max-width:96vw;max-height:92vh;background:rgba(255,255,255,.88);
+               backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
+               border:1px solid rgba(255,255,255,.6);border-radius:16px;
+               box-shadow:0 24px 60px rgba(15,23,42,.28),0 2px 8px rgba(15,23,42,.14);
+               display:flex;flex-direction:column;overflow:hidden;}
+.ho-todo-float[hidden]{display:none;}
+.ho-todo-float-head{display:flex;align-items:center;gap:8px;padding:9px 8px 9px 12px;
+                    background:linear-gradient(135deg,#1e2a3a 0%,#334862 100%);color:#fff;
+                    cursor:grab;user-select:none;flex-shrink:0;touch-action:none;}
+.ho-todo-float-head:active{cursor:grabbing;}
+.ho-todo-float-drag{display:flex;align-items:center;opacity:.5;flex-shrink:0;}
+.ho-todo-float-title{font-size:12.5px;font-weight:800;letter-spacing:.02em;flex:1;white-space:nowrap;
+                     overflow:hidden;text-overflow:ellipsis;}
+.ho-todo-float-actions{display:flex;align-items:center;gap:3px;flex-shrink:0;}
+.ho-todo-float-actions button{border:none;background:rgba(255,255,255,.14);color:#fff;width:24px;height:24px;
+                              border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;
+                              font-size:15px;line-height:1;}
+.ho-todo-float-actions button:hover{background:rgba(255,255,255,.26);}
+.ho-todo-float-body{flex:1;min-height:0;position:relative;}
+.ho-todo-float-body iframe{width:100%;height:100%;border:none;display:block;background:#fff;}
+.ho-todo-float-resize{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;touch-action:none;}
+.ho-todo-float-resize::after{content:'';position:absolute;right:5px;bottom:5px;width:8px;height:8px;
+                             border-right:2px solid rgba(30,42,58,.32);border-bottom:2px solid rgba(30,42,58,.32);
+                             border-radius:1px;}
+.ho-todo-float.dragging,.ho-todo-float.resizing{box-shadow:0 30px 70px rgba(15,23,42,.36);}
+.ho-todo-float.dragging .ho-todo-float-body,.ho-todo-float.resizing .ho-todo-float-body{pointer-events:none;}
+
 #ho-limit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                   align-items:center;justify-content:center;}
 #ho-limit-overlay.show{display:flex;}
@@ -265,11 +300,43 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-tokasum-months-btn{border:1px solid #ccc;background:#fafafa;border-radius:12px;padding:3px 11px;
                        font-size:11px;font-weight:700;color:#555;cursor:pointer;}
 .ho-tokasum-months-btn.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+
+/* メーター検査フローティング表（紙台帳「◯月 メーター検査」と同じ列構成、印鑑欄の代わりに期限を編集可にしたもの） */
+#ho-mtr-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
+                align-items:center;justify-content:center;}
+#ho-mtr-overlay.show{display:flex;}
+#ho-mtr-modal{background:#fff;border-radius:10px;padding:18px 20px;width:640px;max-width:94vw;
+             max-height:86vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+@media (min-width:769px){ #ho-mtr-modal{width:760px;max-width:92vw;} }
+.ho-mtr-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
+             color:var(--navy);margin-bottom:10px;flex-shrink:0;}
+#ho-mtr-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
+.ho-mtr-body{overflow-y:auto;flex:1;}
+.ho-mtr-group{margin-bottom:16px;}
+.ho-mtr-group:last-child{margin-bottom:0;}
+.ho-mtr-group-title{background:var(--navy);color:#fff;font-size:13px;font-weight:800;padding:6px 10px;border-radius:6px 6px 0 0;}
+.ho-mtr-table{width:100%;border-collapse:collapse;font-size:12px;}
+.ho-mtr-table th,.ho-mtr-table td{border:1px solid #ccc;padding:5px 6px;text-align:center;}
+.ho-mtr-table th{background:#f3f4f6;color:#374151;font-weight:700;}
+.ho-mtr-table td{position:relative;}
+.ho-mtr-input{width:100%;border:1px solid #d1d5db;border-radius:5px;padding:4px 5px;font-size:12px;
+              box-sizing:border-box;font-family:inherit;}
+.ho-mtr-empty{text-align:center;color:var(--muted);font-size:13px;padding:24px 0;}
+.ho-mtr-sug{display:none;position:absolute;top:100%;left:2px;right:2px;background:#fff;border:1px solid #e5e7eb;
+           border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.15);max-height:160px;overflow-y:auto;z-index:30;text-align:left;}
+.ho-mtr-sug-item{padding:6px 9px;font-size:12px;cursor:pointer;border-bottom:1px solid #f3f4f6;}
+.ho-mtr-sug-item:hover{background:#f0c04033;}
+.ho-mtr-del{border:none;background:transparent;color:#ccc;font-size:14px;cursor:pointer;padding:2px 4px;line-height:1;}
+.ho-mtr-del:hover{color:var(--red);}
+.ho-mtr-add{border:1px dashed #bbb;background:#fff;color:#666;border-radius:0 0 6px 6px;padding:6px 0;
+           font-size:12px;cursor:pointer;width:100%;border-top:none;}
+.ho-mtr-add:hover{background:#f7f7f7;}
 </style>
 
 <div id="ho-root">
   <div class="ho-tabs-h" id="ho-tabs-m"></div>
   <div class="ho-toolrow">
+    <button type="button" id="ho-meter-btn" class="ho-tokasum-btn">メーター検査</button>
     <button type="button" id="ho-copy-btn" class="ho-copy-btn">コピー</button>
     <button type="button" id="ho-print-btn" class="ho-print-btn">印刷</button>
     <button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button>
@@ -293,6 +360,22 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 <div id="ho-save-dot"></div>
 <div id="ho-toast"></div>
 <button type="button" id="ho-stale-banner">⚠ 他の端末で更新されています。クリックして更新</button>
+
+<div id="ho-todo-float" class="ho-todo-float" hidden>
+  <div class="ho-todo-float-head" id="ho-todo-float-head">
+    <span class="ho-todo-float-drag" aria-hidden="true"><svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="2" cy="2" r="1.5"/><circle cx="8" cy="2" r="1.5"/><circle cx="2" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="2" cy="14" r="1.5"/><circle cx="8" cy="14" r="1.5"/></svg></span>
+    <span class="ho-todo-float-title">やることリスト</span>
+    <div class="ho-todo-float-actions">
+      <button type="button" id="ho-todo-float-newtab" aria-label="別タブで開く" title="別タブで開く"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14L21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg></button>
+      <button type="button" id="ho-todo-float-close" aria-label="閉じる" title="閉じる">×</button>
+    </div>
+  </div>
+  <div class="ho-todo-float-body" id="ho-todo-float-body">
+    <iframe id="ho-todo-float-iframe" title="やることリスト" loading="lazy"></iframe>
+  </div>
+  <div class="ho-todo-float-resize" id="ho-todo-float-resize" aria-hidden="true"></div>
+</div>
+
 <div id="ho-fontset-overlay">
   <div id="ho-fontset-modal">
     <div class="ho-fontset-head"><span id="ho-fontset-title">課の設定</span><button type="button" id="ho-fontset-close">×</button></div>
@@ -349,11 +432,18 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     <div class="ho-tokasum-list" id="ho-tokasum-list"></div>
   </div>
 </div>
+<div id="ho-mtr-overlay">
+  <div id="ho-mtr-modal">
+    <div class="ho-mtr-head"><span id="ho-mtr-title">メーター検査</span><button type="button" id="ho-mtr-close">×</button></div>
+    <div class="ho-mtr-body" id="ho-mtr-body"></div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
+const TODO_URL = ${safeJson(`${ADMIN_PATH}/todo`)};
 const EDITABLE = ${editable ? 'true' : 'false'};
 const MY_DIVISION = ${safeJson(myDivision)};
 function lastDivision(){
@@ -670,6 +760,7 @@ function renderTabs(){
 async function switchDivision(d){
   if (d === H.division) return;
   H.division = d; H.date = null;
+  closeMeterModal();
   try { localStorage.setItem('ho_last_division', String(d)); } catch {}
   renderTabs();
   applyFontSize();
@@ -1017,6 +1108,139 @@ async function openTokaSummary(){
 function closeTokaSummary(){
   document.getElementById('ho-tokasum-overlay').classList.remove('show');
 }
+
+// ===== メーター検査（紙台帳「◯月 メーター検査」と同じ列構成のフローティング表。印鑑欄は無くし、期限を編集可にする） =====
+// 点検管理ページの meter_inspections（vehicle_teams連動の全社共通の正式な検査台帳）とは
+// 完全に独立した、引き継ぎシート専用の簡易台帳（handover_meter_entries）。車番も手入力で、
+// 行の追加・削除も自由に行える（紙の台帳をそのままデジタル化したもの）。
+function hoMtrEsc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function hoMtrTeamsForDivision(d){
+  const lo = (d - 1) * 2 + 1;
+  return [lo, lo + 1];
+}
+async function openMeterModal(){
+  document.getElementById('ho-mtr-title').textContent = 'メーター検査（' + H.division + '課）';
+  document.getElementById('ho-mtr-overlay').classList.add('show');
+  document.getElementById('ho-mtr-body').innerHTML = '<div class="ho-mtr-empty">読み込み中…</div>';
+  try {
+    const data = await api('GET', '/'+H.division+'/meter-entries');
+    renderMeterModal(data.entries || []);
+  } catch(e) {
+    document.getElementById('ho-mtr-body').innerHTML = '<div class="ho-mtr-empty">読み込みに失敗しました</div>';
+  }
+}
+function closeMeterModal(){
+  document.getElementById('ho-mtr-overlay').classList.remove('show');
+}
+function hoMtrTextTd(field, value, placeholder){
+  return '<td><input type="text" class="ho-mtr-input ho-mtr-field" data-field="' + field + '" value="' + hoMtrEsc(value || '') + '" placeholder="' + (placeholder || '') + '"></td>';
+}
+function hoMtrAssigneeTd(field, value){
+  return '<td>'
+    + '<input type="text" class="ho-mtr-input ho-mtr-field ho-mtr-assignee" data-field="' + field + '" value="' + hoMtrEsc(value || '') + '" placeholder="氏名" autocomplete="off">'
+    + '<div class="ho-mtr-sug"></div>'
+    + '</td>';
+}
+function hoMtrDateTd(field, value){
+  return '<td><input type="date" class="ho-mtr-input ho-mtr-field" data-field="' + field + '" value="' + (value || '') + '"></td>';
+}
+function hoMtrRowHtml(r){
+  return '<tr data-id="' + r.id + '">'
+    + hoMtrTextTd('car_no', r.car_no, '車番')
+    + hoMtrAssigneeTd('tentative_assignee_name', r.tentative_assignee_name)
+    + hoMtrDateTd('inspection_date', r.inspection_date)
+    + hoMtrDateTd('tentative_limit', r.tentative_limit)
+    + hoMtrAssigneeTd('honkensa_assignee_name', r.honkensa_assignee_name)
+    + hoMtrDateTd('honkensa_limit', r.honkensa_limit)
+    + '<td><button type="button" class="ho-mtr-del" data-id="' + r.id + '" title="この行を削除">×</button></td>'
+    + '</tr>';
+}
+function renderMeterModal(entries){
+  const teams = hoMtrTeamsForDivision(H.division);
+  const body = document.getElementById('ho-mtr-body');
+  body.innerHTML = teams.map(function(t){
+    const trows = entries.filter(function(r){ return r.team === t; });
+    const rowsHtml = trows.length ? trows.map(hoMtrRowHtml).join('')
+      : '<tr><td colspan="7" class="ho-mtr-empty">行がありません</td></tr>';
+    return '<div class="ho-mtr-group">'
+      + '<div class="ho-mtr-group-title">' + t + '班</div>'
+      + '<table class="ho-mtr-table" data-team="' + t + '"><thead><tr>'
+      + '<th style="width:70px;">車番</th><th>仮検予定者</th><th style="width:108px;">実施日</th><th style="width:108px;">仮検期限</th>'
+      + '<th>本検予定者</th><th style="width:108px;">本検期限</th><th style="width:28px;"></th>'
+      + '</tr></thead><tbody>' + rowsHtml + '</tbody></table>'
+      + '<button type="button" class="ho-mtr-add" data-team="' + t + '">＋ 行を追加</button>'
+      + '</div>';
+  }).join('');
+}
+async function hoMtrAddRow(team){
+  try {
+    await api('POST', '/'+H.division+'/meter-entries', { team: team });
+    const data = await api('GET', '/'+H.division+'/meter-entries');
+    renderMeterModal(data.entries || []);
+  } catch(e) { alert('追加に失敗しました'); }
+}
+async function hoMtrDeleteRow(id){
+  if (!confirm('この行を削除しますか？')) return;
+  try {
+    await api('DELETE', '/'+H.division+'/meter-entries/'+id);
+    document.querySelector('#ho-mtr-body tr[data-id="'+id+'"]')?.remove();
+  } catch(e) { alert('削除に失敗しました'); }
+}
+async function hoMtrSaveField(id, field, value){
+  try {
+    const o = {};
+    o[field] = value === '' ? null : value;
+    await api('PATCH', '/'+H.division+'/meter-entries/'+id, o);
+    toast('保存しました');
+  } catch(e) { alert('保存に失敗しました'); }
+}
+document.getElementById('ho-mtr-body').addEventListener('change', function(ev){
+  const el = ev.target;
+  if (!el.classList || !el.classList.contains('ho-mtr-field')) return;
+  const tr = el.closest('tr[data-id]');
+  if (!tr) return;
+  hoMtrSaveField(tr.getAttribute('data-id'), el.getAttribute('data-field'), el.value);
+});
+document.getElementById('ho-mtr-body').addEventListener('click', function(ev){
+  const addBtn = ev.target.closest('.ho-mtr-add');
+  if (addBtn) { hoMtrAddRow(parseInt(addBtn.getAttribute('data-team'), 10)); return; }
+  const delBtn = ev.target.closest('.ho-mtr-del');
+  if (delBtn) { hoMtrDeleteRow(delBtn.getAttribute('data-id')); return; }
+  const item = ev.target.closest('.ho-mtr-sug-item');
+  if (item) {
+    const results = item.parentElement;
+    const input = results.previousElementSibling;
+    input.value = item.getAttribute('data-name');
+    results.style.display = 'none';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+});
+document.getElementById('ho-mtr-body').addEventListener('input', function(ev){
+  const el = ev.target;
+  if (!el.classList || !el.classList.contains('ho-mtr-assignee')) return;
+  clearTimeout(el._mtrSearchTimer);
+  const q = el.value.trim();
+  const results = el.nextElementSibling;
+  if (!q) { results.style.display = 'none'; results.innerHTML = ''; return; }
+  el._mtrSearchTimer = setTimeout(function(){
+    api('GET', '/'+H.division+'/employee-suggest?q='+encodeURIComponent(q)).then(function(data){
+      const names = data.names || [];
+      results.innerHTML = names.length
+        ? names.map(function(n){ return '<div class="ho-mtr-sug-item" data-name="' + hoMtrEsc(n) + '">' + hoMtrEsc(n) + '</div>'; }).join('')
+        : '<div style="padding:8px 10px;font-size:12px;color:#9ca3af;">該当する社員がいません</div>';
+      results.style.display = 'block';
+    }).catch(function(){});
+  }, 200);
+});
+document.getElementById('ho-mtr-body').addEventListener('focusout', function(ev){
+  const el = ev.target;
+  if (!el.classList || !el.classList.contains('ho-mtr-assignee')) return;
+  setTimeout(function(){
+    const results = el.nextElementSibling;
+    if (results) results.style.display = 'none';
+  }, 150);
+});
+
 function copySheetImage(){
   if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
   const el = document.querySelector('#ho-sheet-wrap .ho-doc');
@@ -1080,6 +1304,11 @@ document.getElementById('ho-tokasum-btn').addEventListener('click', openTokaSumm
 document.getElementById('ho-tokasum-close').addEventListener('click', closeTokaSummary);
 document.getElementById('ho-tokasum-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'ho-tokasum-overlay') closeTokaSummary();
+});
+document.getElementById('ho-meter-btn').addEventListener('click', openMeterModal);
+document.getElementById('ho-mtr-close').addEventListener('click', closeMeterModal);
+document.getElementById('ho-mtr-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'ho-mtr-overlay') closeMeterModal();
 });
 document.getElementById('ho-tokasum-prev').addEventListener('click', () => {
   H.tokaSumMonth = addMonth(H.tokaSumMonth, -1);
@@ -1209,6 +1438,7 @@ async function loadSheet(date){
     H.customContent = data.customContent || [];
     renderSheet(data.sheet, date);
     hideStaleBanner();
+    refreshTodoFloatIfOpen();
   } catch(e){ toast('読み込みエラー: '+e.message, 3000); }
 }
 
@@ -1349,6 +1579,12 @@ function renderSheet(sheet, date){
             '<input class="ho-kabu-inp" id="ho-kabu-j" type="number" step="0.5" min="0" max="999" value="'+safeNum(sheet?.kabu_jisseki)+'"'+ro+'></div>' +
           '<div class="ho-kabu-item"><span class="ho-kabu-lbl">動態</span>' +
             '<button class="ho-douta-btn'+doutaCls+'" id="ho-douta-btn"'+(EDITABLE?'':' disabled')+'>'+douta+'</button></div>' +
+          '<div class="ho-kabu-item">' +
+            '<button type="button" class="ho-todo-float-btn" id="ho-todo-float-btn" data-perm-key="todo" aria-label="やることリスト" title="やることリスト">' +
+              '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>' +
+              '<span>やることリスト</span>' +
+            '</button>' +
+          '</div>' +
         '</div>' +
         '<button type="button" class="ho-limit-btn" id="ho-limit-btn">⏰ リミット</button>' +
         (EDITABLE ? '<button class="ho-del-btn" id="ho-del-btn" title="このシートを削除">🗑</button>' : '') +
@@ -1361,6 +1597,9 @@ function renderSheet(sheet, date){
 
   document.getElementById('ho-limit-btn')?.addEventListener('click', openLimitModal);
   loadLimits();
+  const todoFloatBtn = document.getElementById('ho-todo-float-btn');
+  todoFloatBtn?.addEventListener('click', toggleTodoFloat);
+  if (isTodoFloatOpen()) todoFloatBtn?.classList.add('active');
 
   if (EDITABLE){
     document.getElementById('ho-kabu-y')?.addEventListener('input', () => { recalcJisseki(); scheduleSave('kabu_yotei'); });
@@ -1384,6 +1623,126 @@ function renderSheet(sheet, date){
     document.getElementById('ho-del-btn')?.addEventListener('click', () => confirmDeleteDate(H.date));
   }
 }
+
+// ===== やることリスト（フローティングパネル）=====
+// 左サイドバーにあった「やることリスト」ページをこの画面に統合したもの。実体は既存の
+// /todo ページを embed=1&combined=1 でiframe表示するだけ（一覧・編集・勤務者チェック等のロジックは
+// 一切複製しない）。combined=1により、開いている課のリストと当直のリストがタブ切り替え無しで
+// 1画面にまとまり、日付も引き継ぎシート側に自動で合わせる（表示をシンプルにする狙い）。
+// 非モーダル（背景を覆わない）なので、パネルを開いたまま引き継ぎシート側の入力も続けられる。
+function todoFloatUrl(){
+  return TODO_URL + '?ka=' + encodeURIComponent(H.division) + '&date=' + encodeURIComponent(H.date || today()) + '&embed=1&combined=1';
+}
+function isTodoFloatOpen(){
+  const el = document.getElementById('ho-todo-float');
+  return !!el && !el.hidden;
+}
+function loadTodoFloatGeom(){
+  try {
+    const raw = localStorage.getItem('ho_todo_float_geom');
+    if (raw) return JSON.parse(raw);
+  } catch(e){}
+  return null;
+}
+function saveTodoFloatGeom(g){
+  try { localStorage.setItem('ho_todo_float_geom', JSON.stringify(g)); } catch(e){}
+}
+function clampTodoFloatGeom(g){
+  const margin = 8;
+  const maxW = Math.max(320, window.innerWidth - margin * 2);
+  const maxH = Math.max(280, window.innerHeight - margin * 2);
+  const width = Math.min(Math.max(g.width, 320), maxW);
+  const height = Math.min(Math.max(g.height, 280), maxH);
+  const left = Math.min(Math.max(g.left, margin), Math.max(margin, window.innerWidth - width - margin));
+  const top = Math.min(Math.max(g.top, margin), Math.max(margin, window.innerHeight - height - margin));
+  return { left: left, top: top, width: width, height: height };
+}
+function applyTodoFloatGeom(g){
+  const panel = document.getElementById('ho-todo-float');
+  panel.style.left = g.left + 'px';
+  panel.style.top = g.top + 'px';
+  panel.style.width = g.width + 'px';
+  panel.style.height = g.height + 'px';
+}
+function defaultTodoFloatGeom(){
+  const width = Math.min(420, window.innerWidth - 16);
+  const height = Math.min(560, window.innerHeight - 16);
+  const btn = document.getElementById('ho-todo-float-btn');
+  let left = window.innerWidth - width - 24;
+  let top = 90;
+  if (btn){
+    const r = btn.getBoundingClientRect();
+    left = r.left;
+    top = r.bottom + 8;
+  }
+  return clampTodoFloatGeom({ left: left, top: top, width: width, height: height });
+}
+function positionTodoFloat(){
+  const stored = loadTodoFloatGeom();
+  applyTodoFloatGeom(stored ? clampTodoFloatGeom(stored) : defaultTodoFloatGeom());
+}
+function refreshTodoFloatIfOpen(){
+  if (!isTodoFloatOpen()) return;
+  const iframe = document.getElementById('ho-todo-float-iframe');
+  const url = todoFloatUrl();
+  if (iframe.dataset.loadedUrl !== url){ iframe.src = url; iframe.dataset.loadedUrl = url; }
+}
+function openTodoFloat(){
+  const panel = document.getElementById('ho-todo-float');
+  const iframe = document.getElementById('ho-todo-float-iframe');
+  const url = todoFloatUrl();
+  if (iframe.dataset.loadedUrl !== url){ iframe.src = url; iframe.dataset.loadedUrl = url; }
+  panel.hidden = false;
+  positionTodoFloat();
+  document.querySelectorAll('.ho-todo-float-btn').forEach(b => b.classList.add('active'));
+}
+function closeTodoFloat(){
+  document.getElementById('ho-todo-float').hidden = true;
+  document.querySelectorAll('.ho-todo-float-btn').forEach(b => b.classList.remove('active'));
+}
+function toggleTodoFloat(){
+  if (isTodoFloatOpen()) closeTodoFloat(); else openTodoFloat();
+}
+(function initTodoFloatChrome(){
+  const panel = document.getElementById('ho-todo-float');
+  const head = document.getElementById('ho-todo-float-head');
+  const resizeHandle = document.getElementById('ho-todo-float-resize');
+  let mode = null, sx = 0, sy = 0, sg = null;
+  function onDown(e, m){
+    if (e.target.closest('.ho-todo-float-actions')) return;
+    mode = m;
+    sx = e.clientX; sy = e.clientY;
+    const r = panel.getBoundingClientRect();
+    sg = { left: r.left, top: r.top, width: r.width, height: r.height };
+    panel.classList.add(mode === 'drag' ? 'dragging' : 'resizing');
+    if (e.target.setPointerCapture) { try { e.target.setPointerCapture(e.pointerId); } catch(err){} }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp, { once: true });
+    e.preventDefault();
+  }
+  function onMove(e){
+    if (!mode) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    const g = (mode === 'drag')
+      ? { left: sg.left + dx, top: sg.top + dy, width: sg.width, height: sg.height }
+      : { left: sg.left, top: sg.top, width: sg.width + dx, height: sg.height + dy };
+    applyTodoFloatGeom(clampTodoFloatGeom(g));
+  }
+  function onUp(){
+    document.removeEventListener('pointermove', onMove);
+    panel.classList.remove('dragging', 'resizing');
+    mode = null;
+    const r = panel.getBoundingClientRect();
+    saveTodoFloatGeom({ left: r.left, top: r.top, width: r.width, height: r.height });
+  }
+  head.addEventListener('pointerdown', (e) => onDown(e, 'drag'));
+  resizeHandle.addEventListener('pointerdown', (e) => onDown(e, 'resize'));
+  document.getElementById('ho-todo-float-close').addEventListener('click', closeTodoFloat);
+  document.getElementById('ho-todo-float-newtab').addEventListener('click', () => {
+    window.open(TODO_URL + '?ka=' + encodeURIComponent(H.division) + '&date=' + encodeURIComponent(H.date || today()), '_blank');
+  });
+  window.addEventListener('resize', () => { if (isTodoFloatOpen()) applyTodoFloatGeom(clampTodoFloatGeom(panel.getBoundingClientRect())); });
+})();
 
 // ===== 色ツールバー =====
 let tbHideTimer;

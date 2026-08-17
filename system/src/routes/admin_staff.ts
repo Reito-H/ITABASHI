@@ -241,21 +241,46 @@ app.get('/staff', async (c) => {
   };
   const base = { div: filterDiv, enrollment: filterStatus, active: filterActive, retire: filterRetirement };
 
-  const divBtns = [['all', '全課'], ['1', '1課'], ['2', '2課'], ['3', '3課'], ['4', '4課']].map(([v, l]) =>
-    `<a href="${ADMIN_PATH}/staff?${makeFilter('div', v, base)}" style="padding:4px 10px;border-radius:4px;font-size:12px;text-decoration:none;${filterDiv === v ? 'background:#1a3a5c;color:white;' : 'background:#f3f4f6;color:#374151;'}">${l}</a>`
+  // 課の絞り込みはヘッダー右側（headerDivTabs）に統合
+  const headerDivTabs = [['all', '全課'], ['1', '1課'], ['2', '2課'], ['3', '3課'], ['4', '4課']].map(([v, l]) =>
+    `<a href="${ADMIN_PATH}/staff?${makeFilter('div', v, base)}" class="hdr-dept-tab${filterDiv === v ? ' active' : ''}">${l}</a>`
+  ).join('');
+  const headerExtra = `
+    <div class="hdr-dept-tabs">${headerDivTabs}</div>
+    <div class="hdr-report-menu">
+      <button type="button" class="hdr-report-btn" id="hdr-report-btn" onclick="toggleReportMenu()">
+        関連ページ <span style="font-size:9px;">▼</span>
+      </button>
+      <div class="hdr-report-list" id="hdr-report-list">
+        <a href="${ADMIN_PATH}/crew-shift">乗務員シフト</a>
+        <a href="${ADMIN_PATH}/sales-analytics">売上分析（全社）</a>
+        <a href="${ADMIN_PATH}/tantosha">担当車表</a>
+      </div>
+    </div>`;
+
+  // 絞り込みボタン群（セグメントコントロール風、ヘッダーの課タブと同じ視覚言語で統一）
+  const filterTabs = (
+    paramKey: string,
+    options: Array<{ v: string; l: string; warn?: boolean }>,
+    current: string,
+    theme: 'navy' | 'amber' = 'navy'
+  ) => options.map(o =>
+    `<a href="${ADMIN_PATH}/staff?${makeFilter(paramKey, o.v, base)}" class="flt-tab${theme === 'amber' ? ' amber' : ''}${o.warn ? ' warn' : ''}${current === o.v ? ' active' : ''}">${o.l}</a>`
   ).join('');
 
-  const enrollBtns = [['all', '全員'], ['通常', '通常'], ['育休', '育休'], ['病欠', '病欠'], ['傷病', '傷病'], ['長欠', '長欠']].map(([v, l]) =>
-    `<a href="${ADMIN_PATH}/staff?${makeFilter('enrollment', v, base)}" style="padding:4px 10px;border-radius:4px;font-size:12px;text-decoration:none;${filterStatus === v ? 'background:#1a3a5c;color:white;' : 'background:#f3f4f6;color:#374151;'}">${l}</a>`
-  ).join('');
+  const enrollBtns = filterTabs('enrollment', [
+    { v: 'all', l: '全員' }, { v: '通常', l: '通常' }, { v: '育休', l: '育休' },
+    { v: '病欠', l: '病欠' }, { v: '傷病', l: '傷病' }, { v: '長欠', l: '長欠' },
+  ], filterStatus);
 
-  const activeBtns = [['1', '在籍'], ['0', '退職'], ['', '全て']].map(([v, l]) =>
-    `<a href="${ADMIN_PATH}/staff?${makeFilter('active', v, base)}" style="padding:4px 10px;border-radius:4px;font-size:12px;text-decoration:none;${filterActive === v ? 'background:#1a3a5c;color:white;' : 'background:#f3f4f6;color:#374151;'}">${l}</a>`
-  ).join('');
+  const activeBtns = filterTabs('active', [
+    { v: '1', l: '在籍' }, { v: '0', l: '退職' }, { v: '', l: '全て' },
+  ], filterActive);
 
-  const retireBtns = [['', '全員'], ['candidate', '退職候補'], ['soon', '30日以内'], ['has', '退職日あり']].map(([v, l]) =>
-    `<a href="${ADMIN_PATH}/staff?${makeFilter('retire', v, base)}" style="padding:4px 10px;border-radius:4px;font-size:12px;text-decoration:none;${filterRetirement === v ? 'background:#92400e;color:white;' : v === 'candidate' ? 'background:#fee2e2;color:#dc2626;' : 'background:#f3f4f6;color:#374151;'}">${l}</a>`
-  ).join('');
+  const retireBtns = filterTabs('retire', [
+    { v: '', l: '全員' }, { v: 'candidate', l: '退職候補', warn: true },
+    { v: 'soon', l: '30日以内' }, { v: 'has', l: '退職日あり' },
+  ], filterRetirement, 'amber');
 
   // 詳細検索: 何件の条件が有効か（バッジ表示・自動展開の判定用）
   const advActiveCount = [
@@ -329,6 +354,11 @@ app.get('/staff', async (c) => {
       <td data-cell="caution" data-label="要注意" style="${C}white-space:nowrap;text-align:center;" data-val="${e.is_caution ? '1' : '0'}">
         ${e.is_caution ? '<span style="background:#fecaca;color:#991b1b;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;">注意</span>' : '—'}
       </td>
+      <td data-cell="portal" style="${C}text-align:center;white-space:nowrap;" onclick="event.stopPropagation()">
+        <a href="${ADMIN_PATH}/crew-portal/employee/${e.id}" class="row-portal-link" title="個人データ参照（日別明細・売上）" aria-label="${escHtml(e.name)}の個人データ参照">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+        </a>
+      </td>
     </tr>`;
   }).join('');
 
@@ -345,22 +375,24 @@ app.get('/staff', async (c) => {
       <input type="hidden" name="active" value="${escHtml(filterActive)}">
       <input type="hidden" name="retire" value="${escHtml(filterRetirement)}">
       <input name="q" value="${escHtml(q)}" placeholder="氏名・フリガナ・社員番号で検索"
-        style="flex:1;min-width:200px;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
-      <button type="submit" style="padding:7px 16px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;">検索</button>
-      ${q ? `<a href="${ADMIN_PATH}/staff" style="padding:7px 14px;background:#e5e7eb;color:#374151;border-radius:6px;font-size:13px;text-decoration:none;">クリア</a>` : ''}
+        style="flex:1;min-width:200px;border:1px solid #d1d5db;border-radius:8px;padding:8px 12px;font-size:13px;">
+      <button type="submit" style="padding:8px 18px;background:linear-gradient(135deg,#1e4a73,#1a3a5c);color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 5px rgba(26,58,92,.25);">検索</button>
+      ${q ? `<a href="${ADMIN_PATH}/staff" style="padding:8px 14px;background:#f1f5f9;color:#475569;border-radius:8px;font-size:13px;text-decoration:none;">クリア</a>` : ''}
     </form>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
-      <div style="display:flex;gap:4px;align-items:center;">
-        <span style="font-size:11px;color:#9ca3af;width:36px;">課</span>${divBtns}
+    <div class="flt-toolbar">
+      <div class="flt-group">
+        <span class="flt-group-label">状態</span>
+        <div class="flt-seg">${enrollBtns}</div>
       </div>
-      <div style="display:flex;gap:4px;align-items:center;">
-        <span style="font-size:11px;color:#9ca3af;width:36px;">状態</span>${enrollBtns}
+      <div class="flt-divider"></div>
+      <div class="flt-group">
+        <span class="flt-group-label">在籍</span>
+        <div class="flt-seg">${activeBtns}</div>
       </div>
-      <div style="display:flex;gap:4px;align-items:center;">
-        <span style="font-size:11px;color:#9ca3af;width:36px;">在籍</span>${activeBtns}
-      </div>
-      <div style="display:flex;gap:4px;align-items:center;">
-        <span style="font-size:11px;color:#9ca3af;width:42px;">退職</span>${retireBtns}
+      <div class="flt-divider"></div>
+      <div class="flt-group">
+        <span class="flt-group-label">退職</span>
+        <div class="flt-seg">${retireBtns}</div>
       </div>
     </div>
 
@@ -568,10 +600,11 @@ app.get('/staff', async (c) => {
           <th style="${THS}" onclick="sortTable(7)">在籍状態 <span class="si">↕</span></th>
           <th style="${THS}" onclick="sortTable(8)">退職予定日 <span class="si">↕</span></th>
           <th style="${TH}text-align:center;">要注意</th>
+          <th style="${TH}text-align:center;">詳細</th>
         </tr>
       </thead>
       <tbody id="staff-tbody">
-        ${rows || `<tr><td colspan="10" style="padding:24px;text-align:center;color:#9ca3af;">該当する社員がいません</td></tr>`}
+        ${rows || `<tr><td colspan="11" style="padding:24px;text-align:center;color:#9ca3af;">該当する社員がいません</td></tr>`}
       </tbody>
     </table>
   </div>
@@ -603,6 +636,35 @@ app.get('/staff', async (c) => {
 <style>
 .sel-opt{display:block;width:100%;padding:8px 14px;background:none;border:none;text-align:left;font-size:13px;color:#374151;cursor:pointer;}
 .sel-opt:hover{background:#f3f4f6;}
+/* ヘッダー右側の課タブ（セグメントコントロール） */
+.hdr-dept-tabs{display:flex;align-items:center;gap:2px;padding:3px;background:linear-gradient(180deg,#f3f5f8,#eaeef3);border:1px solid #e2e8f0;border-radius:10px;box-shadow:inset 0 1px 2px rgba(15,23,42,.05);flex-shrink:0;}
+.hdr-dept-tab{padding:6px 14px;border-radius:7px;font-size:12.5px;font-weight:600;color:#64748b;text-decoration:none;white-space:nowrap;transition:background .15s ease,color .15s ease,box-shadow .15s ease;}
+.hdr-dept-tab:hover{background:rgba(255,255,255,.75);color:#1a3a5c;}
+.hdr-dept-tab.active{background:linear-gradient(135deg,#1e4a73,#1a3a5c);color:#fff;font-weight:700;letter-spacing:.02em;box-shadow:0 2px 6px rgba(26,58,92,.32);}
+.hdr-dept-tab.active:hover{background:linear-gradient(135deg,#1e4a73,#1a3a5c);color:#fff;}
+/* ヘッダーの関連ページメニュー */
+.hdr-report-menu{position:relative;margin-left:2px;}
+.hdr-report-btn{display:flex;align-items:center;gap:5px;padding:7px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#475569;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s ease,border-color .15s ease;}
+.hdr-report-btn:hover{background:#f8fafc;border-color:#cbd5e1;}
+.hdr-report-list{display:none;position:absolute;top:calc(100% + 6px);right:0;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12);z-index:200;min-width:190px;overflow:hidden;padding:5px;}
+.hdr-report-list a{display:block;padding:8px 11px;border-radius:6px;font-size:12.5px;font-weight:600;color:#374151;text-decoration:none;transition:background .12s ease;}
+.hdr-report-list a:hover{background:#f1f5f9;color:#1a3a5c;}
+/* 絞り込みツールバー（セグメントコントロール） */
+.flt-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;}
+.flt-group{display:flex;align-items:center;gap:8px;}
+.flt-group-label{font-size:10.5px;font-weight:700;color:#94a3b8;letter-spacing:.03em;white-space:nowrap;}
+.flt-divider{width:1px;height:22px;background:#e5e7eb;}
+.flt-seg{display:flex;gap:2px;padding:3px;background:linear-gradient(180deg,#f3f5f8,#eaeef3);border:1px solid #e2e8f0;border-radius:8px;box-shadow:inset 0 1px 2px rgba(15,23,42,.05);}
+.flt-tab{padding:5px 11px;border-radius:5px;font-size:12px;font-weight:600;color:#64748b;text-decoration:none;white-space:nowrap;transition:background .15s ease,color .15s ease,box-shadow .15s ease;}
+.flt-tab:hover{background:rgba(255,255,255,.75);color:#1a3a5c;}
+.flt-tab.active{background:linear-gradient(135deg,#1e4a73,#1a3a5c);color:#fff;box-shadow:0 2px 5px rgba(26,58,92,.3);}
+.flt-tab.amber.active{background:linear-gradient(135deg,#a8580f,#92400e);box-shadow:0 2px 5px rgba(146,64,14,.3);}
+.flt-tab.warn{color:#dc2626;background:rgba(254,226,226,.55);}
+.flt-tab.warn:hover{background:rgba(254,226,226,.9);color:#b91c1c;}
+.flt-tab.warn.active{background:linear-gradient(135deg,#a8580f,#92400e);color:#fff;box-shadow:0 2px 5px rgba(146,64,14,.3);}
+/* 一覧行の個人データ参照アクション */
+.row-portal-link{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;background:#eff6ff;color:#1d4ed8;transition:background .15s ease;}
+.row-portal-link:hover{background:#dbeafe;}
 /* 詳細検索パネル */
 .as-adv{border-top:1px solid #eef1f5;margin-top:12px;padding-top:2px;}
 .as-adv summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:8px 0;font-size:12.5px;font-weight:600;color:#4b5563;user-select:none;}
@@ -654,7 +716,8 @@ app.get('/staff', async (c) => {
   #staff-table td[data-cell="schedule"]{order:-2;}
   #staff-table td[data-cell="start"]{order:-1;}
   #staff-table td[data-cell="car"], #staff-table td[data-cell="enrollment"],
-  #staff-table td[data-cell="retire"], #staff-table td[data-cell="caution"]{display:none;}
+  #staff-table td[data-cell="retire"], #staff-table td[data-cell="caution"],
+  #staff-table td[data-cell="portal"]{display:none;}
   #staff-table td[data-label]:not([data-cell="name"])::before{
     content:attr(data-label) '： ';color:#9ca3af;font-size:11px;
   }
@@ -716,6 +779,19 @@ function toggleSelMenu() {
 document.addEventListener('click', function(e) {
   const btn = document.getElementById('sel-menu-btn');
   const menu = document.getElementById('sel-menu');
+  if (menu && btn && !btn.contains(e.target) && !menu.contains(e.target)) {
+    menu.style.display = 'none';
+  }
+});
+
+// ===== ヘッダー: 関連ページメニュー =====
+function toggleReportMenu() {
+  const menu = document.getElementById('hdr-report-list');
+  menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+}
+document.addEventListener('click', function(e) {
+  const btn = document.getElementById('hdr-report-btn');
+  const menu = document.getElementById('hdr-report-list');
   if (menu && btn && !btn.contains(e.target) && !menu.contains(e.target)) {
     menu.style.display = 'none';
   }
@@ -1223,7 +1299,7 @@ function clearCsvImport() {
 
 </script>`;
 
-  return c.html(layout('社員管理', content, 'staff'));
+  return c.html(layout('社員管理', content, 'staff', headerExtra));
 });
 
 // ===== 新規登録フォーム =====
@@ -1403,7 +1479,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
 
   ${!isNew ? `
   <div style="margin-bottom:16px;">
-    <a href="${ADMIN_PATH}/crew-portal/employee/${emp!.id}" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">売上分析・日別明細を見る（乗務員ポータル）→</a>
+    <a href="${ADMIN_PATH}/crew-portal/employee/${emp!.id}" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">個人データ参照（売上分析・日別明細）を見る →</a>
   </div>
   ` : ''}
 

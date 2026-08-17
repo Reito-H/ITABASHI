@@ -121,7 +121,7 @@ const ADMIN_PATH = '${ADMIN_PATH}';
 loadOverview();
 </script>`;
 
-  return c.html(layout('売上分析', content, 'crew-portal'));
+  return c.html(layout('売上分析', content, 'staff'));
 });
 
 export default app;

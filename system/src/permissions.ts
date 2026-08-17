@@ -8,10 +8,10 @@
 //   migration_031 で既存の制限付きアカウントには全キーの .edit を付与済み。
 
 // 権限キー一覧
-//   サイドバー: home / kancho-shift / handover / todo / crew-portal / newcomers / staff /
+//   サイドバー: home / kancho-shift / handover / todo / newcomers / staff /
 //               vehicles / garage / accidents / inspection / settings / announcements / line / requests
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
-//   乗務員ポータル配下（サイドバーからは非表示・crew-portal経由でリンク）: tantosha / crew-shift
+//   個人データ参照（crew-portal）・乗務員ポータル配下（サイドバーからは非表示・社員管理の一覧/ヘッダーからリンク）: crew-portal / tantosha / crew-shift
 //   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
 //   設定カード: settings.liff / settings.lost-items / settings.accidents /
 //               settings.violations / settings.violation-types /
@@ -187,7 +187,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'shift',         label: '新人シフト管理' },
     { key: 'kancho-shift',  label: '班長シフト' },
     { key: 'handover',      label: '引き継ぎシート' },
-    { key: 'crew-portal',   label: '乗務員ポータル（個人データ参照）' },
+    { key: 'crew-portal',   label: '個人データ参照（日別明細・売上）' },
     { key: 'tantosha',      label: '担当車表' },
     { key: 'todo',          label: 'やることリスト' },
     { key: 'crew-shift',    label: '乗務員シフト・夏季稼働' },

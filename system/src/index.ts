@@ -100,10 +100,14 @@ app.use('*', requireJapan);
 // セキュリティヘッダー
 app.use('*', async (c, next) => {
   await next();
-  const pathname = new URL(c.req.url).pathname;
+  const reqUrl = new URL(c.req.url);
+  const pathname = reqUrl.pathname;
   const isLiff = pathname.startsWith('/liff');
   const isForm = pathname.startsWith('/form');
   const isNojicoPage = pathname === `/${SECRET}/admin/nojico`;
+  // やることリスト: 引き継ぎシートのフローティングパネルにiframe埋め込みするため、
+  // embed=1指定時のみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
+  const isTodoEmbed = pathname === `/${SECRET}/admin/todo` && reqUrl.searchParams.get('embed') === '1';
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   c.res.headers.set('Cache-Control', 'no-store');
@@ -121,13 +125,16 @@ app.use('*', async (c, next) => {
       "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
     );
   } else {
-    c.res.headers.set('X-Frame-Options', 'DENY');
+    // やることリストのembedページのみ、引き継ぎシートのフローティングパネルから
+    // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
+    c.res.headers.set('X-Frame-Options', isTodoEmbed ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     // nojicoページのみ、アプリ内ブラウザとして外部サイト(app.no-jico.com)をiframe表示できるようframe-srcを追加で許可する
     const frameSrc = isNojicoPage ? ' frame-src https://app.no-jico.com;' : '';
+    const frameAncestors = isTodoEmbed ? "frame-ancestors 'self';" : "frame-ancestors 'none';";
     c.res.headers.set('Content-Security-Policy',
-      "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; frame-ancestors 'none';" + frameSrc
+      "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; " + frameAncestors + frameSrc
     );
   }
 });

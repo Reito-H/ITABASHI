@@ -1807,7 +1807,7 @@ app.get('/settings/tutorial', (c) => {
     <a href="#benten-shift" data-perm-key="settings.benten">1-18. ベンテンクラブ シフト</a>
     <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
     <a href="#handover" data-perm-key="handover">1-20. 引き継ぎシート — 課の申し送り事項</a>
-    <a href="#crew-portal" data-perm-key="crew-portal">1-21. 乗務員ポータル — 個人データ・シフト・売上・担当車表</a>
+    <a href="#crew-portal" data-perm-key="crew-portal">1-21. 個人データ参照・乗務員シフト・売上分析・担当車表</a>
     <a href="#todo" data-perm-key="todo">1-22. やることリスト — 課ごとの日次チェックリスト・当直共通タスク</a>
     <div class="tut-toc-section" style="margin-top:12px;" data-perm-key="settings.vehicle-search-guide">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
     <a href="#veh-guide" data-perm-key="settings.vehicle-search-guide">2-1. LINE車番検索ガイド（詳細は専用ページへ）</a>
@@ -2226,13 +2226,13 @@ app.get('/settings/tutorial', (c) => {
     </table>
   </div>
 
-  <!-- 1-21 乗務員ポータル -->
+  <!-- 1-21 個人データ参照・乗務員シフト・売上分析・担当車表 -->
   <div class="tut-section" id="crew-portal" data-perm-key="crew-portal">
-    <h3><span class="num">21</span>乗務員ポータル — 個人データ・シフト・売上・担当車表</h3>
-    <p style="font-size:13px;">乗務員ごとの日別明細・売上分析や、乗務員シフト、全社の売上分析、担当車表を4つのタブで切り替えて確認できます。</p>
+    <h3><span class="num">21</span>個人データ参照・乗務員シフト・売上分析・担当車表</h3>
+    <p style="font-size:13px;">社員管理の一覧の各行、またはヘッダーの「関連ページ」から、乗務員ごとの日別明細・売上分析（個人データ参照）、乗務員シフト、全社の売上分析、担当車表にアクセスできます。</p>
     <table class="tut-table">
-      <tr><th>タブ</th><th>内容</th></tr>
-      <tr><td>個人データ参照</td><td>社員を選んで日別明細・月度売上推移・曜日別平均売上などを表示</td></tr>
+      <tr><th>機能</th><th>内容</th></tr>
+      <tr><td>個人データ参照</td><td>社員管理の一覧・詳細ページから遷移し、日別明細・月度売上推移・曜日別平均売上などを表示</td></tr>
       <tr><td>乗務員シフト</td><td>月間勤務予定表のWeb版。夏季稼働計画対実績の確認も可能</td></tr>
       <tr><td>売上分析（全社）</td><td>全社員横断の売上分析</td></tr>
       <tr><td>担当車表</td><td>3班・4班の担当者一覧表。Webで編集・印刷できる（板橋のみ）</td></tr>

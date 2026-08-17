@@ -109,30 +109,10 @@ const KA_TABS: Array<{ key: string; label: string }> = [
   { key: 'toban', label: '当直' },
 ];
 
-export function todoListPage(params: {
-  ka: string;
-  date: string;
-  prevDate: string;
-  nextDate: string;
-  todayDate: string;
-  dateLabel: string;
-  tasks: TodoTaskRow[];
-  workerChecks: TodoWorkerCheckRow[];
-  editable: boolean;
-}): string {
-  const { ka, date, prevDate, nextDate, todayDate, dateLabel, tasks, workerChecks, editable } = params;
-  const dt = new Date(`${date}T00:00:00Z`);
-  const todayWeekday = dt.getUTCDay();
-  const todayDom = dt.getUTCDate();
-  const qs = (k: string, d: string) => `?ka=${encodeURIComponent(k)}&date=${encodeURIComponent(d)}`;
-
-  return `
-<style>
+// 通常ページ（todoListPage）と、引き継ぎシートのフローティングパネル用の統合ビュー（todoCombinedPage）で
+// 共通して使うCSS/JS。タブ・編集パネル・モーダル・勤務者追加/検索まわりは通常ページ専用のため含めない。
+const TODO_SHARED_CSS = `
   .todo-wrap { max-width:820px; }
-  .todo-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
-  .todo-tab { padding:7px 20px; border-radius:6px 6px 0 0; border:1px solid #d1d5db; border-bottom:none;
-              background:#e5e7eb; color:#374151; font-size:13px; font-weight:600; text-decoration:none; }
-  .todo-tab.active { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
   .todo-btn { padding:6px 14px; border-radius:5px; border:1px solid #d1d5db; background:#fff; cursor:pointer; font-size:12.5px; text-decoration:none; color:#374151; display:inline-block; }
   .todo-btn:hover { background:#f3f4f6; }
   .todo-btn.primary { background:#2563eb; border-color:#2563eb; color:#fff; font-weight:600; }
@@ -145,12 +125,101 @@ export function todoListPage(params: {
   .todo-row:last-child { border-bottom:none; }
   .todo-row.done .todo-title { color:#9ca3af; text-decoration:line-through; }
   .todo-row-off { opacity:0.45; }
-  .todo-check { width:18px; height:18px; flex-shrink:0; }
+  .todo-check { width:18px; height:18px; flex-shrink:0; accent-color:#4f46e5; }
+  .todo-row:hover { background:#fafbff; }
   .todo-title { font-size:13.5px; color:#1f2937; }
   .todo-time { font-size:11.5px; color:#fff; background:#6b7280; border-radius:4px; padding:2px 7px; }
   .todo-badge-off { font-size:11px; color:#9ca3af; }
   .todo-note { font-size:11.5px; color:#fff; background:#dc2626; border-radius:4px; padding:2px 7px; font-weight:600; }
   .todo-doneby { margin-left:auto; font-size:11px; color:#9ca3af; }
+  .wc-wrap { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; margin-top:6px; }
+  .wc-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .wc-heading { font-size:13.5px; font-weight:700; color:#1a3a5c; }
+  .wc-group { margin-bottom:10px; }
+  .wc-group:last-child { margin-bottom:0; }
+  .wc-group-title { font-size:11.5px; font-weight:700; color:#fff; background:#6b7280; border-radius:4px; padding:2px 8px; display:inline-block; margin-bottom:4px; }
+  .wc-row { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid #f1f5f9; }
+  .wc-row:last-child { border-bottom:none; }
+  .wc-row.done .wc-name { color:#9ca3af; text-decoration:line-through; }
+  .wc-check { width:18px; height:18px; flex-shrink:0; accent-color:#4f46e5; }
+  .wc-name { font-size:13.5px; color:#1f2937; }
+  .wc-doneby { margin-left:auto; font-size:11px; color:#9ca3af; }
+`;
+
+// チェックボックス（タスク・勤務者）のトグル処理。呼び出し側スクリプトが var API / var DATE を
+// 先に宣言していることが前提（通常ページ・統合ビューの両方でこの形は共通）。
+const TODO_TOGGLE_JS = `
+document.addEventListener('change', function(e) {
+  var cb = e.target.closest ? e.target.closest('.todo-check') : null;
+  if (!cb) return;
+  var id = Number(cb.dataset.taskId);
+  var isDone = cb.checked;
+  var row = cb.closest('.todo-row');
+  row.classList.toggle('done', isDone);
+  fetch(API + '/completions/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task_id: id, date: DATE, is_done: isDone })
+  }).then(function(r) {
+    if (!r.ok) {
+      cb.checked = !isDone;
+      row.classList.toggle('done', !isDone);
+      alert('更新に失敗しました');
+    }
+  }).catch(function() {
+    cb.checked = !isDone;
+    row.classList.toggle('done', !isDone);
+    alert('通信エラーが発生しました');
+  });
+});
+document.addEventListener('change', function(e) {
+  var cb = e.target.closest ? e.target.closest('.wc-check') : null;
+  if (!cb) return;
+  var id = Number(cb.dataset.wcId);
+  var isDone = cb.checked;
+  var row = cb.closest('.wc-row');
+  row.classList.toggle('done', isDone);
+  fetch(API + '/worker-checks/' + id + '/toggle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ is_done: isDone })
+  }).then(function(r) {
+    if (!r.ok) { cb.checked = !isDone; row.classList.toggle('done', !isDone); alert('更新に失敗しました'); }
+  }).catch(function() {
+    cb.checked = !isDone;
+    row.classList.toggle('done', !isDone);
+    alert('通信エラーが発生しました');
+  });
+});
+`;
+
+export function todoListPage(params: {
+  ka: string;
+  date: string;
+  prevDate: string;
+  nextDate: string;
+  todayDate: string;
+  dateLabel: string;
+  tasks: TodoTaskRow[];
+  workerChecks: TodoWorkerCheckRow[];
+  editable: boolean;
+  embed?: boolean;
+}): string {
+  const { ka, date, prevDate, nextDate, todayDate, dateLabel, tasks, workerChecks, editable, embed } = params;
+  const dt = new Date(`${date}T00:00:00Z`);
+  const todayWeekday = dt.getUTCDay();
+  const todayDom = dt.getUTCDate();
+  // embed中（引き継ぎシートのフローティングパネル内）はタブ・日付移動のリンク遷移後も
+  // 埋め込み表示のまま保つため、embed=1を全リンクに引き継ぐ
+  const qs = (k: string, d: string) => `?ka=${encodeURIComponent(k)}&date=${encodeURIComponent(d)}${embed ? '&embed=1' : ''}`;
+
+  return `
+<style>
+${TODO_SHARED_CSS}
+  .todo-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .todo-tab { padding:7px 20px; border-radius:6px 6px 0 0; border:1px solid #d1d5db; border-bottom:none;
+              background:#e5e7eb; color:#374151; font-size:13px; font-weight:600; text-decoration:none; }
+  .todo-tab.active { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
   .todo-edit-panel { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:10px; }
   .todo-edit-row { display:flex; align-items:center; gap:8px; padding:5px 6px; border-bottom:1px solid #eef2f7; background:#fff; }
   .todo-edit-row:last-child { border-bottom:none; }
@@ -165,18 +234,6 @@ export function todoListPage(params: {
   .todo-wd-chips { display:flex; gap:6px; flex-wrap:wrap; }
   .todo-wd-chip { display:flex; align-items:center; gap:3px; font-size:12px; border:1px solid #d1d5db; border-radius:5px; padding:3px 8px; cursor:pointer; }
   .todo-modal-btns { display:flex; gap:8px; margin-top:16px; }
-  .wc-wrap { background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:10px 12px; margin-top:6px; }
-  .wc-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
-  .wc-heading { font-size:13.5px; font-weight:700; color:#1a3a5c; }
-  .wc-group { margin-bottom:10px; }
-  .wc-group:last-child { margin-bottom:0; }
-  .wc-group-title { font-size:11.5px; font-weight:700; color:#fff; background:#6b7280; border-radius:4px; padding:2px 8px; display:inline-block; margin-bottom:4px; }
-  .wc-row { display:flex; align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid #f1f5f9; }
-  .wc-row:last-child { border-bottom:none; }
-  .wc-row.done .wc-name { color:#9ca3af; text-decoration:line-through; }
-  .wc-check { width:18px; height:18px; flex-shrink:0; }
-  .wc-name { font-size:13.5px; color:#1f2937; }
-  .wc-doneby { margin-left:auto; font-size:11px; color:#9ca3af; }
   .wc-del { border:none; background:none; color:#b91c1c; cursor:pointer; font-size:15px; line-height:1; padding:2px 4px; }
   .wc-search-results { display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #e5e7eb; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.12); margin-top:4px; max-height:220px; overflow-y:auto; z-index:70; }
   .wc-search-result { padding:8px 10px; font-size:13px; cursor:pointer; border-bottom:1px solid #f3f4f6; }
@@ -225,31 +282,7 @@ var editingId = null;
 document.getElementById('todo-modal-bg').addEventListener('click', function(e) {
   if (e.target === this) closeTaskModal();
 });
-
-document.addEventListener('change', function(e) {
-  var cb = e.target.closest ? e.target.closest('.todo-check') : null;
-  if (!cb) return;
-  var id = Number(cb.dataset.taskId);
-  var isDone = cb.checked;
-  var row = cb.closest('.todo-row');
-  row.classList.toggle('done', isDone);
-  fetch(API + '/completions/toggle', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ task_id: id, date: DATE, is_done: isDone })
-  }).then(function(r) {
-    if (!r.ok) {
-      cb.checked = !isDone;
-      row.classList.toggle('done', !isDone);
-      alert('更新に失敗しました');
-    }
-  }).catch(function() {
-    cb.checked = !isDone;
-    row.classList.toggle('done', !isDone);
-    alert('通信エラーが発生しました');
-  });
-});
-
+${TODO_TOGGLE_JS}
 if (EDITABLE) {
   document.getElementById('todo-edit-toggle').addEventListener('click', function() {
     var panel = document.getElementById('todo-edit-panel');
@@ -268,26 +301,6 @@ if (EDITABLE) {
     if (delBtn) deleteWorkerCheck(Number(delBtn.dataset.wcDel));
   });
 }
-
-document.addEventListener('change', function(e) {
-  var cb = e.target.closest ? e.target.closest('.wc-check') : null;
-  if (!cb) return;
-  var id = Number(cb.dataset.wcId);
-  var isDone = cb.checked;
-  var row = cb.closest('.wc-row');
-  row.classList.toggle('done', isDone);
-  fetch(API + '/worker-checks/' + id + '/toggle', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ is_done: isDone })
-  }).then(function(r) {
-    if (!r.ok) { cb.checked = !isDone; row.classList.toggle('done', !isDone); alert('更新に失敗しました'); }
-  }).catch(function() {
-    cb.checked = !isDone;
-    row.classList.toggle('done', !isDone);
-    alert('通信エラーが発生しました');
-  });
-});
 
 function deleteWorkerCheck(id) {
   if (!confirm('この勤務者を削除しますか？')) return;
@@ -577,6 +590,95 @@ function saveOrder() {
     body: JSON.stringify({ ids: ids })
   }).then(function(r) { if (r.ok) location.reload(); });
 }
+</script>
+`;
+}
+
+// 引き継ぎシートのフローティングパネル用の統合ビュー。開いている課のやることリスト＋当直の
+// やることリストを、タブ切り替え無しで1画面に並べて表示する（タスク定義の追加・編集・並び替えや
+// 勤務者の追加・削除はここでは行わず、フル機能が必要な場合は「別タブで開く」から通常ページを使う）。
+// 課タスクと当直タスクは別グループとしてはっきり分かれており、見出しクリックで個別に開閉できる
+// （開閉状態は保存しない。誤って畳んだまま「中身が見えなくなった」と気づかれない事故を防ぐため、
+// パネルを開き直すたびに必ず両方展開の状態から始まる）。
+function todoGroupBlockHtml(
+  groupKey: string, label: string, tasks: TodoTaskRow[], workerChecks: TodoWorkerCheckRow[], todayWeekday: number, todayDom: number
+): string {
+  return `
+  <div class="todo-group" data-group-key="${groupKey}">
+    <div class="todo-group-title" data-group-toggle="${groupKey}">
+      <svg class="todo-group-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      <span>${escHtml(label)}</span>
+      <span class="todo-group-hint">（タップで表示）</span>
+    </div>
+    <div class="todo-group-body">
+      <div class="todo-list">
+        ${tasks.length > 0 ? tasks.map(t => taskRowHtml(t, todayWeekday, todayDom)).join('') : '<div style="padding:16px;color:#9ca3af;font-size:13px;">タスクが登録されていません</div>'}
+      </div>
+      ${workerChecklistHtml(workerChecks, false)}
+    </div>
+  </div>`;
+}
+
+export function todoCombinedPage(params: {
+  division: number;
+  date: string;
+  prevDate: string;
+  nextDate: string;
+  todayDate: string;
+  dateLabel: string;
+  divisionTasks: TodoTaskRow[];
+  divisionWorkerChecks: TodoWorkerCheckRow[];
+  tobanTasks: TodoTaskRow[];
+  tobanWorkerChecks: TodoWorkerCheckRow[];
+}): string {
+  const {
+    division, date, prevDate, nextDate, todayDate, dateLabel,
+    divisionTasks, divisionWorkerChecks, tobanTasks, tobanWorkerChecks,
+  } = params;
+  const dt = new Date(`${date}T00:00:00Z`);
+  const todayWeekday = dt.getUTCDay();
+  const todayDom = dt.getUTCDate();
+  const qs = (d: string) => `?ka=${division}&date=${encodeURIComponent(d)}&embed=1&combined=1`;
+
+  return `
+<style>
+${TODO_SHARED_CSS}
+  .todo-group { margin-bottom:20px; }
+  .todo-group:last-child { margin-bottom:0; }
+  .todo-group-title { display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:800; color:#1a3a5c;
+                      margin-bottom:6px; padding:2px; cursor:pointer; user-select:none; }
+  .todo-group-chevron { flex-shrink:0; transition:transform .15s; }
+  .todo-group.collapsed .todo-group-chevron { transform:rotate(-90deg); }
+  .todo-group.collapsed .todo-group-body { display:none; }
+  .todo-group-hint { display:none; font-weight:600; color:#9ca3af; font-size:11px; }
+  .todo-group.collapsed .todo-group-hint { display:inline; }
+</style>
+
+<div class="todo-wrap">
+  <div class="todo-datenav">
+    <a class="todo-btn" href="${qs(prevDate)}">◀ 前日</a>
+    <span class="todo-date-label">${escHtml(dateLabel)}</span>
+    <a class="todo-btn" href="${qs(nextDate)}">翌日 ▶</a>
+    <a class="todo-btn" href="${qs(todayDate)}">今日</a>
+  </div>
+
+  ${todoGroupBlockHtml('division', `${division}課`, divisionTasks, divisionWorkerChecks, todayWeekday, todayDom)}
+  ${todoGroupBlockHtml('toban', '当直', tobanTasks, tobanWorkerChecks, todayWeekday, todayDom)}
+</div>
+
+<script>
+var DATE = ${safeJson(date)};
+var API = ${safeJson(`${ADMIN_PATH}/api/todo`)};
+${TODO_TOGGLE_JS}
+
+// 課グループ／当直グループの開閉。誤って畳んだまま気づかず「中身が消えた」ように見える事故を
+// 避けるため、開閉状態は保存しない（パネルを開き直す・課や日付を切り替えるたびに必ず両方展開の状態に戻る）。
+document.querySelectorAll('.todo-group-title[data-group-toggle]').forEach(function(title) {
+  var group = title.closest('.todo-group');
+  title.addEventListener('click', function() {
+    group.classList.toggle('collapsed');
+  });
+});
 </script>
 `;
 }

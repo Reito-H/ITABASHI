@@ -28,7 +28,37 @@ function showToast(msg) {
 // フローティング新規報告ボタンを表示しないページ（設定・点検管理・班長シフト）
 const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'garage']);
 
-export function layout(title: string, content: string, activePage: string = '', headerExtra: string = ''): string {
+// embed=true: サイドバー・ヘッダー・お知らせ・リミットポーリング等を全て省いた最小限のHTML文書を返す。
+// 引き継ぎシートのフローティングパネル（やることリスト）のようにiframeへ埋め込む用途専用。
+export function layout(title: string, content: string, activePage: string = '', headerExtra: string = '', embed: boolean = false): string {
+  if (embed) {
+    return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>${escHtml(title)}</title>
+  <style>
+    :root {
+      --color-primary: #1a3a5c; --color-primary-dark: #0f2740; --color-primary-hover: #244a70;
+      --color-accent: #f2c14e; --color-danger: #dc2626; --color-danger-bg: #fef2f2; --color-danger-border: #fecaca;
+      --color-success: #166534; --color-success-bg: #f0fdf4; --color-warning: #d97706; --color-warning-bg: #fffbeb;
+      --color-text: #1e293b; --color-text-muted: #6b7280; --color-border: #e5e7eb;
+      --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
+      --font-xs: 11px; --font-sm: 12px; --font-base: 13px; --font-lg: 15px;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #fff; margin: 0; color: var(--color-text); }
+  </style>
+</head>
+<body>
+  <div class="page-content" style="padding:10px;">
+    ${content}
+  </div>
+</body>
+</html>`;
+  }
   const showReportFab = !REPORT_FAB_HIDDEN_PAGES.has(activePage);
   // permKey省略時は id をそのまま権限キーとして使う（filterHtmlByPermissionsのdata-nav-id判定用）。
   // 報告センターは専用の権限キーを持たず、既存の5つの報告権限のいずれかで表示する（スペース区切り＝OR）
@@ -38,8 +68,6 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/settings/reports`, label: '報告センター', id: 'report-center', permKey: REPORT_CENTER_PERM, highlight: true },
     { href: `${ADMIN_PATH}/kancho-shift`,  label: '班長シフト',      id: 'kancho-shift' },
     { href: `${ADMIN_PATH}/handover`,      label: '引き継ぎシート',  id: 'handover' },
-    { href: `${ADMIN_PATH}/todo`,          label: 'やることリスト',  id: 'todo' },
-    { href: `${ADMIN_PATH}/crew-portal`,   label: '乗務員ポータル',  id: 'crew-portal' },
     { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
     { href: `${ADMIN_PATH}/driver-reports`, label: 'ドライバー報告', id: 'driver-reports' },
