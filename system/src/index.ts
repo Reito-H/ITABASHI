@@ -48,6 +48,7 @@ import diaApi from './routes/api/dia';
 import adminTantoshaRoutes from './routes/admin_tantosha';
 import adminTodoRoutes from './routes/admin_todo';
 import adminCrewShiftRoutes from './routes/admin_crew_shift';
+import adminDispatchRoutes from './routes/admin_dispatch';
 import adminHandoverRoutes from './routes/admin_handover';
 import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
 import adminRequestsRoutes from './routes/admin_requests';
@@ -60,6 +61,8 @@ import adminAccidentsRoutes from './routes/admin_accidents';
 import adminAccidentsAnalysisRoutes from './routes/admin_accidents_analysis';
 import adminAccidentsForecastRoutes from './routes/admin_accidents_forecast';
 import adminAccidentsTrainingRoutes from './routes/admin_accidents_training';
+import adminAccidentsPersonRoutes from './routes/admin_accidents_person';
+import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -111,6 +114,9 @@ app.use('*', async (c, next) => {
   // やることリスト: 引き継ぎシートのフローティングパネルにiframe埋め込みするため、
   // embed=1指定時のみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
   const isTodoEmbed = pathname === `/${SECRET}/admin/todo` && reqUrl.searchParams.get('embed') === '1';
+  // 事故防止AI: 引き継ぎシートのポップアップに課別傾向分析レポートをiframe埋め込みするため、
+  // このレポートページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
+  const isAccidentAiEmbed = pathname.startsWith(`/${SECRET}/admin/accidents/division/`) && pathname.endsWith('/report/print');
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   c.res.headers.set('Cache-Control', 'no-store');
@@ -128,14 +134,15 @@ app.use('*', async (c, next) => {
       "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
     );
   } else {
-    // やることリストのembedページのみ、引き継ぎシートのフローティングパネルから
+    // やることリスト・事故防止AIレポートのembedページのみ、引き継ぎシートのフローティングパネル/ポップアップから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    c.res.headers.set('X-Frame-Options', isTodoEmbed ? 'SAMEORIGIN' : 'DENY');
+    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed;
+    c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     // nojicoページのみ、アプリ内ブラウザとして外部サイト(app.no-jico.com)をiframe表示できるようframe-srcを追加で許可する
     const frameSrc = isNojicoPage ? ' frame-src https://app.no-jico.com;' : '';
-    const frameAncestors = isTodoEmbed ? "frame-ancestors 'self';" : "frame-ancestors 'none';";
+    const frameAncestors = allowSameOriginFrame ? "frame-ancestors 'self';" : "frame-ancestors 'none';";
     c.res.headers.set('Content-Security-Policy',
       "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; " + frameAncestors + frameSrc
     );
@@ -250,6 +257,7 @@ app.route(`/${SECRET}/admin`, adminDiaRoutes);
 app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
 app.route(`/${SECRET}/admin`, adminTodoRoutes);
 app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
+app.route(`/${SECRET}/admin`, adminDispatchRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
@@ -262,6 +270,8 @@ app.route(`/${SECRET}/admin`, adminAccidentsRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsAnalysisRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsForecastRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsTrainingRoutes);
+app.route(`/${SECRET}/admin`, adminAccidentsPersonRoutes);
+app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 
 // =====================
 // API（認証必須）

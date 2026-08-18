@@ -338,11 +338,23 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-mtr-add{border:1px dashed #bbb;background:#fff;color:#666;border-radius:0 0 6px 6px;padding:6px 0;
            font-size:12px;cursor:pointer;width:100%;border-top:none;}
 .ho-mtr-add:hover{background:#f7f7f7;}
+
+/* 事故防止AI：課別傾向分析レポートのポップアップ表示（表示専用、iframeで印刷ページをそのまま埋め込む） */
+#ho-accai-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:800;display:none;
+                  align-items:center;justify-content:center;}
+#ho-accai-overlay.show{display:flex;}
+#ho-accai-modal{background:#fff;border-radius:10px;padding:14px;width:900px;max-width:96vw;
+               height:92vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+.ho-accai-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
+              color:var(--navy);margin-bottom:10px;flex-shrink:0;}
+#ho-accai-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
+#ho-accai-frame{flex:1;width:100%;border:1px solid #e5e7eb;border-radius:8px;}
 </style>
 
 <div id="ho-root">
   <div class="ho-tabs-h" id="ho-tabs-m"></div>
   <div class="ho-toolrow">
+    <button type="button" id="ho-accident-ai-btn" class="ho-tokasum-btn">事故防止AI</button>
     <button type="button" id="ho-meter-btn" class="ho-tokasum-btn">メーター検査</button>
     <button type="button" id="ho-copy-btn" class="ho-copy-btn">コピー</button>
     <button type="button" id="ho-print-btn" class="ho-print-btn">印刷</button>
@@ -449,12 +461,19 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     <div class="ho-mtr-body" id="ho-mtr-body"></div>
   </div>
 </div>
+<div id="ho-accai-overlay">
+  <div id="ho-accai-modal">
+    <div class="ho-accai-head"><span id="ho-accai-title">事故防止AI 課別傾向分析レポート</span><button type="button" id="ho-accai-close">×</button></div>
+    <iframe id="ho-accai-frame" src="about:blank"></iframe>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
 const TODO_URL = ${safeJson(`${ADMIN_PATH}/todo`)};
+const ACCIDENT_AI_URL = ${safeJson(`${ADMIN_PATH}/accidents/division`)};
 const EDITABLE = ${editable ? 'true' : 'false'};
 const MY_DIVISION = ${safeJson(myDivision)};
 function lastDivision(){
@@ -1317,6 +1336,21 @@ document.getElementById('ho-tokasum-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'ho-tokasum-overlay') closeTokaSummary();
 });
 document.getElementById('ho-meter-btn').addEventListener('click', openMeterModal);
+function openAccidentAiModal(){
+  var now = new Date();
+  var sinceMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-01';
+  document.getElementById('ho-accai-frame').src = ACCIDENT_AI_URL + '/' + H.division + '/report/print?since=' + sinceMonth + '&forecast=1';
+  document.getElementById('ho-accai-overlay').classList.add('show');
+}
+function closeAccidentAiModal(){
+  document.getElementById('ho-accai-overlay').classList.remove('show');
+  document.getElementById('ho-accai-frame').src = 'about:blank';
+}
+document.getElementById('ho-accident-ai-btn').addEventListener('click', openAccidentAiModal);
+document.getElementById('ho-accai-close').addEventListener('click', closeAccidentAiModal);
+document.getElementById('ho-accai-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'ho-accai-overlay') closeAccidentAiModal();
+});
 document.getElementById('ho-mtr-close').addEventListener('click', closeMeterModal);
 document.getElementById('ho-mtr-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'ho-mtr-overlay') closeMeterModal();

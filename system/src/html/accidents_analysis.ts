@@ -178,14 +178,14 @@ export function accidentsAnalysisPage(opts: AccidentsAnalysisOpts): string {
   const divOptions = ['<option value="">全社</option>', ...[1, 2, 3, 4].map(d =>
     `<option value="${d}" ${d === selectedDivision ? 'selected' : ''}>${d}課</option>`)].join('');
 
-  const individualRanking = buildIndividualRanking(records).slice(0, 20);
+  const individualRanking = buildIndividualRanking(records);
   const divisionRanking = buildDivisionRanking(records, prevRecords);
   const vehicleRanking = buildVehicleRanking(records);
 
   const individualRowsHtml = individualRanking.length === 0
     ? `<tr><td colspan="7" style="padding:20px;text-align:center;color:#9ca3af;">データなし</td></tr>`
     : individualRanking.map((r, i) => `
-      <tr>
+      <tr data-name="${escHtml(r.name)}">
         <td>${i + 1}</td>
         <td>${escHtml(r.name)}</td>
         <td>${r.division != null ? `${r.division}課 ` : ''}${escHtml(r.team || '')}</td>
@@ -340,10 +340,11 @@ export function accidentsAnalysisPage(opts: AccidentsAnalysisOpts): string {
   </div>
 
   <h2 class="aa-h2">事故回数ランキング</h2>
+  <input class="aa-select" id="aa-individual-search" placeholder="氏名で絞り込み" oninput="aaFilterIndividual()" style="width:220px;margin-bottom:10px;">
   <div class="ac-table-wrap">
     <table class="ac-table">
       <thead><tr><th>順位</th><th>氏名</th><th>課・班</th><th>件数</th><th>直近事故日</th><th>平均予定過失%</th><th>損害額合計</th></tr></thead>
-      <tbody>${individualRowsHtml}</tbody>
+      <tbody id="aa-individual-tbody">${individualRowsHtml}</tbody>
     </table>
   </div>
   <div class="aa-grid-2">
@@ -422,6 +423,12 @@ function aaReload() {
   var division = document.getElementById('aa-division').value;
   var url = '${ADMIN_PATH}/accidents/analysis?months=' + months + (division ? '&division=' + division : '');
   location.href = url;
+}
+function aaFilterIndividual() {
+  var q = document.getElementById('aa-individual-search').value.trim();
+  document.querySelectorAll('#aa-individual-tbody tr[data-name]').forEach(function(tr) {
+    tr.style.display = tr.getAttribute('data-name').indexOf(q) === -1 ? 'none' : '';
+  });
 }
 new Chart(document.getElementById('aa-trend-chart').getContext('2d'), {
   type: 'bar',

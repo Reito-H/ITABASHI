@@ -25,7 +25,7 @@ export function accidentsTrainingPage(opts: AccidentsTrainingOpts): string {
   const rowsHtml = candidates.length === 0
     ? `<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">条件に該当する対象者はいません</td></tr>`
     : candidates.map((r, i) => `
-      <tr>
+      <tr data-name="${escHtml(r.name)}">
         <td><input type="checkbox" class="at-check" data-key="${escHtml(r.key)}" checked></td>
         <td>${i + 1}</td>
         <td>${escHtml(r.name)}</td>
@@ -66,10 +66,11 @@ export function accidentsTrainingPage(opts: AccidentsTrainingOpts): string {
     <div class="at-count">対象者 <b id="at-selected-count">${candidates.length}</b> 名</div>
     <button class="at-btn" id="at-print-btn" onclick="atPrint()" ${candidates.length === 0 ? 'disabled' : ''}>選択した対象者を一括印刷</button>
   </div>
+  <input class="at-select" id="at-search" placeholder="氏名で絞り込み" oninput="atFilterCandidates()" style="width:220px;margin-bottom:10px;">
   <div class="at-table-wrap">
     <table class="at-table">
       <thead><tr><th></th><th>#</th><th>氏名</th><th>課・班</th><th>期間内事故件数</th><th>直近事故日</th></tr></thead>
-      <tbody>${rowsHtml}</tbody>
+      <tbody id="at-tbody">${rowsHtml}</tbody>
     </table>
   </div>
 </div>
@@ -81,6 +82,13 @@ function atUpdateCount() {
   document.getElementById('at-print-btn').disabled = checked === 0;
 }
 document.querySelectorAll('.at-check').forEach(function(cb) { cb.addEventListener('change', atUpdateCount); });
+
+function atFilterCandidates() {
+  var q = document.getElementById('at-search').value.trim();
+  document.querySelectorAll('#at-tbody tr[data-name]').forEach(function(tr) {
+    tr.style.display = tr.getAttribute('data-name').indexOf(q) === -1 ? 'none' : '';
+  });
+}
 
 function atReload() {
   var months = document.getElementById('at-months').value;

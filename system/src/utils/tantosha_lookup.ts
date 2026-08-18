@@ -35,3 +35,36 @@ export function tantoshaShiftLabel(info: TantoshaShift | undefined): string {
 export function isItabashi(...offices: Array<string | null | undefined>): boolean {
   return offices.some(o => (o ?? '').includes('板橋'));
 }
+
+// 配車管理：車番(door)から担当車の優先順位（A=p1, B=p2, C=r「3台廻り」）を返す。
+// 新テーブルを作らず、既存の担当車表(tantosha_rows)をそのまま流用する。
+export type TantoshaPriority = { role: 'p1' | 'p2' | 'r'; letter: string; name: string };
+
+export async function getTantoshaPriorityForCar(db: D1Database, carNo: string): Promise<TantoshaPriority[]> {
+  const map = await getTantoshaPriorityMap(db);
+  return map.get((carNo ?? '').trim()) ?? [];
+}
+
+// 全車両分を1クエリでまとめて取得する版（配車ボード等、多数の車番を一度に扱う画面向け）
+export async function getTantoshaPriorityMap(db: D1Database): Promise<Map<string, TantoshaPriority[]>> {
+  const map = new Map<string, TantoshaPriority[]>();
+  try {
+    const rows = await db.prepare(`
+      SELECT r.door, r.p1_letter, r.p1_name, r.p2_letter, r.p2_name, r.r_letter, r.r_name
+      FROM tantosha_rows r
+      JOIN tantosha_groups g ON g.id = r.group_id
+      WHERE r.door != '' AND g.is_active = 1
+      ORDER BY g.sort_order, r.sort_order
+    `).all<{ door: string; p1_letter: string; p1_name: string; p2_letter: string; p2_name: string; r_letter: string; r_name: string }>();
+    for (const row of (rows.results ?? [])) {
+      const door = (row.door ?? '').trim();
+      if (!door || map.has(door)) continue;
+      const list: TantoshaPriority[] = [];
+      if ((row.p1_name ?? '').trim()) list.push({ role: 'p1', letter: row.p1_letter ?? '', name: row.p1_name.trim() });
+      if ((row.p2_name ?? '').trim()) list.push({ role: 'p2', letter: row.p2_letter ?? '', name: row.p2_name.trim() });
+      if ((row.r_name ?? '').trim()) list.push({ role: 'r', letter: row.r_letter ?? '', name: row.r_name.trim() });
+      if (list.length > 0) map.set(door, list);
+    }
+  } catch { /* テーブル未作成等でも配車ボード自体は動かす */ }
+  return map;
+}

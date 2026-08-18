@@ -95,16 +95,64 @@ export function bucketWeekday(dates: Array<string | null | undefined>): number[]
 }
 
 // 事故データ配下4画面（月次一覧/分析・ランキング/予測カレンダー/研修案内印刷）共通のタブナビ
-export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'training'): string {
+export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'training' | 'person' | 'division'): string {
   const tabs: Array<{ id: typeof active; label: string; href: string }> = [
     { id: 'list', label: '月次一覧', href: `${ADMIN_PATH}/accidents` },
     { id: 'analysis', label: '分析・ランキング', href: `${ADMIN_PATH}/accidents/analysis` },
     { id: 'forecast', label: '予測カレンダー', href: `${ADMIN_PATH}/accidents/forecast` },
     { id: 'training', label: '事故研修案内', href: `${ADMIN_PATH}/accidents/training` },
+    { id: 'person', label: '個人別レポート', href: `${ADMIN_PATH}/accidents/person` },
+    { id: 'division', label: '事故防止AI', href: `${ADMIN_PATH}/accidents/division` },
   ];
   return `<div class="ac-tabnav">` + tabs.map(t =>
     `<a class="ac-tab-link${t.id === active ? ' active' : ''}" href="${t.href}">${t.label}</a>`
   ).join('') + `</div>`;
+}
+
+// 期間（開始日〜終了日）絞り込みUI。個人別レポート・課別レポートで共通利用。
+// 呼び出し側ページは必ず `function acPeriodApply(since, until) { ... }`（URLを組み立ててlocation.hrefする関数）を
+// 自身の<script>内に定義すること。CSSは PERIOD_FILTER_BAR_CSS を各ページの<style>ブロックに含める。
+export const PERIOD_FILTER_BAR_CSS = `
+  .ac-period-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  .ac-period-input { border:1px solid #d1d5db; border-radius:8px; padding:8px 10px; font-size:13px; background:#fff; }
+  .ac-period-sep { color:#9ca3af; font-size:13px; }
+  .ac-period-btn { border:none; border-radius:8px; padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer; }
+  .ac-period-btn-primary { background:#1a3a5c; color:#fff; }
+  .ac-period-presets { display:flex; gap:6px; flex-wrap:wrap; margin-left:6px; }
+  .ac-period-preset { border:1px solid #d1d5db; background:#f9fafb; color:#475569; border-radius:14px; padding:5px 12px; font-size:11px; cursor:pointer; }
+  .ac-period-preset:hover { background:#eef2ff; border-color:#a5b4fc; }
+`;
+
+export interface PeriodFilterBarOpts {
+  since: string | null;
+  until: string | null;
+}
+
+export function periodFilterBarHtml(opts: PeriodFilterBarOpts): string {
+  const { since, until } = opts;
+  return `
+<div class="ac-period-bar">
+  <input type="date" class="ac-period-input" id="ac-period-since" value="${since ?? ''}">
+  <span class="ac-period-sep">〜</span>
+  <input type="date" class="ac-period-input" id="ac-period-until" value="${until ?? ''}">
+  <button type="button" class="ac-period-btn ac-period-btn-primary" onclick="acPeriodApply(document.getElementById('ac-period-since').value, document.getElementById('ac-period-until').value)">この期間で表示</button>
+  <span class="ac-period-presets">
+    <button type="button" class="ac-period-preset" onclick="acPeriodApplyPreset(1)">今月</button>
+    <button type="button" class="ac-period-preset" onclick="acPeriodApplyPreset(3)">直近3ヶ月</button>
+    <button type="button" class="ac-period-preset" onclick="acPeriodApplyPreset(6)">直近6ヶ月</button>
+    <button type="button" class="ac-period-preset" onclick="acPeriodApplyPreset(12)">直近12ヶ月</button>
+    <button type="button" class="ac-period-preset" onclick="acPeriodApplyPreset(24)">直近24ヶ月</button>
+    <button type="button" class="ac-period-preset" onclick="acPeriodApply('', '')">全期間</button>
+  </span>
+</div>
+<script>
+function acPeriodApplyPreset(months) {
+  var today = new Date();
+  var since = new Date(today.getFullYear(), today.getMonth() - months, today.getDate());
+  function fmt(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  acPeriodApply(fmt(since), fmt(today));
+}
+</script>`;
 }
 
 function monthLabel(ym: string): string {
@@ -162,7 +210,7 @@ export function accidentsPage(opts: AccidentsPageOpts): string {
   const rowsHtml = records.length === 0
     ? `<tr><td colspan="9" style="padding:28px;text-align:center;color:#9ca3af;">この月度の事故データはありません</td></tr>`
     : records.map(r => `
-      <tr class="ac-row" onclick="openAccidentDetail(${r.id})">
+      <tr class="ac-row" onclick="openAccidentDetail(${r.id})" data-division="${r.division ?? ''}" data-search="${escHtml([r.emp_name, r.plate_no, r.emp_no].filter(Boolean).join(' '))}">
         <td>${escHtml(r.occurred_date.slice(5).replace('-', '/'))} ${escHtml(r.occurred_time ?? '')}</td>
         <td>${r.division != null ? `${r.division}課` : ''} ${escHtml(r.team ?? '')}</td>
         <td>${escHtml(r.emp_name ?? '')}</td>
@@ -225,9 +273,19 @@ export function accidentsPage(opts: AccidentsPageOpts): string {
 <div class="ac">
   ${accidentsTabNav('list')}
   <div class="ac-top">
-    <select class="ac-month-select" id="ac-month-select" onchange="location.href='${ADMIN_PATH}/accidents?month='+this.value">
-      ${monthOptions}
-    </select>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <select class="ac-month-select" id="ac-month-select" onchange="location.href='${ADMIN_PATH}/accidents?month='+this.value">
+        ${monthOptions}
+      </select>
+      <select class="ac-month-select" id="ac-division-filter" onchange="acApplyFilter()">
+        <option value="">全課</option>
+        <option value="1">1課</option>
+        <option value="2">2課</option>
+        <option value="3">3課</option>
+        <option value="4">4課</option>
+      </select>
+      <input class="ac-month-select" id="ac-search" placeholder="氏名・車番で絞り込み" oninput="acApplyFilter()" style="width:200px;">
+    </div>
     <div style="display:flex;gap:8px;">
       <button class="ac-btn ac-btn-green" onclick="toggleAcImport()">CSVインポート</button>
     </div>
@@ -291,6 +349,16 @@ export function accidentsPage(opts: AccidentsPageOpts): string {
 
 <script>
 var AC_RECORDS = ${safeJson(records)};
+
+function acApplyFilter() {
+  var division = document.getElementById('ac-division-filter').value;
+  var q = document.getElementById('ac-search').value.trim();
+  document.querySelectorAll('.ac-row').forEach(function(tr) {
+    var matchesDivision = !division || tr.getAttribute('data-division') === division;
+    var matchesSearch = !q || tr.getAttribute('data-search').indexOf(q) !== -1;
+    tr.style.display = (matchesDivision && matchesSearch) ? '' : 'none';
+  });
+}
 
 function openAccidentDetail(id) {
   var r = AC_RECORDS.find(function(x) { return x.id === id; });
