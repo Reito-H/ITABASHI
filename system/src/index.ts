@@ -63,6 +63,7 @@ import adminAccidentsForecastRoutes from './routes/admin_accidents_forecast';
 import adminAccidentsTrainingRoutes from './routes/admin_accidents_training';
 import adminAccidentsPersonRoutes from './routes/admin_accidents_person';
 import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
+import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -272,6 +273,7 @@ app.route(`/${SECRET}/admin`, adminAccidentsForecastRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsTrainingRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsPersonRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
+app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 
 // =====================
 // API（認証必須）

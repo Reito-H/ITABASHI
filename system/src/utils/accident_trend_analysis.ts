@@ -12,7 +12,7 @@ export interface TrendAnalysisContent {
   weekday_breakdown: Array<{ label: string; cnt: number }>; // 曜日別件数（日〜土、常に7件）
 }
 
-function freqRanking(records: AccidentRecord[], keyFn: (r: AccidentRecord) => string | null | undefined): Array<{ key: string; cnt: number }> {
+export function freqRanking(records: AccidentRecord[], keyFn: (r: AccidentRecord) => string | null | undefined): Array<{ key: string; cnt: number }> {
   const map = new Map<string, number>();
   for (const r of records) {
     const v = keyFn(r);
@@ -22,7 +22,7 @@ function freqRanking(records: AccidentRecord[], keyFn: (r: AccidentRecord) => st
   return Array.from(map.entries()).map(([key, cnt]) => ({ key, cnt })).sort((a, b) => b.cnt - a.cnt);
 }
 
-function pct(part: number, total: number): number {
+export function pct(part: number, total: number): number {
   return total > 0 ? Math.round((part / total) * 100) : 0;
 }
 

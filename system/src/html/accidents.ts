@@ -95,7 +95,7 @@ export function bucketWeekday(dates: Array<string | null | undefined>): number[]
 }
 
 // 事故データ配下4画面（月次一覧/分析・ランキング/予測カレンダー/研修案内印刷）共通のタブナビ
-export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'training' | 'person' | 'division'): string {
+export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'training' | 'person' | 'division' | 'material'): string {
   const tabs: Array<{ id: typeof active; label: string; href: string }> = [
     { id: 'list', label: '月次一覧', href: `${ADMIN_PATH}/accidents` },
     { id: 'analysis', label: '分析・ランキング', href: `${ADMIN_PATH}/accidents/analysis` },
@@ -103,6 +103,7 @@ export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'trai
     { id: 'training', label: '事故研修案内', href: `${ADMIN_PATH}/accidents/training` },
     { id: 'person', label: '個人別レポート', href: `${ADMIN_PATH}/accidents/person` },
     { id: 'division', label: '事故防止AI', href: `${ADMIN_PATH}/accidents/division` },
+    { id: 'material', label: '教材', href: `${ADMIN_PATH}/accidents/material` },
   ];
   return `<div class="ac-tabnav">` + tabs.map(t =>
     `<a class="ac-tab-link${t.id === active ? ' active' : ''}" href="${t.href}">${t.label}</a>`
