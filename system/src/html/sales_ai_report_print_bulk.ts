@@ -34,18 +34,15 @@ export function renderSalesAiReportPrintBulkPage(sheets: SalesAiReportSheetOptio
       var availablePx = (297 - 32) * pxPerMm;
       fit.style.transform = 'none';
       fit.style.width = '100%';
-      var natural = fit.scrollHeight;
+      // 幅を広げて縮小率を掛けるたびに文字の折り返しが変わり必要な高さも変わるため、
+      // 収まるまで数回繰り返して収束させる（1回きりの補正だと余白1枚だけの空白ページが出ることがあった）
       var scale = 1;
-      if (natural > availablePx && natural > 0) {
-        scale = (availablePx / natural) * 0.99;
+      for (var j = 0; j < 6; j++) {
+        var natural = fit.scrollHeight;
+        if (natural <= 0 || natural * scale <= availablePx) break;
+        scale = (availablePx / natural) * 0.97;
         fit.style.width = (100 / scale) + '%';
         fit.style.transform = 'scale(' + scale + ')';
-        var reNatural = fit.scrollHeight;
-        if (reNatural * scale > availablePx) {
-          scale = (availablePx / reNatural) * 0.99;
-          fit.style.width = (100 / scale) + '%';
-          fit.style.transform = 'scale(' + scale + ')';
-        }
       }
     }
     function fitAllSheets() {

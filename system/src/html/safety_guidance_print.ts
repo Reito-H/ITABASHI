@@ -82,7 +82,9 @@ export const SAFETY_GUIDANCE_PRINT_CSS = `
   .sr-comment-line { height: 30px; border-bottom: 1px solid #cbd5e1; }
   .sr-comment-line:last-child { border-bottom: none; }
 
-  .sr-stamp-footer { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 20px; }
+  /* .sheet-fit（自動縮小の対象）の外に置き、.sheet基準の絶対位置に固定することで、
+     上の内容がどれだけ長くなっても印鑑欄が押し出されたり2枚目にはみ出したりしないようにする */
+  .sr-stamp-footer { position: absolute; right: 18mm; bottom: 16mm; display: flex; justify-content: flex-end; }
   .sr-stamp-row { display: flex; gap: 18px; }
   .sr-stamp-box { display: flex; flex-direction: column; align-items: center; gap: 6px; }
   .sr-stamp-frame { width: 52px; height: 52px; border: 1.5px solid #64748b; border-radius: 4px; }
@@ -181,7 +183,7 @@ export function renderSafetyGuidanceCommentSheet(o: SafetyGuidanceSheetOptions):
 
   return `
     <div class="sheet" id="print-sheet-1">
-      <div class="sheet-fit" id="sheet-fit-1" style="display:flex;flex-direction:column;height:265mm;">
+      <div class="sheet-fit" id="sheet-fit-1">
         <div class="sr-head">
           <div>
             <div class="sr-badge">安全運転指導書</div>
@@ -199,15 +201,14 @@ export function renderSafetyGuidanceCommentSheet(o: SafetyGuidanceSheetOptions):
 
         <div class="sr-comment-title">指導内容・所感</div>
         <div class="sr-comment-box">${commentLines}</div>
-
-        <div class="sr-stamp-footer">
-          <div class="sr-stamp-row">
-            ${stampLabels.map(label => `
-              <div class="sr-stamp-box">
-                <div class="sr-stamp-frame"></div>
-                <div class="sr-stamp-label">${escHtml(label)}</div>
-              </div>`).join('')}
-          </div>
+      </div>
+      <div class="sr-stamp-footer">
+        <div class="sr-stamp-row">
+          ${stampLabels.map(label => `
+            <div class="sr-stamp-box">
+              <div class="sr-stamp-frame"></div>
+              <div class="sr-stamp-label">${escHtml(label)}</div>
+            </div>`).join('')}
         </div>
       </div>
     </div>`;
@@ -241,18 +242,15 @@ export function renderSafetyGuidancePrintPage(o: SafetyGuidanceSheetOptions, bac
       var availablePx = (297 - 32) * pxPerMm;
       fit.style.transform = 'none';
       fit.style.width = '100%';
-      var natural = fit.scrollHeight;
+      // 幅を広げて縮小率を掛けるたびに文字の折り返しが変わり必要な高さも変わるため、
+      // 収まるまで数回繰り返して収束させる（1回きりの補正だと余白1枚だけの空白ページが出ることがあった）
       var scale = 1;
-      if (natural > availablePx && natural > 0) {
-        scale = (availablePx / natural) * 0.99;
+      for (var j = 0; j < 6; j++) {
+        var natural = fit.scrollHeight;
+        if (natural <= 0 || natural * scale <= availablePx) break;
+        scale = (availablePx / natural) * 0.97;
         fit.style.width = (100 / scale) + '%';
         fit.style.transform = 'scale(' + scale + ')';
-        var reNatural = fit.scrollHeight;
-        if (reNatural * scale > availablePx) {
-          scale = (availablePx / reNatural) * 0.99;
-          fit.style.width = (100 / scale) + '%';
-          fit.style.transform = 'scale(' + scale + ')';
-        }
       }
     }
     function fitAllSheets() { fitOneSheet(0); fitOneSheet(1); }

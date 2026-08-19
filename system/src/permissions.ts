@@ -93,6 +93,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/followup/,     'newcomers'],
   [/^\/interviews/,   'newcomers'],
   [/^\/info/,         'newcomers'],
+  [/^\/newcomer-intros/,     'newcomers'],
+  [/^\/api\/newcomer-intros/, 'newcomers'],
   [/^\/staff/,        'staff'],
   [/^\/sales-ai/,     'sales-ai'],
   [/^\/sales/,        'staff'],

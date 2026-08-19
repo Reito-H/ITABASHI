@@ -8,8 +8,46 @@ import type { Env } from '../auth';
 import { MONITOR_ACCIDENTS_PATH } from '../config';
 import { accidentsMonitorPage } from '../html/accidents_monitor';
 import { bucketHourBands } from '../html/accidents';
+import { fetchPublicNewcomerIntros, getNewcomerCardIntervalSeconds } from './public_newcomer_monitor';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// 表示モード: 'accidents'=事故のみ（既定・現行動作） / 'newcomers'=新人紹介のみ / 'alternate'=交互表示
+export const DISPLAY_MODE_KEY = 'accidents_monitor_display_mode';
+export const ALTERNATE_SECONDS_KEY = 'accidents_monitor_alternate_seconds';
+export const DEFAULT_ALTERNATE_SECONDS = 15;
+export const MIN_ALTERNATE_SECONDS = 2;
+
+export type MonitorDisplayMode = 'accidents' | 'newcomers' | 'alternate';
+
+export async function getMonitorDisplaySettings(db: D1Database): Promise<{ mode: MonitorDisplayMode; alternateSeconds: number }> {
+  const rows = await db.prepare(
+    `SELECT key, value FROM system_settings WHERE key IN (?, ?)`
+  ).bind(DISPLAY_MODE_KEY, ALTERNATE_SECONDS_KEY).all<{ key: string; value: string }>();
+  const map = new Map((rows.results ?? []).map(r => [r.key, r.value]));
+
+  const rawMode = map.get(DISPLAY_MODE_KEY);
+  const mode: MonitorDisplayMode = (rawMode === 'newcomers' || rawMode === 'alternate') ? rawMode : 'accidents';
+
+  const rawSeconds = parseInt(map.get(ALTERNATE_SECONDS_KEY) ?? '', 10);
+  const alternateSeconds = Number.isFinite(rawSeconds) && rawSeconds >= MIN_ALTERNATE_SECONDS ? rawSeconds : DEFAULT_ALTERNATE_SECONDS;
+
+  return { mode, alternateSeconds };
+}
+
+export async function saveMonitorDisplaySettings(db: D1Database, mode: MonitorDisplayMode, alternateSeconds: number): Promise<void> {
+  const seconds = Math.max(MIN_ALTERNATE_SECONDS, Math.round(alternateSeconds));
+  await db.batch([
+    db.prepare(`
+      INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now', 'localtime'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).bind(DISPLAY_MODE_KEY, mode),
+    db.prepare(`
+      INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now', 'localtime'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).bind(ALTERNATE_SECONDS_KEY, String(seconds)),
+  ]);
+}
 
 function prevYm(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
@@ -48,7 +86,10 @@ app.get('/api/public/accidents-monitor', async (c) => {
   const ym = jstNow.toISOString().slice(0, 7);
   const prevYmStr = prevYm(ym);
 
-  const [rows, prevCountRow, divisionRows] = await Promise.all([
+  const displaySettings = await getMonitorDisplaySettings(c.env.DB);
+  const needsNewcomers = displaySettings.mode === 'newcomers' || displaySettings.mode === 'alternate';
+
+  const [rows, prevCountRow, divisionRows, newcomers, newcomerCardIntervalSeconds] = await Promise.all([
     c.env.DB.prepare(`SELECT occurred_time FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
       .bind(ym).all<{ occurred_time: string | null }>(),
     c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
@@ -56,6 +97,8 @@ app.get('/api/public/accidents-monitor', async (c) => {
     c.env.DB.prepare(
       `SELECT division, COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ? GROUP BY division ORDER BY division`
     ).bind(ym).all<{ division: number | null; cnt: number }>(),
+    needsNewcomers ? fetchPublicNewcomerIntros(c.env.DB) : Promise.resolve([]),
+    needsNewcomers ? getNewcomerCardIntervalSeconds(c.env.DB) : Promise.resolve(8),
   ]);
 
   const times = (rows.results ?? []).map(r => r.occurred_time);
@@ -75,6 +118,10 @@ app.get('/api/public/accidents-monitor', async (c) => {
     divisions,
     bands: bucketHourBands(times),
     generatedAt: jstNow.toISOString(),
+    displayMode: displaySettings.mode,
+    alternateSeconds: displaySettings.alternateSeconds,
+    newcomers,
+    newcomerCardIntervalSeconds,
   });
 });
 

@@ -69,11 +69,13 @@ import adminAccidentsTrainingRoutes from './routes/admin_accidents_training';
 import adminAccidentsPersonRoutes from './routes/admin_accidents_person';
 import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
+import adminNewcomerIntrosRoutes from './routes/admin_newcomer_intros';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import publicAccidentsMonitorRoutes from './routes/public_accidents_monitor';
 import publicAccidentsUploadRoutes from './routes/public_accidents_upload';
+import publicNewcomerMonitorRoutes from './routes/public_newcomer_monitor';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { getMaintenanceMode, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
@@ -282,6 +284,7 @@ app.route(`/${SECRET}/admin`, adminAccidentsTrainingRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsPersonRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
+app.route(`/${SECRET}/admin`, adminNewcomerIntrosRoutes);
 
 // =====================
 // API（認証必須）
@@ -386,6 +389,7 @@ app.route('', liffKanchoRoutes);
 app.route('', publicKanchoWishRoutes);
 app.route('', publicAccidentsMonitorRoutes);
 app.route('', publicAccidentsUploadRoutes);
+app.route('', publicNewcomerMonitorRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

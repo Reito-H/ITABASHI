@@ -284,18 +284,15 @@ export function renderReportPrintPage(o: ReportPrintOptions): string {
       var availablePx = (210 - 20) * pxPerMm; // .sheetのpadding(上下10mmずつ)を除いた高さ
       fit.style.transform = 'none';
       fit.style.width = '100%';
-      var natural = fit.scrollHeight;
+      // 幅を広げて縮小率を掛けるたびに文字の折り返しが変わり必要な高さも変わるため、
+      // 収まるまで数回繰り返して収束させる（1回きりの補正だと余白1枚だけの空白ページが出ることがあった）
       var scale = 1;
-      if (natural > availablePx && natural > 0) {
-        scale = (availablePx / natural) * 0.99;
+      for (var i = 0; i < 6; i++) {
+        var natural = fit.scrollHeight;
+        if (natural <= 0 || natural * scale <= availablePx) break;
+        scale = (availablePx / natural) * 0.97;
         fit.style.width = (100 / scale) + '%';
         fit.style.transform = 'scale(' + scale + ')';
-        var reNatural = fit.scrollHeight;
-        if (reNatural * scale > availablePx) {
-          scale = (availablePx / reNatural) * 0.99;
-          fit.style.width = (100 / scale) + '%';
-          fit.style.transform = 'scale(' + scale + ')';
-        }
       }
       var statusEl = document.getElementById('fit-status');
       if (statusEl) statusEl.textContent = scale < 0.999 ? ('※縮小表示中: ' + Math.round(scale * 100) + '%') : '';

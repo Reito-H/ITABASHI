@@ -10,10 +10,10 @@ import type { Env } from '../auth';
 import type {
   Employee, ShiftEntry, Instructor, InstructorSchedule, ScheduleType, Coach
 } from '../html/shift';
-import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH } from '../config';
+import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH, MONITOR_NEWCOMERS_PATH } from '../config';
 import qrcode from 'qrcode-generator';
 import { getMaintenanceMode, setMaintenanceMode, isAdminAccount } from '../utils/maintenance';
-import { triggerAccidentsMonitorForceRefresh } from './public_accidents_monitor';
+import { triggerAccidentsMonitorForceRefresh, getMonitorDisplaySettings, saveMonitorDisplaySettings, type MonitorDisplayMode } from './public_accidents_monitor';
 import { agoLabel } from './admin_line_usage';
 import { bucketCoarseBands, COARSE_BAND_LABELS } from '../html/accidents';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
@@ -799,6 +799,7 @@ app.get('/newcomers', (c) => {
     { href: `${ADMIN}/interviews`, title: '面談管理',          desc: '面談記録・次回面談予定日の管理' },
     { href: `${ADMIN}/sales`,      title: '売上管理',          desc: '月次営業収入・乗車回数・走行距離の集計' },
     { href: `${ADMIN}/events`,     title: '嫌なこと報告一覧', desc: '新人からの報告一覧・対応メモの管理' },
+    { href: `${ADMIN}/newcomer-intros`, title: '新人紹介カード管理', desc: '事故モニターサイネージの「新人紹介」表示用カード（写真・名前・班・一言コメント）の登録' },
   ];
   const cards = items.map(item => `
     <a href="${item.href}" style="display:flex;align-items:center;gap:16px;background:white;border-radius:12px;padding:20px 22px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid #e5e7eb;transition:box-shadow 0.15s;"
@@ -1019,11 +1020,12 @@ app.get('/shift/print/:empId', async (c) => {
 
 // ===== 設定：スケジュール区分管理 =====
 // ===== 設定トップ（カード一覧）=====
-app.get('/settings', (c) => {
+app.get('/settings', async (c) => {
   const ADMIN = ADMIN_PATH;
+  const displaySettings = await getMonitorDisplaySettings(c.env.DB);
   type SettingCard = { href: string; perm: string; title: string; desc: string; highlight?: boolean; newTab?: boolean };
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
-  const groups: Array<{ heading: string; cards: SettingCard[] }> = [
+  const groups: Array<{ heading: string; cards: SettingCard[]; extraHtml?: string }> = [
     { heading: '日々の運用', cards: [
       // 報告センターは左サイドバーに独立項目として配置したため、ここには表示しない
       { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄',       desc: 'ホシコンについての要望・意見・欲しい機能などを自由に投稿' },
@@ -1055,8 +1057,30 @@ app.get('/settings', (c) => {
       { href: `${ADMIN}/presentation`, perm: 'settings.presentation', title: 'ホシコン発表資料', desc: '社内システムのDX事例プレゼンテーション（横スライド・印刷対応、フル権限adminのみ）' },
     ]},
     { heading: 'モニター表示', cards: [
-      { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）', newTab: true },
-    ]},
+      { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）。下の表示モード設定に従って表示内容が変わります', newTab: true },
+      { href: MONITOR_NEWCOMERS_PATH, perm: 'newcomers', title: '新人紹介モニター表示', desc: '新人紹介カードだけを常時表示するページ（ログイン不要。別の物理サイネージに映す用途で、表示モード設定に関わらず常に新人紹介のみ表示）', newTab: true },
+    ], extraHtml: `
+      <div data-perm-key="accidents" style="background:white;border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-top:12px;">
+        <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">事故モニター表示の表示モード</div>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:#374151;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="radio" name="monitor-mode" value="accidents" ${displaySettings.mode === 'accidents' ? 'checked' : ''} onchange="onMonitorModeChange()"> 事故データのみ（既定）
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="radio" name="monitor-mode" value="newcomers" ${displaySettings.mode === 'newcomers' ? 'checked' : ''} onchange="onMonitorModeChange()"> 新人紹介のみ
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="radio" name="monitor-mode" value="alternate" ${displaySettings.mode === 'alternate' ? 'checked' : ''} onchange="onMonitorModeChange()"> 事故データと新人紹介を交互表示
+          </label>
+          <div id="monitor-alternate-seconds-wrap" style="margin-left:26px;display:${displaySettings.mode === 'alternate' ? 'flex' : 'none'};align-items:center;gap:8px;">
+            <span style="color:#6b7280;">切替間隔:</span>
+            <input type="number" id="monitor-alternate-seconds" min="2" value="${displaySettings.alternateSeconds}" style="width:70px;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;">
+            <span style="color:#6b7280;">秒ごと</span>
+          </div>
+        </div>
+        <div id="monitor-mode-msg" style="font-size:12px;color:#dc2626;margin-top:10px;"></div>
+        <button type="button" id="monitor-mode-save-btn" onclick="saveMonitorMode()" style="margin-top:12px;padding:7px 20px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">表示モードを保存</button>
+      </div>` },
     { heading: 'ガイド・システム', cards: [
       { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: '資料センター',       desc: 'マニュアルPDF・就業規則などの資料を保存・共有' },
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
@@ -1095,6 +1119,7 @@ app.get('/settings', (c) => {
         <div style="display:flex;flex-direction:column;gap:12px;">
           ${g.cards.map(cardHtml).join('')}
         </div>
+        ${g.extraHtml || ''}
       </div>`).join('')}
     </div>
     <script>
@@ -1117,12 +1142,61 @@ app.get('/settings', (c) => {
             alert('通信エラーで強制更新できませんでした');
           });
       }
+
+      function onMonitorModeChange() {
+        var mode = document.querySelector('input[name="monitor-mode"]:checked').value;
+        document.getElementById('monitor-alternate-seconds-wrap').style.display = mode === 'alternate' ? 'flex' : 'none';
+      }
+      function saveMonitorMode() {
+        var mode = document.querySelector('input[name="monitor-mode"]:checked').value;
+        var seconds = parseInt(document.getElementById('monitor-alternate-seconds').value, 10) || 15;
+        var msg = document.getElementById('monitor-mode-msg');
+        var btn = document.getElementById('monitor-mode-save-btn');
+        msg.textContent = '';
+        btn.disabled = true;
+        btn.textContent = '保存中…';
+        fetch(ADMIN_PATH + '/api/accidents-monitor-display-mode', {
+          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: mode, alternateSeconds: seconds })
+        })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            btn.disabled = false;
+            btn.textContent = '表示モードを保存';
+            if (!res.ok) { msg.textContent = res.j.error || '保存に失敗しました'; return; }
+            alert('表示モードを保存しました。モニター画面に反映まで少し時間がかかる場合があります。');
+          })
+          .catch(function () {
+            btn.disabled = false;
+            btn.textContent = '表示モードを保存';
+            msg.textContent = '通信エラーが発生しました';
+          });
+      }
     </script>`;
   return c.html(layout('設定', html, 'settings'));
 });
 
 // 事故モニターの強制更新（設定ページの「事故モニター表示」カードから実行）
 app.post('/api/accidents-monitor-force-refresh', async (c) => {
+  await triggerAccidentsMonitorForceRefresh(c.env.DB);
+  return c.json({ ok: true });
+});
+
+// 事故モニターの表示モード保存（設定ページ「モニター表示」の表示モード切替から実行）
+app.post('/api/accidents-monitor-display-mode', async (c) => {
+  let body: { mode?: string; alternateSeconds?: number };
+  try { body = await c.req.json(); } catch { return c.json({ error: '不正なリクエスト' }, 400); }
+
+  const mode = body.mode;
+  if (mode !== 'accidents' && mode !== 'newcomers' && mode !== 'alternate') {
+    return c.json({ error: '表示モードの値が不正です' }, 400);
+  }
+  const alternateSeconds = Number(body.alternateSeconds);
+  if (!Number.isFinite(alternateSeconds) || alternateSeconds < 2) {
+    return c.json({ error: '切替間隔は2秒以上の数値を指定してください' }, 400);
+  }
+
+  await saveMonitorDisplaySettings(c.env.DB, mode as MonitorDisplayMode, alternateSeconds);
   await triggerAccidentsMonitorForceRefresh(c.env.DB);
   return c.json({ ok: true });
 });
