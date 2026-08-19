@@ -212,7 +212,7 @@ app.post('/csv-import', async (c) => {
       avg_return_time?: string | null;
       used_cars?: string | null;
       isLongAbsent?: boolean;
-      salesEntries?: Array<{ date: string; dutyCode: string; amount: number }>;
+      salesEntries?: Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null }>;
     }>;
   };
   try {
@@ -309,7 +309,7 @@ app.post('/csv-import', async (c) => {
   let salesUpdated = 0;
   const DUTY_CODES = ['a', 'b', 'B', 'D', 'H'];
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  const salesByEmpNo = new Map<string, Array<{ date: string; dutyCode: string; amount: number }>>();
+  const salesByEmpNo = new Map<string, Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null }>>();
   for (const emp of valid) {
     if (emp.salesEntries?.length) salesByEmpNo.set(emp.emp_no, emp.salesEntries);
   }
@@ -335,17 +335,21 @@ app.post('/csv-import', async (c) => {
         if (!Number.isFinite(amount) || amount < 0 || amount > 999999) continue;
         if (!DATE_RE.test(entry.date) || !DUTY_CODES.includes(entry.dutyCode)) continue;
         const { year, month } = getPeriod(entry.date);
+        const startTime = /^\d{2}:\d{2}$/.test(entry.startTime ?? '') ? entry.startTime! : null;
+        const returnTime = /^\d{2}:\d{2}$/.test(entry.returnTime ?? '') ? entry.returnTime! : null;
         salesStatements.push(
           c.env.DB.prepare(`
-            INSERT INTO sales_records (emp_id, date, amount, duty_code, period_year, period_month, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            INSERT INTO sales_records (emp_id, date, amount, duty_code, period_year, period_month, start_time, return_time, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
             ON CONFLICT(emp_id, date) DO UPDATE SET
               amount = excluded.amount,
               duty_code = excluded.duty_code,
               period_year = excluded.period_year,
               period_month = excluded.period_month,
+              start_time = COALESCE(excluded.start_time, sales_records.start_time),
+              return_time = COALESCE(excluded.return_time, sales_records.return_time),
               updated_at = datetime('now', 'localtime')
-          `).bind(empId, entry.date, amount, entry.dutyCode, year, month)
+          `).bind(empId, entry.date, amount, entry.dutyCode, year, month, startTime, returnTime)
         );
       }
     }

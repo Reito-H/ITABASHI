@@ -253,7 +253,7 @@ app.get('/staff', async (c) => {
       </button>
       <div class="hdr-report-list" id="hdr-report-list">
         <a href="${ADMIN_PATH}/crew-shift">乗務員シフト</a>
-        <a href="${ADMIN_PATH}/sales-analytics">売上分析（全社）</a>
+        <a href="${ADMIN_PATH}/sales-ai">AI売上分析（全社）</a>
         <a href="${ADMIN_PATH}/tantosha">担当車表</a>
       </div>
     </div>`;
@@ -1010,7 +1010,9 @@ async function parseCsvText(text) {
         const m = dateRaw.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})$/);
         if (m) {
           const isoDate = m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
-          e.salesEntries.push({ date: isoDate, dutyCode: mapped, amount: salesAmount });
+          const rowStartTime = (!isNaN(startRaw) && startRaw>0) ? fmtHours(startRaw) : null;
+          const rowReturnTime = (!isNaN(retRaw) && retRaw>0) ? fmtHours(retRaw) : null;
+          e.salesEntries.push({ date: isoDate, dutyCode: mapped, amount: salesAmount, startTime: rowStartTime, returnTime: rowReturnTime });
         }
       }
     }

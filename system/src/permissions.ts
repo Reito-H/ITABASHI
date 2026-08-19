@@ -8,7 +8,7 @@
 //   migration_031 で既存の制限付きアカウントには全キーの .edit を付与済み。
 
 // 権限キー一覧
-//   サイドバー: home / kancho-shift / handover / todo / newcomers / staff /
+//   サイドバー: home / kancho-shift / handover / todo / newcomers / staff / sales-ai /
 //               vehicles / garage / accidents / inspection / settings / announcements / line / requests
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   個人データ参照（crew-portal）・乗務員ポータル配下（サイドバーからは非表示・社員管理の一覧/ヘッダーからリンク）: crew-portal / tantosha / crew-shift
@@ -91,6 +91,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/interviews/,   'newcomers'],
   [/^\/info/,         'newcomers'],
   [/^\/staff/,        'staff'],
+  [/^\/sales-ai/,     'sales-ai'],
   [/^\/sales/,        'staff'],
   [/^\/events/,       'events'],
   [/^\/vehicles/,     'vehicles'],
@@ -196,6 +197,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'crew-shift',    label: '乗務員シフト・配車管理・夏季稼働' },
     { key: 'newcomers',     label: '総合新人管理' },
     { key: 'staff',         label: '社員管理（詳細検索含む）' },
+    { key: 'sales-ai',      label: 'AI売上分析' },
     { key: 'events',        label: '報告一覧' },
     { key: 'vehicles',      label: '車両検索' },
     { key: 'garage',        label: '車庫見取り図' },

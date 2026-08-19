@@ -105,7 +105,7 @@ function downloadShiftSalesPdf() {
   const val = document.getElementById('pdf-month-select').value;
   if (!val) { alert('対象月度がありません（売上データがまだ登録されていません）'); return; }
   const [year, month] = val.split('-');
-  window.open('/api/sales-analytics/employee/' + STAFF_ID + '/pdf?year=' + year + '&month=' + month, '_blank');
+  window.open('/api/sales-ai/employee/' + STAFF_ID + '/pdf?year=' + year + '&month=' + month, '_blank');
 }
 
 async function loadSalesAnalytics() {
@@ -113,7 +113,7 @@ async function loadSalesAnalytics() {
   document.getElementById('sales-loading').style.display = '';
   document.getElementById('sales-content').style.display = 'none';
   try {
-    const res = await fetch('/api/sales-analytics/employee/' + STAFF_ID + '?months=' + months);
+    const res = await fetch('/api/sales-ai/employee/' + STAFF_ID + '?months=' + months);
     const json = await res.json();
     if (!res.ok) { document.getElementById('sales-loading').textContent = json.error || '読み込みに失敗しました'; return; }
 

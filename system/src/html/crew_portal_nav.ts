@@ -1,14 +1,13 @@
 // 乗務員シフト・売上分析（全社）・担当車表の共通サブタブ（社員管理の関連ページ）
 import { ADMIN_PATH } from '../config';
 
-export type CrewPortalTab = 'crew-shift' | 'sales-analytics' | 'tantosha' | 'dispatch-board' | 'vehicle-rotation' | 'none';
+export type CrewPortalTab = 'crew-shift' | 'tantosha' | 'dispatch-board' | 'vehicle-rotation' | 'none';
 
 export function crewPortalSubNav(active: CrewPortalTab): string {
   const tabs: Array<{ id: CrewPortalTab; href: string; label: string }> = [
     { id: 'crew-shift',      href: `${ADMIN_PATH}/crew-shift`,      label: '乗務員シフト' },
     { id: 'dispatch-board',  href: `${ADMIN_PATH}/dispatch-board`,  label: '配車管理' },
     { id: 'vehicle-rotation', href: `${ADMIN_PATH}/vehicle-rotation`, label: '車両ローテーション' },
-    { id: 'sales-analytics', href: `${ADMIN_PATH}/sales-analytics`, label: '売上分析（全社）' },
     { id: 'tantosha',        href: `${ADMIN_PATH}/tantosha`,        label: '担当車表' },
   ];
   return `<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;border-bottom:2px solid #e5e7eb;flex-wrap:wrap;">
