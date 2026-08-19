@@ -1047,6 +1047,13 @@ app.get('/settings', (c) => {
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
       { href: `${ADMIN}/cc-list`,                  perm: '',                         title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
     ]},
+    { heading: 'AI売上分析の設定', cards: [
+      { href: `${ADMIN}/settings/wage-estimate`, perm: 'settings.wage-estimate', title: '賃金試算設定', desc: 'AI売上分析「賃金インパクト試算」で使う成果手当の概算計算パラメータ（曜日別基準額・歩合率）' },
+      { href: `${ADMIN}/settings/driving-risk`,  perm: 'settings.driving-risk',  title: '運転リスク検証設定', desc: 'AI売上分析「安全運転リスク」判定のしきい値（急挙動件数・最高速度）' },
+    ]},
+    { heading: '経営・対外資料', cards: [
+      { href: `${ADMIN}/presentation`, perm: 'settings.presentation', title: 'ホシコン発表資料', desc: '社内システムのDX事例プレゼンテーション（横スライド・印刷対応、フル権限adminのみ）' },
+    ]},
     { heading: 'モニター表示', cards: [
       { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）', newTab: true },
     ]},

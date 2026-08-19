@@ -21,6 +21,18 @@ export interface SalesAnalysisInput {
     dutyComparison: Array<{ dutyCode: string; selfAvg: number; peerAvg: number | null; diffPct: number | null; selfCount: number }>;
   } | null;
   returnTime: { avg: string | null; count: number; sufficientData: boolean };
+  wageEstimate: {
+    periodLabel: string;
+    commissionEstimate: number;
+    perRideImpact: number;
+    monthlyIfEveryDayImpact: number;
+    dutyDaysInMonth: number;
+    farePerRide: number;
+    fareSource: 'actual' | 'assumed';
+    wageCategoryLabel: string;
+    nightAllowance: number;
+    overtimeAllowance: number;
+  } | null;
 }
 
 export interface SalesAnalysisContent {
@@ -30,6 +42,8 @@ export interface SalesAnalysisContent {
   strong_points: string[];
   recommendations: string[];
   closing_comment: string;
+  labor_demand_note: string;
+  wage_summary: string;
 }
 
 const WEAK_POINT_RECOMMENDATIONS: Array<{ match: RegExp; advice: string }> = [
@@ -142,5 +156,37 @@ export function buildRuleBasedSalesAnalysis(input: SalesAnalysisInput): SalesAna
     ? '上記の改善余地を意識しつつ、安全運転を第一に営業を続けてください。'
     : '引き続き安定した乗務を継続してください。';
 
-  return { headline, trend_summary, weak_points, strong_points, recommendations, closing_comment };
+  // 労働需要の背景（平日=通勤・出張等のビジネス需要 vs 土日=レジャー需要。既存の曜日別データのみで完結）
+  const weekdayIdx = [1, 2, 3, 4, 5]; // 月〜金
+  const weekendIdx = [0, 6]; // 日・土
+  const weighted = (idxs: number[]) => {
+    const items = idxs.map(i => input.weekdayBreakdown[i]).filter((w): w is { label: string; avg: number | null; count: number } => !!w && w.avg !== null);
+    const cnt = items.reduce((s, w) => s + w.count, 0);
+    if (cnt === 0) return null;
+    return Math.round(items.reduce((s, w) => s + (w.avg ?? 0) * w.count, 0) / cnt);
+  };
+  const weekdayAvg = weighted(weekdayIdx);
+  const weekendAvg = weighted(weekendIdx);
+  let labor_demand_note: string;
+  if (weekdayAvg !== null && weekendAvg !== null) {
+    const cmp = weekdayAvg >= weekendAvg
+      ? `平日の方が${Math.round(((weekdayAvg - weekendAvg) / weekendAvg) * 100)}%高く、通勤・出張利用を中心とした安定需要をうまく取り込めています。`
+      : `土日の方が${Math.round(((weekendAvg - weekdayAvg) / weekdayAvg) * 100)}%高く、平日のビジネス需要を取り込む余地があります。`;
+    labor_demand_note = `平日（月〜金）はサラリーマン・ビジネス利用者の通勤・出張需要が中心で、安定した需要が見込めます。一方、土日はレジャー・行楽需要が中心です。${input.empName}さんの平日平均は${weekdayAvg.toLocaleString('ja-JP')}円、土日平均は${weekendAvg.toLocaleString('ja-JP')}円で、${cmp}`;
+  } else {
+    labor_demand_note = '平日（通勤・出張などのビジネス需要）と土日（レジャー需要）を比較するにはデータが不足しています。';
+  }
+
+  // 賃金インパクト試算（概算・成果手当のみ）
+  let wage_summary = '';
+  if (input.wageEstimate) {
+    const we = input.wageEstimate;
+    const fareLabel = we.fareSource === 'actual' ? '実績' : '想定';
+    wage_summary = `${we.periodLabel}の概算成果手当（${we.wageCategoryLabel}・歩合部分のみ）は${we.commissionEstimate.toLocaleString('ja-JP')}円です。客単価${we.farePerRide.toLocaleString('ja-JP')}円（${fareLabel}）で計算すると、あと1組多く乗せるごとに概算+${we.perRideImpact.toLocaleString('ja-JP')}円。乗務日（${we.dutyDaysInMonth}日）ごとに続けると、月換算で概算+${we.monthlyIfEveryDayImpact.toLocaleString('ja-JP')}円の計算になります。`;
+    if (we.nightAllowance > 0 || we.overtimeAllowance > 0) {
+      wage_summary += `深夜手当は概算${we.nightAllowance.toLocaleString('ja-JP')}円、残業手当は概算${we.overtimeAllowance.toLocaleString('ja-JP')}円です（服務手当・段階分け・法定内外区分を省略した簡易計算のため、実際の給与とは異なります）。`;
+    }
+  }
+
+  return { headline, trend_summary, weak_points, strong_points, recommendations, closing_comment, labor_demand_note, wage_summary };
 }

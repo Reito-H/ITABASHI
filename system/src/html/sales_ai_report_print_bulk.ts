@@ -1,10 +1,10 @@
 // 複数社員分 AI売上分析レポート 一括印刷ページ（/sales-ai/report/print-bulk?ids=1,2,3）
-// 1社員=1枚（A4縦）で連続出力。各シートの描画は sales_ai_report_print.ts のシート部品を共用する。
+// 1社員=2枚（分析＋所感記入シート、A4縦）で連続出力。各シートの描画は sales_ai_report_print.ts のシート部品を共用する。
 import { escHtml } from './layout';
-import { renderSalesAiReportSheet, SALES_AI_REPORT_PRINT_CSS, type SalesAiReportSheetOptions } from './sales_ai_report_print';
+import { renderSalesAiReportSheet, renderSalesAiReportCommentSheet, SALES_AI_REPORT_PRINT_CSS, type SalesAiReportSheetOptions } from './sales_ai_report_print';
 
 export function renderSalesAiReportPrintBulkPage(sheets: SalesAiReportSheetOptions[], backHref: string): string {
-  const sheetsHtml = sheets.map((o, i) => renderSalesAiReportSheet(o, i)).join('\n');
+  const sheetsHtml = sheets.map((o, i) => renderSalesAiReportSheet(o, i * 2) + renderSalesAiReportCommentSheet(o, i * 2 + 1)).join('\n');
   const names = sheets.map(o => o.name).join('・');
 
   return `<!DOCTYPE html>
@@ -26,7 +26,7 @@ export function renderSalesAiReportPrintBulkPage(sheets: SalesAiReportSheetOptio
   </div>
   <script>
     document.querySelectorAll('.issued-at').forEach(function(el) { el.textContent = new Date().toLocaleString('ja-JP'); });
-    var SHEET_COUNT = ${sheets.length};
+    var SHEET_COUNT = ${sheets.length * 2};
     function fitOneSheet(i) {
       var fit = document.getElementById('sheet-fit-' + i);
       if (!fit) return;

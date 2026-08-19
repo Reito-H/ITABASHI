@@ -524,7 +524,7 @@ app.get('/staff', async (c) => {
       CSV インポート
     </h2>
     <p style="font-size:12px;color:#6b7280;margin:0 0 14px;">
-      出庫データCSV（Shift-JIS）を選択してください。社員番号をキーに既存社員は更新、未登録社員は新規追加します。
+      出庫データCSV（Shift-JIS）、または「ホシコン収集データ」形式のCSVを選択してください。社員番号をキーに既存社員は更新、未登録社員は新規追加します。
     </p>
 
     <!-- ファイル選択エリア -->
@@ -965,36 +965,88 @@ function modeOf(arr) {
 function avgOf(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
 
 // ===== CSV 解析（チャンク分割・非同期・進捗表示） =====
+// 2形式に対応:
+//   ・従来形式（ヘッダー無し、日付,営業所,課,社員番号,氏名,勤務,車番,出庫時刻,帰庫時刻,税込収入 の10列）
+//   ・ホシコン収集データ形式（ヘッダー行「日付,営業所,課,班,車両,コード,氏名,...」で始まる40列以上のCSV。
+//     出庫点呼時刻・帰庫点呼時刻・営業回数・走行キロを含む、より詳細な日次データ）
 async function parseCsvText(text) {
   const lines = text.split(/\\r?\\n/);
   const total = lines.length;
   const empMap = {};
   let csvMaxDate = '';
 
+  const firstCols = (lines[0] || '').split(',');
+  const isHoshiconFormat = firstCols[0].trim() === '日付' && firstCols.length >= 38;
+  const startLine = isHoshiconFormat ? 1 : 0;
+
   const CHUNK = 8000;
-  for (let i = 0; i < total; i += CHUNK) {
+  for (let i = startLine; i < total; i += CHUNK) {
     const end = Math.min(i + CHUNK, total);
     for (let j = i; j < end; j++) {
       const line = lines[j];
       if (!line || !line.trim()) continue;
       const cols = line.split(',');
-      if (cols.length < 8) continue;
-      const dateRaw = cols[0]?.trim();
-      const teamRaw = cols[2]?.trim();
-      const empNo   = cols[3]?.trim();
-      const name    = cols[4]?.trim();
-      const workRaw = cols[5]?.trim();
-      const carRaw  = cols[6]?.trim();
-      const startRaw = parseFloat(cols[7]?.trim());
-      const retRaw   = parseFloat(cols[8]?.trim());
-      const salesRaw = cols[9]?.trim();
+
+      let dateRaw, teamRaw, empNo, name, workRaw, carRaw, startRaw, retRaw, salesRaw, rideCountRaw, distanceRaw;
+      let safetyRaw = null;
+      let laborHours = null;
+      let nightHours = null;
+      let overtimeHours = null;
+      if (isHoshiconFormat) {
+        if (cols.length < 40) continue;
+        dateRaw = cols[0]?.trim();
+        teamRaw = cols[3]?.trim();
+        carRaw  = cols[4]?.trim();
+        empNo   = cols[5]?.trim();
+        name    = cols[6]?.trim();
+        workRaw = cols[8]?.trim();
+        salesRaw = cols[21]?.trim();
+        rideCountRaw = cols[20]?.trim();
+        distanceRaw  = cols[18]?.trim();
+        // 実労働時間 = 拘束時間(列13) - 休憩時間(列14)
+        const constraintRaw = parseFloat(cols[13]?.trim());
+        const breakRaw = parseFloat(cols[14]?.trim());
+        if (!isNaN(constraintRaw) && !isNaN(breakRaw)) {
+          const lh = constraintRaw - breakRaw;
+          if (lh > 0 && lh < 24) laborHours = lh;
+        }
+        // 深夜時間(列16)・残業時間(列17)
+        const nightRaw = parseFloat(cols[16]?.trim());
+        const overtimeRaw = parseFloat(cols[17]?.trim());
+        if (!isNaN(nightRaw) && nightRaw >= 0) nightHours = nightRaw;
+        if (!isNaN(overtimeRaw) && overtimeRaw >= 0) overtimeHours = overtimeRaw;
+        // 出庫点呼時刻・帰庫点呼時刻（点呼記録の実時刻。従来形式の出庫/帰庫時刻に相当）
+        startRaw = parseFloat(cols[38]?.trim());
+        retRaw   = parseFloat(cols[39]?.trim());
+        // 急発進・急加速・急減速（実車/空車）・最高速度（高速道/一般道、実車/空車）
+        safetyRaw = {
+          harshStartLoaded: parseInt(cols[25]?.trim(), 10), harshStartEmpty: parseInt(cols[26]?.trim(), 10),
+          harshAccelLoaded: parseInt(cols[27]?.trim(), 10), harshAccelEmpty: parseInt(cols[28]?.trim(), 10),
+          harshDecelLoaded: parseInt(cols[29]?.trim(), 10), harshDecelEmpty: parseInt(cols[30]?.trim(), 10),
+          maxSpeedLoadedHighway: parseInt(cols[35]?.trim(), 10), maxSpeedEmptyHighway: parseInt(cols[34]?.trim(), 10),
+          maxSpeedLoadedLocal: parseInt(cols[37]?.trim(), 10), maxSpeedEmptyLocal: parseInt(cols[36]?.trim(), 10),
+        };
+      } else {
+        if (cols.length < 8) continue;
+        dateRaw = cols[0]?.trim();
+        teamRaw = cols[2]?.trim();
+        empNo   = cols[3]?.trim();
+        name    = cols[4]?.trim();
+        workRaw = cols[5]?.trim();
+        carRaw  = cols[6]?.trim();
+        startRaw = parseFloat(cols[7]?.trim());
+        retRaw   = parseFloat(cols[8]?.trim());
+        salesRaw = cols[9]?.trim();
+        rideCountRaw = undefined;
+        distanceRaw  = undefined;
+      }
 
       if (!empNo || !name || !/^\\d{8}$/.test(empNo)) continue;
       if (dateRaw && dateRaw > csvMaxDate) csvMaxDate = dateRaw;
 
       if (!empMap[empNo]) {
         empMap[empNo] = { emp_no:empNo, name, team:parseInt(teamRaw)||null,
-          workTypes:[], carFreq:{}, startEntries:[], returnTimes:[], dates:[], salesEntries:[] };
+          workTypes:[], carFreq:{}, startEntries:[], returnTimes:[], dates:[], salesEntries:[], safetyEntries:[] };
       }
       const e = empMap[empNo];
       const mapped = WORK_TYPE_MAP[workRaw];
@@ -1004,15 +1056,38 @@ async function parseCsvText(text) {
       if (!isNaN(retRaw) && retRaw>0) e.returnTimes.push(retRaw);
       if (dateRaw) e.dates.push(dateRaw);
 
-      // 税込売上（10列目）: 社員番号・日付・勤務区分（duty_code）が揃っている行のみ売上記録へ反映
+      const dateMatch = dateRaw ? dateRaw.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})$/) : null;
+      const isoDate = dateMatch ? dateMatch[1] + '-' + dateMatch[2].padStart(2,'0') + '-' + dateMatch[3].padStart(2,'0') : null;
+
+      // 税込売上: 社員番号・日付・勤務区分（duty_code）が揃っている行のみ売上記録へ反映
       const salesAmount = parseInt(salesRaw, 10);
-      if (mapped && dateRaw && !isNaN(salesAmount) && salesAmount >= 0 && salesAmount <= 999999) {
-        const m = dateRaw.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})$/);
-        if (m) {
-          const isoDate = m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
-          const rowStartTime = (!isNaN(startRaw) && startRaw>0) ? fmtHours(startRaw) : null;
-          const rowReturnTime = (!isNaN(retRaw) && retRaw>0) ? fmtHours(retRaw) : null;
-          e.salesEntries.push({ date: isoDate, dutyCode: mapped, amount: salesAmount, startTime: rowStartTime, returnTime: rowReturnTime });
+      if (mapped && isoDate && !isNaN(salesAmount) && salesAmount >= 0 && salesAmount <= 999999) {
+        const rowStartTime = (!isNaN(startRaw) && startRaw>0) ? fmtHours(startRaw) : null;
+        const rowReturnTime = (!isNaN(retRaw) && retRaw>0) ? fmtHours(retRaw) : null;
+        const rideCountNum = rideCountRaw !== undefined ? parseInt(rideCountRaw, 10) : NaN;
+        const distanceNum  = distanceRaw !== undefined ? parseFloat(distanceRaw) : NaN;
+        e.salesEntries.push({
+          date: isoDate, dutyCode: mapped, amount: salesAmount,
+          startTime: rowStartTime, returnTime: rowReturnTime,
+          rideCount: !isNaN(rideCountNum) ? rideCountNum : null,
+          distanceKm: !isNaN(distanceNum) ? Math.round(distanceNum) : null,
+          laborHours, nightHours, overtimeHours,
+        });
+      }
+
+      // 安全運転データ（ホシコン形式のみ）: 数値が1つでも取れていれば記録
+      if (safetyRaw && isoDate) {
+        const clean = (v) => !isNaN(v) ? v : null;
+        const hasAny = Object.values(safetyRaw).some(v => !isNaN(v));
+        if (hasAny) {
+          e.safetyEntries.push({
+            date: isoDate,
+            harshStartLoaded: clean(safetyRaw.harshStartLoaded), harshStartEmpty: clean(safetyRaw.harshStartEmpty),
+            harshAccelLoaded: clean(safetyRaw.harshAccelLoaded), harshAccelEmpty: clean(safetyRaw.harshAccelEmpty),
+            harshDecelLoaded: clean(safetyRaw.harshDecelLoaded), harshDecelEmpty: clean(safetyRaw.harshDecelEmpty),
+            maxSpeedLoadedHighway: clean(safetyRaw.maxSpeedLoadedHighway), maxSpeedEmptyHighway: clean(safetyRaw.maxSpeedEmptyHighway),
+            maxSpeedLoadedLocal: clean(safetyRaw.maxSpeedLoadedLocal), maxSpeedEmptyLocal: clean(safetyRaw.maxSpeedEmptyLocal),
+          });
         }
       }
     }
@@ -1072,6 +1147,7 @@ async function parseCsvText(text) {
       lastDate, daysSinceLast, isLongAbsent,
       hasTimeChange, recentAvg, earlyAvg,
       salesEntries: e.salesEntries,
+      safetyEntries: e.safetyEntries,
     };
   });
 
@@ -1248,11 +1324,12 @@ async function executeCsvImport() {
     used_cars: e.used_cars,
     isLongAbsent: e.isLongAbsent || false,
     salesEntries: e.salesEntries || [],
+    safetyEntries: e.safetyEntries || [],
   }));
 
   // 100名ずつ分割して送信（大量データでもタイムアウトしない）
   const BATCH = 100;
-  let totalInserted = 0, totalUpdated = 0, totalSales = 0;
+  let totalInserted = 0, totalUpdated = 0, totalSales = 0, totalSafety = 0;
   const allErrors = [];
 
   try {
@@ -1267,6 +1344,7 @@ async function executeCsvImport() {
         totalInserted += json.inserted || 0;
         totalUpdated  += json.updated  || 0;
         totalSales    += json.salesUpdated || 0;
+        totalSafety   += json.safetyUpdated || 0;
         if (json.errors?.length) allErrors.push(...json.errors);
       } else {
         allErrors.push(json.error || \`batch \${i} エラー\`);
@@ -1277,6 +1355,7 @@ async function executeCsvImport() {
     resultDiv.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 16px;font-size:13px;color:#166534;">'+
       'インポート完了: <strong>新規追加 '+totalInserted+'名</strong> / <strong>更新 '+totalUpdated+'名</strong>'+
       (totalSales ? ' / <strong>税込売上 '+totalSales+'件を反映</strong>' : '')+
+      (totalSafety ? ' / <strong>安全運転データ '+totalSafety+'件を反映</strong>' : '')+
       (allErrors.length?'<div style="margin-top:8px;color:#dc2626;font-size:12px;">エラー: '+allErrors.join('、')+'</div>':'')+
       '<div style="margin-top:10px;"><a href="'+ADMIN_PATH+'/staff" style="color:#1d4ed8;font-size:13px;">→ 社員一覧を更新</a></div></div>';
     resultDiv.style.display='block';

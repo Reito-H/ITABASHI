@@ -19,7 +19,8 @@
 //               settings.benten / settings.schedule-types / settings.dia / settings.coaches /
 //               settings.instructors / settings.periods / settings.notifications /
 //               settings.offices / settings.vehicle-search-guide / settings.documents /
-//               settings.tutorial / settings.status / settings.kancho-logic
+//               settings.tutorial / settings.status / settings.kancho-logic /
+//               settings.wage-estimate / settings.driving-risk
 
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
 // キーは '|' 区切りで複数指定可（いずれか1つでも権限があればOK）。例: 'a|b|c'
@@ -41,6 +42,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/coaches/,              'settings.coaches'],
   [/^\/settings\/instructors/,          'settings.instructors'],
   [/^\/settings\/periods/,              'settings.periods'],
+  [/^\/settings\/wage-estimate/,        'settings.wage-estimate'],
+  [/^\/settings\/driving-risk/,         'settings.driving-risk'],
   [/^\/settings\/notifications/,        'settings.notifications'],
   [/^\/settings\/offices/,              'settings.offices'],
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
@@ -154,6 +157,8 @@ const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
   [/^\/api\/instructors/,         ['settings.instructors']],
   [/^\/api\/instructor-invite/,   ['settings.instructors']],
   [/^\/api\/period-settings/,     ['settings.periods']],
+  [/^\/api\/wage-estimate-settings/, ['settings.wage-estimate']],
+  [/^\/api\/driving-risk-settings/,  ['settings.driving-risk']],
   [/^\/api\/notifications/,       ['settings.notifications']],
   [/^\/api\/inspection/,          ['inspection']],
   [/^\/api\/vehicle-deadlines\/(meter|shaken)/, ['inspection']],
@@ -223,6 +228,8 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.coaches',              label: '研修担当' },
     { key: 'settings.instructors',          label: '班長・指導者' },
     { key: 'settings.periods',              label: '月度設定' },
+    { key: 'settings.wage-estimate',        label: '賃金試算設定' },
+    { key: 'settings.driving-risk',         label: '運転リスク検証設定' },
     { key: 'settings.notifications',        label: 'LINE通知設定' },
     { key: 'settings.offices',              label: '営業所' },
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },

@@ -25,6 +25,7 @@ function buildSheetOptions(data: NonNullable<EmployeeAnalytics>, months: number)
     trend: data.trend,
     relative: data.relative,
     returnTime: data.returnTime,
+    wageEstimate: data.wageEstimate,
   });
   const cnt = data.daily.length;
   const totalAmount = data.daily.reduce((s, d) => s + d.amount, 0);
@@ -36,6 +37,7 @@ function buildSheetOptions(data: NonNullable<EmployeeAnalytics>, months: number)
     totalAmount, cnt, lastDate,
     weekdayBreakdown: data.weekdayBreakdown,
     content,
+    drivingRisk: data.drivingRisk,
   };
 }
 
@@ -92,6 +94,17 @@ app.get('/sales-ai', async (c) => {
     </div>
 
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
+      <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 4px;">安全運転リスクランキング（今月度・危険挙動の多い順）</h3>
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:12px;">ホシコン収集データCSVの急発進・急加速・急減速・最高速度から算出した参考指標です。実際の事故記録ではありません。</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
+          <th style="padding:6px 8px;">氏名</th><th style="padding:6px 8px;">課/班</th><th style="padding:6px 8px;">急挙動合計</th><th style="padding:6px 8px;">乗務日あたり</th><th style="padding:6px 8px;">最高速度(高速/一般)</th><th style="padding:6px 8px;">速度超過日数</th><th style="padding:6px 8px;">判定</th>
+        </tr></thead>
+        <tbody id="risk-tbody"></tbody>
+      </table>
+    </div>
+
+    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
         <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0;">社員別サマリー・ランキング（今月度・前月度比）</h3>
         <div style="display:flex;gap:8px;align-items:center;">
@@ -100,8 +113,20 @@ app.get('/sales-ai', async (c) => {
         </div>
       </div>
       <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="text" id="search-box" placeholder="社員名で検索" oninput="renderTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;width:200px;">
-        <select id="sort-select" onchange="renderTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+        <input type="text" id="search-box" placeholder="社員名で検索" oninput="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;width:180px;">
+        <select id="division-filter" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+          <option value="">全課</option>
+          <option value="1">1課</option><option value="2">2課</option><option value="3">3課</option><option value="4">4課</option>
+        </select>
+        <select id="team-filter" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+          <option value="">全班</option>
+          <option value="1">1班</option><option value="2">2班</option><option value="3">3班</option><option value="4">4班</option>
+          <option value="5">5班</option><option value="6">6班</option><option value="7">7班</option><option value="8">8班</option>
+        </select>
+        <label style="font-size:12px;color:#b91c1c;display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="min-wage-filter" onchange="applyFilters()">最賃者のみ表示
+        </label>
+        <select id="sort-select" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
           <option value="curTotal-desc">今月度売上 高い順</option>
           <option value="curTotal-asc">今月度売上 低い順</option>
           <option value="changePct-desc">前月度比 高い順</option>
@@ -110,12 +135,14 @@ app.get('/sales-ai', async (c) => {
           <option value="curAvgPerDuty-asc">平均日商 低い順</option>
           <option value="curAvgReturnTimeMinutes-asc">平均帰庫時刻 早い順</option>
           <option value="curAvgReturnTimeMinutes-desc">平均帰庫時刻 遅い順</option>
+          <option value="minimumWageShortfall-desc">最賃補填額(概算) 高い順</option>
         </select>
       </div>
+      <div style="font-size:10.5px;color:#9ca3af;margin-bottom:8px;">※最賃判定は基本給I＋歩合部分（公出含む）＋深夜/残業手当の概算給与と最低賃金時給×実労働時間を比較した概算です。深夜/残業手当は服務手当・段階分け・法定内外区分を省略した簡易計算です。<a href="${ADMIN_PATH}/settings/wage-estimate" style="color:#2563eb;">賃金試算設定</a>で確認・修正できます。</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
           <th style="padding:6px 8px;width:24px;"><input type="checkbox" id="select-all" onchange="toggleAll(this.checked)"></th>
-          <th style="padding:6px 8px;">順位</th><th style="padding:6px 8px;">氏名</th><th style="padding:6px 8px;">課/班</th><th style="padding:6px 8px;">今月度合計</th><th style="padding:6px 8px;">平均日商</th><th style="padding:6px 8px;">乗務日数</th><th style="padding:6px 8px;">前月度比</th><th style="padding:6px 8px;">平均帰庫時刻</th>
+          <th style="padding:6px 8px;">順位</th><th style="padding:6px 8px;">氏名</th><th style="padding:6px 8px;">課/班</th><th style="padding:6px 8px;">今月度合計</th><th style="padding:6px 8px;">平均日商</th><th style="padding:6px 8px;">乗務日数</th><th style="padding:6px 8px;">前月度比</th><th style="padding:6px 8px;">平均帰庫時刻</th><th style="padding:6px 8px;">最賃判定</th>
         </tr></thead>
         <tbody id="emp-tbody"></tbody>
       </table>
@@ -186,18 +213,59 @@ async function loadOverview() {
       '</tr>'
     ).join('') || '<tr><td colspan="4" style="padding:12px 8px;color:#9ca3af;">データがありません</td></tr>';
 
-    renderTable();
+    renderRiskTable();
+    applyFilters();
   } catch (err) {
     document.getElementById('loading').textContent = '通信エラーが発生しました';
   }
 }
 
+function currentDivTeamFilter() {
+  const div = document.getElementById('division-filter').value;
+  const team = document.getElementById('team-filter').value;
+  return { div: div ? parseInt(div) : null, team: team ? parseInt(team) : null };
+}
+
+function renderRiskTable() {
+  if (!overviewData) return;
+  const { div, team } = currentDivTeamFilter();
+  const RISK_COLORS = { low: '#166534', medium: '#d97706', high: '#dc2626' };
+  const RISK_BG = { low: '#f0fdf4', medium: '#fffbeb', high: '#fef2f2' };
+  const RISK_LABELS = { low: '低', medium: '中', high: '高' };
+  const rows = (overviewData.drivingRiskRanking || []).filter(r =>
+    (div === null || r.division === div) && (team === null || r.team === team)
+  );
+  document.getElementById('risk-tbody').innerHTML = rows.map(r =>
+    '<tr style="border-bottom:1px solid #f3f4f6;">' +
+    '<td style="padding:7px 8px;"><a href="' + ADMIN_PATH + '/sales-ai/employee/' + r.empId + '" style="color:#2563eb;text-decoration:none;font-weight:600;">' + escHtmlJs(r.name) + '</a></td>' +
+    '<td style="padding:7px 8px;color:#6b7280;">' + (r.division ?? '—') + '課' + (r.team ? r.team + '班' : '') + '</td>' +
+    '<td style="padding:7px 8px;font-weight:600;">' + r.totalHarshEvents + '件</td>' +
+    '<td style="padding:7px 8px;">' + r.harshEventsPerDuty + '件</td>' +
+    '<td style="padding:7px 8px;">' + (r.maxSpeedHighway ?? '—') + '/' + (r.maxSpeedLocal ?? '—') + 'km/h</td>' +
+    '<td style="padding:7px 8px;">' + r.speedingDays + '日</td>' +
+    '<td style="padding:7px 8px;"><span style="background:' + RISK_BG[r.riskLevel] + ';color:' + RISK_COLORS[r.riskLevel] + ';border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700;">' + RISK_LABELS[r.riskLevel] + '</span></td>' +
+    '</tr>'
+  ).join('') || '<tr><td colspan="7" style="padding:12px 8px;color:#9ca3af;">安全運転データがありません（ホシコン形式CSVの取込で蓄積されます）</td></tr>';
+}
+
+function applyFilters() {
+  renderTable();
+  renderRiskTable();
+}
+
 function renderTable() {
   if (!overviewData) return;
   const q = document.getElementById('search-box').value.trim();
+  const { div, team } = currentDivTeamFilter();
+  const minWageOnly = document.getElementById('min-wage-filter').checked;
   const [sortKey, sortDir] = document.getElementById('sort-select').value.split('-');
 
-  let rows = overviewData.employees.filter(e => !q || e.name.includes(q));
+  let rows = overviewData.employees.filter(e =>
+    (!q || e.name.includes(q)) &&
+    (div === null || e.division === div) &&
+    (team === null || e.team === team) &&
+    (!minWageOnly || e.isMinimumWageEarner)
+  );
   rows = rows.slice().sort((a, b) => {
     const av = a[sortKey] ?? -Infinity, bv = b[sortKey] ?? -Infinity;
     return sortDir === 'asc' ? av - bv : bv - av;
@@ -207,6 +275,9 @@ function renderTable() {
   tbody.innerHTML = rows.map((e, i) => {
     const changeColor = e.changePct === null ? '#9ca3af' : (e.changePct >= 0 ? '#059669' : '#dc2626');
     const changeText = e.changePct === null ? '—' : (e.changePct >= 0 ? '+' : '') + e.changePct + '%';
+    const mwCell = e.isMinimumWageEarner
+      ? '<span style="background:#fef2f2;color:#dc2626;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:700;">最賃 補填概算' + (e.minimumWageShortfall ?? 0).toLocaleString('ja-JP') + '円</span>'
+      : (e.minimumWageShortfall !== null ? '<span style="color:#9ca3af;">—</span>' : '<span style="color:#d1d5db;">データ不足</span>');
     return '<tr style="border-bottom:1px solid #f3f4f6;">' +
       '<td style="padding:7px 8px;"><input type="checkbox" class="emp-check" data-id="' + e.empId + '" ' + (selectedIds.has(e.empId) ? 'checked' : '') + ' onchange="toggleOne(' + e.empId + ', this.checked)"></td>' +
       '<td style="padding:7px 8px;color:#9ca3af;">' + (i + 1) + '</td>' +
@@ -217,6 +288,7 @@ function renderTable() {
       '<td style="padding:7px 8px;">' + e.curDutyCount + '日</td>' +
       '<td style="padding:7px 8px;font-weight:700;color:' + changeColor + ';">' + changeText + '</td>' +
       '<td style="padding:7px 8px;">' + (e.curAvgReturnTime ?? '—') + '</td>' +
+      '<td style="padding:7px 8px;">' + mwCell + '</td>' +
       '</tr>';
   }).join('');
 }
@@ -312,6 +384,19 @@ app.get('/sales-ai/employee/:id', async (c) => {
 
       <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">帰庫時間</h4>
       <div id="return-time-box" style="margin-bottom:24px;font-size:12px;color:#374151;background:#f9fafb;border-radius:8px;padding:10px 14px;"></div>
+
+      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">賃金インパクト試算（概算）</h4>
+      <div id="wage-box" style="margin-bottom:8px;font-size:12px;color:#374151;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;line-height:1.7;"></div>
+      <div style="font-size:10.5px;color:#9ca3af;margin-bottom:24px;">※本人の勤務区分に応じた成果手当（歩合部分・公出含む）と、深夜/残業手当の概算です。深夜/残業手当は服務手当・能率手当・段階分け・法定内外区分を省略した簡易計算のため、実際の給与とは異なります。設定値は<a href="${ADMIN_PATH}/settings/wage-estimate" style="color:#2563eb;">賃金試算設定</a>で確認・修正できます。</div>
+
+      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">最低賃金判定（概算）</h4>
+      <div id="min-wage-box" style="margin-bottom:24px;font-size:12px;color:#374151;"></div>
+
+      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">労働需要の背景</h4>
+      <div id="labor-demand-box" style="margin-bottom:24px;font-size:12px;color:#374151;background:#f9fafb;border-radius:8px;padding:10px 14px;line-height:1.7;"></div>
+
+      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">安全運転リスク（参考指標・事故記録ではありません）</h4>
+      <div id="risk-box" style="margin-bottom:24px;font-size:12px;color:#374151;"></div>
 
       <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">AI分析 — 弱点・改善提案</h4>
       <div style="display:flex;gap:16px;margin-bottom:16px;">
@@ -413,6 +498,48 @@ async function loadAll() {
       document.getElementById('return-time-box').textContent = '平均帰庫時刻: ' + data.returnTime.avg + '（' + data.returnTime.count + '件のデータより算出）';
     } else {
       document.getElementById('return-time-box').textContent = '帰庫時刻のデータを蓄積中です（現在' + data.returnTime.count + '件。10件以上で傾向を表示します）';
+    }
+
+    document.getElementById('wage-box').textContent = report.content.wage_summary || 'データが不足しているため試算できません（当月度の実績が必要です）';
+    document.getElementById('labor-demand-box').textContent = report.content.labor_demand_note;
+
+    const mw = data.minimumWage;
+    if (mw && mw.sufficientData) {
+      const box = document.getElementById('min-wage-box');
+      if (mw.isMinimumWageEarner) {
+        box.innerHTML =
+          '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;line-height:1.8;">' +
+          '<span style="background:#dc2626;color:white;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700;">最賃者（概算）</span><br>' +
+          '概算給与 ' + mw.estimatedPay.toLocaleString('ja-JP') + '円 ／ 最低賃金保障額 ' + mw.guaranteedPay.toLocaleString('ja-JP') + '円' +
+          '（実労働時間 ' + mw.laborHoursTotal + '時間）<br>' +
+          '<strong style="color:#dc2626;">補填額(概算): ' + mw.shortfall.toLocaleString('ja-JP') + '円</strong>' +
+          '</div>';
+      } else {
+        box.innerHTML =
+          '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;line-height:1.8;">' +
+          '概算給与 ' + mw.estimatedPay.toLocaleString('ja-JP') + '円 ／ 最低賃金保障額 ' + mw.guaranteedPay.toLocaleString('ja-JP') + '円' +
+          '（実労働時間 ' + mw.laborHoursTotal + '時間）— 最低賃金を上回っています' +
+          '</div>';
+      }
+    } else {
+      document.getElementById('min-wage-box').innerHTML = '<div style="color:#9ca3af;background:#f9fafb;border-radius:8px;padding:10px 14px;">実労働時間データが不足しているため判定できません（ホシコン形式CSVの取込で蓄積されます）</div>';
+    }
+
+    const risk = data.drivingRisk;
+    if (risk) {
+      const RISK_COLORS = { low: '#166534', medium: '#d97706', high: '#dc2626' };
+      const RISK_BG = { low: '#f0fdf4', medium: '#fffbeb', high: '#fef2f2' };
+      const RISK_LABELS = { low: '低', medium: '中', high: '高' };
+      document.getElementById('risk-box').innerHTML =
+        '<span style="display:inline-block;background:' + RISK_BG[risk.riskLevel] + ';color:' + RISK_COLORS[risk.riskLevel] + ';border-radius:12px;padding:3px 12px;font-size:12px;font-weight:700;margin-bottom:8px;">総合判定: リスク' + RISK_LABELS[risk.riskLevel] + '</span>' +
+        '<div style="display:flex;gap:16px;background:#f9fafb;border-radius:8px;padding:10px 14px;">' +
+        '<div>急挙動合計: <strong>' + risk.totalHarshEvents + '件</strong></div>' +
+        '<div>乗務日あたり: <strong>' + risk.harshEventsPerDuty + '件</strong></div>' +
+        '<div>最高速度(高速/一般): <strong>' + (risk.maxSpeedHighway ?? '—') + '/' + (risk.maxSpeedLocal ?? '—') + 'km/h</strong></div>' +
+        '<div>速度超過日数: <strong>' + risk.speedingDays + '日</strong></div>' +
+        '</div>';
+    } else {
+      document.getElementById('risk-box').innerHTML = '<div style="color:#9ca3af;background:#f9fafb;border-radius:8px;padding:10px 14px;">安全運転データがまだありません（ホシコン形式CSVの取込で蓄積されます）</div>';
     }
 
     document.getElementById('weak-list').innerHTML = report.content.weak_points.map(t => '<li>' + escHtmlJs(t) + '</li>').join('') || '<li style="color:#9ca3af;">特筆すべき弱点は見られません</li>';

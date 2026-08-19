@@ -4,6 +4,7 @@
 //   が売上データを集計してテンプレート文に流し込んだもので、外部AI/LLM APIは使用しない。
 import { escHtml } from './layout';
 import type { SalesAnalysisContent } from '../utils/sales_trend_analysis';
+import type { DrivingRiskSummary } from '../utils/driving_risk_analysis';
 
 export interface SalesAiReportSheetOptions {
   name: string;
@@ -16,7 +17,15 @@ export interface SalesAiReportSheetOptions {
   lastDate: string | null;
   weekdayBreakdown: Array<{ label: string; avg: number | null; count: number }>;
   content: SalesAnalysisContent;
+  drivingRisk: DrivingRiskSummary | null;
 }
+
+const RISK_LEVEL_LABELS: Record<DrivingRiskSummary['riskLevel'], string> = { low: '低', medium: '中', high: '高' };
+const RISK_LEVEL_COLORS: Record<DrivingRiskSummary['riskLevel'], { bg: string; fg: string; border: string }> = {
+  low: { bg: '#f0fdf4', fg: '#166534', border: '#bbf7d0' },
+  medium: { bg: '#fffbeb', fg: '#d97706', border: '#fde68a' },
+  high: { bg: '#fef2f2', fg: '#dc2626', border: '#fecaca' },
+};
 
 // 印刷ページ共通CSS（単票・一括の両方で使用）
 export const SALES_AI_REPORT_PRINT_CSS = `
@@ -74,6 +83,20 @@ export const SALES_AI_REPORT_PRINT_CSS = `
   .sr-foot .right { text-align: right; font-size: 9.5px; color: #9ca3af; line-height: 1.6; }
   .sr-foot .right .brand { font-size: 11px; font-weight: 800; color: #1a3a5c; }
 
+  .sr-badge2 { display: inline-block; border-radius: 20px; padding: 1px 9px; font-size: 10px; font-weight: 700; }
+
+  /* 2枚目: 所感記入シート */
+  .sr-comment-title { font-size: 13px; font-weight: 700; color: #1a3a5c; margin: 6px 0 14px; padding-left: 8px; border-left: 4px solid #1a3a5c; }
+  .sr-comment-box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px 20px; }
+  .sr-comment-line { height: 30px; border-bottom: 1px solid #cbd5e1; }
+  .sr-comment-line:last-child { border-bottom: none; }
+
+  .sr-stamp-footer { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 20px; }
+  .sr-stamp-row { display: flex; gap: 18px; }
+  .sr-stamp-box { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .sr-stamp-frame { width: 52px; height: 52px; border: 1.5px solid #64748b; border-radius: 4px; }
+  .sr-stamp-label { font-size: 10.5px; color: #475569; }
+
   @media print {
     @page { size: A4 portrait; margin: 0; }
     html, body { background: #fff; }
@@ -103,6 +126,17 @@ export function renderSalesAiReportSheet(o: SalesAiReportSheetOptions, sheetInde
   const recsHtml = o.content.recommendations.length
     ? `<ul class="sr-list">${o.content.recommendations.map(t => `<li>${escHtml(t)}</li>`).join('')}</ul>`
     : `<div class="sr-empty">—</div>`;
+
+  const riskHtml = o.drivingRisk ? (() => {
+    const colors = RISK_LEVEL_COLORS[o.drivingRisk!.riskLevel];
+    return `
+      <div class="sr-kpis" style="margin-bottom:0;">
+        <div class="sr-kpi"><div class="sr-kpi-label">総合判定</div><div class="sr-kpi-value"><span class="sr-badge2" style="background:${colors.bg};color:${colors.fg};border:1px solid ${colors.border};">リスク${RISK_LEVEL_LABELS[o.drivingRisk!.riskLevel]}</span></div></div>
+        <div class="sr-kpi"><div class="sr-kpi-label">急挙動合計</div><div class="sr-kpi-value">${o.drivingRisk!.totalHarshEvents}件</div></div>
+        <div class="sr-kpi"><div class="sr-kpi-label">乗務日あたり</div><div class="sr-kpi-value">${o.drivingRisk!.harshEventsPerDuty}件</div></div>
+        <div class="sr-kpi"><div class="sr-kpi-label">最高速度(高速/一般)</div><div class="sr-kpi-value" style="font-size:13px;">${o.drivingRisk!.maxSpeedHighway ?? '—'}/${o.drivingRisk!.maxSpeedLocal ?? '—'}km/h</div></div>
+      </div>`;
+  })() : `<div class="sr-empty">安全運転データがまだありません（対応形式のCSV取込で今後蓄積されます）</div>`;
 
   return `
     <div class="sheet" id="print-sheet-${sheetIndex}">
@@ -141,6 +175,22 @@ export function renderSalesAiReportSheet(o: SalesAiReportSheetOptions, sheetInde
           <div class="sr-body-text">${escHtml(o.content.trend_summary)}</div>
         </div>
 
+        ${o.content.wage_summary ? `
+        <div class="sr-section">
+          <div class="sr-section-title">賃金インパクト試算（概算）</div>
+          <div class="sr-body-text">${escHtml(o.content.wage_summary)}</div>
+        </div>` : ''}
+
+        <div class="sr-section">
+          <div class="sr-section-title">労働需要の背景</div>
+          <div class="sr-body-text">${escHtml(o.content.labor_demand_note)}</div>
+        </div>
+
+        <div class="sr-section">
+          <div class="sr-section-title">安全運転リスク（参考指標・事故記録ではありません）</div>
+          ${riskHtml}
+        </div>
+
         <div class="sr-cols">
           <div class="sr-section sr-weak">
             <div class="sr-section-title">弱点・改善余地</div>
@@ -160,11 +210,53 @@ export function renderSalesAiReportSheet(o: SalesAiReportSheetOptions, sheetInde
         <div class="sr-closing">${escHtml(o.content.closing_comment)}</div>
 
         <div class="sr-disclaimer">
-          ※本レポートは売上実績データを集計・分析して自動生成したものです（ルールベース集計であり外部AIサービスは使用していません）。参考情報としてご活用ください。
+          ※本レポートは売上実績データを集計・分析して自動生成したものです（ルールベース集計であり外部AIサービスは使用していません）。参考情報としてご活用ください。<br>
+          ${o.content.wage_summary ? `※賃金インパクト試算は、本人の勤務区分に応じた成果手当（歩合部分・公出含む）と深夜/残業手当の簡易概算です。深夜/残業手当は服務手当・能率手当・段階分け・法定内外区分を省略した概算計算のため、実際の給与明細とは異なります。試用期間中の差等も含まれません。設定値は「設定 → 賃金試算設定」で確認・修正できます。<br>` : ''}
+          ※安全運転リスクはホシコン収集データCSVの急発進・急加速・急減速・最高速度から算出した参考指標であり、実際の事故記録ではありません。
         </div>
         <div class="sr-foot">
           <div class="left">本紙は社内システムより自動生成されています</div>
           <div class="right">発行日時: <span class="issued-at"></span><br><span class="brand">ホシコンAI売上分析システム</span></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// 2枚目: 所感記入シート（罫線のみの手書き用コメント欄＋右下の空欄印鑑欄）
+// 印鑑欄は「所長・課長・班長・教育」の4つ。枠内は完全に空欄（薄い印影テキストや透かしは一切入れない）。
+export function renderSalesAiReportCommentSheet(o: SalesAiReportSheetOptions, sheetIndex: number): string {
+  const commentLines = Array.from({ length: 13 }, () => `<div class="sr-comment-line"></div>`).join('');
+  const stampLabels = ['所長', '課長', '班長', '教育'];
+
+  return `
+    <div class="sheet" id="print-sheet-${sheetIndex}">
+      <div class="sheet-fit" id="sheet-fit-${sheetIndex}" style="display:flex;flex-direction:column;height:265mm;">
+        <div class="sr-head">
+          <div>
+            <div class="sr-badge">AI売上分析レポート</div>
+            <h1>所感記入シート</h1>
+            <div class="sub">今後の売上向上に向けて</div>
+          </div>
+          <div class="meta">
+            発行日：${escHtml(o.issuedDateLabel)}<br>
+            対象期間：${escHtml(o.periodLabel)}
+          </div>
+        </div>
+
+        <div class="sr-to">${escHtml(o.name)}<span class="suffix">様</span></div>
+        <div class="sr-to-sub">${o.division != null ? `${o.division}課 ` : ''}${o.team != null ? `${o.team}班` : ''}</div>
+
+        <div class="sr-comment-title">今後の売上向上に向けて（所感・目標）</div>
+        <div class="sr-comment-box">${commentLines}</div>
+
+        <div class="sr-stamp-footer">
+          <div class="sr-stamp-row">
+            ${stampLabels.map(label => `
+              <div class="sr-stamp-box">
+                <div class="sr-stamp-frame"></div>
+                <div class="sr-stamp-label">${escHtml(label)}</div>
+              </div>`).join('')}
+          </div>
         </div>
       </div>
     </div>`;
@@ -183,15 +275,16 @@ export function renderSalesAiReportPrintPage(o: SalesAiReportSheetOptions, backH
   <div class="toolbar">
     <a href="${backHref}">← 個人詳細に戻る</a>
     <button class="print-btn" onclick="window.print()">🖨️ 印刷 / PDF保存</button>
-    <span class="hint">このレポートはAIが売上実績データから自動生成した分析です</span>
+    <span class="hint">このレポートはAIが売上実績データから自動生成した分析です（1枚目: 分析／2枚目: 所感記入シート）</span>
   </div>
   <div class="stage">
     ${renderSalesAiReportSheet(o, 0)}
+    ${renderSalesAiReportCommentSheet(o, 1)}
   </div>
   <script>
     document.querySelectorAll('.issued-at').forEach(function(el) { el.textContent = new Date().toLocaleString('ja-JP'); });
-    function fitSheetToPage() {
-      var fit = document.getElementById('sheet-fit-0');
+    function fitOneSheet(i) {
+      var fit = document.getElementById('sheet-fit-' + i);
       if (!fit) return;
       var pxPerMm = 96 / 25.4;
       var availablePx = (297 - 32) * pxPerMm;
@@ -211,9 +304,10 @@ export function renderSalesAiReportPrintPage(o: SalesAiReportSheetOptions, backH
         }
       }
     }
-    fitSheetToPage();
-    window.addEventListener('load', fitSheetToPage);
-    window.addEventListener('beforeprint', fitSheetToPage);
+    function fitAllSheets() { fitOneSheet(0); fitOneSheet(1); }
+    fitAllSheets();
+    window.addEventListener('load', fitAllSheets);
+    window.addEventListener('beforeprint', fitAllSheets);
   </script>
 </body>
 </html>`;

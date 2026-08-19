@@ -212,7 +212,15 @@ app.post('/csv-import', async (c) => {
       avg_return_time?: string | null;
       used_cars?: string | null;
       isLongAbsent?: boolean;
-      salesEntries?: Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null }>;
+      salesEntries?: Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null; rideCount?: number | null; distanceKm?: number | null; laborHours?: number | null; nightHours?: number | null; overtimeHours?: number | null }>;
+      safetyEntries?: Array<{
+        date: string;
+        harshStartLoaded: number | null; harshStartEmpty: number | null;
+        harshAccelLoaded: number | null; harshAccelEmpty: number | null;
+        harshDecelLoaded: number | null; harshDecelEmpty: number | null;
+        maxSpeedLoadedHighway: number | null; maxSpeedEmptyHighway: number | null;
+        maxSpeedLoadedLocal: number | null; maxSpeedEmptyLocal: number | null;
+      }>;
     }>;
   };
   try {
@@ -305,11 +313,11 @@ app.post('/csv-import', async (c) => {
   }
 
   // 税込売上（CSV最終列）を各社員の売上記録(sales_records)へ反映
-  // 会社公式データのため上書き優先。ride_countは列指定しないので既存値を保持する
+  // 会社公式データのため上書き優先。ride_count/distance_kmは行に無ければ既存値を保持する（従来形式のCSVは未指定）
   let salesUpdated = 0;
   const DUTY_CODES = ['a', 'b', 'B', 'D', 'H'];
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  const salesByEmpNo = new Map<string, Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null }>>();
+  const salesByEmpNo = new Map<string, Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null; rideCount?: number | null; distanceKm?: number | null; laborHours?: number | null; nightHours?: number | null; overtimeHours?: number | null }>>();
   for (const emp of valid) {
     if (emp.salesEntries?.length) salesByEmpNo.set(emp.emp_no, emp.salesEntries);
   }
@@ -337,10 +345,15 @@ app.post('/csv-import', async (c) => {
         const { year, month } = getPeriod(entry.date);
         const startTime = /^\d{2}:\d{2}$/.test(entry.startTime ?? '') ? entry.startTime! : null;
         const returnTime = /^\d{2}:\d{2}$/.test(entry.returnTime ?? '') ? entry.returnTime! : null;
+        const rideCount = Number.isFinite(entry.rideCount) ? Math.round(entry.rideCount as number) : null;
+        const distanceKm = Number.isFinite(entry.distanceKm) ? Math.round(entry.distanceKm as number) : null;
+        const laborHours = Number.isFinite(entry.laborHours) ? entry.laborHours as number : null;
+        const nightHours = Number.isFinite(entry.nightHours) ? entry.nightHours as number : null;
+        const overtimeHours = Number.isFinite(entry.overtimeHours) ? entry.overtimeHours as number : null;
         salesStatements.push(
           c.env.DB.prepare(`
-            INSERT INTO sales_records (emp_id, date, amount, duty_code, period_year, period_month, start_time, return_time, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            INSERT INTO sales_records (emp_id, date, amount, duty_code, period_year, period_month, start_time, return_time, ride_count, distance_km, labor_hours, night_hours, overtime_hours, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
             ON CONFLICT(emp_id, date) DO UPDATE SET
               amount = excluded.amount,
               duty_code = excluded.duty_code,
@@ -348,8 +361,13 @@ app.post('/csv-import', async (c) => {
               period_month = excluded.period_month,
               start_time = COALESCE(excluded.start_time, sales_records.start_time),
               return_time = COALESCE(excluded.return_time, sales_records.return_time),
+              ride_count = COALESCE(excluded.ride_count, sales_records.ride_count),
+              distance_km = COALESCE(excluded.distance_km, sales_records.distance_km),
+              labor_hours = COALESCE(excluded.labor_hours, sales_records.labor_hours),
+              night_hours = COALESCE(excluded.night_hours, sales_records.night_hours),
+              overtime_hours = COALESCE(excluded.overtime_hours, sales_records.overtime_hours),
               updated_at = datetime('now', 'localtime')
-          `).bind(empId, entry.date, amount, entry.dutyCode, year, month, startTime, returnTime)
+          `).bind(empId, entry.date, amount, entry.dutyCode, year, month, startTime, returnTime, rideCount, distanceKm, laborHours, nightHours, overtimeHours)
         );
       }
     }
@@ -365,7 +383,76 @@ app.post('/csv-import', async (c) => {
     }
   }
 
-  return c.json({ ok: true, inserted: toInsert.length, updated: toUpdate.length, salesUpdated, errors });
+  // 安全運転データ（ホシコン形式CSVのみ、無ければ空）を driving_safety_records へ反映
+  let safetyUpdated = 0;
+  const safetyByEmpNo = new Map<string, NonNullable<typeof valid[number]['safetyEntries']>>();
+  for (const emp of valid) {
+    if (emp.safetyEntries?.length) safetyByEmpNo.set(emp.emp_no, emp.safetyEntries);
+  }
+
+  if (safetyByEmpNo.size > 0) {
+    const empNos = [...safetyByEmpNo.keys()];
+    const idMap = new Map<string, number>();
+    for (let ci = 0; ci < empNos.length; ci += LOOKUP_CHUNK) {
+      const lc = empNos.slice(ci, ci + LOOKUP_CHUNK);
+      const ph = lc.map(() => '?').join(',');
+      const rows = await c.env.DB.prepare(
+        `SELECT id, emp_no FROM employees WHERE emp_no IN (${ph})`
+      ).bind(...lc).all<{ id: number; emp_no: string }>();
+      for (const r of (rows.results ?? [])) idMap.set(r.emp_no, r.id);
+    }
+
+    const numOrNull = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v)) ? Math.round(v) : null;
+    const safetyStatements: D1Stmt[] = [];
+    for (const [empNo, entries] of safetyByEmpNo) {
+      const empId = idMap.get(empNo);
+      if (!empId) continue;
+      for (const entry of entries) {
+        if (!DATE_RE.test(entry.date)) continue;
+        safetyStatements.push(
+          c.env.DB.prepare(`
+            INSERT INTO driving_safety_records (
+              emp_id, date, harsh_start_loaded, harsh_start_empty, harsh_accel_loaded, harsh_accel_empty,
+              harsh_decel_loaded, harsh_decel_empty, max_speed_loaded_highway, max_speed_empty_highway,
+              max_speed_loaded_local, max_speed_empty_local, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            ON CONFLICT(emp_id, date) DO UPDATE SET
+              harsh_start_loaded = excluded.harsh_start_loaded,
+              harsh_start_empty = excluded.harsh_start_empty,
+              harsh_accel_loaded = excluded.harsh_accel_loaded,
+              harsh_accel_empty = excluded.harsh_accel_empty,
+              harsh_decel_loaded = excluded.harsh_decel_loaded,
+              harsh_decel_empty = excluded.harsh_decel_empty,
+              max_speed_loaded_highway = excluded.max_speed_loaded_highway,
+              max_speed_empty_highway = excluded.max_speed_empty_highway,
+              max_speed_loaded_local = excluded.max_speed_loaded_local,
+              max_speed_empty_local = excluded.max_speed_empty_local,
+              updated_at = datetime('now', 'localtime')
+          `).bind(
+            empId, entry.date,
+            numOrNull(entry.harshStartLoaded), numOrNull(entry.harshStartEmpty),
+            numOrNull(entry.harshAccelLoaded), numOrNull(entry.harshAccelEmpty),
+            numOrNull(entry.harshDecelLoaded), numOrNull(entry.harshDecelEmpty),
+            numOrNull(entry.maxSpeedLoadedHighway), numOrNull(entry.maxSpeedEmptyHighway),
+            numOrNull(entry.maxSpeedLoadedLocal), numOrNull(entry.maxSpeedEmptyLocal),
+          )
+        );
+      }
+    }
+
+    for (let i = 0; i < safetyStatements.length; i += CHUNK) {
+      const chunk = safetyStatements.slice(i, i + CHUNK);
+      try {
+        await c.env.DB.batch(chunk);
+        safetyUpdated += chunk.length;
+      } catch (e) {
+        errors.push(`safety[${i}–${i + CHUNK - 1}]: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+
+  return c.json({ ok: true, inserted: toInsert.length, updated: toUpdate.length, salesUpdated, safetyUpdated, errors });
 });
 
 // emp_noベースの一括退職処理（CSVインポート退職候補向け）
@@ -396,7 +483,7 @@ app.post('/purge-by-empno', async (c) => {
   ).bind(...valid).all<{ id: number }>();
   const ids = (rows.results ?? []).map(r => r.id);
   if (ids.length > 0) {
-    const relTables = ['shift_entries','sales_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
+    const relTables = ['shift_entries','sales_records','driving_safety_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
     const CHUNK = 100;
     for (let i = 0; i < ids.length; i += CHUNK) {
       const chunk = ids.slice(i, i + CHUNK);
@@ -445,7 +532,7 @@ app.post('/bulk-purge', async (c) => {
     const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
     if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
     const CHUNK = 100;
-    const relTables = ['shift_entries','sales_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
+    const relTables = ['shift_entries','sales_records','driving_safety_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
     for (let i = 0; i < ids.length; i += CHUNK) {
       const chunk = ids.slice(i, i + CHUNK);
       const ph = chunk.map(() => '?').join(',');
@@ -467,6 +554,7 @@ app.delete('/:id/purge', async (c) => {
   const tables = [
     'shift_entries',
     'sales_records',
+    'driving_safety_records',
     'bad_events',
     'new_employee_info',
     'invite_codes',
