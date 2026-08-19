@@ -355,8 +355,8 @@ app.get('/staff', async (c) => {
         ${e.is_caution ? '<span style="background:#fecaca;color:#991b1b;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:700;">注意</span>' : '—'}
       </td>
       <td data-cell="portal" style="${C}text-align:center;white-space:nowrap;" onclick="event.stopPropagation()">
-        <a href="${ADMIN_PATH}/crew-portal/employee/${e.id}" class="row-portal-link" title="個人データ参照（日別明細・売上）" aria-label="${escHtml(e.name)}の個人データ参照">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+        <a href="${ADMIN_PATH}/staff/${e.id}" class="row-portal-link" title="社員情報を編集" aria-label="${escHtml(e.name)}の社員情報を編集">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
         </a>
       </td>
     </tr>`;
@@ -600,7 +600,7 @@ app.get('/staff', async (c) => {
           <th style="${THS}" onclick="sortTable(7)">在籍状態 <span class="si">↕</span></th>
           <th style="${THS}" onclick="sortTable(8)">退職予定日 <span class="si">↕</span></th>
           <th style="${TH}text-align:center;">要注意</th>
-          <th style="${TH}text-align:center;">詳細</th>
+          <th style="${TH}text-align:center;">編集</th>
         </tr>
       </thead>
       <tbody id="staff-tbody">
@@ -662,7 +662,7 @@ app.get('/staff', async (c) => {
 .flt-tab.warn{color:#dc2626;background:rgba(254,226,226,.55);}
 .flt-tab.warn:hover{background:rgba(254,226,226,.9);color:#b91c1c;}
 .flt-tab.warn.active{background:linear-gradient(135deg,#a8580f,#92400e);color:#fff;box-shadow:0 2px 5px rgba(146,64,14,.3);}
-/* 一覧行の個人データ参照アクション */
+/* 一覧行の編集アクション（行クリック自体は個人データ参照へ遷移） */
 .row-portal-link{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;background:#eff6ff;color:#1d4ed8;transition:background .15s ease;}
 .row-portal-link:hover{background:#dbeafe;}
 /* 詳細検索パネル */
@@ -749,7 +749,7 @@ function sortTable(col) {
 
 function rowClick(e, id) {
   if (e.target.type === 'checkbox') return;
-  location.href = ADMIN_PATH_S + '/staff/' + id + location.search;
+  location.href = ADMIN_PATH_S + '/crew-portal/employee/' + id;
 }
 
 function onCbChange(cb) {

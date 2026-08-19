@@ -4,10 +4,13 @@ import { Hono } from 'hono';
 import { layout, escHtml } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
-import { computeEmployeeAnalytics, type EmployeeAnalytics } from './api/sales_ai';
+import { computeEmployeeAnalytics, loadDrivingRiskSettings, type EmployeeAnalytics } from './api/sales_ai';
 import { buildRuleBasedSalesAnalysis } from '../utils/sales_trend_analysis';
 import { renderSalesAiReportPrintPage, type SalesAiReportSheetOptions } from '../html/sales_ai_report_print';
 import { renderSalesAiReportPrintBulkPage } from '../html/sales_ai_report_print_bulk';
+import { renderSafetyGuidancePrintPage, type SafetyGuidanceSheetOptions } from '../html/safety_guidance_print';
+import { summarizeDrivingRiskByCategory, buildDrivingSafetyGuidance } from '../utils/driving_safety_guidance';
+import { summarizeDrivingRisk, type DrivingSafetyRow } from '../utils/driving_risk_analysis';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -46,6 +49,54 @@ function buildSheetOptions(data: NonNullable<EmployeeAnalytics>, months: number)
 // ===================================================
 app.get('/sales-ai', async (c) => {
   const content = `
+<style>
+  /* 安全運転リスクランキング — モダンUI（このページ限定のスコープ付きスタイル） */
+  .srr-card { position: relative; overflow: hidden; }
+  .srr-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, #ef4444 0%, #f59e0b 45%, #10b981 100%);
+    opacity: .55;
+  }
+  .srr-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+  @media (max-width: 720px) { .srr-stat-grid { grid-template-columns: 1fr; } }
+  .srr-stat {
+    position: relative; border-radius: 14px; padding: 14px 16px 12px; border: 1px solid;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .srr-stat:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(15,23,42,0.08); }
+  .srr-stat-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+  .srr-stat-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .srr-stat-label { font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+  .srr-stat-value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; letter-spacing: -.01em; }
+  .srr-stat-sub { font-size: 11px; color: #6b7280; margin-top: 3px; }
+  .srr-stat-bar { height: 5px; border-radius: 3px; background: rgba(15,23,42,0.06); margin-top: 10px; overflow: hidden; }
+  .srr-stat-bar-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+
+  .srr-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+  .srr-table thead th {
+    padding: 9px 10px; text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+    color: #94a3b8; text-transform: uppercase; border-bottom: 1px solid #e5e7eb; white-space: nowrap;
+  }
+  .srr-table tbody td { padding: 10px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+  .srr-table tbody tr { transition: background .12s ease; }
+  .srr-table tbody tr:hover { background: #f8fafc; }
+  .srr-table tbody tr:last-child td { border-bottom: none; }
+  .srr-name-link { color: #1a3a5c; text-decoration: none; font-weight: 700; }
+  .srr-name-link:hover { color: #2563eb; text-decoration: underline; }
+  .srr-num { font-variant-numeric: tabular-nums; }
+
+  .srr-chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; border: 1px solid transparent; white-space: nowrap;
+  }
+  .srr-chip-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+  .srr-icon-btn {
+    display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px;
+    border-radius: 8px; color: #64748b; background: transparent; transition: background .12s ease, color .12s ease;
+  }
+  .srr-icon-btn:hover { background: #eef2f7; color: #1a3a5c; }
+</style>
 <div style="max-width:1180px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
     <div>
@@ -60,6 +111,37 @@ app.get('/sales-ai', async (c) => {
   </div>
 
   <div id="loading" style="color:#9ca3af;font-size:13px;margin-top:16px;">読み込み中…</div>
+
+  <div id="filter-toolbar" style="display:none;position:sticky;top:0;z-index:15;background:#f8fafc;padding:10px 0 12px;margin-bottom:10px;border-bottom:1px solid #e5e7eb;">
+    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:12px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <span style="font-size:11px;font-weight:700;color:#6b7280;">絞り込み：</span>
+      <input type="text" id="search-box" placeholder="社員名で検索" oninput="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;width:180px;">
+      <select id="division-filter" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+        <option value="">全課</option>
+        <option value="1">1課</option><option value="2">2課</option><option value="3">3課</option><option value="4">4課</option>
+      </select>
+      <select id="team-filter" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+        <option value="">全班</option>
+        <option value="1">1班</option><option value="2">2班</option><option value="3">3班</option><option value="4">4班</option>
+        <option value="5">5班</option><option value="6">6班</option><option value="7">7班</option><option value="8">8班</option>
+      </select>
+      <label style="font-size:12px;color:#b91c1c;display:flex;align-items:center;gap:4px;">
+        <input type="checkbox" id="min-wage-filter" onchange="applyFilters()">最賃者のみ表示
+      </label>
+      <select id="sort-select" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+        <option value="curTotal-desc">今月度売上 高い順</option>
+        <option value="curTotal-asc">今月度売上 低い順</option>
+        <option value="changePct-desc">前月度比 高い順</option>
+        <option value="changePct-asc">前月度比 低い順</option>
+        <option value="curAvgPerDuty-desc">平均日商 高い順</option>
+        <option value="curAvgPerDuty-asc">平均日商 低い順</option>
+        <option value="curAvgReturnTimeMinutes-asc">平均帰庫時刻 早い順</option>
+        <option value="curAvgReturnTimeMinutes-desc">平均帰庫時刻 遅い順</option>
+        <option value="minimumWageShortfall-desc">最賃補填額(概算) 高い順</option>
+      </select>
+      <span style="font-size:10.5px;color:#9ca3af;">※課・名前・最賃絞り込みは下の安全運転リスクランキング／社員別サマリーの両方に適用されます</span>
+    </div>
+  </div>
 
   <div id="content" style="display:none;">
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
@@ -93,15 +175,23 @@ app.get('/sales-ai', async (c) => {
       </div>
     </div>
 
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-      <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 4px;">安全運転リスクランキング（今月度・危険挙動の多い順）</h3>
-      <div style="font-size:11px;color:#9ca3af;margin-bottom:12px;">ホシコン収集データCSVの急発進・急加速・急減速・最高速度から算出した参考指標です。実際の事故記録ではありません。</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;">
-        <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
-          <th style="padding:6px 8px;">氏名</th><th style="padding:6px 8px;">課/班</th><th style="padding:6px 8px;">急挙動合計</th><th style="padding:6px 8px;">乗務日あたり</th><th style="padding:6px 8px;">最高速度(高速/一般)</th><th style="padding:6px 8px;">速度超過日数</th><th style="padding:6px 8px;">判定</th>
-        </tr></thead>
-        <tbody id="risk-tbody"></tbody>
-      </table>
+    <div class="srr-card" style="background:white;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:22px 24px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;margin-bottom:2px;">
+        <h3 style="font-size:13.5px;font-weight:700;color:#1e293b;margin:0;">安全運転リスクランキング <span style="font-weight:400;color:#94a3b8;">— 今月度・危険挙動の多い順</span></h3>
+      </div>
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:14px;">ホシコン収集データCSVの急発進・急加速・急減速・最高速度から算出した参考指標です。実際の事故記録ではありません。</div>
+
+      <div id="risk-correlation-box" class="srr-stat-grid"></div>
+      <div style="font-size:10.5px;color:#9ca3af;margin-bottom:12px;">※累計事故件数・前回事故からの経過月数は<a href="${ADMIN_PATH}/accidents" style="color:#2563eb;">事故データ管理</a>（在籍期間中の全期間累計）との照合です。安全運転リスクは今月度データのため、時間軸が異なる参考情報である点にご留意ください。</div>
+
+      <div style="overflow-x:auto;">
+        <table class="srr-table">
+          <thead><tr>
+            <th>氏名</th><th>課/班</th><th>急挙動合計</th><th>乗務日あたり</th><th>最高速度(高速/一般)</th><th>速度超過日数</th><th>判定</th><th>累計事故件数</th><th>前回事故からの経過</th><th style="text-align:center;">指導書</th>
+          </tr></thead>
+          <tbody id="risk-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
@@ -111,32 +201,6 @@ app.get('/sales-ai', async (c) => {
           <span id="selected-count" style="font-size:11px;color:#6b7280;">0名選択中</span>
           <button type="button" id="bulk-print-btn" onclick="printSelected()" disabled style="padding:6px 14px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;opacity:0.5;">選択した社員をまとめて印刷</button>
         </div>
-      </div>
-      <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="text" id="search-box" placeholder="社員名で検索" oninput="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;width:180px;">
-        <select id="division-filter" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
-          <option value="">全課</option>
-          <option value="1">1課</option><option value="2">2課</option><option value="3">3課</option><option value="4">4課</option>
-        </select>
-        <select id="team-filter" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
-          <option value="">全班</option>
-          <option value="1">1班</option><option value="2">2班</option><option value="3">3班</option><option value="4">4班</option>
-          <option value="5">5班</option><option value="6">6班</option><option value="7">7班</option><option value="8">8班</option>
-        </select>
-        <label style="font-size:12px;color:#b91c1c;display:flex;align-items:center;gap:4px;">
-          <input type="checkbox" id="min-wage-filter" onchange="applyFilters()">最賃者のみ表示
-        </label>
-        <select id="sort-select" onchange="applyFilters()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
-          <option value="curTotal-desc">今月度売上 高い順</option>
-          <option value="curTotal-asc">今月度売上 低い順</option>
-          <option value="changePct-desc">前月度比 高い順</option>
-          <option value="changePct-asc">前月度比 低い順</option>
-          <option value="curAvgPerDuty-desc">平均日商 高い順</option>
-          <option value="curAvgPerDuty-asc">平均日商 低い順</option>
-          <option value="curAvgReturnTimeMinutes-asc">平均帰庫時刻 早い順</option>
-          <option value="curAvgReturnTimeMinutes-desc">平均帰庫時刻 遅い順</option>
-          <option value="minimumWageShortfall-desc">最賃補填額(概算) 高い順</option>
-        </select>
       </div>
       <div style="font-size:10.5px;color:#9ca3af;margin-bottom:8px;">※最賃判定は基本給I＋歩合部分（公出含む）＋深夜/残業手当の概算給与と最低賃金時給×実労働時間を比較した概算です。深夜/残業手当は服務手当・段階分け・法定内外区分を省略した簡易計算です。<a href="${ADMIN_PATH}/settings/wage-estimate" style="color:#2563eb;">賃金試算設定</a>で確認・修正できます。</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
@@ -180,6 +244,7 @@ async function loadOverview() {
     document.getElementById('next-period-btn').style.cursor = json.period.isCurrentPeriod ? 'default' : 'pointer';
     document.getElementById('loading').style.display = 'none';
     document.getElementById('content').style.display = '';
+    document.getElementById('filter-toolbar').style.display = '';
 
     const tbody = document.getElementById('factor-tbody');
     tbody.innerHTML = json.factorBreakdown.map(f => {
@@ -226,26 +291,67 @@ function currentDivTeamFilter() {
   return { div: div ? parseInt(div) : null, team: team ? parseInt(team) : null };
 }
 
+const RISK_ACCENT = { low: '#10b981', medium: '#f59e0b', high: '#ef4444' };
+const RISK_TINT   = { low: '#f0fdf9', medium: '#fffbeb', high: '#fef2f2' };
+const RISK_TEXT   = { low: '#047857', medium: '#b45309', high: '#b91c1c' };
+const RISK_LABELS = { low: '低', medium: '中', high: '高' };
+const PRINT_ICON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+
+// 前回事故からの経過月数を、色分けされた小さなチップに変換する
+function recencyChip(accidentCount, months) {
+  if (accidentCount === 0) {
+    return { label: '事故歴なし', fg: '#047857', bg: '#f0fdf9', border: '#a7f3d0' };
+  }
+  if (months === null) return { label: '—', fg: '#94a3b8', bg: '#f8fafc', border: '#e5e7eb' };
+  if (months < 3)  return { label: '約' + months + 'ヶ月（要注意）', fg: '#b91c1c', bg: '#fef2f2', border: '#fecaca' };
+  if (months < 12) return { label: '約' + months + 'ヶ月', fg: '#b45309', bg: '#fffbeb', border: '#fde68a' };
+  return { label: '約' + months + 'ヶ月無事故', fg: '#047857', bg: '#f0fdf9', border: '#a7f3d0' };
+}
+
 function renderRiskTable() {
   if (!overviewData) return;
+  const q = document.getElementById('search-box').value.trim();
   const { div, team } = currentDivTeamFilter();
-  const RISK_COLORS = { low: '#166534', medium: '#d97706', high: '#dc2626' };
-  const RISK_BG = { low: '#f0fdf4', medium: '#fffbeb', high: '#fef2f2' };
-  const RISK_LABELS = { low: '低', medium: '中', high: '高' };
-  const rows = (overviewData.drivingRiskRanking || []).filter(r =>
-    (div === null || r.division === div) && (team === null || r.team === team)
+  const allRows = overviewData.drivingRiskRanking || [];
+  const rows = allRows.filter(r =>
+    (!q || r.name.includes(q)) && (div === null || r.division === div) && (team === null || r.team === team)
   );
-  document.getElementById('risk-tbody').innerHTML = rows.map(r =>
-    '<tr style="border-bottom:1px solid #f3f4f6;">' +
-    '<td style="padding:7px 8px;"><a href="' + ADMIN_PATH + '/sales-ai/employee/' + r.empId + '" style="color:#2563eb;text-decoration:none;font-weight:600;">' + escHtmlJs(r.name) + '</a></td>' +
-    '<td style="padding:7px 8px;color:#6b7280;">' + (r.division ?? '—') + '課' + (r.team ? r.team + '班' : '') + '</td>' +
-    '<td style="padding:7px 8px;font-weight:600;">' + r.totalHarshEvents + '件</td>' +
-    '<td style="padding:7px 8px;">' + r.harshEventsPerDuty + '件</td>' +
-    '<td style="padding:7px 8px;">' + (r.maxSpeedHighway ?? '—') + '/' + (r.maxSpeedLocal ?? '—') + 'km/h</td>' +
-    '<td style="padding:7px 8px;">' + r.speedingDays + '日</td>' +
-    '<td style="padding:7px 8px;"><span style="background:' + RISK_BG[r.riskLevel] + ';color:' + RISK_COLORS[r.riskLevel] + ';border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700;">' + RISK_LABELS[r.riskLevel] + '</span></td>' +
-    '</tr>'
-  ).join('') || '<tr><td colspan="7" style="padding:12px 8px;color:#9ca3af;">安全運転データがありません（ホシコン形式CSVの取込で蓄積されます）</td></tr>';
+
+  // 事故惹起率: リスク判定（高/中/低）ごとに、累計事故件数1件以上の人数の割合を集計（絞り込み後の対象者ベース）
+  const buckets = { high: { total: 0, withAccident: 0 }, medium: { total: 0, withAccident: 0 }, low: { total: 0, withAccident: 0 } };
+  rows.forEach(r => {
+    buckets[r.riskLevel].total++;
+    if (r.accidentCount > 0) buckets[r.riskLevel].withAccident++;
+  });
+  document.getElementById('risk-correlation-box').innerHTML = ['high', 'medium', 'low'].map(level => {
+    const b = buckets[level];
+    const pct = b.total > 0 ? Math.round((b.withAccident / b.total) * 1000) / 10 : 0;
+    return '<div class="srr-stat" style="background:' + RISK_TINT[level] + ';border-color:' + RISK_ACCENT[level] + '2e;">' +
+      '<div class="srr-stat-head">' +
+        '<span class="srr-stat-dot" style="background:' + RISK_ACCENT[level] + ';"></span>' +
+        '<span class="srr-stat-label" style="color:' + RISK_TEXT[level] + ';">リスク' + RISK_LABELS[level] + ' の事故惹起率</span>' +
+      '</div>' +
+      '<div class="srr-stat-value" style="color:' + RISK_TEXT[level] + ';">' + (b.total > 0 ? pct + '<span style="font-size:14px;font-weight:700;">%</span>' : '—') + '</div>' +
+      '<div class="srr-stat-sub">' + (b.total > 0 ? b.total + '名中 ' + b.withAccident + '名に事故歴あり' : '該当者なし') + '</div>' +
+      '<div class="srr-stat-bar"><div class="srr-stat-bar-fill" style="width:' + pct + '%;background:' + RISK_ACCENT[level] + ';"></div></div>' +
+    '</div>';
+  }).join('');
+
+  document.getElementById('risk-tbody').innerHTML = rows.map(r => {
+    const rc = recencyChip(r.accidentCount, r.monthsSinceLastAccident);
+    return '<tr>' +
+    '<td><a href="' + ADMIN_PATH + '/sales-ai/employee/' + r.empId + '" class="srr-name-link">' + escHtmlJs(r.name) + '</a></td>' +
+    '<td style="color:#6b7280;">' + (r.division ?? '—') + '課' + (r.team ? r.team + '班' : '') + '</td>' +
+    '<td class="srr-num" style="font-weight:700;">' + r.totalHarshEvents + '件</td>' +
+    '<td class="srr-num">' + r.harshEventsPerDuty + '件</td>' +
+    '<td class="srr-num">' + (r.maxSpeedHighway ?? '—') + '/' + (r.maxSpeedLocal ?? '—') + 'km/h</td>' +
+    '<td class="srr-num">' + r.speedingDays + '日</td>' +
+    '<td><span class="srr-chip" style="background:' + RISK_TINT[r.riskLevel] + ';color:' + RISK_TEXT[r.riskLevel] + ';border-color:' + RISK_ACCENT[r.riskLevel] + '33;"><span class="srr-chip-dot" style="background:' + RISK_ACCENT[r.riskLevel] + ';"></span>' + RISK_LABELS[r.riskLevel] + '</span></td>' +
+    '<td class="srr-num" style="' + (r.accidentCount > 0 ? 'color:#dc2626;font-weight:700;' : 'color:#9ca3af;') + '">' + r.accidentCount + '件</td>' +
+    '<td><span class="srr-chip" style="background:' + rc.bg + ';color:' + rc.fg + ';border-color:' + rc.border + ';">' + rc.label + '</span></td>' +
+    '<td style="text-align:center;"><a href="' + ADMIN_PATH + '/sales-ai/employee/' + r.empId + '/safety-guidance/print" target="_blank" title="安全運転指導書を印刷" class="srr-icon-btn">' + PRINT_ICON_SVG + '</a></td>' +
+    '</tr>';
+  }).join('') || '<tr><td colspan="10" style="padding:16px 8px;color:#9ca3af;text-align:center;">安全運転データがありません（ホシコン形式CSVの取込で蓄積されます）</td></tr>';
 }
 
 function applyFilters() {
@@ -532,12 +638,13 @@ async function loadAll() {
       const RISK_LABELS = { low: '低', medium: '中', high: '高' };
       document.getElementById('risk-box').innerHTML =
         '<span style="display:inline-block;background:' + RISK_BG[risk.riskLevel] + ';color:' + RISK_COLORS[risk.riskLevel] + ';border-radius:12px;padding:3px 12px;font-size:12px;font-weight:700;margin-bottom:8px;">総合判定: リスク' + RISK_LABELS[risk.riskLevel] + '</span>' +
-        '<div style="display:flex;gap:16px;background:#f9fafb;border-radius:8px;padding:10px 14px;">' +
+        '<div style="display:flex;gap:16px;background:#f9fafb;border-radius:8px;padding:10px 14px;margin-bottom:8px;">' +
         '<div>急挙動合計: <strong>' + risk.totalHarshEvents + '件</strong></div>' +
         '<div>乗務日あたり: <strong>' + risk.harshEventsPerDuty + '件</strong></div>' +
         '<div>最高速度(高速/一般): <strong>' + (risk.maxSpeedHighway ?? '—') + '/' + (risk.maxSpeedLocal ?? '—') + 'km/h</strong></div>' +
         '<div>速度超過日数: <strong>' + risk.speedingDays + '日</strong></div>' +
-        '</div>';
+        '</div>' +
+        '<a href="${ADMIN_PATH}/sales-ai/employee/' + EMP_ID + '/safety-guidance/print?months=' + months + '" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">🚨 安全運転指導書を印刷</a>';
     } else {
       document.getElementById('risk-box').innerHTML = '<div style="color:#9ca3af;background:#f9fafb;border-radius:8px;padding:10px 14px;">安全運転データがまだありません（ホシコン形式CSVの取込で蓄積されます）</div>';
     }
@@ -593,6 +700,72 @@ app.get('/sales-ai/report/print-bulk', async (c) => {
   if (!sheets.length) return c.text('対象社員が見つかりません', 404);
 
   return c.html(renderSalesAiReportPrintBulkPage(sheets, `${ADMIN_PATH}/sales-ai`));
+});
+
+// ===================================================
+// 安全運転指導書（急発進・急加速・急減速・速度超過の実績＋リスク説明＋事故照合。1枚目: 指導書／2枚目: 記入シート+印鑑欄）
+// ===================================================
+app.get('/sales-ai/employee/:id/safety-guidance/print', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.notFound();
+  const months = Math.min(Math.max(parseInt(c.req.query('months') ?? '6') || 6, 1), 24);
+
+  const emp = await c.env.DB.prepare('SELECT id, name, emp_no, division, team FROM employees WHERE id = ?')
+    .bind(id).first<{ id: number; name: string; emp_no: string; division: number | null; team: number | null }>();
+  if (!emp) return c.text('社員が見つかりません', 404);
+
+  const since = new Date();
+  since.setMonth(since.getMonth() - months);
+  const sinceStr = since.toISOString().slice(0, 10);
+
+  const [safetyRows, dutyRow, riskSettings, accidentRow] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT date, harsh_start_loaded, harsh_start_empty, harsh_accel_loaded, harsh_accel_empty,
+              harsh_decel_loaded, harsh_decel_empty, max_speed_loaded_highway, max_speed_loaded_local
+       FROM driving_safety_records WHERE emp_id = ? AND date >= ?`
+    ).bind(id, sinceStr).all<{
+      date: string;
+      harsh_start_loaded: number | null; harsh_start_empty: number | null;
+      harsh_accel_loaded: number | null; harsh_accel_empty: number | null;
+      harsh_decel_loaded: number | null; harsh_decel_empty: number | null;
+      max_speed_loaded_highway: number | null; max_speed_loaded_local: number | null;
+    }>(),
+    c.env.DB.prepare('SELECT COUNT(*) as cnt FROM sales_records WHERE emp_id = ? AND date >= ?').bind(id, sinceStr).first<{ cnt: number }>(),
+    loadDrivingRiskSettings(c.env.DB),
+    c.env.DB.prepare('SELECT COUNT(*) as cnt, MAX(occurred_date) as last_date FROM accident_records WHERE emp_no = ?').bind(emp.emp_no).first<{ cnt: number; last_date: string | null }>(),
+  ]);
+
+  const rows: DrivingSafetyRow[] = (safetyRows.results ?? []).map(r => ({
+    date: r.date,
+    harshStartLoaded: r.harsh_start_loaded, harshStartEmpty: r.harsh_start_empty,
+    harshAccelLoaded: r.harsh_accel_loaded, harshAccelEmpty: r.harsh_accel_empty,
+    harshDecelLoaded: r.harsh_decel_loaded, harshDecelEmpty: r.harsh_decel_empty,
+    maxSpeedLoadedHighway: r.max_speed_loaded_highway, maxSpeedLoadedLocal: r.max_speed_loaded_local,
+  }));
+  if (!rows.length) return c.text('安全運転データがありません（ホシコン形式CSVの取込で蓄積されます）', 404);
+
+  const dutyDays = dutyRow?.cnt ?? rows.length;
+  const riskSummary = summarizeDrivingRisk(rows, dutyDays, riskSettings);
+  const breakdown = summarizeDrivingRiskByCategory(rows, riskSettings);
+  const accidentCount = accidentRow?.cnt ?? 0;
+  const lastAccidentDate = accidentRow?.last_date ?? null;
+  const monthsSinceLastAccident = lastAccidentDate
+    ? Math.max(0, Math.floor((Date.now() - new Date(lastAccidentDate).getTime()) / 86400000 / 30))
+    : null;
+
+  const content = buildDrivingSafetyGuidance({
+    empName: emp.name, dutyDays, breakdown, riskSummary, settings: riskSettings, accidentCount,
+    lastAccidentDate, monthsSinceLastAccident,
+  });
+
+  const sheet: SafetyGuidanceSheetOptions = {
+    name: emp.name, division: emp.division, team: emp.team,
+    periodLabel: `直近${months}ヶ月`,
+    issuedDateLabel: formatIssuedDateLabel(),
+    dutyDays, breakdown, riskSummary, content, accidentCount, monthsSinceLastAccident,
+  };
+
+  return c.html(renderSafetyGuidancePrintPage(sheet, `${ADMIN_PATH}/sales-ai/employee/${id}`));
 });
 
 export default app;

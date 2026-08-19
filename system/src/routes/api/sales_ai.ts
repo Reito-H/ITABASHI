@@ -139,7 +139,7 @@ async function loadWageEstimateSettings(db: D1Database): Promise<WageEstimateSet
 const DEFAULT_RISK_SETTINGS_ROW = { harsh_event_daily_threshold: 5, max_speed_highway_threshold: 100, max_speed_local_threshold: 60 };
 type RiskSettingsRow = typeof DEFAULT_RISK_SETTINGS_ROW;
 
-async function loadDrivingRiskSettings(db: D1Database): Promise<DrivingRiskSettings> {
+export async function loadDrivingRiskSettings(db: D1Database): Promise<DrivingRiskSettings> {
   const row = await db.prepare('SELECT * FROM driving_risk_settings WHERE id = 1').first<RiskSettingsRow>();
   const d = row ?? DEFAULT_RISK_SETTINGS_ROW;
   return {
@@ -413,8 +413,8 @@ app.get('/overview', async (c) => {
   const prev = getPeriodRange(prevY, prevM, settings);
   const isCurrentPeriod = curY === todayY && curM === todayM;
 
-  const [empRows, curRows, prevRows, safetyRows, riskSettings, wageSettings] = await Promise.all([
-    c.env.DB.prepare('SELECT id, name, division, team FROM employees WHERE is_active = 1').all<{ id: number; name: string; division: number | null; team: number | null }>(),
+  const [empRows, curRows, prevRows, safetyRows, riskSettings, wageSettings, accidentCountRows] = await Promise.all([
+    c.env.DB.prepare('SELECT id, name, emp_no, division, team FROM employees WHERE is_active = 1').all<{ id: number; name: string; emp_no: string; division: number | null; team: number | null }>(),
     c.env.DB.prepare('SELECT emp_id, amount, duty_code, date, return_time, labor_hours, night_hours, overtime_hours FROM sales_records WHERE date >= ? AND date <= ?').bind(cur.start, cur.end).all<{ emp_id: number; amount: number; duty_code: string | null; date: string; return_time: string | null; labor_hours: number | null; night_hours: number | null; overtime_hours: number | null }>(),
     c.env.DB.prepare('SELECT emp_id, amount FROM sales_records WHERE date >= ? AND date <= ?').bind(prev.start, prev.end).all<{ emp_id: number; amount: number }>(),
     c.env.DB.prepare(
@@ -424,10 +424,24 @@ app.get('/overview', async (c) => {
     ).bind(cur.start, cur.end).all<SafetyDbRow & { emp_id: number }>(),
     loadDrivingRiskSettings(c.env.DB),
     loadWageEstimateSettings(c.env.DB),
+    c.env.DB.prepare(
+      `SELECT emp_no, COUNT(*) as cnt, MAX(occurred_date) as last_date FROM accident_records WHERE emp_no IS NOT NULL AND emp_no != '' GROUP BY emp_no`
+    ).all<{ emp_no: string; cnt: number; last_date: string | null }>(),
   ]);
 
   const empDivTeam = new Map<number, { division: number | null; team: number | null }>();
   for (const e of empRows.results ?? []) empDivTeam.set(e.id, { division: e.division, team: e.team });
+
+  const empNoById = new Map<number, string>();
+  for (const e of empRows.results ?? []) empNoById.set(e.id, e.emp_no);
+  const accidentByEmpNo = new Map<string, { cnt: number; lastDate: string | null }>();
+  for (const r of accidentCountRows.results ?? []) accidentByEmpNo.set(r.emp_no, { cnt: r.cnt, lastDate: r.last_date });
+
+  // 前回事故からの経過月数（暦日ベースの概算。30日=1ヶ月として算出）
+  function monthsSince(dateStr: string): number {
+    const days = Math.floor((new Date(today).getTime() - new Date(dateStr).getTime()) / 86400000);
+    return Math.max(0, Math.floor(days / 30));
+  }
 
   const curByEmp = new Map<number, {
     total: number; weighted: number; count: number; returnTimes: string[];
@@ -517,11 +531,17 @@ app.get('/overview', async (c) => {
     const dutyDays = curByEmp.get(empId)?.count ?? rows.length;
     const summary = summarizeDrivingRisk(rows.map(toDrivingSafetyRow), dutyDays, riskSettings);
     const empName = (empRows.results ?? []).find(e => e.id === empId)?.name ?? '';
+    const empNo = empNoById.get(empId) ?? null;
+    const accidentInfo = empNo ? accidentByEmpNo.get(empNo) : undefined;
+    const accidentCount = accidentInfo?.cnt ?? 0;
+    const lastAccidentDate = accidentInfo?.lastDate ?? null;
+    const monthsSinceLastAccident = lastAccidentDate ? monthsSince(lastAccidentDate) : null;
     return {
-      empId, name: empName, division: info?.division ?? null, team: info?.team ?? null,
+      empId, empNo, name: empName, division: info?.division ?? null, team: info?.team ?? null,
       totalHarshEvents: summary.totalHarshEvents, harshEventsPerDuty: summary.harshEventsPerDuty,
       overThresholdDays: summary.overThresholdDays, maxSpeedHighway: summary.maxSpeedHighway,
       maxSpeedLocal: summary.maxSpeedLocal, speedingDays: summary.speedingDays, riskLevel: summary.riskLevel,
+      accidentCount, lastAccidentDate, monthsSinceLastAccident,
     };
   }).sort((a, b) => b.totalHarshEvents - a.totalHarshEvents);
 

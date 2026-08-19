@@ -6,6 +6,20 @@ import { escHtml } from './layout';
 import { type AccidentRecord, accidentsTabNav, faultBand, PERIOD_FILTER_BAR_CSS, periodFilterBarHtml } from './accidents';
 import { type IndividualRow } from './accidents_analysis';
 import { type AccidentPeriod, periodLabel as formatPeriodLabel, todayIsoJST } from '../utils/accident_period';
+import { type DrivingRiskSummary } from '../utils/driving_risk_analysis';
+
+const RISK_LEVEL_LABELS: Record<DrivingRiskSummary['riskLevel'], string> = { low: '低', medium: '中', high: '高' };
+const RISK_LEVEL_COLORS: Record<DrivingRiskSummary['riskLevel'], { bg: string; fg: string; border: string }> = {
+  low: { bg: '#f0fdf9', fg: '#047857', border: '#a7f3d0' },
+  medium: { bg: '#fffbeb', fg: '#b45309', border: '#fde68a' },
+  high: { bg: '#fef2f2', fg: '#b91c1c', border: '#fecaca' },
+};
+function riskBadgeHtml(summary: DrivingRiskSummary | null | undefined): string {
+  if (!summary) return '<span style="color:#d1d5db;font-size:11px;">データなし</span>';
+  const c = RISK_LEVEL_COLORS[summary.riskLevel];
+  return `<span style="display:inline-flex;align-items:center;gap:5px;padding:2px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${c.bg};color:${c.fg};border:1px solid ${c.border};">` +
+    `<span style="width:6px;height:6px;border-radius:50%;background:${c.fg};"></span>リスク${RISK_LEVEL_LABELS[summary.riskLevel]}（急挙動${summary.totalHarshEvents}件）</span>`;
+}
 
 function periodQueryString(period: AccidentPeriod): string {
   const parts: string[] = [];
@@ -23,15 +37,16 @@ export interface AccidentsPersonListOpts {
   ranking: IndividualRow[];
   selectedDivision: number | null;
   period: AccidentPeriod;
+  drivingRiskByEmpNo: Map<string, { empId: number; summary: DrivingRiskSummary | null }>;
 }
 
 export function accidentsPersonListPage(opts: AccidentsPersonListOpts): string {
-  const { ranking, selectedDivision, period } = opts;
+  const { ranking, selectedDivision, period, drivingRiskByEmpNo } = opts;
   const divOptions = ['<option value="">全社</option>', ...[1, 2, 3, 4].map(d =>
     `<option value="${d}" ${d === selectedDivision ? 'selected' : ''}>${d}課</option>`)].join('');
 
   const rowsHtml = ranking.length === 0
-    ? `<tr><td colspan="6" style="padding:28px;text-align:center;color:#9ca3af;">事故データがありません</td></tr>`
+    ? `<tr><td colspan="7" style="padding:28px;text-align:center;color:#9ca3af;">事故データがありません</td></tr>`
     : ranking.map(r => `
       <tr class="ap-row" data-key="${escHtml(r.key)}" data-name="${escHtml(r.name)}">
         <td>${escHtml(r.name)}</td>
@@ -40,6 +55,7 @@ export function accidentsPersonListPage(opts: AccidentsPersonListOpts): string {
         <td>${escHtml(r.lastDate.slice(0, 10))}</td>
         <td>${r.faultCnt ? Math.round(r.faultSum / r.faultCnt) + '%' : '—'}</td>
         <td>${r.damageSum ? '¥' + r.damageSum.toLocaleString('ja-JP') : '—'}</td>
+        <td>${riskBadgeHtml(drivingRiskByEmpNo.get(r.key)?.summary)}</td>
       </tr>`).join('');
 
   return `
@@ -62,7 +78,7 @@ export function accidentsPersonListPage(opts: AccidentsPersonListOpts): string {
 </style>
 <div class="ap">
   ${accidentsTabNav('person')}
-  <p class="ap-hint">氏名をクリックすると、その方の事故記録の詳細一覧（印刷可）を確認できます。期間を指定しない場合は全期間の累計です。</p>
+  <p class="ap-hint">氏名をクリックすると、その方の事故記録の詳細一覧（印刷可）を確認できます。期間を指定しない場合は全期間の累計です。「安全運転リスク」はホシコン収集データCSVの急発進・急加速・急減速・最高速度から算出した参考指標で、事故記録とは別の指標です（emp_no照合ができない場合は「データなし」）。</p>
   ${periodFilterBarHtml({ since: period.since, until: period.until })}
   <p class="ap-period-label">表示期間：${escHtml(period.since ? formatPeriodLabel(period, todayIsoJST()) : '全期間')}</p>
   <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
@@ -71,7 +87,7 @@ export function accidentsPersonListPage(opts: AccidentsPersonListOpts): string {
   </div>
   <div class="ap-table-wrap">
     <table class="ap-table">
-      <thead><tr><th>氏名</th><th>課・班</th><th>累計件数</th><th>直近事故日</th><th>平均予定過失%</th><th>損害額合計</th></tr></thead>
+      <thead><tr><th>氏名</th><th>課・班</th><th>累計件数</th><th>直近事故日</th><th>平均予定過失%</th><th>損害額合計</th><th>安全運転リスク（表示期間）</th></tr></thead>
       <tbody id="ap-tbody">${rowsHtml}</tbody>
     </table>
   </div>
@@ -114,11 +130,13 @@ export interface AccidentPersonDetailPrintOptions {
   records: AccidentRecord[]; // 発生日降順
   period: AccidentPeriod;
   issuedDateLabel: string;
+  empId: number | null;
+  drivingRisk: DrivingRiskSummary | null;
 }
 
 // 個人の事故記録・詳細データ一覧（印刷可能な独立ページ。他の印刷ページ同様、管理画面の共通レイアウトには含めない）
 export function renderAccidentPersonDetailPrintPage(o: AccidentPersonDetailPrintOptions): string {
-  const { key, name, division, team, records, period, issuedDateLabel } = o;
+  const { key, name, division, team, records, period, issuedDateLabel, empId, drivingRisk } = o;
   const qs = periodQueryString(period);
 
   const cnt = records.length;
@@ -180,6 +198,11 @@ export function renderAccidentPersonDetailPrintPage(o: AccidentPersonDetailPrint
   .fault-chip { font-size: 11px; color: #374151; background: #f1f5f9; border-radius: 6px; padding: 4px 10px; }
   .fault-chip b { color: #1a3a5c; }
 
+  .safety-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .safety-box-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .safety-box-title { font-size: 11.5px; font-weight: 700; color: #1a3a5c; }
+  .safety-box-empty { font-size: 11px; color: #9ca3af; }
+
   table.rec-table { width: 100%; border-collapse: collapse; font-size: 11px; }
   table.rec-table thead { display: table-header-group; }
   table.rec-table th { padding: 6px 8px; text-align: left; background: #f3f4f6; color: #4b5563; font-weight: 700; border-bottom: 1px solid #d1d5db; white-space: nowrap; }
@@ -202,6 +225,7 @@ export function renderAccidentPersonDetailPrintPage(o: AccidentPersonDetailPrint
     <a class="back-link" href="${ADMIN_PATH}/accidents/person${qs}">← 個人別レポート一覧に戻る</a>
     <button class="print-btn" onclick="window.print()">🖨️ 印刷 / PDF保存</button>
     <a class="ai-link" href="${ADMIN_PATH}/accidents/person/${encodeURIComponent(key)}/report/print${qs}" target="_blank" rel="noopener">AI事故傾向分析レポート</a>
+    ${empId != null ? `<a class="ai-link" style="background:#7c2d92;" href="${ADMIN_PATH}/sales-ai/employee/${empId}/safety-guidance/print" target="_blank" rel="noopener">安全運転指導書を見る</a>` : ''}
     <span class="hint">この記録一覧をそのまま印刷できます</span>
   </div>
   <div class="stage">
@@ -228,6 +252,21 @@ export function renderAccidentPersonDetailPrintPage(o: AccidentPersonDetailPrint
         <span class="fault-chip">1〜49% <b>${faultCounts['1〜49%']}件</b></span>
         <span class="fault-chip">50%以上 <b>${faultCounts['50%以上']}件</b></span>
         <span class="fault-chip">未確定 <b>${faultCounts['未確定']}件</b></span>
+      </div>
+
+      <div class="safety-box">
+        <div class="safety-box-head">
+          <span class="safety-box-title">安全運転データ（参考指標・同一対象期間）</span>
+          ${riskBadgeHtml(drivingRisk)}
+        </div>
+        ${drivingRisk ? `
+        <div class="kpis" style="margin-bottom:0;">
+          <div class="kpi"><div class="kpi-label">急挙動合計</div><div class="kpi-value">${drivingRisk.totalHarshEvents}件</div></div>
+          <div class="kpi"><div class="kpi-label">乗務日あたり</div><div class="kpi-value">${drivingRisk.harshEventsPerDuty}件</div></div>
+          <div class="kpi"><div class="kpi-label">最高速度(高速/一般)</div><div class="kpi-value" style="font-size:12px;">${drivingRisk.maxSpeedHighway ?? '—'}/${drivingRisk.maxSpeedLocal ?? '—'}km/h</div></div>
+          <div class="kpi"><div class="kpi-label">速度超過日数</div><div class="kpi-value">${drivingRisk.speedingDays}日</div></div>
+        </div>` : `
+        <div class="safety-box-empty">安全運転データがありません（emp_noの照合ができないか、対象期間内のホシコン形式CSV取込データがまだありません）</div>`}
       </div>
 
       <table class="rec-table">
