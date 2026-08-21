@@ -11,7 +11,6 @@ import {
   faultBand,
   accidentsTabNav,
 } from './accidents';
-
 export interface AccidentsAnalysisOpts {
   months: number;
   selectedDivision: number | null;

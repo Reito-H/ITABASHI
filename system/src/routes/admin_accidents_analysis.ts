@@ -40,7 +40,7 @@ app.get('/accidents/analysis', async (c) => {
     prevRecords: prevRes.results ?? [],
   });
 
-  return c.html(layout('事故データ分析', content, 'accidents'));
+  return c.html(layout('事故分析・ランキング', content, 'accidents'));
 });
 
 export default app;

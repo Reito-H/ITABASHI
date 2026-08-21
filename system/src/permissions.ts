@@ -208,7 +208,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'events',        label: '報告一覧' },
     { key: 'vehicles',      label: '車両検索' },
     { key: 'garage',        label: '車庫見取り図' },
-    { key: 'accidents',     label: '事故データ' },
+    { key: 'accidents',     label: '事故分析' },
     { key: 'inspection',    label: '点検管理（メーター検査・車検管理を含む）' },
     { key: 'announcements', label: 'お知らせ配信' },
     { key: 'line',          label: 'LINE管理' },

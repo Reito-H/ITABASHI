@@ -54,7 +54,7 @@ app.get('/accidents', async (c) => {
     records: recordsRes.results ?? [],
   });
 
-  return c.html(layout('事故データ', content, 'accidents'));
+  return c.html(layout('事故分析', content, 'accidents'));
 });
 
 // ===== API =====

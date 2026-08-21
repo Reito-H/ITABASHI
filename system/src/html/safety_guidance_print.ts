@@ -157,7 +157,7 @@ export function renderSafetyGuidanceSheet(o: SafetyGuidanceSheetOptions): string
         </div>
 
         <div class="sr-section">
-          <div class="sr-section-title">事故データとの照合</div>
+          <div class="sr-section-title">事故分析との照合</div>
           <div class="${accidentClass}">${escHtml(o.content.accidentNote)}</div>
         </div>
 
@@ -165,7 +165,7 @@ export function renderSafetyGuidanceSheet(o: SafetyGuidanceSheetOptions): string
 
         <div class="sr-disclaimer">
           ※本紙は運転挙動データ（急発進・急加速・急減速・最高速度）を集計・分析して自動生成したものです（ルールベース集計であり外部AIサービスは使用していません）。参考情報としてご活用ください。<br>
-          ※安全運転リスクは対象期間の運転挙動データ、事故件数は在籍期間中の全期間累計です。時間軸が異なる参考情報である点にご留意ください。実際の事故記録の詳細は事故データ管理ページでご確認ください。
+          ※安全運転リスクは対象期間の運転挙動データ、事故件数は在籍期間中の全期間累計です。時間軸が異なる参考情報である点にご留意ください。実際の事故記録の詳細は事故分析ページでご確認ください。
         </div>
         <div class="sr-foot">
           <div class="left">本紙は社内システムより自動生成されています</div>

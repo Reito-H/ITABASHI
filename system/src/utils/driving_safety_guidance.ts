@@ -122,8 +122,8 @@ export function buildDrivingSafetyGuidance(input: DrivingSafetyGuidanceInput): D
   }
 
   const accidentNote = accidentCount > 0
-    ? `${empName}さんは在籍期間中に事故記録が${accidentCount}件あります。前回事故日は${lastAccidentDate ?? '—'}（約${monthsSinceLastAccident}ヶ月経過）です。安全運転指導の際は、過去の事故内容もあわせてご確認ください（事故データ管理ページで参照できます）。`
-    : `${empName}さんの在籍期間中の事故記録はありません（事故データ管理との照合・全期間累計）。`;
+    ? `${empName}さんは在籍期間中に事故記録が${accidentCount}件あります。前回事故日は${lastAccidentDate ?? '—'}（約${monthsSinceLastAccident}ヶ月経過）です。安全運転指導の際は、過去の事故内容もあわせてご確認ください（事故分析ページで参照できます）。`
+    : `${empName}さんの在籍期間中の事故記録はありません（事故分析との照合・全期間累計）。`;
 
   const closingComment = categoryExplanations.length > 0
     ? '安全運転の基本動作（車間距離の確保・早めのブレーキ操作・法定速度の遵守）を徹底し、次回の点呼・指導時に本紙の内容をご確認ください。'

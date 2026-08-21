@@ -50,6 +50,41 @@ function avgTime(times: Array<string | null | undefined>): string | null {
   return minutesToTime(Math.round(mins.reduce((s, n) => s + n, 0) / mins.length));
 }
 
+// 1時間ごとの売上の強さ（1乗務日あたり平均・推定）: 出庫〜帰庫の時間帯にamountを均等按分し、
+// 乗務日数で割って「その時間帯が平均してどれだけ売上に貢献しているか」を算出する。
+// 乗車ごとの時刻データは存在しないため、あくまで「稼働時間帯に売上を均して割り振った」概算値。
+export interface HourlySalesBucket { hour: number; avgAmount: number; sampleCount: number }
+function bucketHourlyAmount(rows: Array<{ amount: number; start_time: string | null; return_time: string | null }>): { hourly: HourlySalesBucket[]; coverageCount: number; totalCount: number } {
+  const totals = new Array(24).fill(0);
+  const samples = new Array(24).fill(0);
+  let coverageCount = 0;
+  for (const r of rows) {
+    const s = timeToMinutes(r.start_time);
+    const e0 = timeToMinutes(r.return_time);
+    if (s === null || e0 === null) continue;
+    const e = e0 <= s ? e0 + 24 * 60 : e0; // 日跨ぎ（例: 22:00出庫→翌6:00帰庫）
+    const duration = e - s;
+    if (duration <= 0) continue;
+    coverageCount++;
+    for (let h = 0; h < 24; h++) {
+      for (const offset of [0, 24 * 60]) {
+        const bucketStart = h * 60 + offset;
+        const overlap = Math.min(e, bucketStart + 60) - Math.max(s, bucketStart);
+        if (overlap > 0) {
+          totals[h] += r.amount * (overlap / duration);
+          samples[h]++;
+        }
+      }
+    }
+  }
+  return {
+    hourly: totals.map((total, hour) => ({
+      hour, avgAmount: coverageCount > 0 ? Math.round(total / coverageCount) : 0, sampleCount: samples[hour],
+    })),
+    coverageCount, totalCount: rows.length,
+  };
+}
+
 type FactorBucket = { label: string; avgTrue: number | null; avgFalse: number | null; countTrue: number; countFalse: number; diffPct: number | null };
 
 function bucketBy(rows: { amount: number; f: DayFactors }[], label: string, pick: (f: DayFactors) => boolean): FactorBucket {
@@ -179,6 +214,7 @@ export type EmployeeAnalytics = {
   wageEstimate: SalesAnalysisInput['wageEstimate'];
   drivingRisk: DrivingRiskSummary | null;
   minimumWage: MinimumWageCheckResult | null;
+  hourlySales: ReturnType<typeof bucketHourlyAmount>;
 } | null;
 
 // 社員別の集計一式（詳細画面・印刷レポートで共用）
@@ -330,11 +366,14 @@ export async function computeEmployeeAnalytics(db: D1Database, empId: number, mo
     ? summarizeDrivingRisk(safetyRows.map(toDrivingSafetyRow), dbRows.length, await loadDrivingRiskSettings(db))
     : null;
 
+  // 時間帯別の売上の強さ（出庫〜帰庫時間で按分した推定値。直近months分の全データが対象）
+  const hourlySales = bucketHourlyAmount(dbRows);
+
   return {
     emp, daily, monthly,
     factorBreakdown: buildFactorBreakdown(enriched.map(r => ({ amount: r.amount, f: r.f }))),
     weekdayBreakdown: weekdayBreakdown(enriched.map(r => ({ amount: r.amount, f: r.f }))),
-    trend, relative, returnTime, wageEstimate, drivingRisk, minimumWage,
+    trend, relative, returnTime, wageEstimate, drivingRisk, minimumWage, hourlySales,
   };
 }
 
@@ -355,6 +394,7 @@ app.get('/employee/:empId', async (c) => {
     factorBreakdown: data.factorBreakdown, weekdayBreakdown: data.weekdayBreakdown,
     trend: data.trend, relative: data.relative, returnTime: data.returnTime,
     wageEstimate: data.wageEstimate, drivingRisk: data.drivingRisk, minimumWage: data.minimumWage,
+    hourlySales: data.hourlySales,
   });
 });
 
@@ -413,35 +453,15 @@ app.get('/overview', async (c) => {
   const prev = getPeriodRange(prevY, prevM, settings);
   const isCurrentPeriod = curY === todayY && curM === todayM;
 
-  const [empRows, curRows, prevRows, safetyRows, riskSettings, wageSettings, accidentCountRows] = await Promise.all([
+  const [empRows, curRows, prevRows, wageSettings] = await Promise.all([
     c.env.DB.prepare('SELECT id, name, emp_no, division, team FROM employees WHERE is_active = 1').all<{ id: number; name: string; emp_no: string; division: number | null; team: number | null }>(),
-    c.env.DB.prepare('SELECT emp_id, amount, duty_code, date, return_time, labor_hours, night_hours, overtime_hours FROM sales_records WHERE date >= ? AND date <= ?').bind(cur.start, cur.end).all<{ emp_id: number; amount: number; duty_code: string | null; date: string; return_time: string | null; labor_hours: number | null; night_hours: number | null; overtime_hours: number | null }>(),
+    c.env.DB.prepare('SELECT emp_id, amount, duty_code, date, start_time, return_time, labor_hours, night_hours, overtime_hours FROM sales_records WHERE date >= ? AND date <= ?').bind(cur.start, cur.end).all<{ emp_id: number; amount: number; duty_code: string | null; date: string; start_time: string | null; return_time: string | null; labor_hours: number | null; night_hours: number | null; overtime_hours: number | null }>(),
     c.env.DB.prepare('SELECT emp_id, amount FROM sales_records WHERE date >= ? AND date <= ?').bind(prev.start, prev.end).all<{ emp_id: number; amount: number }>(),
-    c.env.DB.prepare(
-      `SELECT emp_id, date, harsh_start_loaded, harsh_start_empty, harsh_accel_loaded, harsh_accel_empty,
-              harsh_decel_loaded, harsh_decel_empty, max_speed_loaded_highway, max_speed_loaded_local
-       FROM driving_safety_records WHERE date >= ? AND date <= ?`
-    ).bind(cur.start, cur.end).all<SafetyDbRow & { emp_id: number }>(),
-    loadDrivingRiskSettings(c.env.DB),
     loadWageEstimateSettings(c.env.DB),
-    c.env.DB.prepare(
-      `SELECT emp_no, COUNT(*) as cnt, MAX(occurred_date) as last_date FROM accident_records WHERE emp_no IS NOT NULL AND emp_no != '' GROUP BY emp_no`
-    ).all<{ emp_no: string; cnt: number; last_date: string | null }>(),
   ]);
 
   const empDivTeam = new Map<number, { division: number | null; team: number | null }>();
   for (const e of empRows.results ?? []) empDivTeam.set(e.id, { division: e.division, team: e.team });
-
-  const empNoById = new Map<number, string>();
-  for (const e of empRows.results ?? []) empNoById.set(e.id, e.emp_no);
-  const accidentByEmpNo = new Map<string, { cnt: number; lastDate: string | null }>();
-  for (const r of accidentCountRows.results ?? []) accidentByEmpNo.set(r.emp_no, { cnt: r.cnt, lastDate: r.last_date });
-
-  // 前回事故からの経過月数（暦日ベースの概算。30日=1ヶ月として算出）
-  function monthsSince(dateStr: string): number {
-    const days = Math.floor((new Date(today).getTime() - new Date(dateStr).getTime()) / 86400000);
-    return Math.max(0, Math.floor(days / 30));
-  }
 
   const curByEmp = new Map<number, {
     total: number; weighted: number; count: number; returnTimes: string[];
@@ -520,30 +540,8 @@ app.get('/overview', async (c) => {
   // 全社横断の暦要因分析（当月度実績データ全体）
   const enriched = (curRows.results ?? []).map(r => ({ amount: r.amount, f: getDayFactors(r.date) }));
 
-  // 安全運転リスクランキング（危険挙動の多い順。急挙動件数の多い乗務員をリストアップして事故リスクを検証する用途）
-  const safetyByEmp = new Map<number, SafetyDbRow[]>();
-  for (const r of safetyRows.results ?? []) {
-    if (!safetyByEmp.has(r.emp_id)) safetyByEmp.set(r.emp_id, []);
-    safetyByEmp.get(r.emp_id)!.push(r);
-  }
-  const drivingRiskRanking = [...safetyByEmp.entries()].map(([empId, rows]) => {
-    const info = empDivTeam.get(empId);
-    const dutyDays = curByEmp.get(empId)?.count ?? rows.length;
-    const summary = summarizeDrivingRisk(rows.map(toDrivingSafetyRow), dutyDays, riskSettings);
-    const empName = (empRows.results ?? []).find(e => e.id === empId)?.name ?? '';
-    const empNo = empNoById.get(empId) ?? null;
-    const accidentInfo = empNo ? accidentByEmpNo.get(empNo) : undefined;
-    const accidentCount = accidentInfo?.cnt ?? 0;
-    const lastAccidentDate = accidentInfo?.lastDate ?? null;
-    const monthsSinceLastAccident = lastAccidentDate ? monthsSince(lastAccidentDate) : null;
-    return {
-      empId, empNo, name: empName, division: info?.division ?? null, team: info?.team ?? null,
-      totalHarshEvents: summary.totalHarshEvents, harshEventsPerDuty: summary.harshEventsPerDuty,
-      overThresholdDays: summary.overThresholdDays, maxSpeedHighway: summary.maxSpeedHighway,
-      maxSpeedLocal: summary.maxSpeedLocal, speedingDays: summary.speedingDays, riskLevel: summary.riskLevel,
-      accidentCount, lastAccidentDate, monthsSinceLastAccident,
-    };
-  }).sort((a, b) => b.totalHarshEvents - a.totalHarshEvents);
+  // 時間帯別の売上の強さ（出庫〜帰庫時間で按分した推定値）
+  const hourlySales = bucketHourlyAmount(curRows.results ?? []);
 
   let nextY = curY, nextM = curM + 1;
   if (nextM > 12) { nextM = 1; nextY += 1; }
@@ -557,9 +555,86 @@ app.get('/overview', async (c) => {
     divisionBreakdown, teamBreakdown,
     factorBreakdown: buildFactorBreakdown(enriched),
     weekdayBreakdown: weekdayBreakdown(enriched),
-    drivingRiskRanking,
+    hourlySales,
   });
 });
+
+// ===================================================
+// 安全運転リスクランキング（今月度・危険挙動の多い順）— 事故分析ページ（分析・ランキング）から呼び出す
+// ===================================================
+export interface DrivingRiskRankingRow {
+  empId: number; empNo: string | null; name: string; division: number | null; team: number | null;
+  totalHarshEvents: number; harshEventsPerDuty: number; overThresholdDays: number;
+  maxSpeedHighway: number | null; maxSpeedLocal: number | null; speedingDays: number;
+  riskLevel: 'high' | 'medium' | 'low';
+  accidentCount: number; lastAccidentDate: string | null; monthsSinceLastAccident: number | null;
+}
+
+export async function computeDrivingRiskRanking(db: D1Database, year?: number, month?: number): Promise<DrivingRiskRankingRow[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { year: todayY, month: todayM } = getPeriod(today);
+  const curY = year ?? todayY;
+  const curM = month ?? todayM;
+  const periodSettings = await getPeriodSettings(db);
+  const cur = getPeriodRange(curY, curM, periodSettings);
+
+  const [empRows, safetyRows, riskSettings, accidentCountRows, dutyRows] = await Promise.all([
+    db.prepare('SELECT id, name, emp_no, division, team FROM employees WHERE is_active = 1').all<{ id: number; name: string; emp_no: string; division: number | null; team: number | null }>(),
+    db.prepare(
+      `SELECT emp_id, date, harsh_start_loaded, harsh_start_empty, harsh_accel_loaded, harsh_accel_empty,
+              harsh_decel_loaded, harsh_decel_empty, max_speed_loaded_highway, max_speed_loaded_local
+       FROM driving_safety_records WHERE date >= ? AND date <= ?`
+    ).bind(cur.start, cur.end).all<SafetyDbRow & { emp_id: number }>(),
+    loadDrivingRiskSettings(db),
+    db.prepare(
+      `SELECT emp_no, COUNT(*) as cnt, MAX(occurred_date) as last_date FROM accident_records WHERE emp_no IS NOT NULL AND emp_no != '' GROUP BY emp_no`
+    ).all<{ emp_no: string; cnt: number; last_date: string | null }>(),
+    db.prepare('SELECT emp_id, COUNT(*) as cnt FROM sales_records WHERE date >= ? AND date <= ? GROUP BY emp_id').bind(cur.start, cur.end).all<{ emp_id: number; cnt: number }>(),
+  ]);
+
+  const empDivTeam = new Map<number, { division: number | null; team: number | null }>();
+  const empNoById = new Map<number, string>();
+  const empNameById = new Map<number, string>();
+  for (const e of empRows.results ?? []) {
+    empDivTeam.set(e.id, { division: e.division, team: e.team });
+    empNoById.set(e.id, e.emp_no);
+    empNameById.set(e.id, e.name);
+  }
+  const dutyDaysByEmp = new Map<number, number>();
+  for (const r of dutyRows.results ?? []) dutyDaysByEmp.set(r.emp_id, r.cnt);
+  const accidentByEmpNo = new Map<string, { cnt: number; lastDate: string | null }>();
+  for (const r of accidentCountRows.results ?? []) accidentByEmpNo.set(r.emp_no, { cnt: r.cnt, lastDate: r.last_date });
+
+  // 前回事故からの経過月数（暦日ベースの概算。30日=1ヶ月として算出）
+  function monthsSince(dateStr: string): number {
+    const days = Math.floor((new Date(today).getTime() - new Date(dateStr).getTime()) / 86400000);
+    return Math.max(0, Math.floor(days / 30));
+  }
+
+  const safetyByEmp = new Map<number, SafetyDbRow[]>();
+  for (const r of safetyRows.results ?? []) {
+    if (!safetyByEmp.has(r.emp_id)) safetyByEmp.set(r.emp_id, []);
+    safetyByEmp.get(r.emp_id)!.push(r);
+  }
+
+  return [...safetyByEmp.entries()].map(([empId, rows]) => {
+    const info = empDivTeam.get(empId);
+    const dutyDays = dutyDaysByEmp.get(empId) ?? rows.length;
+    const summary = summarizeDrivingRisk(rows.map(toDrivingSafetyRow), dutyDays, riskSettings);
+    const empNo = empNoById.get(empId) ?? null;
+    const accidentInfo = empNo ? accidentByEmpNo.get(empNo) : undefined;
+    const accidentCount = accidentInfo?.cnt ?? 0;
+    const lastAccidentDate = accidentInfo?.lastDate ?? null;
+    const monthsSinceLastAccident = lastAccidentDate ? monthsSince(lastAccidentDate) : null;
+    return {
+      empId, empNo, name: empNameById.get(empId) ?? '', division: info?.division ?? null, team: info?.team ?? null,
+      totalHarshEvents: summary.totalHarshEvents, harshEventsPerDuty: summary.harshEventsPerDuty,
+      overThresholdDays: summary.overThresholdDays, maxSpeedHighway: summary.maxSpeedHighway,
+      maxSpeedLocal: summary.maxSpeedLocal, speedingDays: summary.speedingDays, riskLevel: summary.riskLevel,
+      accidentCount, lastAccidentDate, monthsSinceLastAccident,
+    };
+  }).sort((a, b) => b.totalHarshEvents - a.totalHarshEvents);
+}
 
 // ===================================================
 // 社員別: 指定月度の勤務実績・売上PDF（紙帳票風、既存機能のまま維持）
