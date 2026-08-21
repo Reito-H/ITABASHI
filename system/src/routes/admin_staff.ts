@@ -992,8 +992,11 @@ async function parseCsvText(text) {
       let laborHours = null;
       let nightHours = null;
       let overtimeHours = null;
+      let rawCsv = null;
       if (isHoshiconFormat) {
         if (cols.length < 40) continue;
+        // 未使用列も含め1行分をまるごと保持（将来の賃金計算精度向上等に備える。列の並びはmigration_099参照）
+        rawCsv = JSON.stringify(cols);
         dateRaw = cols[0]?.trim();
         teamRaw = cols[3]?.trim();
         carRaw  = cols[4]?.trim();
@@ -1071,7 +1074,7 @@ async function parseCsvText(text) {
           startTime: rowStartTime, returnTime: rowReturnTime,
           rideCount: !isNaN(rideCountNum) ? rideCountNum : null,
           distanceKm: !isNaN(distanceNum) ? Math.round(distanceNum) : null,
-          laborHours, nightHours, overtimeHours,
+          laborHours, nightHours, overtimeHours, rawCsv,
         });
       }
 
@@ -1327,17 +1330,34 @@ async function executeCsvImport() {
     safetyEntries: e.safetyEntries || [],
   }));
 
-  // 100名ずつ分割して送信（大量データでもタイムアウトしない）
+  // 社員数だけでなく日次データ量（sales/safetyエントリ数）でも分割
+  // ホシコン形式は1社員あたり数十〜数百件の日次レコードを持つため、件数のみで区切ると
+  // 1リクエスト内のDB書き込み（サブリクエスト）数がCloudflareの上限に達し失敗することがある
   const BATCH = 100;
+  const MAX_ENTRIES_PER_BATCH = 800;
+  const batches = [];
+  {
+    let cur = [], curEntries = 0;
+    for (const emp of payload) {
+      const empEntries = (emp.salesEntries?.length||0) + (emp.safetyEntries?.length||0);
+      if (cur.length && (cur.length >= BATCH || curEntries + empEntries > MAX_ENTRIES_PER_BATCH)) {
+        batches.push(cur); cur = []; curEntries = 0;
+      }
+      cur.push(emp); curEntries += empEntries;
+    }
+    if (cur.length) batches.push(cur);
+  }
+
   let totalInserted = 0, totalUpdated = 0, totalSales = 0, totalSafety = 0;
   const allErrors = [];
 
   try {
-    for (let i = 0; i < payload.length; i += BATCH) {
-      btn.textContent = \`送信中… \${Math.min(i+BATCH, payload.length)}/\${payload.length}名\`;
+    let doneCount = 0;
+    for (const batch of batches) {
+      btn.textContent = \`送信中… \${doneCount + batch.length}/\${payload.length}名\`;
       const res = await fetch('/api/employees/csv-import', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ employees: payload.slice(i, i + BATCH) })
+        body: JSON.stringify({ employees: batch })
       });
       const json = await res.json();
       if (res.ok) {
@@ -1347,8 +1367,9 @@ async function executeCsvImport() {
         totalSafety   += json.safetyUpdated || 0;
         if (json.errors?.length) allErrors.push(...json.errors);
       } else {
-        allErrors.push(json.error || \`batch \${i} エラー\`);
+        allErrors.push(json.error || \`batch \${doneCount} エラー\`);
       }
+      doneCount += batch.length;
     }
 
     const resultDiv = document.getElementById('csv-result');

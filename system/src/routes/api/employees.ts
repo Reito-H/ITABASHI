@@ -212,7 +212,7 @@ app.post('/csv-import', async (c) => {
       avg_return_time?: string | null;
       used_cars?: string | null;
       isLongAbsent?: boolean;
-      salesEntries?: Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null; rideCount?: number | null; distanceKm?: number | null; laborHours?: number | null; nightHours?: number | null; overtimeHours?: number | null }>;
+      salesEntries?: Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null; rideCount?: number | null; distanceKm?: number | null; laborHours?: number | null; nightHours?: number | null; overtimeHours?: number | null; rawCsv?: string | null }>;
       safetyEntries?: Array<{
         date: string;
         harshStartLoaded: number | null; harshStartEmpty: number | null;
@@ -317,7 +317,7 @@ app.post('/csv-import', async (c) => {
   let salesUpdated = 0;
   const DUTY_CODES = ['a', 'b', 'B', 'D', 'H'];
   const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-  const salesByEmpNo = new Map<string, Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null; rideCount?: number | null; distanceKm?: number | null; laborHours?: number | null; nightHours?: number | null; overtimeHours?: number | null }>>();
+  const salesByEmpNo = new Map<string, Array<{ date: string; dutyCode: string; amount: number; startTime?: string | null; returnTime?: string | null; rideCount?: number | null; distanceKm?: number | null; laborHours?: number | null; nightHours?: number | null; overtimeHours?: number | null; rawCsv?: string | null }>>();
   for (const emp of valid) {
     if (emp.salesEntries?.length) salesByEmpNo.set(emp.emp_no, emp.salesEntries);
   }
@@ -350,10 +350,11 @@ app.post('/csv-import', async (c) => {
         const laborHours = Number.isFinite(entry.laborHours) ? entry.laborHours as number : null;
         const nightHours = Number.isFinite(entry.nightHours) ? entry.nightHours as number : null;
         const overtimeHours = Number.isFinite(entry.overtimeHours) ? entry.overtimeHours as number : null;
+        const rawCsv = entry.rawCsv ?? null;
         salesStatements.push(
           c.env.DB.prepare(`
-            INSERT INTO sales_records (emp_id, date, amount, duty_code, period_year, period_month, start_time, return_time, ride_count, distance_km, labor_hours, night_hours, overtime_hours, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            INSERT INTO sales_records (emp_id, date, amount, duty_code, period_year, period_month, start_time, return_time, ride_count, distance_km, labor_hours, night_hours, overtime_hours, raw_csv_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
             ON CONFLICT(emp_id, date) DO UPDATE SET
               amount = excluded.amount,
               duty_code = excluded.duty_code,
@@ -366,8 +367,9 @@ app.post('/csv-import', async (c) => {
               labor_hours = COALESCE(excluded.labor_hours, sales_records.labor_hours),
               night_hours = COALESCE(excluded.night_hours, sales_records.night_hours),
               overtime_hours = COALESCE(excluded.overtime_hours, sales_records.overtime_hours),
+              raw_csv_json = COALESCE(excluded.raw_csv_json, sales_records.raw_csv_json),
               updated_at = datetime('now', 'localtime')
-          `).bind(empId, entry.date, amount, entry.dutyCode, year, month, startTime, returnTime, rideCount, distanceKm, laborHours, nightHours, overtimeHours)
+          `).bind(empId, entry.date, amount, entry.dutyCode, year, month, startTime, returnTime, rideCount, distanceKm, laborHours, nightHours, overtimeHours, rawCsv)
         );
       }
     }

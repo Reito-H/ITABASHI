@@ -14,6 +14,23 @@ import { summarizeDrivingRisk, type DrivingSafetyRow } from '../utils/driving_ri
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
+// AI売上分析 配下（全社サマリー／運賃改定影響分析）共通のタブナビ
+export function salesAiTabNav(active: 'summary' | 'fare-revision'): string {
+  const tabs: Array<{ id: typeof active; label: string; href: string }> = [
+    { id: 'summary', label: '全社サマリー', href: `${ADMIN_PATH}/sales-ai` },
+    { id: 'fare-revision', label: '運賃改定影響分析', href: `${ADMIN_PATH}/sales-ai/fare-revision` },
+  ];
+  return `<div class="sai-tabnav">` + tabs.map(t =>
+    `<a class="sai-tab-link${t.id === active ? ' active' : ''}" href="${t.href}">${t.label}</a>`
+  ).join('') + `</div>`;
+}
+export const SALES_AI_TABNAV_CSS = `
+  .sai-tabnav { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid #e5e7eb; }
+  .sai-tab-link { padding:9px 16px; font-size:13px; font-weight:600; color:#64748b; text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .sai-tab-link:hover { color:#1a3a5c; }
+  .sai-tab-link.active { color:#1a3a5c; border-bottom-color:#1a3a5c; }
+`;
+
 function formatIssuedDateLabel(): string {
   const d = new Date();
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
@@ -57,8 +74,10 @@ app.get('/sales-ai', async (c) => {
   .hrb-bar { width:100%; max-width:22px; border-radius:3px 3px 1px 1px; background:linear-gradient(180deg,#2d6a9f,#1a3a5c); transition:height .2s; }
   .hrb-lb { font-size:9px; color:#94a3b8; }
   .hrb-peak-chip { display:inline-flex; align-items:center; gap:4px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:14px; padding:3px 10px; margin:0 6px 6px 0; font-weight:700; color:#1a3a5c; }
+  ${SALES_AI_TABNAV_CSS}
 </style>
 <div style="max-width:1180px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+  ${salesAiTabNav('summary')}
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
     <div>
       <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0;">AI売上分析 — 全社員横断</h2>
