@@ -48,11 +48,6 @@ app.get('/sales-ai/fare-revision', async (c) => {
   .frv-table td { padding:7px 8px; border-bottom:1px solid #f3f4f6; }
   .frv-table tr.frv-row-clickable { cursor:pointer; }
   .frv-table tr.frv-row-clickable:hover { background:#f8fafc; }
-  .frv-badge { display:inline-block; border-radius:12px; padding:2px 9px; font-size:11px; font-weight:700; }
-  .frv-badge-above { background:#dcfce7; color:#16a34a; }
-  .frv-badge-met { background:#fef3c7; color:#b45309; }
-  .frv-badge-below { background:#fee2e2; color:#dc2626; }
-  .frv-badge-insufficient_data { background:#f3f4f6; color:#6b7280; }
   .frv-advanced { display:none; margin-top:10px; padding-top:10px; border-top:1px dashed #e5e7eb; }
   .frv-advanced.open { display:flex; flex-wrap:wrap; gap:10px; }
   .frv-coverage { font-size:11px; color:#6b7280; margin-top:6px; }
@@ -131,7 +126,7 @@ app.get('/sales-ai/fare-revision', async (c) => {
   <div id="loading" style="color:#9ca3af;font-size:13px;">読み込み中…</div>
 
   <div id="view-overview" style="display:none;">
-    <div class="frv-subtabnav frv-no-print">
+    <div class="frv-subtabnav frv-no-print" id="ov-subtabnav">
       <button type="button" class="frv-subtab-btn active" data-sub="summary" onclick="switchOverviewSub('summary')">サマリー</button>
       <button type="button" class="frv-subtab-btn" data-sub="breakdown" onclick="switchOverviewSub('breakdown')">課・班・勤務別</button>
       <button type="button" class="frv-subtab-btn" data-sub="flagged" onclick="switchOverviewSub('flagged')">早めに切り上げていそうな人</button>
@@ -178,9 +173,15 @@ app.get('/sales-ai/fare-revision', async (c) => {
     </div>
 
     <div id="ov-sub-allemp" class="frv-subpanel" style="display:none;">
+      <div class="frv-subtabnav frv-no-print" id="allemp-category-nav">
+        <button type="button" class="frv-subtab-btn active" data-cat="above" onclick="switchAllEmpCategory('above')">目標達成 <span id="cat-count-above"></span></button>
+        <button type="button" class="frv-subtab-btn" data-cat="met" onclick="switchAllEmpCategory('met')">伸びたが未達 <span id="cat-count-met"></span></button>
+        <button type="button" class="frv-subtab-btn" data-cat="below" onclick="switchAllEmpCategory('below')">減少 <span id="cat-count-below"></span></button>
+        <button type="button" class="frv-subtab-btn" data-cat="insufficient_data" onclick="switchAllEmpCategory('insufficient_data')">データ不足 <span id="cat-count-insufficient_data"></span></button>
+      </div>
       <div class="frv-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0;">社員ごとの一覧</h3>
+          <h3 id="allemp-title" style="font-size:13px;font-weight:700;color:#374151;margin:0;">社員ごとの一覧</h3>
           <div style="display:flex;gap:8px;" class="frv-no-print">
             <input type="text" id="all-emp-search" placeholder="社員名で検索" oninput="renderAllEmployeesTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
             <select id="all-emp-sort" onchange="renderAllEmployeesTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
@@ -191,9 +192,10 @@ app.get('/sales-ai/fare-revision', async (c) => {
           </div>
         </div>
         <table class="frv-table">
-          <thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>判定</th><th>売上の伸び</th><th id="th-allemp-before">前の売上</th><th id="th-allemp-after">後の売上</th><th>働いた時間の伸び</th></tr></thead>
+          <thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>売上の伸び</th><th id="th-allemp-before">前の売上</th><th id="th-allemp-after">後の売上</th><th>働いた時間の伸び</th></tr></thead>
           <tbody id="all-emp-tbody"></tbody>
         </table>
+        <div id="all-emp-empty" style="display:none;font-size:12px;color:#9ca3af;padding:10px 0;">該当する人はいません。</div>
       </div>
     </div>
   </div>
@@ -252,6 +254,7 @@ let empChart = null;
 let currentPeriods = null;
 let currentOverviewSub = 'summary';
 let currentEmpSub = 'summary';
+let currentAllEmpCategory = 'above';
 
 function escHtmlJs(s) {
   const d = document.createElement('div');
@@ -267,9 +270,6 @@ function pctColor(v) {
   return '#dc2626';
 }
 const CATEGORY_LABELS = { above: '目標達成', met: '伸びたが未達', below: '減少', insufficient_data: 'データ不足' };
-function categoryBadge(cat) {
-  return '<span class="frv-badge frv-badge-' + cat + '">' + (CATEGORY_LABELS[cat] || cat) + '</span>';
-}
 
 function onModeChange() {
   const mode = document.getElementById('mode-select').value;
@@ -330,9 +330,18 @@ function switchOverviewSub(name) {
   ['summary', 'breakdown', 'flagged', 'allemp'].forEach(function(n) {
     document.getElementById('ov-sub-' + n).style.display = n === name ? '' : 'none';
   });
-  document.querySelectorAll('#view-overview .frv-subtab-btn').forEach(function(btn) {
+  document.querySelectorAll('#ov-subtabnav .frv-subtab-btn').forEach(function(btn) {
     btn.classList.toggle('active', btn.dataset.sub === name);
   });
+}
+
+function switchAllEmpCategory(cat) {
+  currentAllEmpCategory = cat;
+  document.querySelectorAll('#allemp-category-nav .frv-subtab-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.cat === cat);
+  });
+  document.getElementById('allemp-title').textContent = '社員ごとの一覧（' + (CATEGORY_LABELS[cat] || cat) + '）';
+  renderAllEmployeesTable();
 }
 
 function switchEmpSub(name) {
@@ -352,10 +361,11 @@ function printCurrentView() {
     if (!currentEmpId) { alert('先に個人ビューで社員を選んでください。'); return; }
     params.set('view', 'individual');
     params.set('empId', currentEmpId);
-    params.set('section', currentEmpSub);
+    // 個人レポートはサマリー＋判定理由をまとめた1枚のレポートとして印刷する（日ごとの記録はコピー用途では不要なので対象外）
   } else {
     params.set('view', 'overview');
     params.set('section', currentOverviewSub);
+    if (currentOverviewSub === 'allemp') params.set('category', currentAllEmpCategory);
   }
   window.open(ADMIN_PATH + '/sales-ai/fare-revision/print?' + params.toString(), '_blank');
 }
@@ -448,23 +458,32 @@ function renderFlaggedTable(flagged) {
   document.getElementById('flagged-tbody').innerHTML = html;
 }
 
+function updateCategoryCounts(counts) {
+  document.getElementById('cat-count-above').textContent = '(' + counts.above + ')';
+  document.getElementById('cat-count-met').textContent = '(' + counts.met + ')';
+  document.getElementById('cat-count-below').textContent = '(' + counts.below + ')';
+  document.getElementById('cat-count-insufficient_data').textContent = '(' + counts.insufficientData + ')';
+}
+
 function renderAllEmployeesTable() {
   if (!overviewData) return;
   const search = document.getElementById('all-emp-search').value.trim();
   const sort = document.getElementById('all-emp-sort').value;
-  let list = overviewData.employees.filter(function(e) { return !search || e.empName.indexOf(search) !== -1; });
+  let list = overviewData.employees.filter(function(e) {
+    return e.achievementCategory === currentAllEmpCategory && (!search || e.empName.indexOf(search) !== -1);
+  });
   list = list.slice().sort(function(a, b) {
     if (sort === 'growth-desc') return (b.salesGrowthPct ?? -Infinity) - (a.salesGrowthPct ?? -Infinity);
     if (sort === 'growth-asc') return (a.salesGrowthPct ?? -Infinity) - (b.salesGrowthPct ?? -Infinity);
     return a.empName.localeCompare(b.empName, 'ja');
   });
+  document.getElementById('all-emp-empty').style.display = list.length ? 'none' : '';
   let html = '';
   list.forEach(function(e) {
     html += '<tr class="frv-row-clickable" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\')">' +
       '<td>' + escHtmlJs(e.empName) + '</td>' +
       '<td>' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</td>' +
       '<td>' + (e.wageCategoryLabel ? escHtmlJs(e.wageCategoryLabel) : '—') + '</td>' +
-      '<td>' + categoryBadge(e.achievementCategory) + '</td>' +
       '<td style="color:' + pctColor(e.salesGrowthPct) + ';font-weight:700;">' + fmtPct(e.salesGrowthPct) + '</td>' +
       '<td>' + fmtYen(e.before.avgPerDuty) + '</td>' +
       '<td>' + fmtYen(e.after.avgPerDuty) + '</td>' +
@@ -500,6 +519,8 @@ function loadOverview() {
       renderHistogram(data.histogram);
       renderBreakdownTables(data);
       renderFlaggedTable(data.flagged);
+      updateCategoryCounts(data.counts);
+      document.getElementById('allemp-title').textContent = '社員ごとの一覧（' + (CATEGORY_LABELS[currentAllEmpCategory] || currentAllEmpCategory) + '）';
       renderAllEmployeesTable();
       renderCoverageNote(data.dataCoverage);
       populateDatalist(data.employees);
@@ -631,17 +652,18 @@ app.get('/sales-ai/fare-revision/print', async (c) => {
   if (view === 'individual') {
     const empId = parseInt(c.req.query('empId') ?? '');
     if (isNaN(empId)) return c.text('社員が指定されていません', 400);
-    const section = (['summary', 'reasoning', 'daily'] as const).includes(c.req.query('section') as any)
-      ? (c.req.query('section') as 'summary' | 'reasoning' | 'daily') : 'summary';
+    // 個人レポートはサマリー＋判定理由をまとめた1枚のレポートとして印刷する（日ごとの記録はコピー用途では不要なので対象外）
     const result = await computeFareRevisionEmployee(c.env.DB, empId, c.req.query());
     if (!result) return c.text('社員が見つかりません', 404);
-    return c.html(renderFareRevisionEmployeePrintPage(section, result, printedAtLabel, backHref));
+    return c.html(renderFareRevisionEmployeePrintPage(result, printedAtLabel, backHref));
   }
 
   const section = (['summary', 'breakdown', 'flagged', 'allemp'] as const).includes(c.req.query('section') as any)
     ? (c.req.query('section') as 'summary' | 'breakdown' | 'flagged' | 'allemp') : 'summary';
+  const category = (['above', 'met', 'below', 'insufficient_data'] as const).includes(c.req.query('category') as any)
+    ? (c.req.query('category') as 'above' | 'met' | 'below' | 'insufficient_data') : null;
   const result = await computeFareRevisionOverview(c.env.DB, c.req.query());
-  return c.html(renderFareRevisionOverviewPrintPage(section, result, printedAtLabel, backHref));
+  return c.html(renderFareRevisionOverviewPrintPage(section, result, printedAtLabel, backHref, category));
 });
 
 export default app;

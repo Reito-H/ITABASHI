@@ -34,11 +34,6 @@ export const FARE_REVISION_PRINT_CSS = `
   table.fp-table th { text-align: left; padding: 5px 7px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; white-space: nowrap; }
   table.fp-table td { padding: 5px 7px; border: 1px solid #e2e8f0; }
   table.fp-table tr { break-inside: avoid; }
-  .fp-badge { display: inline-block; border-radius: 10px; padding: 1px 8px; font-size: 9.5px; font-weight: 700; }
-  .fp-badge-above { background: #dcfce7; color: #16a34a; }
-  .fp-badge-met { background: #fef3c7; color: #b45309; }
-  .fp-badge-below { background: #fee2e2; color: #dc2626; }
-  .fp-badge-insufficient_data { background: #f3f4f6; color: #6b7280; }
   .fp-flag { color: #16a34a; font-weight: 700; }
   .fp-drop { color: #dc2626; font-weight: 700; }
 
@@ -67,10 +62,6 @@ function pctClass(v: number | null): string {
 const CATEGORY_LABELS: Record<EmployeeComparison['achievementCategory'], string> = {
   above: '目標達成', met: '伸びたが未達', below: '減少', insufficient_data: 'データ不足',
 };
-function categoryBadge(cat: EmployeeComparison['achievementCategory']): string {
-  return `<span class="fp-badge fp-badge-${cat}">${CATEGORY_LABELS[cat]}</span>`;
-}
-
 function shell(title: string, printedAtLabel: string, headSub: string, condLines: string[], bodyHtml: string, backHref: string): string {
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -116,6 +107,7 @@ export function renderFareRevisionOverviewPrintPage(
   data: FareRevisionOverviewResult,
   printedAtLabel: string,
   backHref: string,
+  category: EmployeeComparison['achievementCategory'] | null = null,
 ): string {
   const condLines = condLinesFromOverview(data);
   const total = data.counts.above + data.counts.met + data.counts.below + data.counts.insufficientData;
@@ -163,9 +155,13 @@ export function renderFareRevisionOverviewPrintPage(
         : `<tr><td colspan="8" style="color:#9ca3af;">該当する人はいません。</td></tr>`
     }</tbody></table>`;
   } else {
-    sectionLabel = '社員ごとの一覧';
-    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>判定</th><th>売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>働いた時間の伸び</th></tr></thead><tbody>${
-      data.employees.map(e => `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.wageCategoryLabel ? escHtml(e.wageCategoryLabel) : '—'}</td><td>${categoryBadge(e.achievementCategory)}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${pct(e.laborHoursGrowthPct)}</td></tr>`).join('')
+    const cat = category ?? 'above';
+    sectionLabel = `社員ごとの一覧（${CATEGORY_LABELS[cat]}）`;
+    const list = data.employees.filter(e => e.achievementCategory === cat);
+    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>働いた時間の伸び</th></tr></thead><tbody>${
+      list.length
+        ? list.map(e => `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.wageCategoryLabel ? escHtml(e.wageCategoryLabel) : '—'}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${pct(e.laborHoursGrowthPct)}</td></tr>`).join('')
+        : `<tr><td colspan="7" style="color:#9ca3af;">該当する人はいません。</td></tr>`
     }</tbody></table>`;
   }
 
@@ -179,8 +175,9 @@ export function renderFareRevisionOverviewPrintPage(
   );
 }
 
+// 個人レポートはサマリー（平均・伸び率）＋判定理由をまとめた1枚のレポートとして出力する。
+// 日ごとの記録はコピー・報告用途では不要なため、印刷対象には含めない（画面上の確認のみ）。
 export function renderFareRevisionEmployeePrintPage(
-  section: 'summary' | 'reasoning' | 'daily',
   data: FareRevisionEmployeeResult,
   printedAtLabel: string,
   backHref: string,
@@ -191,39 +188,23 @@ export function renderFareRevisionEmployeePrintPage(
   const condLines = [
     `<b>比べている期間</b> — ${escHtml(beforeLabel)}: ${data.periods.before.start}〜${data.periods.before.end}（${data.periods.before.days}日間） ／ ${escHtml(afterLabel)}: ${data.periods.after.start}〜${data.periods.after.end}（${data.periods.after.days}日間）`,
   ];
-  let body = '';
-  let sectionLabel = '';
 
-  if (section === 'summary') {
-    sectionLabel = 'サマリー';
-    const rows: Array<[string, string]> = [
-      ['売上の伸び', pct(cmp.salesGrowthPct)],
-      ['判定', CATEGORY_LABELS[cmp.achievementCategory]],
-      ['1時間あたり売上の伸び', pct(cmp.hourlyRateGrowthPct)],
-      ['働いた時間の伸び', pct(cmp.laborHoursGrowthPct)],
-      [`平均の1日の売上（${beforeLabel}→${afterLabel}）`, `${yen(cmp.before.avgPerDuty)} → ${yen(cmp.after.avgPerDuty)}`],
-      [`平均の帰る時刻（${beforeLabel}→${afterLabel}）`, `${cmp.before.avgReturnTime ?? '—'} → ${cmp.after.avgReturnTime ?? '—'}`],
-    ];
-    body += `<table class="fp-kpi-table">${rows.map(([l, v]) => `<tr><td class="label">${escHtml(l)}</td><td class="val">${escHtml(v)}</td></tr>`).join('')}</table>`;
-  } else if (section === 'reasoning') {
-    sectionLabel = '判定理由';
-    body += `<ul class="fp-reasoning">${
-      cmp.reasoning.map(line => `<li${line.indexOf('【早めに切り上げている可能性】') === 0 ? ' class="flag"' : ''}>${escHtml(line)}</li>`).join('')
-    }</ul>`;
-  } else {
-    sectionLabel = '日ごとの記録';
-    const rows = [
-      ...data.dailyAfter.slice().reverse().map(r => ({ ...r, periodLabel: afterLabel })),
-      ...data.dailyBefore.slice().reverse().map(r => ({ ...r, periodLabel: beforeLabel })),
-    ];
-    const sourceLabel = (s: string) => s === 'actual' ? '実際の記録' : s === 'estimated' ? '時刻から計算' : '記録なし';
-    body += `<table class="fp-table"><thead><tr><th>いつの期間</th><th>日付</th><th>売上</th><th>働いた時間</th><th>記録の種類</th><th>帰る時刻</th></tr></thead><tbody>${
-      rows.map(r => `<tr><td>${escHtml(r.periodLabel)}</td><td>${r.date}</td><td>${yen(r.amount)}</td><td>${r.laborHoursResolved !== null ? r.laborHoursResolved + '時間' : '—'}</td><td>${sourceLabel(r.laborHoursSource)}</td><td>${r.returnTime ?? '—'}</td></tr>`).join('')
-    }</tbody></table>`;
-  }
+  const rows: Array<[string, string]> = [
+    ['売上の伸び', pct(cmp.salesGrowthPct)],
+    ['判定', CATEGORY_LABELS[cmp.achievementCategory]],
+    ['1時間あたり売上の伸び', pct(cmp.hourlyRateGrowthPct)],
+    ['働いた時間の伸び', pct(cmp.laborHoursGrowthPct)],
+    [`平均の1日の売上（${beforeLabel}→${afterLabel}）`, `${yen(cmp.before.avgPerDuty)} → ${yen(cmp.after.avgPerDuty)}`],
+    [`平均の帰る時刻（${beforeLabel}→${afterLabel}）`, `${cmp.before.avgReturnTime ?? '—'} → ${cmp.after.avgReturnTime ?? '—'}`],
+  ];
+  let body = `<table class="fp-kpi-table">${rows.map(([l, v]) => `<tr><td class="label">${escHtml(l)}</td><td class="val">${escHtml(v)}</td></tr>`).join('')}</table>`;
+  body += `<div class="fp-section-title">なぜこの判定になったか</div>`;
+  body += `<ul class="fp-reasoning">${
+    cmp.reasoning.map(line => `<li${line.indexOf('【早めに切り上げている可能性】') === 0 ? ' class="flag"' : ''}>${escHtml(line)}</li>`).join('')
+  }</ul>`;
 
   return shell(
-    `運賃改定影響分析 — ${escHtml(data.emp.name)}さん（${sectionLabel}）`,
+    `運賃改定影響分析 — ${escHtml(data.emp.name)}さん`,
     printedAtLabel,
     `${data.emp.division ?? '—'}課${data.emp.team ?? '—'}班　${escHtml(data.emp.name)}さん — 2026年4月からの運賃値上げによる影響分析（ルールベース自動生成）`,
     condLines,
