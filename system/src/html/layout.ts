@@ -1,6 +1,8 @@
 // 共通HTMLレイアウト
 import { ADMIN_PATH, APP_VERSION } from '../config';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
+import { announcementBarHtml, announcementBarScript } from './announcement_bar';
+import { birthdayPopupHtml, birthdayPopupScript } from './birthday_popup';
 
 export function safeJson(value: unknown): string {
   return JSON.stringify(value)
@@ -113,6 +115,7 @@ export function layout(title: string, content: string, activePage: string = '', 
       --font-sm: 12px;
       --font-base: 13px;
       --font-lg: 15px;
+      --ann-bar-h: 0px;
     }
     /* Tailwind utility subset — CDN不要のインラインCSS */
     .flex{display:flex}.grid{display:grid}.grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}.hidden{display:none}.block{display:block}.inline-block{display:inline-block}
@@ -143,8 +146,8 @@ export function layout(title: string, content: string, activePage: string = '', 
     * { box-sizing: border-box; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #f5f5f5; margin: 0; }
     .sidebar {
-      width: 200px; height: 100vh; background: var(--color-primary);
-      position: fixed; top: 0; left: 0; z-index: 40;
+      width: 200px; height: calc(100vh - var(--ann-bar-h, 0px)); background: var(--color-primary);
+      position: fixed; top: var(--ann-bar-h, 0px); left: 0; z-index: 40;
       display: flex; flex-direction: column;
       transition: transform 0.25s ease;
     }
@@ -177,7 +180,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     }
     .sidebar-collapse-btn:hover { background: rgba(255,255,255,0.22); color: #fff; }
     .sidebar-reopen-btn {
-      display: none; position: fixed; top: 14px; left: 0; z-index: 41;
+      display: none; position: fixed; top: calc(14px + var(--ann-bar-h, 0px)); left: 0; z-index: 41;
       width: 26px; height: 34px; border-radius: 0 8px 8px 0; border: none;
       background: var(--color-primary); color: #cbd5e1; cursor: pointer; font-size: 13px;
       align-items: center; justify-content: center; box-shadow: 2px 2px 6px rgba(0,0,0,0.15);
@@ -192,7 +195,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     .mobile-header {
       display: none; background: var(--color-primary); color: white;
       padding: 12px 16px; align-items: center; justify-content: space-between;
-      position: sticky; top: 0; z-index: 50;
+      position: sticky; top: var(--ann-bar-h, 0px); z-index: 50;
     }
     .hamburger {
       background: none; border: none; cursor: pointer; padding: 4px;
@@ -209,7 +212,7 @@ export function layout(title: string, content: string, activePage: string = '', 
       .main-content { margin-left: 0; }
       .mobile-header { display: flex; }
       .desktop-header { display: none; }
-      #bell-dropdown { top: 50px; right: 8px; left: 8px; width: auto; max-width: none; }
+      #bell-dropdown { top: calc(50px + var(--ann-bar-h, 0px)); right: 8px; left: 8px; width: auto; max-width: none; }
     }
     @media (min-width: 769px) and (max-width: 1024px) {
       .sidebar { width: 180px; }
@@ -240,6 +243,8 @@ export function layout(title: string, content: string, activePage: string = '', 
   </style>
 </head>
 <body>
+  ${announcementBarHtml()}
+  ${birthdayPopupHtml()}
   <script>
     try { if (localStorage.getItem('ho_sidebar_collapsed') === '1') document.body.classList.add('sidebar-collapsed'); } catch {}
   </script>
@@ -308,7 +313,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   </div>
 
   <!-- お知らせ（ベルマーク）ドロップダウン -->
-  <div id="bell-dropdown" style="display:none;position:fixed;top:54px;right:20px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.2);width:340px;max-width:92vw;max-height:70vh;overflow-y:auto;z-index:70;">
+  <div id="bell-dropdown" style="display:none;position:fixed;top:calc(54px + var(--ann-bar-h, 0px));right:20px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.2);width:340px;max-width:92vw;max-height:70vh;overflow-y:auto;z-index:70;">
     <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;font-size:13px;font-weight:700;color:#1e293b;position:sticky;top:0;background:#fff;">お知らせ</div>
     <div id="bell-list"></div>
   </div>
@@ -558,6 +563,8 @@ export function layout(title: string, content: string, activePage: string = '', 
       document.getElementById('bell-overlay').style.display = 'none';
     }
     loadBellUnreadCount();
+    ${announcementBarScript()}
+    ${birthdayPopupScript()}
 
     function createHandoverMemoFromFab() {
       fetch('${ADMIN_PATH}/api/handover-memos', {

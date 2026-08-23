@@ -42,14 +42,11 @@ function buildJumpChips(hasPersonalPage: boolean): Array<{ index: number; label:
   for (const t of THEME_CONTENTS) {
     idx++;
     chips.push({ index: idx, label: `事例${t.no}` });
-    idx++; // 解答・解説ページの分
   }
   idx++;
   chips.push({ index: idx, label: '心理学' });
-  idx++; // 心理学2ページ目
   idx++;
   chips.push({ index: idx, label: 'アドバイス' });
-  idx++; // アドバイス2ページ目
   idx++;
   chips.push({ index: idx, label: 'チェックリスト' });
   idx++;
@@ -62,8 +59,9 @@ export function accidentsMaterialViewerPage(o: AccidentsMaterialViewerOptions): 
   const totalPages = pageBodies.length;
   const pages = pageBodies
     .map(
-      (body, i) => `<div class="sheet book-page${i === 0 ? ' active' : ''}" data-page="${i}">
-      <div class="sheet-fit">${body}</div>
+      (page, i) => `<div class="sheet book-page${i === 0 ? ' active' : ''}" data-page="${i}">
+      <div class="sheet-fit">${page.body}</div>
+      ${page.stampFooterHtml || ''}
     </div>`
     )
     .join('');

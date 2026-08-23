@@ -87,8 +87,8 @@ async function canEdit(c: { env: Env; get: (k: 'adminId') => number }): Promise<
   return perms === null || perms.includes('handover.edit');
 }
 
-async function logAction(c: { env: Env; get: (k: 'adminId') => number }, action: string, division: number, date: string): Promise<void> {
-  const { id, name } = await adminName(c);
+async function logAction(c: { env: Env; get: (k: 'adminId') => number }, action: string, division: number, date: string, admin?: { id: number; name: string }): Promise<void> {
+  const { id, name } = admin ?? await adminName(c);
   await c.env.DB.prepare(
     'INSERT INTO handover_edit_logs (admin_id, admin_name, action, division, date) VALUES (?, ?, ?, ?, ?)'
   ).bind(id, name, action, division, date).run();
@@ -572,6 +572,7 @@ app.put('/api/handover/:division/:date', async (c) => {
 
   const b = await c.req.json<Partial<Sheet>>().catch(() => ({} as Partial<Sheet>));
   const divNum = parseInt(division, 10);
+  const admin = await adminName(c);
   await c.env.DB.prepare(`
     INSERT INTO handover_sheets
       (division, date, kabu_yotei, kabu_jisseki, douta, main_content, toka_content, jiko_content, tenken_content, joshu_content, jomu_content, updated_at, updated_by)
@@ -585,12 +586,12 @@ app.put('/api/handover/:division/:date', async (c) => {
     divNum, date, b.kabu_yotei ?? null, b.kabu_jisseki ?? null, b.douta || '未',
     b.main_content ?? '', b.toka_content ?? '', b.jiko_content ?? '',
     b.tenken_content ?? '', b.joshu_content ?? '', b.jomu_content ?? '',
-    (await adminName(c)).name,
+    admin.name,
   ).run();
 
   const saved = await c.env.DB.prepare('SELECT updated_at FROM handover_sheets WHERE division = ? AND date = ?')
     .bind(divNum, date).first<{ updated_at: string }>();
-  await logAction(c, 'save', divNum, date);
+  await logAction(c, 'save', divNum, date, admin);
   return c.json({ ok: true, updated_at: saved?.updated_at ?? null });
 });
 
@@ -622,13 +623,14 @@ app.patch('/api/handover/:division/:date/field', async (c) => {
     ? (b.value === null || b.value === undefined || b.value === '' ? null : Number(b.value))
     : (b.value ?? (field === 'douta' ? '未' : ''));
 
+  const admin = await adminName(c);
   await c.env.DB.prepare(
     `UPDATE handover_sheets SET ${field} = ?, updated_at = datetime('now','localtime'), updated_by = ? WHERE division = ? AND date = ?`
-  ).bind(value, (await adminName(c)).name, divNum, date).run();
+  ).bind(value, admin.name, divNum, date).run();
 
   const saved = await c.env.DB.prepare('SELECT updated_at FROM handover_sheets WHERE division = ? AND date = ?')
     .bind(divNum, date).first<{ updated_at: string }>();
-  await logAction(c, 'save', divNum, date);
+  await logAction(c, 'save', divNum, date, admin);
   return c.json({ ok: true, updated_at: saved?.updated_at ?? null });
 });
 
@@ -661,7 +663,8 @@ app.post('/api/handover/:division/:date/next', async (c) => {
   ).bind(divNum, date).first<{ main_content: string; jiko_content: string; joshu_content: string; jomu_content: string }>();
   const tenkenContent = await buildTenkenContent(c.env.DB, divNum, next);
 
-  const updatedBy = (await adminName(c)).name;
+  const admin = await adminName(c);
+  const updatedBy = admin.name;
   await c.env.DB.prepare(`
     INSERT OR IGNORE INTO handover_sheets
       (division, date, main_content, jiko_content, tenken_content, joshu_content, jomu_content, updated_at, updated_by)
@@ -691,7 +694,7 @@ app.post('/api/handover/:division/:date/next', async (c) => {
     ));
   }
 
-  await logAction(c, 'next', divNum, next);
+  await logAction(c, 'next', divNum, next, admin);
   return c.json({ nextDate: next });
 });
 

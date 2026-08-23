@@ -14,11 +14,14 @@ async function pushToInstructors(env: Env, messages: object[]): Promise<void> {
   const uids = (rows.results ?? []).map(r => r.line_uid);
   if (uids.length === 0) return;
   // Multicast API: 1リクエストで最大500人に一括送信
-  await fetch('https://api.line.me/v2/bot/message/multicast', {
+  const res = await fetch('https://api.line.me/v2/bot/message/multicast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${at}` },
     body: JSON.stringify({ to: uids, messages }),
   });
+  if (!res.ok) {
+    console.error('[pushToInstructors] LINE push failed', res.status, await res.text());
+  }
 }
 
 // 朝の出勤レポート
@@ -147,11 +150,14 @@ export async function sendKanchoAttendance(env: Env, todayStr: string): Promise<
          + line('遅番', oso) + line('終業班長', shugyo);
   }
 
-  await fetch('https://api.line.me/v2/bot/message/multicast', {
+  const res = await fetch('https://api.line.me/v2/bot/message/multicast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${at}` },
     body: JSON.stringify({ to: uids, messages: [{ type: 'text', text: msg.trim() }] }),
   });
+  if (!res.ok) {
+    console.error('[kancho_attendance] LINE push failed', res.status, await res.text());
+  }
 }
 
 // 特定の通知タイプを実行（手動送信・cron 共用）
@@ -182,6 +188,25 @@ async function checkRetirements(env: Env, todayStr: string): Promise<void> {
   `).bind(todayStr).run();
 }
 
+// ハッピーバースデーモード: 設定された発火時刻(birthday_fire_hours)と現在のJST時刻が一致し、
+// 本日誕生日の有効な対象者がいれば birthday_fire_events に1行記録する（同じ日時への重複記録はUNIQUE制約でスキップ）
+async function checkBirthdayFire(env: Env, nowJST: Date, todayStr: string, currentHour: number): Promise<void> {
+  const hourRow = await env.DB.prepare('SELECT 1 FROM birthday_fire_hours WHERE hour = ?').bind(currentHour).first();
+  if (!hourRow) return;
+
+  const birthMonth = nowJST.getUTCMonth() + 1;
+  const birthDay = nowJST.getUTCDate();
+  const celebrants = await env.DB.prepare(
+    'SELECT id FROM birthday_celebrants WHERE is_active = 1 AND birth_month = ? AND birth_day = ?'
+  ).bind(birthMonth, birthDay).all<{ id: number }>();
+  const ids = (celebrants.results ?? []).map(r => r.id);
+  if (ids.length === 0) return;
+
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO birthday_fire_events (event_date, hour, celebrant_ids) VALUES (?, ?, ?)'
+  ).bind(todayStr, currentHour, JSON.stringify(ids)).run();
+}
+
 // Cron ハンドラー（毎時 0 分に実行、設定時刻と照合）
 export async function handleCron(env: Env): Promise<void> {
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -191,6 +216,9 @@ export async function handleCron(env: Env): Promise<void> {
 
   // 退職日到達チェック（毎時実行）
   await checkRetirements(env, todayStr);
+
+  // ハッピーバースデーモードの発火判定（毎時実行）
+  await checkBirthdayFire(env, nowJST, todayStr, currentHour);
 
   const settings = await env.DB.prepare(
     'SELECT type, send_hour, send_minute, last_sent_date FROM notification_settings WHERE is_enabled = 1'

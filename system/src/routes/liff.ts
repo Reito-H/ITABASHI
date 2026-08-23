@@ -29,11 +29,14 @@ async function uidFromRequest(req: Request): Promise<string | null> {
 
 // LINE push メッセージ送信
 async function pushMessage(to: string, accessToken: string, text: string): Promise<void> {
-  await fetch('https://api.line.me/v2/bot/message/push', {
+  const res = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     body: JSON.stringify({ to, messages: [{ type: 'text', text }] }),
   });
+  if (!res.ok) {
+    console.error('[liff pushMessage] LINE push failed', res.status, await res.text());
+  }
 }
 
 // 車番入力→課・班の断定表示＋担当乗務員候補（各報告フォーム共通）。

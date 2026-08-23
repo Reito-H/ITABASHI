@@ -24,11 +24,12 @@ export function meterPanelHtml(): string {
     <div class="ins-table-wrap">
       <table class="ins-table" data-vd-table="meter">
         <thead><tr>
-          <th>車番</th><th>課・班</th><th>登録番号</th><th>メーター器NO</th>
+          <th>車番</th><th>課・班</th><th>登録番号</th><th>初年度</th><th>登録日</th><th>メーター器NO</th>
           <th>仮検査までの期限</th><th>仮検査担当者</th><th>本検査までの期限</th><th>本検査担当者</th>
           <th>前年受検日</th><th>受検日</th><th>検査済票番号</th><th>更新/交換/代替</th><th>点検者</th>
+          <th>実施日(確定)</th><th>実施内容(確定)</th>
         </tr></thead>
-        <tbody id="vd-meter-tbody"><tr><td colspan="13" style="padding:20px;text-align:center;color:#9ca3af;">読み込み中...</td></tr></tbody>
+        <tbody id="vd-meter-tbody"><tr><td colspan="17" style="padding:20px;text-align:center;color:#9ca3af;">読み込み中...</td></tr></tbody>
       </table>
     </div>
   `;
@@ -132,12 +133,25 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
       }).join('');
       return '<td style="padding:6px 8px;"><select class="vd-field" data-field="update_kind" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 4px;font-size:13px;">' + opts + '</select></td>';
     }
+    function vdMonthTd(field, value) {
+      return '<td style="padding:6px 8px;"><input type="month" class="vd-field" data-field="' + field + '" value="' + (value || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"></td>';
+    }
+    var VD_CONFIRMED_TYPE_VALUES = ['', '3', '6', 'S', '車検', '代替'];
+    function vdConfirmedTypeTd(value) {
+      var opts = VD_CONFIRMED_TYPE_VALUES.map(function (k) {
+        var label = k === '' ? '－' : k;
+        return '<option value="' + k + '"' + (value === k || (!value && k === '') ? ' selected' : '') + '>' + label + '</option>';
+      }).join('');
+      return '<td style="padding:6px 8px;"><select class="vd-field" data-field="confirmed_type" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 4px;font-size:13px;">' + opts + '</select></td>';
+    }
 
     function vdMeterRowHtml(r) {
       return '<tr data-car-no="' + vdEscAttr(r.car_no) + '">'
         + '<td style="padding:6px 8px;text-align:center;font-weight:700;">' + vdEscText(r.car_no) + '</td>'
         + '<td style="padding:6px 8px;text-align:center;color:#666;">' + r.ka + '課' + r.team + '班</td>'
         + vdTextTd('registration_no', r.registration_no, '110px')
+        + vdMonthTd('initial_year', r.initial_year)
+        + vdDateTd('registration_date', r.registration_date)
         + vdTextTd('meter_device_no', r.meter_device_no, '90px')
         + vdDateTd('tentative_limit', r.tentative_limit)
         + vdAssigneeTd('tentative_assignee', r.tentative_assignee_id, r.tentative_assignee_name)
@@ -148,6 +162,8 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
         + vdTextTd('cert_no', r.cert_no, '80px')
         + vdUpdateKindTd(r.update_kind)
         + vdTextTd('checker_name', r.checker_name, '70px')
+        + vdDateTd('confirmed_date', r.confirmed_date)
+        + vdConfirmedTypeTd(r.confirmed_type)
         + '</tr>';
     }
 
@@ -165,7 +181,7 @@ export function vehicleDeadlinesClientScript(adminPath: string): string {
       var tbody = document.getElementById('vd-' + kind + '-tbody');
       if (!tbody) return;
       if (!rows.length) {
-        var cols = kind === 'meter' ? 13 : 5;
+        var cols = kind === 'meter' ? 17 : 5;
         tbody.innerHTML = '<tr><td colspan="' + cols + '" style="padding:20px;text-align:center;color:#9ca3af;">該当する車両がありません</td></tr>';
         return;
       }

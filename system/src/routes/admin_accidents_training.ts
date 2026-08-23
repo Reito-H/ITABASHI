@@ -6,6 +6,7 @@ import { ADMIN_PATH } from '../config';
 import { layout } from '../html/layout';
 import { accidentsTrainingPage } from '../html/accidents_training';
 import { renderAccidentsTrainingPrintPage, type TrainingNoticeItem } from '../html/accidents_training_print';
+import { renderAccidentsRideAlongNoticePrintPage } from '../html/accidents_ride_along_notice_print';
 import { buildIndividualRanking } from '../html/accidents_analysis';
 import type { AccidentRecord } from '../html/accidents';
 
@@ -78,6 +79,26 @@ app.get('/accidents/training/print', async (c) => {
     items,
     backHref: `${ADMIN_PATH}/accidents/training?months=${months}${selectedDivision != null ? '&division=' + selectedDivision : ''}`,
   }));
+});
+
+app.get('/accidents/training/notice/print', async (c) => {
+  return c.html(renderAccidentsRideAlongNoticePrintPage({
+    backHref: `${ADMIN_PATH}/accidents/training`,
+    searchEmployeesHref: `${ADMIN_PATH}/accidents/training/notice/search-employees`,
+  }));
+});
+
+// 事故記録がない（=accident_records経由では検索できない）社員も対象にできるよう、
+// 社員名簿(employees)を直接検索する。他機能の検索employees系APIと同じSQL・レスポンス形。
+app.get('/accidents/training/notice/search-employees', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 40);
+  if (!q) return c.json([]);
+  const rows = await c.env.DB.prepare(
+    `SELECT id, name, emp_no, division, team FROM employees
+     WHERE is_active = 1 AND (name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)
+     ORDER BY division, team, seq_no LIMIT 20`
+  ).bind(`%${q}%`, `%${q}%`, `%${q}%`).all<{ id: number; name: string; emp_no: string; division: number | null; team: number | null }>();
+  return c.json(rows.results ?? []);
 });
 
 export default app;

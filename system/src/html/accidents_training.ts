@@ -53,6 +53,10 @@ export function accidentsTrainingPage(opts: AccidentsTrainingOpts): string {
   .at-table th { padding:9px 12px; text-align:left; background:#f9fafb; color:#6b7280; font-size:12px; border-bottom:1px solid #e5e7eb; white-space:nowrap; }
   .at-table td { padding:9px 12px; border-bottom:1px solid #f3f4f6; white-space:nowrap; }
   .at-note { font-size:12px; color:#6b7280; margin:10px 0 16px; line-height:1.6; }
+  .at-newgrad-box { display:flex; align-items:center; justify-content:space-between; gap:12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:12px 16px; margin-bottom:18px; }
+  .at-newgrad-text { font-size:12.5px; color:#1a3a5c; line-height:1.6; }
+  .at-newgrad-text b { display:block; font-size:13.5px; margin-bottom:2px; }
+  .at-newgrad-link { flex-shrink:0; padding:9px 16px; border-radius:8px; font-size:12.5px; font-weight:700; background:#1a3a5c; color:#fff; text-decoration:none; }
 </style>
 <div class="at">
   ${accidentsTabNav('training')}
@@ -62,6 +66,11 @@ export function accidentsTrainingPage(opts: AccidentsTrainingOpts): string {
     <select class="at-select" id="at-division" onchange="atReload()">${divOptions}</select>
   </div>
   <p class="at-note">指定期間内の事故件数がしきい値以上の乗務員を自動抽出します。チェックを外せば対象から除外できます。「一括印刷」で対象者ごとに1枚ずつ事故研修のお知らせを印刷します（帳票の文面は印刷画面でその場で編集できます）。</p>
+
+  <div class="at-newgrad-box">
+    <div class="at-newgrad-text"><b>新卒対象：事故添乗研修のお知らせ</b>氏名・課・班・日時等が空欄の手書き用テンプレートをA4で印刷します。</div>
+    <a class="at-newgrad-link" href="${ADMIN_PATH}/accidents/training/notice/print" target="_blank" rel="noopener">🖨️ 印刷用を開く</a>
+  </div>
   <div class="at-top">
     <div class="at-count">対象者 <b id="at-selected-count">${candidates.length}</b> 名</div>
     <button class="at-btn" id="at-print-btn" onclick="atPrint()" ${candidates.length === 0 ? 'disabled' : ''}>選択した対象者を一括印刷</button>

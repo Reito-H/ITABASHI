@@ -49,6 +49,7 @@ type MeterRow = {
   honkensa_limit: string | null; honkensa_assignee_id: number | null; honkensa_assignee_name: string | null;
   registration_no: string | null; meter_device_no: string | null; prev_inspection_date: string | null;
   cert_no: string | null; inspection_date: string | null; update_kind: string | null; checker_name: string | null;
+  initial_year: string | null; registration_date: string | null; confirmed_date: string | null; confirmed_type: string | null;
 };
 
 app.get('/api/vehicle-deadlines/meter', async (c) => {
@@ -59,7 +60,8 @@ app.get('/api/vehicle-deadlines/meter', async (c) => {
        mi.tentative_limit, mi.tentative_assignee_id, mi.tentative_assignee_name,
        mi.honkensa_limit, mi.honkensa_assignee_id, mi.honkensa_assignee_name,
        mi.registration_no, mi.meter_device_no, mi.prev_inspection_date,
-       mi.cert_no, mi.inspection_date, mi.update_kind, mi.checker_name
+       mi.cert_no, mi.inspection_date, mi.update_kind, mi.checker_name,
+       mi.initial_year, mi.registration_date, mi.confirmed_date, mi.confirmed_type
      FROM vehicle_teams vt
      LEFT JOIN meter_inspections mi ON mi.car_no = vt.car_no
      ${where}
@@ -71,10 +73,13 @@ app.get('/api/vehicle-deadlines/meter', async (c) => {
 });
 
 const METER_FIELDS = ['car_no', 'tentative_limit', 'tentative_assignee_id', 'tentative_assignee_name', 'honkensa_limit', 'honkensa_assignee_id', 'honkensa_assignee_name',
-  'registration_no', 'meter_device_no', 'prev_inspection_date', 'cert_no', 'inspection_date', 'update_kind', 'checker_name'] as const;
+  'registration_no', 'meter_device_no', 'prev_inspection_date', 'cert_no', 'inspection_date', 'update_kind', 'checker_name',
+  'initial_year', 'registration_date', 'confirmed_date', 'confirmed_type'] as const;
 type MeterField = typeof METER_FIELDS[number];
-const METER_DATE_FIELDS = new Set(['tentative_limit', 'honkensa_limit', 'prev_inspection_date', 'inspection_date']);
+const METER_DATE_FIELDS = new Set(['tentative_limit', 'honkensa_limit', 'prev_inspection_date', 'inspection_date', 'registration_date', 'confirmed_date']);
 const METER_UPDATE_KIND_VALUES = new Set(['renewal', 'exchange', 'substitute']);
+const METER_CONFIRMED_TYPE_VALUES = new Set(['3', '6', 'S', '車検', '代替']);
+const METER_INITIAL_YEAR_RE = /^\d{4}-\d{2}$/;
 
 app.put('/api/vehicle-deadlines/meter/:carNo', async (c) => {
   const carNo = c.req.param('carNo');
@@ -93,6 +98,12 @@ app.put('/api/vehicle-deadlines/meter/:carNo', async (c) => {
     }
     if (field === 'update_kind' && body[field] !== null && !METER_UPDATE_KIND_VALUES.has(String(body[field]))) {
       return c.json({ error: '更新種別の値が不正です' }, 400);
+    }
+    if (field === 'confirmed_type' && body[field] !== null && !METER_CONFIRMED_TYPE_VALUES.has(String(body[field]))) {
+      return c.json({ error: '実施内容の値が不正です' }, 400);
+    }
+    if (field === 'initial_year' && body[field] !== null && !METER_INITIAL_YEAR_RE.test(String(body[field]))) {
+      return c.json({ error: '初年度の形式が不正です' }, 400);
     }
     sets.push(`${field} = ?`);
     values.push(body[field] === undefined ? null : (body[field] as string | number | null));

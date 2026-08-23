@@ -153,11 +153,17 @@ export const MATERIAL_PAGE_CSS = `
 
   .m-report-lines { margin-bottom:18px; }
   .m-report-line { border-bottom:1px solid #cbd5e1; height:27px; }
-  .m-vow-footer { display:flex; justify-content:flex-end; align-items:flex-end; }
+  .m-closing-wrap { padding-bottom:24mm; }
+
+  /* .sheet-fit（自動縮小の対象）の外に置き、.sheet基準の絶対位置に固定することで、
+     上の内容がどれだけ長くなっても印鑑欄が押し出されたり2枚目にはみ出したりしないようにする */
+  .m-stamp-footer { position:absolute; right:18mm; bottom:16mm; display:flex; justify-content:flex-end; }
   .m-stamp-row { display:flex; gap:16px; }
   .m-stamp-box { display:flex; flex-direction:column; align-items:center; gap:5px; }
   .m-stamp-frame { width:48px; height:48px; border:1.5px solid #64748b; border-radius:4px; }
   .m-stamp-label { font-size:10.5px; color:#475569; }
+
+  .m-merged-divider { margin-top:6px; padding-top:15px; border-top:1px dashed #cbd5e1; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -316,6 +322,12 @@ function renderThemeCaseBody(theme: ThemeContent): string {
   `;
 }
 
+// 事例クイズと解答・解説を1ページに統合したもの（旧版はこの2つを別ページに分けており、
+// ページ数が不必要に膨らむ原因になっていたため統合した。auto-shrink(fitAllSheets)で1枚に収まる）
+function renderThemeFullBody(theme: ThemeContent, stats: MaterialStats): string {
+  return `${renderThemeCaseBody(theme)}<div class="m-merged-divider">${renderThemeStatsBody(theme, stats)}</div>`;
+}
+
 function renderThemeStatsBody(theme: ThemeContent, stats: MaterialStats): string {
   const themeStat = stats.themes[theme.id];
   const extraStat =
@@ -353,6 +365,11 @@ function renderThemeStatsBody(theme: ThemeContent, stats: MaterialStats): string
 function renderPsychologyBody(section: PsychologySection): string {
   const paragraphs = section.paragraphs.map(p => `<div class="m-explain">${escHtml(p)}</div>`).join('');
   return `<div class="m-psy-title">${iconBrain()}<span>${escHtml(section.title)}</span></div>${paragraphs}`;
+}
+
+// 心理学解説2ページ分を1ページに統合したもの（ページ数削減のため）
+function renderPsychologyFullBody(): string {
+  return `${renderPsychologyBody(PSYCHOLOGY_SECTIONS.page15)}<div class="m-merged-divider">${renderPsychologyBody(PSYCHOLOGY_SECTIONS.page16)}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -404,35 +421,54 @@ function renderClosingBody(personal: PersonalStats | null, themeCasePageNo: Reco
   const items = CLOSING_VOW.commitments
     .map((c, i) => `<div class="m-vow-item"><span class="m-vow-num">${i + 1}</span><span>${escHtml(c)}</span></div>`)
     .join('');
-  const reportLines = Array.from({ length: 5 })
+  const staffLines = Array.from({ length: 3 })
+    .map(() => `<div class="m-report-line"></div>`)
+    .join('');
+  const reportLines = Array.from({ length: 4 })
     .map(() => `<div class="m-report-line"></div>`)
     .join('');
   return `
-    <div class="m-vow-title">${iconCheck()}<span>${escHtml(CLOSING_VOW.title)}</span></div>
-    ${typeBox}
-    <div class="m-explain">${escHtml(CLOSING_VOW.leadText)}</div>
-    <div class="m-vow-list">${items}</div>
-    <div class="m-vow-sign">
-      <div class="m-vow-sign-field"><span>${escHtml(CLOSING_VOW.dateLabel)}</span><span class="m-vow-sign-blank"></span></div>
-      <div class="m-vow-sign-field"><span>${escHtml(CLOSING_VOW.signatureLabel)}</span><span class="m-vow-sign-blank"></span></div>
-    </div>
-    <div class="m-section-title">指導者記入欄</div>
-    <div class="m-report-lines">${reportLines}</div>
-    <div class="m-vow-footer">
-      <div class="m-stamp-row">
-        <div class="m-stamp-box"><div class="m-stamp-frame"></div><div class="m-stamp-label">課長</div></div>
-        <div class="m-stamp-box"><div class="m-stamp-frame"></div><div class="m-stamp-label">班長</div></div>
-        <div class="m-stamp-box"><div class="m-stamp-frame"></div><div class="m-stamp-label">事故担当</div></div>
+    <div class="m-closing-wrap">
+      <div class="m-vow-title">${iconCheck()}<span>${escHtml(CLOSING_VOW.title)}</span></div>
+      ${typeBox}
+      <div class="m-explain">${escHtml(CLOSING_VOW.leadText)}</div>
+      <div class="m-vow-list">${items}</div>
+      <div class="m-vow-sign">
+        <div class="m-vow-sign-field"><span>${escHtml(CLOSING_VOW.dateLabel)}</span><span class="m-vow-sign-blank"></span></div>
+        <div class="m-vow-sign-field"><span>${escHtml(CLOSING_VOW.signatureLabel)}</span><span class="m-vow-sign-blank"></span></div>
       </div>
+      <div class="m-section-title">乗務社員記入欄</div>
+      <div class="m-report-lines">${staffLines}</div>
+      <div class="m-section-title">指導者記入欄</div>
+      <div class="m-report-lines">${reportLines}</div>
     </div>
   `;
+}
+
+// 印鑑欄は.sheet-fit（自動縮小の対象）の外に置くため、本文とは別に返す。
+// 呼び出し側(print/viewer)で.sheet-fitの兄弟要素として配置すること。
+export function renderClosingStampFooterHtml(): string {
+  return `<div class="m-stamp-footer">
+    <div class="m-stamp-row">
+      <div class="m-stamp-box"><div class="m-stamp-frame"></div><div class="m-stamp-label">課長</div></div>
+      <div class="m-stamp-box"><div class="m-stamp-frame"></div><div class="m-stamp-label">班長</div></div>
+      <div class="m-stamp-box"><div class="m-stamp-frame"></div><div class="m-stamp-label">事故担当</div></div>
+    </div>
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------
 // 全ページの組み立て（対象者の有無でページ構成・総ページ数が変わる）
 // ---------------------------------------------------------------------------
 
-export function renderMaterialSheetsInner(stats: MaterialStats, personal: PersonalStats | null): string[] {
+export interface MaterialSheet {
+  body: string;
+  // .sheet-fit（自動縮小の対象）の外側にそのまま差し込む追加要素（印鑑欄など）。
+  // 呼び出し側は .sheet-fit の兄弟要素として配置すること。
+  stampFooterHtml?: string;
+}
+
+export function renderMaterialSheetsInner(stats: MaterialStats, personal: PersonalStats | null): MaterialSheet[] {
   const orderedThemes: ThemeContent[] = THEME_ORDER.map(id => THEME_CONTENTS.find(t => t.id === id)).filter(
     (t): t is ThemeContent => !!t
   );
@@ -440,54 +476,52 @@ export function renderMaterialSheetsInner(stats: MaterialStats, personal: Person
 
   // ページ構成は固定パターンなので、実際に本文を組み立てる前に各ページの番号を求められる。
   // 個人の事故傾向ページ（対象者選択時のみ）が挿入される分、以降の番号が1つずれる。
+  // 事例と解答・解説、心理学解説2本、アドバイス2本はそれぞれ1ページに統合済み（旧版はページ数が
+  // 無駄に多かったため、1ページに収まる内容は極力1ページにまとめている）。
   let n = 3; // 1:表紙 2:全社統計サマリー 3:自己診断
   if (hasPersonalPage) n++;
   const themeCasePageNo = {} as Record<ThemeId, number>;
   for (const theme of orderedThemes) {
     n++;
     themeCasePageNo[theme.id] = n;
-    n++; // 解答・解説ページ
   }
-  n += 2; // なぜ事故は起きるのか ×2
-  n += 2; // 自己診断タイプ別アドバイス ×2
+  n += 1; // なぜ事故は起きるのか（統合1ページ）
+  n += 1; // 自己診断タイプ別アドバイス（統合1ページ）
   n += 1; // 自己チェックリスト
   n += 1; // まとめ・宣言書
   const total = n;
 
-  const pages: string[] = [];
+  const pages: MaterialSheet[] = [];
   let pos = 0;
 
   pos++;
-  pages.push(renderPageShell('表紙', pos, total, renderCoverBody(personal)));
+  pages.push({ body: renderPageShell('表紙', pos, total, renderCoverBody(personal)) });
   pos++;
-  pages.push(renderPageShell('全社統計サマリー', pos, total, renderSummaryBody(stats)));
+  pages.push({ body: renderPageShell('全社統計サマリー', pos, total, renderSummaryBody(stats)) });
   pos++;
-  pages.push(renderPageShell('危険傾向 自己診断', pos, total, renderDiagQuestionBody()));
+  pages.push({ body: renderPageShell('危険傾向 自己診断', pos, total, renderDiagQuestionBody()) });
 
   if (hasPersonalPage && personal) {
     pos++;
-    pages.push(renderPageShell(`${personal.name}さんの事故傾向`, pos, total, renderPersonalAnalysisBody(personal, themeCasePageNo)));
+    pages.push({ body: renderPageShell(`${personal.name}さんの事故傾向`, pos, total, renderPersonalAnalysisBody(personal, themeCasePageNo)) });
   }
 
   for (const theme of orderedThemes) {
     pos++;
-    pages.push(renderPageShell(`事例${theme.no} ${theme.title}`, pos, total, renderThemeCaseBody(theme)));
-    pos++;
-    pages.push(renderPageShell(`事例${theme.no} 解答・解説 ― ${theme.title}`, pos, total, renderThemeStatsBody(theme, stats)));
+    pages.push({ body: renderPageShell(`事例${theme.no} ${theme.title}`, pos, total, renderThemeFullBody(theme, stats)) });
   }
 
   pos++;
-  pages.push(renderPageShell('なぜ事故は起きるのか', pos, total, renderPsychologyBody(PSYCHOLOGY_SECTIONS.page15)));
+  pages.push({ body: renderPageShell('なぜ事故は起きるのか', pos, total, renderPsychologyFullBody()) });
   pos++;
-  pages.push(renderPageShell('なぜ事故は起きるのか', pos, total, renderPsychologyBody(PSYCHOLOGY_SECTIONS.page16)));
+  pages.push({ body: renderPageShell('自己診断タイプ別アドバイス', pos, total, renderDiagAdviceBody(DIAG_TYPES)) });
   pos++;
-  pages.push(renderPageShell('自己診断タイプ別アドバイス', pos, total, renderDiagAdviceBody(DIAG_TYPES.slice(0, 2))));
+  pages.push({ body: renderPageShell('自己チェックリスト', pos, total, renderChecklistBody()) });
   pos++;
-  pages.push(renderPageShell('自己診断タイプ別アドバイス', pos, total, renderDiagAdviceBody(DIAG_TYPES.slice(2, 4))));
-  pos++;
-  pages.push(renderPageShell('自己チェックリスト', pos, total, renderChecklistBody()));
-  pos++;
-  pages.push(renderPageShell('まとめ・宣言書', pos, total, renderClosingBody(personal, themeCasePageNo)));
+  pages.push({
+    body: renderPageShell('まとめ・宣言書', pos, total, renderClosingBody(personal, themeCasePageNo)),
+    stampFooterHtml: renderClosingStampFooterHtml(),
+  });
 
   return pages;
 }

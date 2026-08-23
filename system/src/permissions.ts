@@ -20,7 +20,8 @@
 //               settings.instructors / settings.periods / settings.notifications /
 //               settings.offices / settings.vehicle-search-guide / settings.documents /
 //               settings.tutorial / settings.status / settings.kancho-logic /
-//               settings.wage-estimate / settings.driving-risk
+//               settings.wage-estimate / settings.driving-risk /
+//               settings.announcement-bar / settings.birthday
 
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
 // キーは '|' 区切りで複数指定可（いずれか1つでも権限があればOK）。例: 'a|b|c'
@@ -50,6 +51,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/documents/,            'settings.documents'],
   [/^\/settings\/tutorial/,             'settings.tutorial'],
   [/^\/settings\/status/,               'settings.status'],
+  [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
+  [/^\/settings\/birthday/,             'settings.birthday'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
   [/^\/settings\/kancho-logic/,         'settings.kancho-logic'],
@@ -68,6 +71,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/violation-types/,           'settings.violation-types'],
   [/^\/api\/kancho-wish-settings/,      'settings.kancho-wish'],
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
+  [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
+  [/^\/api\/birthday/,                  'settings.birthday'],
   // 各ページ
   [/^\/kancho-shift/, 'kancho-shift'],
   [/^\/api\/kancho/,  'kancho-shift'],
@@ -238,6 +243,8 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.documents',            label: '資料センター' },
     { key: 'settings.tutorial',             label: 'チュートリアル' },
     { key: 'settings.status',               label: 'システムステータス' },
+    { key: 'settings.announcement-bar',     label: 'アナウンスバー' },
+    { key: 'settings.birthday',             label: 'ハッピーバースデーモード' },
     { key: 'settings.kancho',               label: '班長関連（ハブ）' },
     { key: 'settings.kancho-roster',        label: '班長リスト（班長登録の解除のみ編集可）' },
     { key: 'settings.kancho-wish',          label: '希望休フォーム' },

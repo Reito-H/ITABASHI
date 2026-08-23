@@ -58,6 +58,8 @@ import adminCrewShiftRoutes from './routes/admin_crew_shift';
 import adminDispatchRoutes from './routes/admin_dispatch';
 import adminHandoverRoutes from './routes/admin_handover';
 import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
+import adminAnnouncementBarRoutes, { announcementBarPublicApi } from './routes/admin_announcement_bar';
+import adminBirthdayRoutes, { birthdayPublicApi } from './routes/admin_birthday';
 import adminRequestsRoutes from './routes/admin_requests';
 import adminCcListRoutes from './routes/admin_cc_list';
 import adminBenriRoutes from './routes/admin_benri';
@@ -276,6 +278,8 @@ app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
 app.route(`/${SECRET}/admin`, adminDispatchRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
+app.route(`/${SECRET}/admin`, adminAnnouncementBarRoutes);
+app.route(`/${SECRET}/admin`, adminBirthdayRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
 app.route(`/${SECRET}/admin`, adminCcListRoutes);
 app.route(`/${SECRET}/admin`, adminBenriRoutes);
@@ -313,6 +317,8 @@ app.use('/api/*', async (c, next) => {
   if (path.startsWith('/api/public/')) return next();
   // Web内お知らせ（ベルマーク）の既読化は個人の閲覧状態にすぎず、ページ権限に関わらず全アカウントが利用できる
   if (path.startsWith('/api/announcements/web/')) return next();
+  // アナウンスバーの表示・一時非表示も同様に、管理側の権限(settings.announcement-bar)に関わらず全アカウントが利用できる
+  if (path.startsWith('/api/announcement-bar/')) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -332,6 +338,8 @@ app.route('/api/info', infoApi);
 app.route('/api/events', eventsApi);
 app.route('/api/line', lineApiRoutes);
 app.route('/api/announcements/web', announcementsWebApi);
+app.route('/api/announcement-bar', announcementBarPublicApi);
+app.route('/api/birthday', birthdayPublicApi);
 app.route('/api/schedule-types', scheduleTypesApi);
 app.route('/api/interviews', interviewsApi);
 app.route('/api/coaches', coachesApi);

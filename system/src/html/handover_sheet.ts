@@ -166,6 +166,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-save-dot{position:fixed;top:64px;right:18px;width:8px;height:8px;border-radius:50%;opacity:0;transition:opacity .3s;z-index:400;}
 #ho-save-dot.saving{opacity:1;background:var(--yellow);animation:hoPulse .8s ease-in-out infinite;}
 #ho-save-dot.saved{opacity:1;background:#4caf50;animation:none;}
+#ho-save-dot.error{opacity:1;background:#e53935;animation:hoPulse .8s ease-in-out infinite;}
 @keyframes hoPulse{0%,100%{transform:scale(1);}50%{transform:scale(1.5);}}
 #ho-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:rgba(30,42,58,.9);color:#fff;
           font-size:12px;font-weight:700;padding:8px 18px;border-radius:18px;z-index:700;opacity:0;transition:opacity .25s;
@@ -487,7 +488,7 @@ function initialDivision(){
 const H = {
   division: initialDivision(), date: null, dates: [], updatedAt: null, fieldTimers: {}, savedRange: null,
   numpickApply: null, fontSizes: { 1: 14, 2: 14, 3: 14, 4: 14 }, limits: [],
-  sections: [], customContent: [],
+  sections: [], customContent: [], saveFailCount: 0,
 };
 // DOM要素id → DBカラム名（項目単位の部分保存で使用）
 const FIELD_BY_ID = {
@@ -525,7 +526,19 @@ function toast(msg, dur){
 async function api(method, path, body){
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(API + path, opts);
+  let res;
+  try {
+    res = await fetch(API + path, opts);
+  } catch(e){
+    throw new Error('通信エラー（ネットワークを確認してください）');
+  }
+  // ログインセッション切れ時、APIへのリクエストはログイン画面(HTML)へリダイレクトされ
+  // 200 OKで返ってくることがある。res.okだけで判定すると「保存成功」と誤認するため、
+  // レスポンスがJSONでない＝ログイン画面等が返ってきたケースを明示的にエラー扱いする。
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')){
+    throw new Error(res.redirected ? 'ログインが切れています。ページを再読み込みしてください' : '通信エラー（サーバーの応答が不正です）');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'エラー');
   return data;
@@ -1481,6 +1494,7 @@ async function loadSheet(date){
     const data = await api('GET', '/'+H.division+'/'+date);
     H.updatedAt = data.version ?? (data.sheet?.updated_at || null);
     H.customContent = data.customContent || [];
+    H.saveFailCount = 0;
     renderSheet(data.sheet, date);
     hideStaleBanner();
     refreshTodoFloatIfOpen();
@@ -1510,6 +1524,13 @@ async function checkStaleVersion(){
 async function reloadStaleSheet(){
   hideStaleBanner();
   await flushPendingSaves(); // 自分の未保存の入力を消さないよう、読み込み直す前に先に保存する
+  // 保存が（リトライしても）失敗したままだと、ここで読み込み直すと未保存の入力が
+  // サーバー側の古い内容で上書きされて消えてしまう。その場合は読み込みを中止する。
+  if (H.saveFailCount > 0){
+    showStaleBanner();
+    toast('保存できていない内容があるため更新を中止しました。保存が完了してから再度お試しください', 5000);
+    return;
+  }
   await loadSheet(H.date);
   toast('最新の内容に更新しました');
 }
@@ -1932,19 +1953,34 @@ function fieldValue(field){
 // division/date/valueはスケジュール時点の値を渡す（発火までの間にユーザーが別の日付・課へ
 // 切り替えても、その時点のDOMを読み直さず・誤ったシートへ書き込まないようにするため）
 // 'section_<id>'はカスタムセクション専用エンドポイントへ保存する。
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+// 保存失敗時、最大2回まで自動で再送する（間隔を空けて一時的な通信エラー/サーバー負荷を吸収する）。
+// リトライも含めて完了するまでPromiseを返し続けることで、flushPendingSaves()が
+// 「リトライ中なのに完了扱い」にならないようにしている。
+const SAVE_RETRY_DELAYS_MS = [1000, 2500];
 async function saveField(field, division, date, value){
   if (!date) return;
   const dot = document.getElementById('ho-save-dot');
-  try {
-    const res = field.startsWith('section_')
-      ? await api('PATCH', '/'+division+'/'+date+'/section-content/'+field.slice(8), { value })
-      : await api('PATCH', '/'+division+'/'+date+'/field', { field, value });
-    if (division === H.division && date === H.date) H.updatedAt = res.updated_at || H.updatedAt;
-    dot.className = 'saved';
-    setTimeout(() => { dot.className = ''; }, 2000);
-  } catch(e){
-    dot.className = '';
-    toast('保存に失敗しました: '+e.message, 2500);
+  for (let attempt = 0; attempt <= SAVE_RETRY_DELAYS_MS.length; attempt++){
+    try {
+      const res = field.startsWith('section_')
+        ? await api('PATCH', '/'+division+'/'+date+'/section-content/'+field.slice(8), { value })
+        : await api('PATCH', '/'+division+'/'+date+'/field', { field, value });
+      if (division === H.division && date === H.date) H.updatedAt = res.updated_at || H.updatedAt;
+      dot.className = 'saved';
+      setTimeout(() => { dot.className = ''; }, 2000);
+      H.saveFailCount = 0;
+      return;
+    } catch(e){
+      if (attempt < SAVE_RETRY_DELAYS_MS.length){
+        dot.className = 'saving';
+        await sleep(SAVE_RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+      dot.className = 'error';
+      H.saveFailCount = (H.saveFailCount || 0) + 1;
+      toast('保存に失敗しました: '+e.message+'（入力内容は画面に残っています。再読み込みはせず、保存できるまでお待ちください）', 5000);
+    }
   }
 }
 function scheduleSave(field){
@@ -2035,6 +2071,14 @@ document.addEventListener('click', (e) => {
 }, true);
 // タブを閉じる・戻る等でリンククリックを経由しないケースのフォールバック（完了は保証されないがベストエフォート）
 window.addEventListener('pagehide', () => { flushPendingSaves(); });
+// 保存待ち・保存失敗のまま閉じようとした場合はブラウザ標準の確認ダイアログで警告する
+window.addEventListener('beforeunload', (e) => {
+  const hasPending = Object.values(H.fieldTimers).some(t => t);
+  if (hasPending || H.saveFailCount > 0){
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 
 renderTabs();
 loadSections().then(() => { loadFontSizes(); loadDates(); });
