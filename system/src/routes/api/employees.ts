@@ -177,6 +177,31 @@ app.put('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// 新人登録・種別/新卒年度の設定（newcomers.register 権限でのみ書き込み可）
+app.put('/:id/newcomer', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  if (isNaN(id)) return c.json({ error: 'Invalid ID' }, 400);
+  const data = await c.req.json<{
+    is_newcomer?: number;
+    newcomer_type?: 'normal' | 'shinsotsu' | null;
+    graduate_year?: number | null;
+  }>();
+
+  const isNewcomer = data.is_newcomer ? 1 : 0;
+  const newcomerType = isNewcomer ? (data.newcomer_type ?? null) : null;
+  const graduateYear = isNewcomer && newcomerType === 'shinsotsu' ? (data.graduate_year ?? null) : null;
+
+  if (newcomerType !== null && newcomerType !== 'normal' && newcomerType !== 'shinsotsu') {
+    return c.json({ error: '種別が不正です' }, 400);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE employees SET is_newcomer = ?, newcomer_type = ?, graduate_year = ?, updated_at = datetime('now', 'localtime') WHERE id = ?`
+  ).bind(isNewcomer, newcomerType, graduateYear, id).run();
+
+  return c.json({ ok: true });
+});
+
 // 社員無効化（論理削除 = 退職処理）
 app.delete('/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
@@ -485,7 +510,7 @@ app.post('/purge-by-empno', async (c) => {
   ).bind(...valid).all<{ id: number }>();
   const ids = (rows.results ?? []).map(r => r.id);
   if (ids.length > 0) {
-    const relTables = ['shift_entries','sales_records','driving_safety_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
+    const relTables = ['shift_entries','sales_records','driving_safety_records','new_employee_info','invite_codes','line_users','interview_records'];
     const CHUNK = 100;
     for (let i = 0; i < ids.length; i += CHUNK) {
       const chunk = ids.slice(i, i + CHUNK);
@@ -534,7 +559,7 @@ app.post('/bulk-purge', async (c) => {
     const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
     if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
     const CHUNK = 100;
-    const relTables = ['shift_entries','sales_records','driving_safety_records','bad_events','new_employee_info','invite_codes','line_users','interview_records'];
+    const relTables = ['shift_entries','sales_records','driving_safety_records','new_employee_info','invite_codes','line_users','interview_records'];
     for (let i = 0; i < ids.length; i += CHUNK) {
       const chunk = ids.slice(i, i + CHUNK);
       const ph = chunk.map(() => '?').join(',');
@@ -557,7 +582,6 @@ app.delete('/:id/purge', async (c) => {
     'shift_entries',
     'sales_records',
     'driving_safety_records',
-    'bad_events',
     'new_employee_info',
     'invite_codes',
     'line_users',

@@ -17,6 +17,7 @@ import { triggerAccidentsMonitorForceRefresh, getMonitorDisplaySettings, saveMon
 import { agoLabel } from './admin_line_usage';
 import { bucketCoarseBands, COARSE_BAND_LABELS } from '../html/accidents';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
+import { getAdminPermissions } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -223,9 +224,9 @@ app.get('/', async (c) => {
   // （旧実装は Promise.all を2回 + 個別await5回に分かれており、直列の往復が発生していた）
   const selfAdminId = c.get('adminId');
   const [
-    empStats, unrespondedEvents, overdueInterviews, openReports, lastLogin,
+    empStats, overdueInterviews, openReports, lastLogin,
     hireTrend, reportTrend, divisionComp, salesStats, lineUsage,
-    recentEvents, overdueList, selfAdmin, maintenanceOn, dbHealthOk,
+    overdueList, selfAdmin, maintenanceOn, dbHealthOk,
     accidentTimes, prevAccidentCount,
   ] = await Promise.all([
     c.env.DB.prepare(`
@@ -235,7 +236,6 @@ app.get('/', async (c) => {
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS regular_count
       FROM employees WHERE is_active = 1
     `).first<{ total: number; training_count: number; regular_count: number }>(),
-    c.env.DB.prepare("SELECT COUNT(*) as cnt FROM bad_events WHERE (admin_memo IS NULL OR admin_memo = '')").first<{ cnt: number }>(),
     c.env.DB.prepare(`
       SELECT COUNT(DISTINCT emp_id) as cnt FROM interview_records
       WHERE next_interview_date < ? AND next_interview_date != ''
@@ -261,16 +261,15 @@ app.get('/', async (c) => {
       WHERE hire_date >= ? AND hire_date != ''
       GROUP BY ym
     `).bind(sinceMonth).all<{ ym: string; cnt: number }>().catch(() => null),
-    // 報告件数の推移（嫌なこと・忘れ物・事故・違反・一般の合算）
+    // 報告件数の推移（忘れ物・事故・違反・一般の合算）
     c.env.DB.prepare(`
       SELECT ym, SUM(cnt) AS cnt FROM (
-        SELECT substr(created_at, 1, 7) AS ym, COUNT(*) AS cnt FROM bad_events WHERE created_at >= ? GROUP BY ym
-        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM lost_item_reports  WHERE created_at >= ? GROUP BY 1
+        SELECT substr(created_at, 1, 7) AS ym, COUNT(*) AS cnt FROM lost_item_reports  WHERE created_at >= ? GROUP BY 1
         UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM accident_reports   WHERE created_at >= ? GROUP BY 1
         UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM violation_reports  WHERE created_at >= ? GROUP BY 1
         UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM general_reports    WHERE created_at >= ? GROUP BY 1
       ) GROUP BY ym
-    `).bind(sinceMonth, sinceMonth, sinceMonth, sinceMonth, sinceMonth)
+    `).bind(sinceMonth, sinceMonth, sinceMonth, sinceMonth)
       .all<{ ym: string; cnt: number }>().catch(() => null),
     // 課別の在籍構成
     c.env.DB.prepare(`
@@ -294,12 +293,6 @@ app.get('/', async (c) => {
         COUNT(DISTINCT CASE WHEN created_at >= datetime('now','localtime','-7 days') THEN line_uid END) AS week_users
       FROM line_activity_logs
     `).first<{ today_cnt: number; week_cnt: number; week_users: number }>().catch(() => null),
-    c.env.DB.prepare(`
-      SELECT b.id, b.category, b.content, b.admin_memo, b.created_at, e.name
-      FROM bad_events b
-      JOIN employees e ON b.emp_id = e.id
-      ORDER BY b.created_at DESC LIMIT 8
-    `).all<{ id: number; category: string; content: string; admin_memo: string; name: string; created_at: string }>(),
     c.env.DB.prepare(`
       SELECT e.id, e.name, e.emp_no, e.division, e.team,
         ir.next_interview_date,
@@ -335,17 +328,8 @@ app.get('/', async (c) => {
 
   const statusCheckedAt = jstNow.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit' });
 
-  const CAT_COLOR: Record<string, string> = {
-    'クレーマー': '#fecaca',
-    '交通トラブル': '#fed7aa',
-    '社内の出来事': '#e9d5ff',
-    'その他': '#e5e7eb'
-  };
-
   const openReportTotal = (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0);
   const statCards = [
-    { label: '未対応の報告',     value: unrespondedEvents?.cnt ?? 0, sub: '嫌なこと報告（管理者メモなし）',
-      color: (unrespondedEvents?.cnt ?? 0) > 0 ? '#b91c1c' : '#1a3a5c', href: `${ADMIN_PATH}/events` },
     { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',
       color: (overdueInterviews?.cnt ?? 0) > 0 ? '#b45309' : '#1a3a5c', href: `${ADMIN_PATH}/interviews` },
     { label: '対応中の現場報告', value: openReportTotal,
@@ -368,7 +352,6 @@ app.get('/', async (c) => {
     { href: `${ADMIN_PATH}/staff`,            nav: 'staff',         label: '社員管理' },
     { href: `${ADMIN_PATH}/vehicles`,         nav: 'vehicles',      label: '車両検索' },
     { href: `${ADMIN_PATH}/shift`,            nav: 'shift',         label: '新人シフト管理' },
-    { href: `${ADMIN_PATH}/events`,           nav: 'events',        label: '報告一覧' },
   ];
   const quickHtml = quickLinks.map(q =>
     `<a href="${q.href}" data-nav-id="${q.nav}" class="hm-quick">${escHtml(q.label)}</a>`
@@ -471,18 +454,6 @@ app.get('/', async (c) => {
       </div>
     </a>`;
 
-  const eventRows = (recentEvents.results ?? []).length === 0
-    ? '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">報告はありません</div>'
-    : (recentEvents.results ?? []).map(e => `
-      <a href="${ADMIN_PATH}/events/${e.id}" style="display:block;padding:10px 16px;border-bottom:1px solid #f3f4f6;text-decoration:none;transition:background 0.1s;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
-          <span style="background:${CAT_COLOR[e.category] ?? '#e5e7eb'};padding:1px 7px;border-radius:3px;font-size:11px;color:#374151;white-space:nowrap;">${escHtml(e.category)}</span>
-          <span style="font-size:13px;font-weight:600;color:#1e293b;">${escHtml(e.name)}</span>
-          ${!e.admin_memo ? '<span style="margin-left:auto;font-size:10px;background:#fef2f2;color:#b91c1c;padding:1px 5px;border-radius:3px;white-space:nowrap;">未対応</span>' : ''}
-          <span style="font-size:11px;color:#9ca3af;${!e.admin_memo ? '' : 'margin-left:auto;'}">${escHtml(e.created_at.slice(0, 10))}</span>
-        </div>
-        <div style="font-size:12px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(e.content)}</div>
-      </a>`).join('');
 
   const overdueRows = (overdueList.results ?? []).length === 0
     ? '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">期限超過なし</div>'
@@ -613,13 +584,6 @@ app.get('/', async (c) => {
 
   <!-- 今日の対応の詳細 -->
   <div class="hm-lists">
-    <div class="hm-card">
-      <div class="hm-card-head">
-        <span class="hm-card-title">嫌なこと報告（最新）</span>
-        <a href="${ADMIN_PATH}/events" class="hm-card-more">すべて見る</a>
-      </div>
-      ${eventRows}
-    </div>
     <div class="hm-card">
       <div class="hm-card-head">
         <span class="hm-card-title">面談期限超過</span>
@@ -793,13 +757,9 @@ app.get('/newcomers', (c) => {
   const ADMIN = ADMIN_PATH;
   const items = [
     { href: `${ADMIN}/shift`,      title: '新人シフト管理',   desc: '研修シフトの作成・班長/コーチの割当' },
-    { href: `${ADMIN}/employees`,  title: '新人リスト',       desc: '在籍新人の登録・ステータス・面談フラグ管理' },
-    { href: `${ADMIN}/info`,       title: '新卒Info',          desc: '新卒社員の個人情報・趣味・メンタル状態' },
+    { href: `${ADMIN}/employees`,  title: '新人リスト',       desc: '登録済み新人の一覧・ステータス・種別（通常新人/新卒）・新卒Info（趣味・運転技術・メンタル状態）の管理' },
     { href: `${ADMIN}/followup`,   title: 'フォローリスト',   desc: '要フォロー社員の一覧確認' },
     { href: `${ADMIN}/interviews`, title: '面談管理',          desc: '面談記録・次回面談予定日の管理' },
-    { href: `${ADMIN}/sales`,      title: '売上管理',          desc: '月次営業収入・乗車回数・走行距離の集計' },
-    { href: `${ADMIN}/events`,     title: '嫌なこと報告一覧', desc: '新人からの報告一覧・対応メモの管理' },
-    { href: `${ADMIN}/newcomer-intros`, title: '新人紹介カード管理', desc: '事故モニターサイネージの「新人紹介」表示用カード（写真・名前・班・一言コメント）の登録' },
   ];
   const cards = items.map(item => `
     <a href="${item.href}" style="display:flex;align-items:center;gap:16px;background:white;border-radius:12px;padding:20px 22px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid #e5e7eb;transition:box-shadow 0.15s;"
@@ -1063,6 +1023,7 @@ app.get('/settings', async (c) => {
     { heading: 'モニター表示', cards: [
       { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）。下の表示モード設定に従って表示内容が変わります', newTab: true },
       { href: MONITOR_NEWCOMERS_PATH, perm: 'newcomers', title: '新人紹介モニター表示', desc: '新人紹介カードだけを常時表示するページ（ログイン不要。別の物理サイネージに映す用途で、表示モード設定に関わらず常に新人紹介のみ表示）', newTab: true },
+      { href: `${ADMIN}/newcomer-intros`, perm: 'settings.newcomer-intros', title: '新人紹介カード管理', desc: '事故モニターサイネージの「新人紹介」表示用カード（写真・名前・班・一言コメント）の登録' },
     ], extraHtml: `
       <div data-perm-key="accidents" style="background:white;border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-top:12px;">
         <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">事故モニター表示の表示モード</div>
@@ -1588,8 +1549,7 @@ app.get('/settings/notifications', async (c) => {
   }>();
 
   const TYPE_LABELS: Record<string, { label: string; desc: string; dest: string }> = {
-    morning_report:     { label: '朝の出勤レポート',       desc: '当直・出勤担当者一覧 / 今月度平均売上 / 未対応報告数', dest: 'LINE連携済みの班長・指導者' },
-    bad_event_alert:    { label: '嫌なこと報告アラート',   desc: '未対応の嫌なこと報告がある場合のみ送信', dest: 'LINE連携済みの班長・指導者' },
+    morning_report:     { label: '朝の出勤レポート',       desc: '当直・出勤担当者一覧 / 今月度平均売上', dest: 'LINE連携済みの班長・指導者' },
     benten_shift_daily: { label: 'ベンテンシフト通知',     desc: '当日のベンテンクラブシフトをLINEグループへ自動送信（設定 → ベンテンクラブ シフト でも管理可）', dest: 'ベンテンクラブのLINEグループ' },
     kancho_attendance:  { label: '班長出勤通知',           desc: '本日の班長シフト出勤者一覧を送信（班長シフト画面でもON/OFF可）', dest: '班長シフトの通知先グループ' },
   };
@@ -1875,32 +1835,30 @@ app.get('/settings/tutorial', (c) => {
     <a href="#dash" data-perm-key="home">1-1. ダッシュボード — 全体状況の確認</a>
     <a href="#emp" data-perm-key="staff">1-2. 社員管理 — 登録・編集・ステータス管理</a>
     <a href="#shift" data-perm-key="shift">1-3. シフト管理 — 研修スケジュール入力</a>
-    <a href="#info" data-perm-key="newcomers">1-4. 新卒Info — 新卒社員の個人情報管理</a>
+    <a href="#info" data-perm-key="newcomers">1-4. 新人リスト — 登録・種別（通常新人/新卒）・新卒Info管理</a>
     <a href="#follow" data-perm-key="newcomers">1-5. フォローリスト — 要フォロー社員の確認</a>
     <a href="#interview" data-perm-key="newcomers">1-6. 面談管理 — 面談記録・次回予定</a>
     <a href="#sales" data-perm-key="staff">1-7. 売上管理 — 月次売上の記録と確認</a>
-    <a href="#events" data-perm-key="events">1-8. 報告一覧 — 嫌なこと報告の確認・対応</a>
-    <a href="#announce" data-perm-key="announcements">1-9. お知らせ配信 — LINEで一斉送信</a>
-    <a href="#vehicle" data-perm-key="vehicles">1-10. 車両検索 — 無線番号・ナンバーで車両照会</a>
-    <a href="#line" data-perm-key="line">1-11. LINE管理 — ユーザー連携状況</a>
-    <a href="#settings" data-perm-key="settings">1-12. 設定 — 各種マスタ管理</a>
-    <a href="#kancho" data-perm-key="kancho-shift">1-13. 班長シフト — 班長・指導者の月間シフト</a>
-    <a href="#staff-search" data-perm-key="staff">1-14. 社員絞り込み検索 — 条件を組み合わせた検索</a>
-    <a href="#inspection" data-perm-key="inspection">1-15. 点検管理 — 車両点検スケジュール</a>
-    <a href="#document-center" data-perm-key="settings.documents">1-16. 資料センター — マニュアル・就業規則の保管</a>
-    <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">1-17. 報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</a>
-    <a href="#benten-shift" data-perm-key="settings.benten">1-18. ベンテンクラブ シフト</a>
-    <a href="#line-usage" data-perm-key="settings.line-usage">1-19. LINE利用状況 — 操作ログの確認</a>
-    <a href="#handover" data-perm-key="handover">1-20. 引き継ぎシート — 課の申し送り事項</a>
-    <a href="#crew-portal" data-perm-key="crew-portal">1-21. 個人データ参照・乗務員シフト・売上分析・担当車表</a>
-    <a href="#todo" data-perm-key="todo">1-22. やることリスト — 課ごとの日次チェックリスト・当直共通タスク</a>
+    <a href="#announce" data-perm-key="announcements">1-8. お知らせ配信 — LINEで一斉送信</a>
+    <a href="#vehicle" data-perm-key="vehicles">1-9. 車両検索 — 無線番号・ナンバーで車両照会</a>
+    <a href="#line" data-perm-key="line">1-10. LINE管理 — ユーザー連携状況</a>
+    <a href="#settings" data-perm-key="settings">1-11. 設定 — 各種マスタ管理</a>
+    <a href="#kancho" data-perm-key="kancho-shift">1-12. 班長シフト — 班長・指導者の月間シフト</a>
+    <a href="#staff-search" data-perm-key="staff">1-13. 社員絞り込み検索 — 条件を組み合わせた検索</a>
+    <a href="#inspection" data-perm-key="inspection">1-14. 点検管理 — 車両点検スケジュール</a>
+    <a href="#document-center" data-perm-key="settings.documents">1-15. 資料センター — マニュアル・就業規則の保管</a>
+    <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">1-16. 報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</a>
+    <a href="#benten-shift" data-perm-key="settings.benten">1-17. ベンテンクラブ シフト</a>
+    <a href="#line-usage" data-perm-key="settings.line-usage">1-18. LINE利用状況 — 操作ログの確認</a>
+    <a href="#handover" data-perm-key="handover">1-19. 引き継ぎシート — 課の申し送り事項</a>
+    <a href="#crew-portal" data-perm-key="crew-portal">1-20. 個人データ参照・乗務員シフト・売上分析・担当車表</a>
+    <a href="#todo" data-perm-key="todo">1-21. やることリスト — 課ごとの日次チェックリスト・当直共通タスク</a>
     <div class="tut-toc-section" style="margin-top:12px;" data-perm-key="settings.vehicle-search-guide">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
     <a href="#veh-guide" data-perm-key="settings.vehicle-search-guide">2-1. LINE車番検索ガイド（詳細は専用ページへ）</a>
     <div class="tut-toc-section" style="margin-top:12px;">第3章 — 現場スタッフ向け（LINE利用ガイド）</div>
     <a href="#line-what">3-1. LINEでできること</a>
     <a href="#line-link">3-2. 初回連携の方法</a>
-    <a href="#line-report">3-3. 嫌なこと・困ったことの報告方法</a>
-    <a href="#line-recv">3-4. お知らせ・アンケートの受け取り方</a>
+    <a href="#line-recv">3-3. お知らせ・アンケートの受け取り方</a>
   </div>
 
   <!-- 第1章 -->
@@ -1917,9 +1875,7 @@ app.get('/settings/tutorial', (c) => {
     <table class="tut-table">
       <tr><th>表示項目</th><th>内容</th></tr>
       <tr><td>在籍新人数</td><td>現在研修中・配属済みの社員総数（新卒 / その他の内訳付き）</td></tr>
-      <tr><td>未対応の報告</td><td>LINEで届いた「嫌なこと報告」のうち管理者メモ未記入の件数</td></tr>
       <tr><td>面談期限超過</td><td>次回面談予定日を過ぎているのに面談が実施されていない社員数</td></tr>
-      <tr><td>最近の報告</td><td>直近の嫌なこと報告一覧（クリックで詳細へ）</td></tr>
       <tr><td>面談期限超過リスト</td><td>超過日数付きの社員一覧（クリックで面談記録へ）</td></tr>
       <tr><td>最終ログイン履歴</td><td>直近のログイン記録（不正アクセス確認用）</td></tr>
     </table>
@@ -1964,6 +1920,15 @@ app.get('/settings/tutorial', (c) => {
     </table>
     <div class="tut-tip">退職候補に出た社員を候補から除外したい場合は、社員詳細ページの「退職候補から除外」ボタンを使います。候補リストから非表示になります（在籍は継続）。「退職候補に戻す」で再表示できます。</div>
 
+    <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍退職者リスト（PDF取込）</p>
+    <p style="font-size:13px;">社員一覧の「関連ページ▼」→「退職者リスト」から、紙の「乗務員退職者名簿」PDFをそのままアップロードして退職処理を一括登録できます。</p>
+    <ol class="tut-steps">
+      <li>PDFファイルを選択し「PDF解析・照合プレビュー」をクリック</li>
+      <li>社員番号でDBと自動照合され、一致・既に退職済み・未一致が一覧表示されます</li>
+      <li>内容を確認し（デフォルトで一致した行がチェック済み）、「選択した行を退職処理として確定」をクリック</li>
+    </ol>
+    <div class="tut-note">確定すると対象社員は在籍中の社員名簿から自動的に除外されます（退職フラグを設定するのみで、データは削除されません）。社員番号が未登録の行は自動処理されないため、別途ご確認ください。</div>
+
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍班長として登録する</p>
     <p style="font-size:13px;">社員詳細ページ上部の「班長として登録」ボタンをクリックすると班長フラグが付き、一覧で<span class="tut-badge" style="background:#fef3c7;color:#92400e;">班長</span>バッジが表示されます。再度クリックで解除できます。</p>
 
@@ -2005,28 +1970,27 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;">シフト区分の色・目標回数は「設定 → シフト区分」でカスタマイズできます。「集計」ボタンで社員ごとの区分達成状況も確認できます。</p>
   </div>
 
-  <!-- 1-4 新卒Info -->
+  <!-- 1-4 新人リスト -->
   <div class="tut-section" id="info" data-perm-key="newcomers">
-    <h3><span class="num">4</span>新卒Info — 新卒社員の個人情報管理</h3>
-    <p style="font-size:13px;">新卒社員の趣味・食の好み・飲酒状況・運転技能・メンタル状態などを記録します。面談や日常ケアの参考として活用できます。</p>
+    <h3><span class="num">4</span>新人リスト — 登録・種別・新卒Info管理</h3>
+    <p style="font-size:13px;">総合新人管理の対象社員は権限を持つアカウントが個別に「新人登録」します（在籍社員全員が自動で対象になるわけではありません）。登録時に「通常新人」「新卒」の種別を選び、新卒は年度も設定します。</p>
     <table class="tut-table">
       <tr><th>項目</th><th>活用場面</th></tr>
-      <tr><td>運転技能（A〜E）</td><td>研修カリキュラムの難易度調整</td></tr>
+      <tr><td>種別（通常新人/新卒）・新卒年度</td><td>一覧のフィルタで絞り込み表示（例: 2024年新卒のみ表示）</td></tr>
+      <tr><td>新卒Info（趣味・食の好み・飲酒状況・運転技能・メンタル状態）</td><td>編集画面から記録。面談や日常ケアの参考として活用</td></tr>
       <tr><td>メンタル状態</td><td>安定 / 注意 / 要フォロー / 危険 の4段階。要フォローはフォローリストに反映</td></tr>
-      <tr><td>その他メモ</td><td>個人的な事情・配慮事項などの自由記述</td></tr>
     </table>
-    <div class="tut-note">新卒Info は新卒区分の社員のみ対象です。キャリア入社には表示されません。</div>
+    <div class="tut-note">新卒Infoの項目は編集画面に統合されています（旧「新卒Info」ページは廃止）。乗務を開始した新卒は編集画面から売上・安全運転記録も確認できます。</div>
   </div>
 
   <!-- 1-5 フォローリスト -->
   <div class="tut-section" id="follow" data-perm-key="newcomers">
     <h3><span class="num">5</span>フォローリスト — 要フォロー社員の確認</h3>
-    <p style="font-size:13px;">以下の条件に該当する社員が自動でリストアップされます。定期的に確認して声かけや面談を行いましょう。</p>
+    <p style="font-size:13px;">登録済み新人のうち、以下の条件に該当する社員が自動でリストアップされます。定期的に確認して声かけや面談を行いましょう。</p>
     <table class="tut-table">
       <tr><th>表示条件</th></tr>
       <tr><td>面談対象フラグがオンの社員</td></tr>
       <tr><td>新卒Infoのメンタル状態が「要フォロー」または「危険」の社員</td></tr>
-      <tr><td>嫌なこと報告が一定期間内にある社員</td></tr>
     </table>
   </div>
 
@@ -2054,28 +2018,9 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;margin-top:10px;">月度集計ページでは社員ごとの月間合計と棒グラフを確認できます。CSV出力も可能です。</p>
   </div>
 
-  <!-- 1-8 報告一覧 -->
-  <div class="tut-section" id="events" data-perm-key="events">
-    <h3><span class="num">8</span>報告一覧 — 嫌なこと報告の確認・対応</h3>
-    <p style="font-size:13px;">社員がLINEから送信した「嫌なこと・困ったこと」の報告が一覧で確認できます。</p>
-    <table class="tut-table">
-      <tr><th>カテゴリ</th><th>内容</th></tr>
-      <tr><td style="white-space:nowrap;"><span class="tut-badge" style="background:#fecaca;">クレーマー</span></td><td>乗客からのクレーム・暴言など</td></tr>
-      <tr><td style="white-space:nowrap;"><span class="tut-badge" style="background:#fed7aa;">交通トラブル</span></td><td>事故・ヒヤリハット・道に迷ったなど</td></tr>
-      <tr><td style="white-space:nowrap;"><span class="tut-badge" style="background:#e9d5ff;">社内の出来事</span></td><td>職場の人間関係・設備の問題など</td></tr>
-      <tr><td style="white-space:nowrap;"><span class="tut-badge" style="background:#e5e7eb;">その他</span></td><td>上記に当てはまらないこと</td></tr>
-    </table>
-    <ol class="tut-steps">
-      <li>一覧の報告をクリックして詳細を開く</li>
-      <li>「管理者メモ」欄に対応内容・所感を記入して保存</li>
-      <li>メモを入力すると「未対応」バッジが消え、ダッシュボードの件数も減ります</li>
-    </ol>
-    <div class="tut-warn">メモ未記入の報告はダッシュボードで赤くカウントされます。早めの確認・対応を心がけてください。</div>
-  </div>
-
-  <!-- 1-9 お知らせ配信 -->
+  <!-- 1-8 お知らせ配信 -->
   <div class="tut-section" id="announce" data-perm-key="announcements">
-    <h3><span class="num">9</span>お知らせ配信 — LINEで一斉送信</h3>
+    <h3><span class="num">8</span>お知らせ配信 — LINEで一斉送信</h3>
     <p style="font-size:13px;">社員のLINEアカウントにお知らせやアンケートを一斉送信できます。</p>
     <ol class="tut-steps">
       <li>「＋ 新規配信」をクリック</li>
@@ -2092,9 +2037,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">LINEを未連携の社員には届きません。LINE管理ページで連携状況を確認できます。</div>
   </div>
 
-  <!-- 1-10 車両検索 -->
+  <!-- 1-9 車両検索 -->
   <div class="tut-section" id="vehicle" data-perm-key="vehicles">
-    <h3><span class="num">10</span>車両検索 — 無線番号・ナンバーで車両照会</h3>
+    <h3><span class="num">9</span>車両検索 — 無線番号・ナンバーで車両照会</h3>
     <p style="font-size:13px;">4桁の無線番号またはナンバープレート末尾4桁を入力して、車両情報を検索できます。</p>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍Web管理画面で検索する</p>
@@ -2123,9 +2068,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">班長・指導者以外に検索権限を与えたい場合は、LINEで「車番連携」と送信して自己申請できます。</div>
   </div>
 
-  <!-- 1-11 LINE管理 -->
+  <!-- 1-10 LINE管理 -->
   <div class="tut-section" id="line" data-perm-key="line">
-    <h3><span class="num">11</span>LINE管理 — ユーザー連携状況</h3>
+    <h3><span class="num">10</span>LINE管理 — ユーザー連携状況</h3>
     <p style="font-size:13px;">社員のLINEアカウントと本システムの紐付け状況を管理します。</p>
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍新人・運行管理者などの登録</p>
     <p style="font-size:13px;">招待コード方式は廃止され、「設定 → LINE連携」ページに統合されました。QRコードを発行して本人に読み取ってもらうだけで登録できます。</p>
@@ -2136,9 +2081,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">お知らせの一斉配信・個別配信は「お知らせ配信」ページで行います。</div>
   </div>
 
-  <!-- 1-12 設定 -->
+  <!-- 1-11 設定 -->
   <div class="tut-section" id="settings" data-perm-key="settings">
-    <h3><span class="num">12</span>設定 — 各種マスタ管理</h3>
+    <h3><span class="num">11</span>設定 — 各種マスタ管理</h3>
     <p style="font-size:13px;">設定ページは次の6グループに分かれています。アカウントに権限のない項目は表示されません。</p>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍日々の運用</p>
@@ -2172,7 +2117,7 @@ app.get('/settings/tutorial', (c) => {
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>LINE管理</td><td>新人向け招待コードの発行・紐付け状況の確認</td></tr>
-      <tr><td>LINE通知設定</td><td>朝の出勤レポート・嫌なこと報告アラート・ベンテンシフト通知・班長出勤通知の時刻とON/OFFをまとめて管理</td></tr>
+      <tr><td>LINE通知設定</td><td>朝の出勤レポート・ベンテンシフト通知・班長出勤通知の時刻とON/OFFをまとめて管理</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍マスタ管理</p>
@@ -2196,9 +2141,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-warn">メンテナンスモードをONにすると、LINE Botの応答も含め全ユーザーにメンテナンス中の画面が表示されます。作業前後の切り忘れに注意してください。</div>
   </div>
 
-  <!-- 1-13 班長シフト -->
+  <!-- 1-12 班長シフト -->
   <div class="tut-section" id="kancho" data-perm-key="kancho-shift">
-    <h3><span class="num">13</span>班長シフト — 班長・指導者の月間シフト</h3>
+    <h3><span class="num">12</span>班長シフト — 班長・指導者の月間シフト</h3>
     <p style="font-size:13px;">班長・指導者の月間シフト表をWebで管理します。紙のExcel運用の置き換えです。</p>
     <ol class="tut-steps">
       <li>左メニュー「班長シフト」を開き、月を選択</li>
@@ -2216,9 +2161,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-tip">閲覧だけできる人と編集できる人は、アカウント権限管理で分けられます。</div>
   </div>
 
-  <!-- 1-14 社員絞り込み検索 -->
+  <!-- 1-13 社員絞り込み検索 -->
   <div class="tut-section" id="staff-search" data-perm-key="staff">
-    <h3><span class="num">14</span>社員絞り込み検索 — 条件を組み合わせた検索</h3>
+    <h3><span class="num">13</span>社員絞り込み検索 — 条件を組み合わせた検索</h3>
     <p style="font-size:13px;">名前・社員番号のキーワードに加えて、課・班・勤務形態・在籍状態・入社区分・入社日/退職日の期間・年齢・車種などの条件を組み合わせて社員を検索できます。「社員管理」ページ内の「詳細検索」に統合されています。</p>
     <ol class="tut-steps">
       <li>左メニュー「社員管理」を開く</li>
@@ -2228,9 +2173,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-tip">ふりがな（カタカナ）でも検索できます。条件をやり直すときは「詳細条件をリセット」を押してください。</div>
   </div>
 
-  <!-- 1-15 点検管理 -->
+  <!-- 1-14 点検管理 -->
   <div class="tut-section" id="inspection" data-perm-key="inspection">
-    <h3><span class="num">15</span>点検管理 — 車両点検スケジュール</h3>
+    <h3><span class="num">14</span>点検管理 — 車両点検スケジュール</h3>
     <p style="font-size:13px;">課ごとの車両点検予定（車番・点検種別・出発時刻）を月表で管理します。</p>
     <ol class="tut-steps">
       <li>左メニュー「点検管理」を開き、月と課を選択</li>
@@ -2240,9 +2185,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-warn">写真のAI読み取りは日付ズレなどの誤読が起きることがあります。取り込んだ後は必ず紙の原本と目で照合してください。</div>
   </div>
 
-  <!-- 1-16 資料センター -->
+  <!-- 1-15 資料センター -->
   <div class="tut-section" id="document-center" data-perm-key="settings.documents">
-    <h3><span class="num">16</span>資料センター — マニュアル・就業規則の保管</h3>
+    <h3><span class="num">15</span>資料センター — マニュアル・就業規則の保管</h3>
     <p style="font-size:13px;">マニュアルPDF・就業規則・その他の資料をアップロードし、カテゴリで分類して保管・閲覧できます。</p>
     <ol class="tut-steps">
       <li>設定 →「資料センター」を開く</li>
@@ -2252,9 +2197,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">PDF・Word・Excel・画像などのファイルに対応しています。</div>
   </div>
 
-  <!-- 1-17 報告センター -->
+  <!-- 1-16 報告センター -->
   <div class="tut-section" id="report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">
-    <h3><span class="num">17</span>報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</h3>
+    <h3><span class="num">16</span>報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</h3>
     <p style="font-size:13px;">乗務員や管理者がLINE（LIFF「報告」）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告/引き継ぎメモタブ）で確認・管理します。</p>
     <ol class="tut-steps">
       <li>設定 → 「忘れ物報告」「事故報告」「違反報告」「一般報告」のいずれかを開く（上部タブで切り替え）</li>
@@ -2277,9 +2222,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">報告を削除してもデータ上の履歴には「誰が・いつ・何を削除したか」が残ります。</div>
   </div>
 
-  <!-- 1-18 ベンテンクラブ シフト -->
+  <!-- 1-17 ベンテンクラブ シフト -->
   <div class="tut-section" id="benten-shift" data-perm-key="settings.benten">
-    <h3><span class="num">18</span>ベンテンクラブ シフト</h3>
+    <h3><span class="num">17</span>ベンテンクラブ シフト</h3>
     <p style="font-size:13px;">ベンテンクラブ会員のシフトを管理し、LINEグループへ毎日自動送信します。</p>
     <table class="tut-table">
       <tr><th>設定項目</th><th>内容</th></tr>
@@ -2291,16 +2236,16 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">グループ連携は、Botをグループに招待して「ベンテングループ登録」と送信すると完了します。</div>
   </div>
 
-  <!-- 1-19 LINE利用状況 -->
+  <!-- 1-18 LINE利用状況 -->
   <div class="tut-section" id="line-usage" data-perm-key="settings.line-usage">
-    <h3><span class="num">19</span>LINE利用状況 — 操作ログの確認</h3>
+    <h3><span class="num">18</span>LINE利用状況 — 操作ログの確認</h3>
     <p style="font-size:13px;">LINE連携ユーザーが「いつ・どの機能を使ったか」を確認できます。今日・7日間・30日間の利用者数と、ユーザーごとの利用回数・最終利用日時が一覧になります。</p>
     <div class="tut-note">このページはフル権限の管理者（admin）だけが見られます。</div>
   </div>
 
-  <!-- 1-20 引き継ぎシート -->
+  <!-- 1-19 引き継ぎシート -->
   <div class="tut-section" id="handover" data-perm-key="handover">
-    <h3><span class="num">20</span>引き継ぎシート — 課の申し送り事項</h3>
+    <h3><span class="num">19</span>引き継ぎシート — 課の申し送り事項</h3>
     <p style="font-size:13px;">課ごとの当日・翌日の引き継ぎ事項（事故車・車両異常・乗務希望・点検車検リコールなど）を項目単位で入力・保存します。</p>
     <table class="tut-table">
       <tr><th>機能</th><th>内容</th></tr>
@@ -2311,9 +2256,9 @@ app.get('/settings/tutorial', (c) => {
     </table>
   </div>
 
-  <!-- 1-21 個人データ参照・乗務員シフト・売上分析・担当車表 -->
+  <!-- 1-20 個人データ参照・乗務員シフト・売上分析・担当車表 -->
   <div class="tut-section" id="crew-portal" data-perm-key="crew-portal">
-    <h3><span class="num">21</span>個人データ参照・乗務員シフト・売上分析・担当車表</h3>
+    <h3><span class="num">20</span>個人データ参照・乗務員シフト・売上分析・担当車表</h3>
     <p style="font-size:13px;">社員管理の一覧の各行、またはヘッダーの「関連ページ」から、乗務員ごとの日別明細・売上分析（個人データ参照）、乗務員シフト、全社の売上分析、担当車表にアクセスできます。</p>
     <table class="tut-table">
       <tr><th>機能</th><th>内容</th></tr>
@@ -2324,9 +2269,9 @@ app.get('/settings/tutorial', (c) => {
     </table>
   </div>
 
-  <!-- 1-22 やることリスト -->
+  <!-- 1-21 やることリスト -->
   <div class="tut-section" id="todo" data-perm-key="todo">
-    <h3><span class="num">22</span>やることリスト — 課ごとの日次チェックリスト・当直共通タスク</h3>
+    <h3><span class="num">21</span>やることリスト — 課ごとの日次チェックリスト・当直共通タスク</h3>
     <p style="font-size:13px;">1〜4課それぞれの日次定型業務と、当直担当者の共通業務をチェックリストで管理します。日付を切り替えて過去・当日・翌日の状況を確認できます。</p>
     <table class="tut-table">
       <tr><th>機能</th><th>内容</th></tr>
@@ -2364,7 +2309,6 @@ app.get('/settings/tutorial', (c) => {
     <h3><span class="num">1</span>LINEでできること</h3>
     <table class="tut-table">
       <tr><th>機能</th><th>内容</th></tr>
-      <tr><td>嫌なこと・困ったことの報告</td><td>仕事中に困ったことや嫌な出来事をLINEから簡単に報告できます</td></tr>
       <tr><td>お知らせの受け取り</td><td>事務所からのお知らせ・連絡事項がLINEに届きます</td></tr>
       <tr><td>アンケートへの回答</td><td>URLリンク付きのアンケートがLINEで送られてくることがあります</td></tr>
     </table>
@@ -2383,24 +2327,9 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">連携は1回だけでOKです。機種変更した場合は事務所スタッフに再連携を依頼してください。</div>
   </div>
 
-  <!-- 3-3 嫌なこと報告 -->
-  <div class="tut-section" id="line-report">
-    <h3><span class="num">3</span>嫌なこと・困ったことの報告方法</h3>
-    <p style="font-size:13px;">仕事中に嫌なことや困ったことがあったら、気軽にLINEから報告できます。報告はすぐに事務所に届き、対応します。</p>
-    <ol class="tut-steps">
-      <li>LINEのトーク画面で「<strong>報告</strong>」または「<strong>ほうこく</strong>」と送信</li>
-      <li>カテゴリを選ぶメニューが表示される（クレーマー・交通トラブル・社内の出来事・その他）</li>
-      <li>該当するカテゴリを選択</li>
-      <li>何があったかを自由に文章で入力して送信</li>
-      <li>「報告を受け付けました」とメッセージが届いたら完了です</li>
-    </ol>
-    <div class="tut-tip">どんな小さなことでも報告してください。一人で抱え込まないことが大切です。</div>
-    <div class="tut-note">報告した内容は事務所の担当者のみが確認します。他のスタッフには共有されません。</div>
-  </div>
-
-  <!-- 3-4 お知らせ受け取り -->
+  <!-- 3-3 お知らせ受け取り -->
   <div class="tut-section" id="line-recv">
-    <h3><span class="num">4</span>お知らせ・アンケートの受け取り方</h3>
+    <h3><span class="num">3</span>お知らせ・アンケートの受け取り方</h3>
     <p style="font-size:13px;">事務所からのお知らせは弁天クラブ公式LINEから自動で届きます。</p>
     <ol class="tut-steps">
       <li>LINEに通知が届いたらトーク画面を開く</li>
@@ -2418,45 +2347,60 @@ app.get('/settings/tutorial', (c) => {
   return c.html(layout('チュートリアル', html, 'settings'));
 });
 
-// ===== 社員一覧 =====
+// ===== 新人リスト（新卒Info統合） =====
 app.get('/employees', async (c) => {
   const filterStatus = c.req.query('status') ?? 'all';
   const filterDiv    = c.req.query('div')    ?? 'all';
   const filterYear   = c.req.query('year')   ?? 'all';
+  const filterType   = c.req.query('type')   ?? 'all'; // all | normal | shinsotsu
+  const filterGrad   = c.req.query('grad')   ?? 'all';
   const sortKey      = c.req.query('sort')   ?? 'hire_date';
 
-  const conditions: string[] = ['is_active = 1'];
-  if (filterStatus === 'training')    conditions.push("(status IS NULL OR status = 'training')");
-  else if (filterStatus === 'completed')  conditions.push("status = 'completed'");
-  else if (filterStatus === 'unassigned') conditions.push("status = 'unassigned'");
-  if (filterDiv !== 'all') conditions.push(`division = ${parseInt(filterDiv)}`);
-  if (filterYear !== 'all') conditions.push(`strftime('%Y', hire_date) = '${filterYear.replace(/[^0-9]/g, '')}'`);
+  const conditions: string[] = ['e.is_active = 1', 'e.is_newcomer = 1'];
+  if (filterStatus === 'training')    conditions.push("(e.status IS NULL OR e.status = 'training')");
+  else if (filterStatus === 'completed')  conditions.push("e.status = 'completed'");
+  else if (filterStatus === 'unassigned') conditions.push("e.status = 'unassigned'");
+  if (filterDiv !== 'all') conditions.push(`e.division = ${parseInt(filterDiv)}`);
+  if (filterYear !== 'all') conditions.push(`strftime('%Y', e.hire_date) = '${filterYear.replace(/[^0-9]/g, '')}'`);
+  if (filterType === 'normal' || filterType === 'shinsotsu') conditions.push(`e.newcomer_type = '${filterType}'`);
+  if (filterGrad !== 'all') conditions.push(`e.graduate_year = ${parseInt(filterGrad)}`);
 
   const ORDER: Record<string, string> = {
-    hire_date:      "CASE WHEN hire_date IS NULL THEN 1 ELSE 0 END, hire_date ASC, seq_no, id",
-    hire_date_desc: "CASE WHEN hire_date IS NULL THEN 1 ELSE 0 END, hire_date DESC, seq_no, id",
-    seq_no:         "seq_no ASC, id",
-    division:       "division ASC, team ASC, seq_no, id",
-    name:           "name ASC",
+    hire_date:      "CASE WHEN e.hire_date IS NULL THEN 1 ELSE 0 END, e.hire_date ASC, e.seq_no, e.id",
+    hire_date_desc: "CASE WHEN e.hire_date IS NULL THEN 1 ELSE 0 END, e.hire_date DESC, e.seq_no, e.id",
+    seq_no:         "e.seq_no ASC, e.id",
+    division:       "e.division ASC, e.team ASC, e.seq_no, e.id",
+    name:           "e.name ASC",
   };
   const orderBy = ORDER[sortKey] ?? ORDER.hire_date;
 
   const employees = await c.env.DB.prepare(
-    `SELECT * FROM employees WHERE ${conditions.join(' AND ')} ORDER BY ${orderBy}`
-  ).all<Employee & { status: string }>();
+    `SELECT e.*, i.mental_status, i.driving_skill
+     FROM employees e
+     LEFT JOIN new_employee_info i ON e.id = i.emp_id
+     WHERE ${conditions.join(' AND ')} ORDER BY ${orderBy}`
+  ).all<Employee & { status: string; mental_status: string | null; driving_skill: string | null }>();
+
+  const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
+  const canViewSalesAi = perms === null || perms.includes('sales-ai');
 
   // 配属年の一覧（年フィルター用）
   const years = await c.env.DB.prepare(
-    "SELECT DISTINCT strftime('%Y', hire_date) as y FROM employees WHERE is_active = 1 AND hire_date IS NOT NULL ORDER BY y DESC"
+    "SELECT DISTINCT strftime('%Y', hire_date) as y FROM employees WHERE is_active = 1 AND is_newcomer = 1 AND hire_date IS NOT NULL ORDER BY y DESC"
   ).all<{ y: string }>();
+
+  // 新卒年度の一覧（新卒年度フィルター用）
+  const gradYears = await c.env.DB.prepare(
+    "SELECT DISTINCT graduate_year as y FROM employees WHERE is_active = 1 AND is_newcomer = 1 AND newcomer_type = 'shinsotsu' AND graduate_year IS NOT NULL ORDER BY y DESC"
+  ).all<{ y: number }>();
 
   const STATUS_STYLE: Record<string, { bg: string; color: string; label: string }> = {
     training:   { bg: '#dbeafe', color: '#1e40af', label: '研修中' },
     completed:  { bg: '#bbf7d0', color: '#166534', label: '研修終了' },
     unassigned: { bg: '#f3f4f6', color: '#6b7280', label: '未配属' },
   };
-  const ENTRY_COLORS: Record<string, string> = {
-    '新卒': '#dbeafe', 'キャリア': '#bbf7d0',
+  const MENTAL_COLORS: Record<string, string> = {
+    '安定': '#bbf7d0', '注意': '#fef08a', '要フォロー': '#fed7aa', '危険': '#fecaca'
   };
 
   const rows = (employees.results ?? []).map((e: any) => {
@@ -2467,6 +2411,12 @@ app.get('/employees', async (c) => {
     const nextLabels: Record<string, string> = { training: '→研修終了', completed: '→未配属', unassigned: '→研修中' };
     const nextLabel  = nextLabels[st] ?? '→研修終了';
     const C = 'padding:7px 8px;border-bottom:1px solid #f3f4f6;vertical-align:middle;overflow:hidden;';
+    const newcomerBadge = e.newcomer_type === 'shinsotsu'
+      ? `<span style="background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap;">新卒${e.graduate_year ? ' ' + e.graduate_year : ''}</span>`
+      : `<span style="background:#f3f4f6;color:#374151;padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap;">通常新人</span>`;
+    const mentalBadge = e.mental_status
+      ? `<span style="background:${MENTAL_COLORS[e.mental_status] ?? '#f3f4f6'};padding:2px 6px;border-radius:4px;font-size:11px;white-space:nowrap;">${escHtml(e.mental_status)}</span>`
+      : '<span style="color:#d1d5db;font-size:11px;">—</span>';
     return `
     <tr style="background:white;cursor:pointer;"
       onmouseover="this.style.background='#f8fafc'"
@@ -2485,7 +2435,7 @@ app.get('/employees', async (c) => {
         </div>
       </td>
       <td style="${C}white-space:nowrap;">
-        <span style="background:${ENTRY_COLORS[e.entry_type] ?? '#f3f4f6'};padding:2px 6px;border-radius:4px;font-size:11px;">${escHtml(e.entry_type)}</span>
+        ${newcomerBadge}
       </td>
       <td style="${C}white-space:nowrap;">
         <button onclick="event.stopPropagation();cycleStatus(${e.id},'${st}')" title="${nextLabel}"
@@ -2500,8 +2450,16 @@ app.get('/employees', async (c) => {
           ${itTarget ? '対象' : '—'}
         </button>
       </td>
+      <td style="${C}white-space:nowrap;">
+        ${mentalBadge}
+      </td>
       <td style="${C}font-size:12px;color:#6b7280;white-space:nowrap;text-align:center;">
         ${e.hire_date ? e.hire_date.slice(5).replace('-', '/') : '—'}
+      </td>
+      <td style="${C}white-space:nowrap;text-align:center;">
+        ${(e.first_duty_date && canViewSalesAi)
+          ? `<a href="${ADMIN_PATH}/sales-ai/employee/${e.id}" onclick="event.stopPropagation();" style="font-size:11px;padding:3px 8px;background:#eff6ff;color:#1d4ed8;border-radius:4px;text-decoration:none;white-space:nowrap;">実績を見る</a>`
+          : '<span style="color:#d1d5db;font-size:11px;">—</span>'}
       </td>
       <td style="${C}white-space:nowrap;">
         <div style="display:flex;gap:4px;">
@@ -2513,7 +2471,7 @@ app.get('/employees', async (c) => {
   }).join('');
 
   const q = (params: Record<string, string>) => {
-    const base = { status: filterStatus, div: filterDiv, year: filterYear, sort: sortKey };
+    const base = { status: filterStatus, div: filterDiv, year: filterYear, type: filterType, grad: filterGrad, sort: sortKey };
     return Object.entries({ ...base, ...params }).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
   };
 
@@ -2536,6 +2494,19 @@ app.get('/employees', async (c) => {
     `<a href="${ADMIN_PATH}/employees?${q({ year: val })}" class="text-xs px-3 py-1 rounded ${filterYear === val ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${label}</a>`
   ).join('');
 
+  const typeBtns = [
+    ['all', '全員'], ['normal', '通常新人'], ['shinsotsu', '新卒'],
+  ].map(([val, label]) =>
+    `<a href="${ADMIN_PATH}/employees?${q({ type: val, grad: val === 'shinsotsu' ? filterGrad : 'all' })}" class="text-xs px-3 py-1 rounded ${filterType === val ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${label}</a>`
+  ).join('');
+
+  const gradBtns = filterType === 'shinsotsu' ? [
+    ['all', '全年度'],
+    ...(gradYears.results ?? []).map(r => [String(r.y), `${r.y}年新卒`]),
+  ].map(([val, label]) =>
+    `<a href="${ADMIN_PATH}/employees?${q({ grad: val })}" class="text-xs px-3 py-1 rounded ${filterGrad === val ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${label}</a>`
+  ).join('') : '';
+
   // ソートリンクを生成するヘルパー
   function sortLink(key: string, keyDesc: string, label: string): string {
     const isAsc = sortKey === key;
@@ -2553,6 +2524,14 @@ app.get('/employees', async (c) => {
     <div class="flex justify-between items-center mb-3">
       <div class="space-y-2">
         <div class="flex gap-1 items-center">
+          <span class="text-xs text-gray-400 w-12">種別</span>
+          <div class="flex gap-1">${typeBtns}</div>
+        </div>
+        ${gradBtns ? `<div class="flex gap-1 items-center">
+          <span class="text-xs text-gray-400 w-12">新卒年度</span>
+          <div class="flex gap-1">${gradBtns}</div>
+        </div>` : ''}
+        <div class="flex gap-1 items-center">
           <span class="text-xs text-gray-400 w-12">ステータス</span>
           <div class="flex gap-1">${statusBtns}</div>
         </div>
@@ -2567,34 +2546,27 @@ app.get('/employees', async (c) => {
       </div>
       <div class="flex gap-2 items-center">
         <span class="text-sm text-gray-500">${(employees.results ?? []).length}名</span>
+        <a href="${ADMIN_PATH}/employees/export" class="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-700">CSV出力</a>
         <a href="${ADMIN_PATH}/employees/add" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">＋ 新規登録</a>
       </div>
     </div>
     <div class="bg-white rounded-xl shadow overflow-auto">
-      <table style="width:100%;table-layout:fixed;border-collapse:collapse;">
-        <colgroup>
-          <col style="width:40px">   <!-- NO -->
-          <col style="width:74px">   <!-- 課・班 -->
-          <col style="width:160px">  <!-- 氏名+社員番号 -->
-          <col style="width:60px">   <!-- 区分 -->
-          <col style="width:86px">   <!-- ステータス -->
-          <col style="width:58px">   <!-- 面談 -->
-          <col style="width:52px">   <!-- 配属日 -->
-          <col style="width:108px">  <!-- 操作 -->
-        </colgroup>
+      <table style="width:100%;border-collapse:collapse;">
         <thead class="bg-gray-50">
           <tr>
             <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;">${sortLink('seq_no','seq_no','NO')}</th>
             <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;">${sortLink('division','division','課・班')}</th>
             <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;">${sortLink('name','name','氏名')}</th>
-            <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">区分</th>
+            <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">種別</th>
             <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">ステータス</th>
             <th style="padding:8px 10px;text-align:center;font-size:11px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">面談</th>
+            <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">メンタル</th>
             <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;">${sortLink('hire_date','hire_date_desc','配属日')}</th>
+            <th style="padding:8px 10px;text-align:center;font-size:11px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">乗務実績</th>
             <th style="padding:8px 10px;text-align:left;font-size:11px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:500;">操作</th>
           </tr>
         </thead>
-        <tbody>${rows || '<tr><td colspan="8" style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">該当する社員がいません</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="10" style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">該当する新人がいません（新人登録は社員管理の社員詳細から行えます）</td></tr>'}</tbody>
       </table>
     </div>
     <script>
@@ -2637,7 +2609,39 @@ app.get('/employees', async (c) => {
     }
     </script>
   `;
-  return c.html(layout('社員管理', content, 'employees'));
+  return c.html(layout('新人管理', content, 'employees'));
+});
+
+// ===== 新人リストCSV出力 =====
+app.get('/employees/export', async (c) => {
+  const rows = await c.env.DB.prepare(`
+    SELECT e.division, e.team, e.emp_no, e.name, e.phone, e.entry_type,
+      e.newcomer_type, e.graduate_year,
+      i.hobbies, i.favorite_food, i.alcohol, i.alcohol_note,
+      i.driving_skill, i.driving_note, i.mental_status, i.mental_note, i.other_notes,
+      i.updated_at
+    FROM employees e
+    LEFT JOIN new_employee_info i ON e.id = i.emp_id
+    WHERE e.is_active = 1 AND e.is_newcomer = 1
+    ORDER BY e.division, e.team, e.seq_no
+  `).all<Record<string, string>>();
+
+  const header = ['課', '班', '社員番号', '氏名', '電話番号', '入社区分', '新人種別', '新卒年度', '趣味', '好きな食べ物', 'お酒', 'お酒コメント', '運転技術', '運転技術コメント', 'メンタル', 'メンタルコメント', 'その他', '更新日時'];
+  const body = (rows.results ?? []).map(r =>
+    [r.division ?? '', r.team ?? '', r.emp_no, `"${(r.name ?? '').replace(/"/g, '""')}"`,
+     r.phone ?? '', r.entry_type ?? '', r.newcomer_type === 'shinsotsu' ? '新卒' : '通常新人', r.graduate_year ?? '',
+     r.hobbies ?? '', r.favorite_food ?? '',
+     r.alcohol ?? '', r.alcohol_note ?? '', r.driving_skill ?? '', r.driving_note ?? '',
+     r.mental_status ?? '', r.mental_note ?? '', r.other_notes ?? '', r.updated_at ?? ''].join(',')
+  ).join('\n');
+
+  const csv = `﻿${header.join(',')}\n${body}`;
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="newcomers.csv"'
+    }
+  });
 });
 
 // ===== アフターフォローリスト =====
@@ -2649,13 +2653,10 @@ app.get('/followup', async (c) => {
     SELECT
       e.id, e.name, e.emp_no, e.division, e.team, e.phone,
       e.status, e.hire_date,
-      i.mental_status, i.mental_note, i.driving_skill, i.other_notes,
-      (SELECT COUNT(*) FROM bad_events b WHERE b.emp_id = e.id) as event_count,
-      (SELECT b2.category FROM bad_events b2 WHERE b2.emp_id = e.id ORDER BY b2.created_at DESC LIMIT 1) as last_event_cat,
-      (SELECT b3.created_at FROM bad_events b3 WHERE b3.emp_id = e.id ORDER BY b3.created_at DESC LIMIT 1) as last_event_at
+      i.mental_status, i.mental_note, i.driving_skill, i.other_notes
     FROM employees e
     LEFT JOIN new_employee_info i ON e.id = i.emp_id
-    WHERE e.is_active = 1${divCond}
+    WHERE e.is_active = 1 AND e.is_newcomer = 1${divCond}
     ORDER BY
       CASE i.mental_status WHEN '危険' THEN 1 WHEN '要フォロー' THEN 2 WHEN '注意' THEN 3 ELSE 4 END,
       e.division, e.seq_no
@@ -2663,7 +2664,6 @@ app.get('/followup', async (c) => {
     id: number; name: string; emp_no: string; division: number; team: number; phone: string;
     status: string; hire_date: string;
     mental_status: string; mental_note: string; driving_skill: string; other_notes: string;
-    event_count: number; last_event_cat: string; last_event_at: string;
   }>();
 
   const MENTAL_STYLE: Record<string, { bg: string; color: string }> = {
@@ -2685,9 +2685,6 @@ app.get('/followup', async (c) => {
       ? `<span style="background:${ms.bg};color:${ms.color};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${escHtml(e.mental_status)}</span>`
       : '<span style="color:#9ca3af;font-size:11px;">未入力</span>';
     const statusBadge = `<span style="background:${ss.bg};color:${ss.color};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${ss.label}</span>`;
-    const lastEvent = e.last_event_cat
-      ? `<span style="background:#fee2e2;color:#991b1b;padding:2px 6px;border-radius:4px;font-size:11px;">${escHtml(e.last_event_cat)}</span> <span style="font-size:11px;color:#9ca3af;">${escHtml((e.last_event_at ?? '').slice(0, 10))}</span>`
-      : '<span style="font-size:11px;color:#9ca3af;">報告なし</span>';
 
     return `
     <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:16px;border-left:4px solid ${ms.bg === '#fecaca' ? '#ef4444' : ms.bg === '#fed7aa' ? '#f97316' : ms.bg === '#fef08a' ? '#eab308' : '#22c55e'};">
@@ -2702,13 +2699,11 @@ app.get('/followup', async (c) => {
         <div><span style="color:#9ca3af;">📞 </span><a href="tel:${escHtml(e.phone ?? '')}" style="color:#2563eb;">${escHtml(e.phone ?? '—')}</a></div>
         <div><span style="color:#9ca3af;">📅 配属 </span>${escHtml(e.hire_date ?? '—')}</div>
         <div><span style="color:#9ca3af;">🚗 運転 </span>${escHtml(e.driving_skill ?? '—')}</div>
-        <div><span style="color:#9ca3af;">📋 報告 </span>${e.event_count}件 ${lastEvent}</div>
       </div>
       ${e.mental_note ? `<div style="background:#f9fafb;border-radius:6px;padding:8px;font-size:12px;color:#374151;margin-bottom:8px;"><span style="color:#9ca3af;">メンタルメモ: </span>${escHtml(e.mental_note)}</div>` : ''}
       ${e.other_notes ? `<div style="background:#f9fafb;border-radius:6px;padding:8px;font-size:12px;color:#374151;margin-bottom:8px;"><span style="color:#9ca3af;">その他: </span>${escHtml(e.other_notes)}</div>` : ''}
       <div style="display:flex;gap:6px;">
-        <a href="${ADMIN_PATH}/info/${e.id}" style="font-size:12px;padding:4px 10px;background:#f3f4f6;border-radius:6px;color:#374151;text-decoration:none;">Info編集</a>
-        <a href="${ADMIN_PATH}/events" style="font-size:12px;padding:4px 10px;background:#fee2e2;border-radius:6px;color:#991b1b;text-decoration:none;">報告履歴(${e.event_count})</a>
+        <a href="${ADMIN_PATH}/employees/${e.id}/edit" style="font-size:12px;padding:4px 10px;background:#f3f4f6;border-radius:6px;color:#374151;text-decoration:none;">詳細・Info編集</a>
       </div>
     </div>`;
   }).join('');
@@ -2739,8 +2734,21 @@ app.get('/followup', async (c) => {
 // ===== 社員編集フォーム =====
 app.get('/employees/:id/edit', async (c) => {
   const id = parseInt(c.req.param('id'));
-  const emp = await c.env.DB.prepare('SELECT * FROM employees WHERE id = ?').bind(id).first<Employee & { birth_date: string | null }>();
+  const emp = await c.env.DB.prepare(`
+    SELECT e.*, i.hobbies, i.favorite_food, i.alcohol, i.alcohol_note,
+      i.driving_skill, i.driving_note, i.mental_status, i.mental_note, i.other_notes
+    FROM employees e LEFT JOIN new_employee_info i ON e.id = i.emp_id WHERE e.id = ?
+  `).bind(id).first<Employee & {
+    birth_date: string | null;
+    hobbies: string | null; favorite_food: string | null; alcohol: string | null; alcohol_note: string | null;
+    driving_skill: string | null; driving_note: string | null; mental_status: string | null; mental_note: string | null;
+    other_notes: string | null;
+  }>();
   if (!emp) return c.text('社員が見つかりません', 404);
+
+  const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
+  const canRegister = perms === null || perms.includes('newcomers.register.edit');
+  const canViewSalesAi = perms === null || perms.includes('sales-ai');
 
   const S = 'border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;width:100%;outline:none;background:white;';
   const DS = 'border:1px solid #e5e7eb;border-radius:8px;padding:11px 14px;font-size:15px;width:100%;outline:none;background:white;color:#374151;';
@@ -2751,6 +2759,9 @@ app.get('/employees/:id/edit', async (c) => {
     `<select name="${name}" style="${S}" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e5e7eb'">
       ${opts.map(([v, l]) => `<option value="${v}"${String(val) === v ? ' selected' : ''}>${escHtml(l)}</option>`).join('')}
     </select>`;
+
+  const ta = (name: string, val: string | null, placeholder = '') =>
+    `<textarea name="${name}" placeholder="${escHtml(placeholder)}" rows="3" style="${S}">${escHtml(val ?? '')}</textarea>`;
 
   const dateRow = (name: string, val: string | null) =>
     `<div style="display:flex;gap:6px;align-items:center;">
@@ -2789,6 +2800,43 @@ app.get('/employees/:id/edit', async (c) => {
 
       <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px 22px;">
         <form id="edit-form">
+
+          ${sec('新人登録')}
+          ${canRegister ? `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#374151;cursor:pointer;">
+              <input type="checkbox" id="is_newcomer" name="is_newcomer" ${emp.is_newcomer ? 'checked' : ''} onchange="onNewcomerToggle()">
+              総合新人管理の対象にする（新人登録）
+            </label>
+          </div>
+          <div id="newcomer-fields" style="display:${emp.is_newcomer ? 'grid' : 'none'};grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              ${lbl('種別')}
+              ${sel('newcomer_type', [['normal','通常新人'],['shinsotsu','新卒']], emp.newcomer_type ?? 'normal')}
+            </div>
+            <div>
+              ${lbl('新卒年度')}
+              ${(() => {
+                const curYear = new Date(Date.now() + 9 * 60 * 60 * 1000).getFullYear();
+                const yearOpts = [curYear, curYear - 1, curYear - 2, curYear - 3];
+                if (emp.graduate_year && !yearOpts.includes(emp.graduate_year)) yearOpts.push(emp.graduate_year);
+                return sel('graduate_year', yearOpts.map(y => [String(y), `${y}年`]), emp.graduate_year ?? curYear);
+              })()}
+            </div>
+          </div>
+          ` : `
+          <div style="font-size:13px;color:#6b7280;">
+            ${emp.is_newcomer
+              ? `新人登録済み（${emp.newcomer_type === 'shinsotsu' ? `新卒${emp.graduate_year ? ' ' + emp.graduate_year + '年' : ''}` : '通常新人'}）`
+              : '新人未登録'}
+            <span style="color:#9ca3af;">— 登録/解除には権限が必要です</span>
+          </div>
+          `}
+          ${(emp.first_duty_date && canViewSalesAi) ? `
+          <div style="margin-top:10px;">
+            <a href="${ADMIN_PATH}/sales-ai/employee/${emp.id}" style="font-size:12px;padding:5px 12px;background:#eff6ff;color:#1d4ed8;border-radius:6px;text-decoration:none;">売上・安全運転記録を見る</a>
+          </div>
+          ` : ''}
 
           ${sec('基本情報')}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -2876,6 +2924,44 @@ app.get('/employees/:id/edit', async (c) => {
             </div>
           </div>
 
+          ${sec('新卒Info（趣味・お酒・運転技術・メンタル面）')}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div>
+              ${lbl('趣味')}
+              ${inp('hobbies', emp.hobbies, 'text', '例: 釣り、ゲーム')}
+            </div>
+            <div>
+              ${lbl('好きな食べ物')}
+              ${inp('favorite_food', emp.favorite_food, 'text', '例: ラーメン、寿司')}
+            </div>
+            <div>
+              ${lbl('お酒')}
+              ${sel('alcohol', [['','選択...'],['飲む','飲む'],['飲まない','飲まない'],['機会があれば','機会があれば']], emp.alcohol)}
+              <input type="text" name="alcohol_note" value="${escHtml(emp.alcohol_note ?? '')}" placeholder="コメント"
+                style="${S}margin-top:6px;">
+            </div>
+            <div>
+              ${lbl('運転技術')}
+              ${sel('driving_skill', [['','選択...'],['A','A'],['B','B'],['C','C'],['D','D'],['E','E']], emp.driving_skill)}
+              <div style="font-size:11px;color:#9ca3af;margin-top:4px;">A=優秀 B=良好 C=普通 D=要注意 E=要指導</div>
+            </div>
+            <div style="grid-column:1/-1;">
+              ${lbl('運転技術レポート')}
+              ${ta('driving_note', emp.driving_note, '詳細なメモ...')}
+            </div>
+            <div>
+              ${lbl('メンタル面')}
+              ${sel('mental_status', [['','選択...'],['安定','安定'],['注意','注意'],['要フォロー','要フォロー'],['危険','危険']], emp.mental_status)}
+            </div>
+            <div style="grid-column:1/-1;">
+              ${ta('mental_note', emp.mental_note, 'メンタル面の詳細メモ...')}
+            </div>
+            <div style="grid-column:1/-1;">
+              ${lbl('その他')}
+              ${ta('other_notes', emp.other_notes, 'その他の情報...')}
+            </div>
+          </div>
+
           <div id="form-error" style="color:#dc2626;font-size:13px;margin-top:12px;display:none;"></div>
 
           <div style="display:flex;gap:10px;margin-top:22px;padding-top:18px;border-top:1px solid #f3f4f6;">
@@ -2904,6 +2990,10 @@ app.get('/employees/:id/edit', async (c) => {
         document.querySelector('[name="'+name+'"]').value = '';
         if (name === 'birth_date') updateAge();
       }
+      function onNewcomerToggle() {
+        const checked = document.getElementById('is_newcomer').checked;
+        document.getElementById('newcomer-fields').style.display = checked ? 'grid' : 'none';
+      }
       function updateAge() {
         const val = document.getElementById('birth_date').value;
         const el = document.getElementById('age-display');
@@ -2918,6 +3008,8 @@ app.get('/employees/:id/edit', async (c) => {
       }
     </script>
     <script>
+    const CAN_REGISTER = ${canRegister ? 'true' : 'false'};
+    const INFO_KEYS = ['hobbies','favorite_food','alcohol','alcohol_note','driving_skill','driving_note','mental_status','mental_note','other_notes'];
     document.getElementById('edit-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const btn = document.getElementById('save-btn');
@@ -2925,23 +3017,51 @@ app.get('/employees/:id/edit', async (c) => {
       btn.textContent = '保存中...';
       const fd = new FormData(e.target);
       const data = Object.fromEntries(fd.entries());
+
+      const infoData = {};
+      for (const k of INFO_KEYS) { infoData[k] = data[k] ?? ''; delete data[k]; }
+
+      let newcomerData = null;
+      if (CAN_REGISTER) {
+        newcomerData = {
+          is_newcomer: document.getElementById('is_newcomer').checked ? 1 : 0,
+          newcomer_type: data.newcomer_type || 'normal',
+          graduate_year: data.graduate_year ? parseInt(data.graduate_year) : null,
+        };
+      }
+      delete data.is_newcomer; delete data.newcomer_type; delete data.graduate_year;
+
       data.division    = data.division    ? parseInt(data.division)    : null;
       data.team        = data.team        ? parseInt(data.team)        : null;
       data.seq_no      = data.seq_no      ? parseInt(data.seq_no)      : null;
       data.hire_date   = data.hire_date   || null;
       data.first_duty_date = data.first_duty_date || null;
       data.birth_date  = data.birth_date  || null;
-      const res = await fetch('/api/employees/${id}', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      if (res.ok) {
-        window.location.href = '${ADMIN_PATH}/employees';
-      } else {
-        const err = document.getElementById('form-error');
-        err.textContent = '保存に失敗しました。';
-        err.style.display = 'block';
+
+      try {
+        const reqs = [
+          fetch('/api/employees/${id}', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+          }),
+          fetch('/api/info/${id}', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(infoData)
+          }),
+        ];
+        if (newcomerData) {
+          reqs.push(fetch('/api/employees/${id}/newcomer', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newcomerData)
+          }));
+        }
+        const results = await Promise.all(reqs);
+        if (results.every(r => r.ok)) {
+          window.location.href = '${ADMIN_PATH}/employees';
+        } else {
+          throw new Error('保存に失敗しました。');
+        }
+      } catch (err) {
+        const errEl = document.getElementById('form-error');
+        errEl.textContent = '保存に失敗しました。';
+        errEl.style.display = 'block';
         btn.disabled = false;
         btn.textContent = '保存する';
       }
@@ -3074,208 +3194,6 @@ app.get('/employees/add', async (c) => {
   return c.html(layout('新人登録', content, 'employees'));
 });
 
-// ===== 新卒Info一覧 =====
-app.get('/info', async (c) => {
-  const employees = await c.env.DB.prepare(`
-    SELECT e.*, i.hobbies, i.favorite_food, i.alcohol, i.alcohol_note,
-      i.driving_skill, i.driving_note, i.mental_status, i.mental_note, i.other_notes,
-      i.updated_at as info_updated_at
-    FROM employees e
-    LEFT JOIN new_employee_info i ON e.id = i.emp_id
-    WHERE e.is_active = 1 AND e.entry_type = '新卒'
-    ORDER BY e.seq_no, e.id
-  `).all<{
-    id: number; name: string; emp_no: string; division: number; team: number;
-    phone: string; entry_type: string;
-    hobbies: string; favorite_food: string; alcohol: string; alcohol_note: string;
-    driving_skill: string; driving_note: string; mental_status: string; mental_note: string;
-    other_notes: string; info_updated_at: string;
-  }>();
-
-  const MENTAL_COLORS: Record<string, string> = {
-    '安定': '#bbf7d0', '注意': '#fef08a', '要フォロー': '#fed7aa', '危険': '#fecaca'
-  };
-  const SKILL_COLORS: Record<string, string> = {
-    'A': '#bbf7d0', 'B': '#dbeafe', 'C': '#fef9c3', 'D': '#fed7aa', 'E': '#fecaca'
-  };
-
-  const rows = (employees.results ?? []).map(e => `
-    <tr class="hover:bg-gray-50" onclick="window.location='${ADMIN_PATH}/info/${e.id}'" style="cursor:pointer;">
-      <td class="px-3 py-2 text-xs text-gray-500 border-b">${e.division ?? ''}-${e.team ?? ''}</td>
-      <td class="px-3 py-2 text-sm font-medium text-gray-800 border-b">
-        ${escHtml(e.name)}
-        <div class="text-xs text-gray-400">${escHtml(e.emp_no)}</div>
-      </td>
-      <td class="px-3 py-2 text-xs text-gray-600 border-b">${escHtml(e.phone ?? '')}</td>
-      <td class="px-3 py-2 text-xs border-b">
-        ${e.driving_skill ? `<span style="background:${SKILL_COLORS[e.driving_skill]??'#f3f4f6'};padding:2px 8px;border-radius:4px;font-weight:bold;">${escHtml(e.driving_skill)}</span>` : '<span class="text-gray-300">未入力</span>'}
-      </td>
-      <td class="px-3 py-2 text-xs border-b">
-        ${e.mental_status ? `<span style="background:${MENTAL_COLORS[e.mental_status]??'#f3f4f6'};padding:2px 8px;border-radius:4px;">${escHtml(e.mental_status)}</span>` : '<span class="text-gray-300">未入力</span>'}
-      </td>
-      <td class="px-3 py-2 text-xs text-gray-500 border-b">${e.hobbies ? escHtml(e.hobbies.slice(0, 20)) : ''}</td>
-      <td class="px-3 py-2 text-xs text-gray-500 border-b">${e.info_updated_at ? escHtml(e.info_updated_at.slice(0, 10)) : '—'}</td>
-    </tr>
-  `).join('');
-
-  const content = `
-    <div class="flex justify-between items-center mb-4">
-      <div class="text-sm text-gray-500">${(employees.results ?? []).length}名</div>
-      <a href="${ADMIN_PATH}/info/export" class="bg-gray-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-gray-700">CSV出力</a>
-    </div>
-    <div class="bg-white rounded-xl shadow overflow-auto">
-      <table class="w-full">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">課-班</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">氏名</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">電話番号</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">運転技術</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">メンタル</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">趣味</th>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">更新日</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `;
-
-  return c.html(layout('新卒Info', content, 'info'));
-});
-
-// ===== 新卒Info 個別編集 =====
-app.get('/info/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  const emp = await c.env.DB.prepare(`
-    SELECT e.*, i.hobbies, i.favorite_food, i.alcohol, i.alcohol_note,
-      i.driving_skill, i.driving_note, i.mental_status, i.mental_note, i.other_notes
-    FROM employees e LEFT JOIN new_employee_info i ON e.id = i.emp_id WHERE e.id = ?
-  `).bind(id).first<{
-    id: number; name: string; emp_no: string; division: number; team: number; phone: string;
-    hobbies: string; favorite_food: string; alcohol: string; alcohol_note: string;
-    driving_skill: string; driving_note: string; mental_status: string; mental_note: string;
-    other_notes: string;
-  }>();
-
-  if (!emp) return c.text('社員が見つかりません', 404);
-
-  const sel = (name: string, options: string[], val: string | null) =>
-    `<select name="${name}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-      <option value="">選択...</option>
-      ${options.map(o => `<option value="${o}"${val === o ? ' selected' : ''}>${escHtml(o)}</option>`).join('')}
-    </select>`;
-
-  const txt = (name: string, val: string | null, placeholder = '') =>
-    `<input type="text" name="${name}" value="${escHtml(val ?? '')}" placeholder="${escHtml(placeholder)}"
-      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">`;
-
-  const ta = (name: string, val: string | null, placeholder = '') =>
-    `<textarea name="${name}" placeholder="${escHtml(placeholder)}" rows="3"
-      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">${escHtml(val ?? '')}</textarea>`;
-
-  const content = `
-    <div class="max-w-2xl">
-      <div class="bg-white rounded-xl shadow p-6">
-        <div class="flex items-center gap-3 mb-6 pb-4 border-b">
-          <div>
-            <h2 class="text-lg font-bold text-gray-800">${escHtml(emp.name)}</h2>
-            <div class="text-sm text-gray-500">社員番号: ${escHtml(emp.emp_no)} ／ ${emp.division ?? ''}課 ${emp.team ?? ''}班</div>
-          </div>
-        </div>
-        <form id="info-form" class="space-y-5">
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">趣味</label>
-              ${txt('hobbies', emp.hobbies, '例: 釣り、ゲーム')}
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">好きな食べ物</label>
-              ${txt('favorite_food', emp.favorite_food, '例: ラーメン、寿司')}
-            </div>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">お酒</label>
-              ${sel('alcohol', ['飲む', '飲まない', '機会があれば'], emp.alcohol)}
-              <input type="text" name="alcohol_note" value="${escHtml(emp.alcohol_note ?? '')}" placeholder="コメント"
-                class="w-full border border-gray-200 rounded-lg px-3 py-1 text-sm mt-1">
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">運転技術</label>
-              ${sel('driving_skill', ['A', 'B', 'C', 'D', 'E'], emp.driving_skill)}
-              <div class="text-xs text-gray-400 mt-1">A=優秀 B=良好 C=普通 D=要注意 E=要指導</div>
-            </div>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">運転技術レポート</label>
-            ${ta('driving_note', emp.driving_note, '詳細なメモ...')}
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">メンタル面</label>
-            ${sel('mental_status', ['安定', '注意', '要フォロー', '危険'], emp.mental_status)}
-            <div class="mt-2">${ta('mental_note', emp.mental_note, 'メンタル面の詳細メモ...')}</div>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">その他</label>
-            ${ta('other_notes', emp.other_notes, 'その他の情報...')}
-          </div>
-          <div class="flex gap-3 pt-2">
-            <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">保存</button>
-            <a href="${ADMIN_PATH}/info" class="px-6 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">一覧に戻る</a>
-          </div>
-        </form>
-      </div>
-    </div>
-    <script>
-    document.getElementById('info-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      const data = Object.fromEntries(fd.entries());
-      const res = await fetch('/api/info/${id}', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-      if (res.ok) { alert('保存しました！'); }
-      else { alert('保存に失敗しました。'); }
-    });
-    </script>
-  `;
-
-  return c.html(layout(`${emp.name} — 新卒Info`, content, 'info'));
-});
-
-// ===== 新卒Info CSV出力 =====
-app.get('/info/export', async (c) => {
-  const rows = await c.env.DB.prepare(`
-    SELECT e.division, e.team, e.emp_no, e.name, e.phone, e.entry_type,
-      i.hobbies, i.favorite_food, i.alcohol, i.alcohol_note,
-      i.driving_skill, i.driving_note, i.mental_status, i.mental_note, i.other_notes,
-      i.updated_at
-    FROM employees e
-    LEFT JOIN new_employee_info i ON e.id = i.emp_id
-    WHERE e.is_active = 1 AND e.entry_type = '新卒'
-    ORDER BY e.division, e.team, e.seq_no
-  `).all<Record<string, string>>();
-
-  const header = ['課', '班', '社員番号', '氏名', '電話番号', '入社区分', '趣味', '好きな食べ物', 'お酒', 'お酒コメント', '運転技術', '運転技術コメント', 'メンタル', 'メンタルコメント', 'その他', '更新日時'];
-  const body = (rows.results ?? []).map(r =>
-    [r.division ?? '', r.team ?? '', r.emp_no, `"${(r.name ?? '').replace(/"/g, '""')}"`,
-     r.phone ?? '', r.entry_type ?? '', r.hobbies ?? '', r.favorite_food ?? '',
-     r.alcohol ?? '', r.alcohol_note ?? '', r.driving_skill ?? '', r.driving_note ?? '',
-     r.mental_status ?? '', r.mental_note ?? '', r.other_notes ?? '', r.updated_at ?? ''].join(',')
-  ).join('\n');
-
-  const csv = `﻿${header.join(',')}\n${body}`;
-  return new Response(csv, {
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="new_employee_info.csv"'
-    }
-  });
-});
-
 // ===== システムステータス =====
 
 // メンテナンスモード状態（ステータスページ表示用）
@@ -3361,8 +3279,7 @@ app.get('/settings/status', async (c) => {
         ['vehicles',       'SELECT COUNT(*) AS cnt FROM vehicles'],
         ['liff_users',     'SELECT COUNT(*) AS cnt FROM line_liff_users'],
         ['line_logs',      'SELECT COUNT(*) AS cnt FROM line_activity_logs'],
-        ['reports',        `SELECT (SELECT COUNT(*) FROM bad_events)
-                              + (SELECT COUNT(*) FROM lost_item_reports)
+        ['reports',        `SELECT (SELECT COUNT(*) FROM lost_item_reports)
                               + (SELECT COUNT(*) FROM accident_reports)
                               + (SELECT COUNT(*) FROM violation_reports)
                               + (SELECT COUNT(*) FROM general_reports) AS cnt`],

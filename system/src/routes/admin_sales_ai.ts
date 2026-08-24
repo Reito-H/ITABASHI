@@ -14,10 +14,11 @@ import { summarizeDrivingRisk, type DrivingSafetyRow } from '../utils/driving_ri
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
-// AI売上分析 配下（全社サマリー／運賃改定影響分析）共通のタブナビ
-export function salesAiTabNav(active: 'summary' | 'fare-revision'): string {
+// AI売上分析 配下（全社サマリー／運賃改定影響分析／売上予想カレンダー）共通のタブナビ
+export function salesAiTabNav(active: 'summary' | 'fare-revision' | 'forecast-calendar'): string {
   const tabs: Array<{ id: typeof active; label: string; href: string }> = [
     { id: 'summary', label: '全社サマリー', href: `${ADMIN_PATH}/sales-ai` },
+    { id: 'forecast-calendar', label: '売上予想カレンダー', href: `${ADMIN_PATH}/sales-ai/forecast-calendar` },
     { id: 'fare-revision', label: '運賃改定影響分析', href: `${ADMIN_PATH}/sales-ai/fare-revision` },
   ];
   return `<div class="sai-tabnav">` + tabs.map(t =>
@@ -125,7 +126,14 @@ app.get('/sales-ai', async (c) => {
 
   <div id="content" style="display:none;">
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-      <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 14px;">全社横断の暦要因別 営収差（今月度・実データより）</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+        <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0;">全社横断の暦要因別 営収差（今月度・実データより）</h3>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="weather-status-text" style="font-size:11px;color:#9ca3af;"></span>
+          <button type="button" id="weather-import-btn" onclick="importMissingWeather()" style="padding:5px 12px;background:#fff;border:1px solid #d1d5db;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;color:#374151;">🌤️ 気象庁データを取込</button>
+        </div>
+      </div>
+      <div style="font-size:10.5px;color:#9ca3af;margin-bottom:10px;">※雨天・猛暑日・冬日は<a href="https://www.data.jma.go.jp/stats/etrn/index.php" target="_blank" style="color:#2563eb;">気象庁（東京）の公開データ</a>を取込んで判定します。未取込の期間は「—」表示になります。売上データがある期間分をまとめて取込めます（月ごとに順番に取込むため、件数が多いと時間がかかります）。</div>
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
           <th style="padding:6px 8px;">要因</th><th style="padding:6px 8px;">該当日平均</th><th style="padding:6px 8px;">非該当日平均</th><th style="padding:6px 8px;">差分</th><th style="padding:6px 8px;">件数</th>
@@ -203,6 +211,58 @@ function changePeriod(delta) {
   viewYear = delta < 0 ? p.prevYear : p.nextYear;
   viewMonth = delta < 0 ? p.prevMonth : p.nextMonth;
   loadOverview();
+}
+
+function monthsBetween(minDate, maxDate) {
+  const out = [];
+  let y = parseInt(minDate.slice(0, 4)), m = parseInt(minDate.slice(5, 7));
+  const endY = parseInt(maxDate.slice(0, 4)), endM = parseInt(maxDate.slice(5, 7));
+  while (y < endY || (y === endY && m <= endM)) {
+    out.push(y + '-' + String(m).padStart(2, '0'));
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
+async function refreshWeatherStatus() {
+  const el = document.getElementById('weather-status-text');
+  const btn = document.getElementById('weather-import-btn');
+  try {
+    const res = await fetch('/api/sales-ai/weather/status');
+    const json = await res.json();
+    if (!json.salesDateRange.min) { el.textContent = '売上データがありません'; btn.style.display = 'none'; return; }
+    const allMonths = monthsBetween(json.salesDateRange.min, new Date().toISOString().slice(0, 10));
+    const importedSet = new Set(json.importedMonths.map(m => m.ym));
+    const missing = allMonths.filter(m => !importedSet.has(m));
+    if (missing.length === 0) {
+      el.textContent = '取込済み（' + allMonths.length + 'ヶ月分）';
+      btn.style.display = 'none';
+    } else {
+      el.textContent = '未取込: ' + missing.length + 'ヶ月分';
+      btn.style.display = '';
+      btn.dataset.missing = JSON.stringify(missing);
+    }
+  } catch (err) {
+    el.textContent = '';
+  }
+}
+
+async function importMissingWeather() {
+  const btn = document.getElementById('weather-import-btn');
+  const missing = JSON.parse(btn.dataset.missing || '[]');
+  if (!missing.length) return;
+  btn.disabled = true;
+  for (let i = 0; i < missing.length; i++) {
+    const [y, m] = missing[i].split('-').map(Number);
+    btn.textContent = '取込中… (' + (i + 1) + '/' + missing.length + ')';
+    try {
+      await fetch('/api/sales-ai/weather/import?year=' + y + '&month=' + m, { method: 'POST' });
+    } catch (err) { /* 1ヶ月失敗しても続行 */ }
+  }
+  btn.textContent = '🌤️ 気象庁データを取込';
+  btn.disabled = false;
+  await refreshWeatherStatus();
+  await loadOverview();
 }
 
 async function loadOverview() {
@@ -418,9 +478,205 @@ function escHtmlJs(s) {
 
 const ADMIN_PATH = '${ADMIN_PATH}';
 loadOverview();
+refreshWeatherStatus();
 </script>`;
 
   return c.html(layout('AI売上分析', content, 'sales-ai'));
+});
+
+// ===================================================
+// 売上予想カレンダー（全社合計・平均日商ベース・ルールベース）
+// ===================================================
+app.get('/sales-ai/forecast-calendar', async (c) => {
+  const content = `
+<style>
+  ${SALES_AI_TABNAV_CSS}
+  .fc-month { background:white; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.08); padding:12px 14px; }
+  .fc-month-title { font-size:12.5px; font-weight:700; color:#374151; margin-bottom:8px; }
+  .fc-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+  .fc-wd { font-size:9.5px; color:#9ca3af; text-align:center; padding-bottom:2px; }
+  .fc-cell { position:relative; aspect-ratio:1; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:600; color:#374151; cursor:pointer; }
+  .fc-cell.empty { visibility:hidden; }
+  .fc-cell:hover, .fc-cell.selected { outline:2px solid #1a3a5c; outline-offset:-2px; }
+  .fc-months { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  @media (max-width:900px) { .fc-months { grid-template-columns:repeat(2,1fr); } }
+  #fc-tooltip { position:fixed; z-index:50; background:#1e293b; color:#fff; font-size:11.5px; line-height:1.6; border-radius:8px; padding:10px 12px; max-width:260px; box-shadow:0 4px 16px rgba(0,0,0,0.25); pointer-events:none; display:none; }
+  #fc-detail-panel { display:none; }
+  /* 日付見出し・予想額の色はコンテナの背景色に合わせて切り替える（白背景のdetail-panelと濃紺背景のtooltipで共用のため） */
+  #fc-detail-panel .fc-detail-title, #fc-detail-panel .fc-detail-headline { color:#1a3a5c; }
+  #fc-detail-panel .fc-detail-sub { color:#374151; }
+  #fc-tooltip .fc-detail-title { color:#fff; }
+  #fc-tooltip .fc-detail-headline { color:#7dd3fc; }
+  #fc-tooltip .fc-detail-sub { color:#e2e8f0; }
+</style>
+<div style="max-width:1180px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+  ${salesAiTabNav('forecast-calendar')}
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+    <div>
+      <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0;">売上予想カレンダー — 全社合計（平均日商）</h2>
+      <div style="font-size:11px;color:#9ca3af;margin-top:3px;">過去の実績（曜日別・暦要因別）から組み立てたルールベースの予想です。外部AIへの通信は行いません。天気は将来日には分からないため予想には使用していません。</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;white-space:nowrap;">
+      <button type="button" onclick="changeYear(-1)" style="padding:5px 12px;background:#fff;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;">◀ 前年</button>
+      <div id="fc-year-label" style="font-size:13px;font-weight:700;color:#1a3a5c;min-width:70px;text-align:center;"></div>
+      <button type="button" onclick="changeYear(1)" style="padding:5px 12px;background:#fff;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;">次年 ▶</button>
+    </div>
+  </div>
+
+  <div id="fc-loading" style="color:#9ca3af;font-size:13px;margin-top:16px;">読み込み中…</div>
+  <div id="fc-content" style="display:none;">
+    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:11.5px;color:#6b7280;">平均より低い</span>
+        <div style="width:180px;height:12px;border-radius:6px;background:linear-gradient(90deg,#9ec5f4,#f0efec,#f3b2a0);"></div>
+        <span style="font-size:11.5px;color:#6b7280;">平均より高い</span>
+      </div>
+      <div id="fc-overall-mean" style="font-size:11.5px;color:#6b7280;"></div>
+    </div>
+
+    <div id="fc-insufficient" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 18px;font-size:12.5px;color:#78350f;margin-bottom:16px;"></div>
+
+    <div id="fc-detail-panel" style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:14px 20px;margin-bottom:16px;">
+      <div id="fc-detail-body" style="font-size:12.5px;color:#374151;line-height:1.8;"></div>
+    </div>
+
+    <div id="fc-months" class="fc-months"></div>
+
+    <div style="font-size:10.5px;color:#9ca3af;margin:16px 0 24px;line-height:1.8;">
+      ※予想値は「曜日別の平均日商」を基準に、祝日・連休前後・大型連休・忘新年会/送別会シーズン・月末月初・ボーナス月など、事前に分かる暦要因の過去の効果（該当日と非該当日の平均差）を加算して算出した概算です。件数の少ない要因は信頼性が低いため予想モデルから除外しています。実際の売上を保証するものではありません。<br>
+      ※雨天・猛暑日・冬日は暦要因別の分析（<a href="${ADMIN_PATH}/sales-ai" style="color:#2563eb;">全社サマリー</a>）でのみ使用しており、将来日が不明なため本カレンダーの予想には含めていません。
+    </div>
+  </div>
+</div>
+
+<div id="fc-tooltip"></div>
+
+<script>
+const ADMIN_PATH = '${ADMIN_PATH}';
+const MONTH_LABELS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+const WD_LABELS = ['日','月','火','水','木','金','土'];
+let fcYear = new Date().getFullYear();
+let fcData = null;
+let fcSelectedDate = null;
+
+function changeYear(delta) {
+  fcYear += delta;
+  loadForecast();
+}
+
+function fcColor(score) {
+  const s = Math.max(-1, Math.min(1, score));
+  const mix = (a, b, t) => Math.round(a + (b - a) * t);
+  const hex = (c) => [1,3,5].map(i => c.slice(i, i + 2));
+  const gray = [0xf0, 0xef, 0xec];
+  const target = s < 0 ? [0x9e, 0xc5, 0xf4] : [0xf3, 0xb2, 0xa0];
+  const t = Math.abs(s);
+  const rgb = [0,1,2].map(i => mix(gray[i], target[i], t));
+  return 'rgb(' + rgb.join(',') + ')';
+}
+
+async function loadForecast() {
+  document.getElementById('fc-loading').style.display = '';
+  document.getElementById('fc-content').style.display = 'none';
+  document.getElementById('fc-year-label').textContent = fcYear + '年';
+  try {
+    const res = await fetch('/api/sales-ai/forecast-calendar?year=' + fcYear);
+    const json = await res.json();
+    if (!res.ok) { document.getElementById('fc-loading').textContent = json.error || '読み込みに失敗しました'; return; }
+    fcData = json;
+    document.getElementById('fc-loading').style.display = 'none';
+    document.getElementById('fc-content').style.display = '';
+
+    if (!json.sufficientData) {
+      document.getElementById('fc-insufficient').style.display = '';
+      document.getElementById('fc-insufficient').textContent = '予想を組み立てるにはデータが不足しています（現在' + json.sampleDayCount + '日分。過去24ヶ月の売上データが蓄積されると自動的に表示されます）。';
+      document.getElementById('fc-months').innerHTML = '';
+      document.getElementById('fc-overall-mean').textContent = '';
+      return;
+    }
+    document.getElementById('fc-insufficient').style.display = 'none';
+    document.getElementById('fc-overall-mean').textContent = '過去' + json.sampleDayCount + '日分の実績から算出（全体平均日商 ' + json.overallMean.toLocaleString('ja-JP') + '円）';
+
+    renderMonths();
+    fcSelectedDate = null;
+    document.getElementById('fc-detail-panel').style.display = 'none';
+  } catch (err) {
+    document.getElementById('fc-loading').textContent = '通信エラーが発生しました';
+  }
+}
+
+function renderMonths() {
+  const byDate = new Map(fcData.days.map(d => [d.date, d]));
+  const html = [];
+  for (let m = 0; m < 12; m++) {
+    const first = new Date(fcYear, m, 1);
+    const daysInMonth = new Date(fcYear, m + 1, 0).getDate();
+    const startWd = first.getDay();
+    let cells = '';
+    for (let i = 0; i < startWd; i++) cells += '<div class="fc-cell empty"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = fcYear + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      const info = byDate.get(dateStr);
+      const bg = info ? fcColor(info.colorScore) : '#f3f4f6';
+      cells += '<div class="fc-cell" style="background:' + bg + ';" data-date="' + dateStr + '" ' +
+        'onmouseenter="fcShowTooltip(event,\\'' + dateStr + '\\')" onmousemove="fcMoveTooltip(event)" onmouseleave="fcHideTooltip()" ' +
+        'onclick="fcSelectDay(\\'' + dateStr + '\\')">' + d + '</div>';
+    }
+    html.push(
+      '<div class="fc-month"><div class="fc-month-title">' + MONTH_LABELS[m] + '</div>' +
+      '<div class="fc-grid">' + WD_LABELS.map(w => '<div class="fc-wd">' + w + '</div>').join('') + cells + '</div></div>'
+    );
+  }
+  document.getElementById('fc-months').innerHTML = html.join('');
+}
+
+function fcDetailHtml(info) {
+  const factorsHtml = info.appliedFactors.length
+    ? info.appliedFactors.map(f => '<span style="display:inline-block;background:#f1f5f9;border-radius:10px;padding:2px 9px;margin:0 6px 6px 0;font-size:11.5px;">' + f.label + ' <b style="color:' + (f.diffPct >= 0 ? '#059669' : '#dc2626') + ';">' + (f.diffPct >= 0 ? '+' : '') + f.diffPct + '%</b></span>').join('')
+    : '<span style="color:#9ca3af;">該当する暦要因はありません</span>';
+  const holidayLine = info.holidayName ? '祝日: ' + info.holidayName + '　' : (info.longHolidayName ? info.longHolidayName + '　' : '');
+  return '<div class="fc-detail-title" style="font-weight:700;font-size:13px;margin-bottom:4px;">' + info.date + '（' + info.weekdayLabel + '曜）</div>' +
+    '<div class="fc-detail-sub" style="margin-bottom:6px;">' + holidayLine + '曜日ベース平均: ' + info.baseWeekdayAvg.toLocaleString('ja-JP') + '円</div>' +
+    '<div class="fc-detail-headline" style="font-size:15px;font-weight:700;margin-bottom:8px;">予想平均日商: ' + info.predicted.toLocaleString('ja-JP') + '円</div>' +
+    '<div>' + factorsHtml + '</div>';
+}
+
+function fcShowTooltip(ev, dateStr) {
+  const info = fcData && fcData.days.find(d => d.date === dateStr);
+  if (!info) return;
+  const tip = document.getElementById('fc-tooltip');
+  tip.innerHTML = fcDetailHtml(info);
+  tip.style.display = 'block';
+  fcMoveTooltip(ev);
+}
+function fcMoveTooltip(ev) {
+  const tip = document.getElementById('fc-tooltip');
+  if (tip.style.display !== 'block') return;
+  const x = Math.min(ev.clientX + 14, window.innerWidth - 280);
+  const y = Math.min(ev.clientY + 14, window.innerHeight - 160);
+  tip.style.left = x + 'px';
+  tip.style.top = y + 'px';
+}
+function fcHideTooltip() {
+  document.getElementById('fc-tooltip').style.display = 'none';
+}
+
+// タップ操作（スマホ・タブレット）向け: クリックで詳細パネルに固定表示
+function fcSelectDay(dateStr) {
+  const info = fcData && fcData.days.find(d => d.date === dateStr);
+  if (!info) return;
+  fcSelectedDate = dateStr;
+  document.querySelectorAll('.fc-cell.selected').forEach(el => el.classList.remove('selected'));
+  const cell = document.querySelector('.fc-cell[data-date="' + dateStr + '"]');
+  if (cell) cell.classList.add('selected');
+  document.getElementById('fc-detail-panel').style.display = 'block';
+  document.getElementById('fc-detail-body').innerHTML = fcDetailHtml(info);
+}
+
+loadForecast();
+</script>`;
+
+  return c.html(layout('売上予想カレンダー', content, 'sales-ai'));
 });
 
 // ===================================================

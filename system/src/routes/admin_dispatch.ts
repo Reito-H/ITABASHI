@@ -10,7 +10,7 @@ import { getAdminPermissions } from '../permissions';
 import { todayJST } from '../benten';
 import { loadTimeMasterMap, computeDailyAlerts, type CarAssignmentForAlert } from '../utils/dispatch_alerts';
 import { getTantoshaPriorityMap } from '../utils/tantosha_lookup';
-import { DISPATCH_PDF_CLIENT_JS_BASE64 } from '../assets/dispatch_pdf_client_bundle';
+import { PDF_PARSERS_CLIENT_JS_BASE64 } from '../assets/pdf_parsers_client_bundle';
 import { vehicleRotationPage, type RotationVehicleRow, type RotationCell, type RotationAlertLevel } from '../html/vehicle_rotation';
 import type { DispatchLimitInfo as RotationLimitInfo } from '../html/dispatch_board';
 
@@ -332,10 +332,11 @@ app.post('/api/dispatch/time-master/save', async (c) => {
 });
 
 // ===== PDF解析用バンドル配信 =====
-// PDF解析（座標マッチング等の重い処理）はサーバーではなくブラウザ側で実行する（crew_shift_pdf.tsと同じ理由）。
-// src/utils/dispatch_pdf.ts を編集したら `npm run build:dispatch-pdf-bundle` で再生成すること。
+// PDF解析（座標マッチング等の重い処理）はサーバーではなくブラウザ側で実行する。
+// 配車PDF・乗務員シフトPDF・退職者名簿PDFの3機能で共通バンドルを配信する（unpdfの重複を避けるため）。
+// src/utils/dispatch_pdf.ts を編集したら `npm run build:pdf-parsers-bundle` で再生成すること。
 app.get('/api/dispatch/pdf-parser.js', (c) => {
-  const bytes = Uint8Array.from(atob(DISPATCH_PDF_CLIENT_JS_BASE64), (ch) => ch.charCodeAt(0));
+  const bytes = Uint8Array.from(atob(PDF_PARSERS_CLIENT_JS_BASE64), (ch) => ch.charCodeAt(0));
   return new Response(bytes, {
     headers: {
       'Content-Type': 'application/javascript; charset=utf-8',

@@ -63,188 +63,6 @@ app.get('/sales/detail', async (c) => {
   return c.html(layout(`${emp.name} 売上詳細`, content, 'sales'));
 });
 
-// ===== 嫌なこと報告 =====
-app.get('/events', async (c) => {
-  const page = parseInt(c.req.query('page') ?? '1');
-  const limit = 20;
-  const offset = (page - 1) * limit;
-
-  const events = await c.env.DB.prepare(`
-    SELECT b.id, b.category, b.content, b.feeling, b.admin_memo, b.created_at,
-      e.name, e.emp_no, e.division
-    FROM bad_events b
-    JOIN employees e ON b.emp_id = e.id
-    ORDER BY b.created_at DESC
-    LIMIT ? OFFSET ?
-  `).bind(limit, offset).all<{
-    id: number; category: string; content: string; feeling: string;
-    admin_memo: string; created_at: string; name: string; emp_no: string; division: number;
-  }>();
-
-  const totalRow = await c.env.DB.prepare('SELECT COUNT(*) as cnt FROM bad_events').first<{ cnt: number }>();
-  const total = totalRow?.cnt ?? 0;
-  const totalPages = Math.ceil(total / limit);
-
-  const CAT_COLORS: Record<string, string> = {
-    'クレーマー': '#fecaca', '交通トラブル': '#fed7aa',
-    '社内の出来事': '#e9d5ff', 'その他': '#e5e7eb'
-  };
-
-  const rows = (events.results ?? []).map(e => `
-    <tr class="hover:bg-gray-50">
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;cursor:pointer;" onclick="window.location='${ADMIN_PATH}/events/${e.id}'">
-        <span style="background:${CAT_COLORS[e.category] ?? '#e5e7eb'};padding:2px 8px;border-radius:4px;font-size:12px;">${escHtml(e.category)}</span>
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;cursor:pointer;" onclick="window.location='${ADMIN_PATH}/events/${e.id}'">${escHtml(e.name)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;max-width:300px;cursor:pointer;" onclick="window.location='${ADMIN_PATH}/events/${e.id}'">
-        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(e.content)}</div>
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;cursor:pointer;" onclick="window.location='${ADMIN_PATH}/events/${e.id}'">${e.created_at.slice(0, 10)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;cursor:pointer;" onclick="window.location='${ADMIN_PATH}/events/${e.id}'">
-        ${e.admin_memo ? '<span style="background:#bbf7d0;padding:2px 6px;border-radius:4px;font-size:11px;">対応済</span>' : '<span style="background:#fee2e2;padding:2px 6px;border-radius:4px;font-size:11px;">未対応</span>'}
-      </td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;">
-        <button onclick="deleteEvent(${e.id})" style="padding:2px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;">削除</button>
-      </td>
-    </tr>`).join('');
-
-  const pagination = totalPages > 1 ? `
-    <div style="display:flex;gap:4px;margin-top:12px;">
-      ${Array.from({ length: totalPages }, (_, i) => i + 1).map(p =>
-        `<a href="${ADMIN_PATH}/events?page=${p}" style="padding:4px 10px;border-radius:4px;font-size:13px;${p === page ? 'background:#2563eb;color:white;' : 'background:#e5e7eb;color:#374151;'}text-decoration:none;">${p}</a>`
-      ).join('')}
-    </div>` : '';
-
-  const content = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <div style="font-size:14px;color:#6b7280;">全 ${total} 件</div>
-      <a href="${ADMIN_PATH}/events/export" style="padding:6px 14px;background:#6b7280;color:white;border-radius:6px;font-size:13px;text-decoration:none;">CSV出力</a>
-    </div>
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);overflow:auto;">
-      <table style="width:100%;border-collapse:collapse;">
-        <thead style="background:#f9fafb;">
-          <tr>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">カテゴリ</th>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">氏名</th>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">内容</th>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">日付</th>
-            <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;">状態</th>
-            <th style="padding:8px 12px;border-bottom:1px solid #e5e7eb;"></th>
-          </tr>
-        </thead>
-        <tbody>${rows || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">報告はありません</td></tr>'}</tbody>
-      </table>
-    </div>
-    ${pagination}
-    <script>
-    async function deleteEvent(id) {
-      if (!confirm('この報告を削除しますか？\\nこの操作は取り消せません。')) return;
-      const res = await fetch('/api/events/' + id, { method: 'DELETE' });
-      if (res.ok) { location.reload(); }
-      else { alert('削除に失敗しました。'); }
-    }
-    </script>
-  `;
-  return c.html(layout('嫌なこと報告一覧', content, 'events'));
-});
-
-// 報告詳細・管理者メモ
-app.get('/events/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  const event = await c.env.DB.prepare(`
-    SELECT b.*, e.name, e.emp_no, e.division, e.team
-    FROM bad_events b JOIN employees e ON b.emp_id = e.id WHERE b.id = ?
-  `).bind(id).first<{
-    id: number; category: string; content: string; feeling: string;
-    admin_memo: string; created_at: string; name: string; emp_no: string;
-    division: number; team: number; emp_id: number;
-  }>();
-  if (!event) return c.text('見つかりません', 404);
-
-  const CAT_COLORS: Record<string, string> = {
-    'クレーマー': '#fecaca', '交通トラブル': '#fed7aa',
-    '社内の出来事': '#e9d5ff', 'その他': '#e5e7eb'
-  };
-
-  const content = `
-    <div style="max-width:640px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <a href="${ADMIN_PATH}/events" style="color:#2563eb;font-size:13px;">← 一覧に戻る</a>
-        <button onclick="deleteEvent(${id})" style="padding:4px 12px;background:#fee2e2;color:#991b1b;border:none;border-radius:6px;font-size:12px;cursor:pointer;">🗑️ この報告を削除</button>
-      </div>
-      <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:24px;margin-top:12px;">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #f3f4f6;">
-          <span style="background:${CAT_COLORS[event.category] ?? '#e5e7eb'};padding:4px 12px;border-radius:6px;font-size:13px;">${escHtml(event.category)}</span>
-          <div>
-            <div style="font-size:16px;font-weight:bold;">${escHtml(event.name)}</div>
-            <div style="font-size:12px;color:#6b7280;">${event.division ?? ''}課 ${event.team ?? ''}班 ／ ${event.created_at.slice(0, 16)}</div>
-          </div>
-        </div>
-        <div style="margin-bottom:16px;">
-          <div style="font-size:12px;font-weight:600;color:#6b7280;margin-bottom:6px;">📝 経緯・出来事</div>
-          <div style="background:#f9fafb;border-radius:8px;padding:12px;font-size:14px;white-space:pre-wrap;line-height:1.6;">${escHtml(event.content)}</div>
-        </div>
-        ${event.feeling ? `
-        <div style="margin-bottom:16px;">
-          <div style="font-size:12px;font-weight:600;color:#6b7280;margin-bottom:6px;">💭 気持ち・感想</div>
-          <div style="background:#fffbeb;border-radius:8px;padding:12px;font-size:14px;white-space:pre-wrap;line-height:1.6;">${escHtml(event.feeling)}</div>
-        </div>` : ''}
-        <div>
-          <div style="font-size:12px;font-weight:600;color:#6b7280;margin-bottom:6px;">📌 管理者メモ（面談記録等）</div>
-          <textarea id="admin-memo" rows="4" placeholder="面談記録・対応内容等を記録..."
-            style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:10px;font-size:13px;line-height:1.6;">${escHtml(event.admin_memo ?? '')}</textarea>
-          <button onclick="saveMemo()" style="margin-top:8px;padding:8px 20px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;">メモを保存</button>
-        </div>
-      </div>
-    </div>
-    <script>
-    async function saveMemo() {
-      const memo = document.getElementById('admin-memo').value;
-      const res = await fetch('/api/events/${id}/memo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ memo })
-      });
-      if (res.ok) alert('保存しました');
-      else alert('保存に失敗しました');
-    }
-    async function deleteEvent(id) {
-      if (!confirm('この報告を削除しますか？\\nこの操作は取り消せません。')) return;
-      const res = await fetch('/api/events/' + id, { method: 'DELETE' });
-      if (res.ok) { window.location.href = '${ADMIN_PATH}/events'; }
-      else { alert('削除に失敗しました。'); }
-    }
-    </script>
-  `;
-  return c.html(layout(`報告詳細 — ${event.name}`, content, 'events'));
-});
-
-// 報告CSV出力
-app.get('/events/export', async (c) => {
-  const rows = await c.env.DB.prepare(`
-    SELECT b.id, b.category, b.content, b.feeling, b.admin_memo, b.created_at,
-      e.name, e.emp_no, e.division, e.team
-    FROM bad_events b JOIN employees e ON b.emp_id = e.id
-    ORDER BY b.created_at DESC
-  `).all<Record<string, string>>();
-
-  const header = ['ID', '課', '班', '社員番号', '氏名', 'カテゴリ', '経緯', '気持ち', '管理者メモ', '日時'];
-  const body = (rows.results ?? []).map(r =>
-    [r.id, r.division ?? '', r.team ?? '', r.emp_no, `"${(r.name ?? '').replace(/"/g, '""')}"`,
-     r.category, `"${(r.content ?? '').replace(/"/g, '""')}"`,
-     `"${(r.feeling ?? '').replace(/"/g, '""')}"`,
-     `"${(r.admin_memo ?? '').replace(/"/g, '""')}"`,
-     r.created_at].join(',')
-  ).join('\n');
-
-  return new Response(`﻿${header.join(',')}\n${body}`, {
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="bad_events.csv"'
-    }
-  });
-});
-
 // ===== LINE管理 =====
 app.get('/line', async (c) => {
   const linked = await c.env.DB.prepare(`
@@ -338,21 +156,21 @@ app.get('/line', async (c) => {
 // 面談管理
 // ============================================================
 
-const CHK_LABEL: Record<string, { section: string; label: string; icon: string }> = {
-  chk_mental_exp:      { section: 'メンタル面',         label: '表情・発言はどうですか',       icon: '😊' },
-  chk_mental_stress:   { section: 'メンタル面',         label: 'ストレスや不満はどうですか',    icon: '💭' },
-  chk_mental_family:   { section: 'メンタル面',         label: '家族・友人との関係は',          icon: '👨‍👩‍👦' },
-  chk_life_sleep:      { section: '生活面',             label: '睡眠は取れていますか',          icon: '😴' },
-  chk_life_appetite:   { section: '生活面',             label: '食欲はありますか',              icon: '🍱' },
-  chk_life_health:     { section: '生活面',             label: '体調はどうですか',              icon: '🏥' },
-  chk_work_motivation: { section: '業務に対して',       label: '仕事のやりがいはありますか',    icon: '💪' },
-  chk_work_instructor: { section: '業務に対して',       label: '指導者との関係はどうですか',    icon: '🤝' },
-  chk_work_rules:      { section: '業務に対して',       label: '礼儀・ルール等は守られていますか', icon: '📋' },
-  chk_money:           { section: 'お金に対する不満',   label: '収入に対して不満はありますか',  icon: '💴' },
-  chk_relation:        { section: '人間関係',           label: '乗務員同士の関係はどうですか',  icon: '👥' },
-  chk_appearance:      { section: '身だしなみ・就業状況', label: '身だしなみはどうですか',      icon: '👔' },
-  chk_attendance:      { section: '身だしなみ・就業状況', label: '就業状況はどうですか',        icon: '⏰' },
-  chk_future:          { section: '今後の意向確認',     label: '今後も仕事を続けたいですか',    icon: '🚕' },
+const CHK_LABEL: Record<string, { section: string; label: string }> = {
+  chk_mental_exp:      { section: 'メンタル面',         label: '表情・発言はどうですか' },
+  chk_mental_stress:   { section: 'メンタル面',         label: 'ストレスや不満はどうですか' },
+  chk_mental_family:   { section: 'メンタル面',         label: '家族・友人との関係は' },
+  chk_life_sleep:      { section: '生活面',             label: '睡眠は取れていますか' },
+  chk_life_appetite:   { section: '生活面',             label: '食欲はありますか' },
+  chk_life_health:     { section: '生活面',             label: '体調はどうですか' },
+  chk_work_motivation: { section: '業務に対して',       label: '仕事のやりがいはありますか' },
+  chk_work_instructor: { section: '業務に対して',       label: '指導者との関係はどうですか' },
+  chk_work_rules:      { section: '業務に対して',       label: '礼儀・ルール等は守られていますか' },
+  chk_money:           { section: 'お金に対する不満',   label: '収入に対して不満はありますか' },
+  chk_relation:        { section: '人間関係',           label: '乗務員同士の関係はどうですか' },
+  chk_appearance:      { section: '身だしなみ・就業状況', label: '身だしなみはどうですか' },
+  chk_attendance:      { section: '身だしなみ・就業状況', label: '就業状況はどうですか' },
+  chk_future:          { section: '今後の意向確認',     label: '今後も仕事を続けたいですか' },
 };
 const CHK_KEYS = Object.keys(CHK_LABEL);
 
@@ -367,7 +185,7 @@ app.get('/interviews', async (c) => {
         WHERE ir2.emp_id = e.id ORDER BY ir2.interview_date DESC LIMIT 1) as next_interview
     FROM employees e
     LEFT JOIN interview_records ir ON ir.emp_id = e.id
-    WHERE e.is_active = 1 AND e.interview_target = 1
+    WHERE e.is_active = 1 AND e.is_newcomer = 1 AND e.interview_target = 1
     GROUP BY e.id
     ORDER BY e.division, e.team, e.seq_no
   `).all<{
@@ -530,7 +348,7 @@ function interviewForm(
       return `
         <div style="display:grid;grid-template-columns:1fr auto;gap:8px;padding:8px 0;border-bottom:1px solid #f3f4f6;align-items:start;">
           <div>
-            <div style="font-size:13px;margin-bottom:4px;">${meta.icon} ${escHtml(meta.label)}</div>
+            <div style="font-size:13px;margin-bottom:4px;">${escHtml(meta.label)}</div>
             <input type="text" name="${key}_note" value="${escHtml(String(val(key + '_note')))}" placeholder="状況・詳細メモ"
               style="width:100%;border:1px solid #e5e7eb;border-radius:4px;padding:5px 8px;font-size:12px;font-family:inherit;">
           </div>
@@ -590,18 +408,18 @@ function interviewForm(
       <!-- 総合所見 -->
       <div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div>
-          <label style="font-size:12px;font-weight:700;color:#1a3a5c;">📌 面談で気になった点・気づき</label>
+          <label style="font-size:12px;font-weight:700;color:#1a3a5c;">【面談で気になった点・気づき】</label>
           <textarea name="concerns" rows="4" placeholder="気になる様子、発言、変化など..."
             style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;font-family:inherit;margin-top:4px;resize:vertical;">${escHtml(String(val('concerns')))}</textarea>
         </div>
         <div>
-          <label style="font-size:12px;font-weight:700;color:#1a3a5c;">📋 今後のフォロー内容・注意事項</label>
+          <label style="font-size:12px;font-weight:700;color:#1a3a5c;">【今後のフォロー内容・注意事項】</label>
           <textarea name="followup_plan" rows="4" placeholder="フォロー方針、注意点、対応予定など..."
             style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;font-family:inherit;margin-top:4px;resize:vertical;">${escHtml(String(val('followup_plan')))}</textarea>
         </div>
       </div>
       <div style="margin-top:12px;">
-        <label style="font-size:12px;font-weight:700;color:#1a3a5c;">💬 本人からのコメント</label>
+        <label style="font-size:12px;font-weight:700;color:#1a3a5c;">【本人からのコメント】</label>
         <textarea name="employee_comment" rows="3" placeholder="本人の言葉・要望・感想など..."
           style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;font-family:inherit;margin-top:4px;resize:vertical;">${escHtml(String(val('employee_comment')))}</textarea>
       </div>
@@ -695,7 +513,7 @@ app.get('/interviews/record/:id/print', async (c) => {
       const val = (r as any)[key];
       const note = (r as any)[key + '_note'] ?? '';
       return `<tr style="border-bottom:1px solid #e5e7eb;">
-        <td style="padding:5px 8px;font-size:12px;width:50%;">${meta.icon} ${meta.label}</td>
+        <td style="padding:5px 8px;font-size:12px;width:50%;">${meta.label}</td>
         <td style="padding:5px 8px;text-align:center;font-size:16px;font-weight:700;color:${chkColor(val)};width:8%;">${chkSymbol(val)}</td>
         <td style="padding:5px 8px;font-size:11px;color:#6b7280;">${note ? escHtml(note) : ''}</td>
       </tr>`;
@@ -715,7 +533,7 @@ app.get('/interviews/record/:id/print', async (c) => {
     td, th { border: 1px solid #d1d5db; }
   </style></head><body>
   <div class="no-print">
-    <button onclick="window.print()" style="padding:8px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;">🖨️ 印刷</button>
+    <button onclick="window.print()" style="padding:8px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;">印刷</button>
   </div>
   <div style="text-align:center;font-size:18px;font-weight:900;letter-spacing:0.3em;margin-bottom:4px;border-bottom:2px solid #1a3a5c;padding-bottom:6px;">新人離職防止 面談記録シート</div>
   <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:12px;padding-top:4px;">
@@ -733,11 +551,11 @@ app.get('/interviews/record/:id/print', async (c) => {
   <table style="margin-bottom:8px;">
     <tr>
       <td style="padding:6px 8px;width:50%;vertical-align:top;">
-        <div style="font-weight:700;font-size:11px;margin-bottom:3px;">📌 気になった点・気づき</div>
+        <div style="font-weight:700;font-size:11px;margin-bottom:3px;">【気になった点・気づき】</div>
         <div style="font-size:12px;min-height:40px;">${r.concerns ? escHtml(r.concerns) : ''}</div>
       </td>
       <td style="padding:6px 8px;width:50%;vertical-align:top;">
-        <div style="font-weight:700;font-size:11px;margin-bottom:3px;">📋 フォロー内容・注意事項</div>
+        <div style="font-weight:700;font-size:11px;margin-bottom:3px;">【フォロー内容・注意事項】</div>
         <div style="font-size:12px;min-height:40px;">${r.followup_plan ? escHtml(r.followup_plan) : ''}</div>
       </td>
     </tr>
@@ -745,7 +563,7 @@ app.get('/interviews/record/:id/print', async (c) => {
   <table>
     <tr>
       <td style="padding:6px 8px;vertical-align:top;">
-        <div style="font-weight:700;font-size:11px;margin-bottom:3px;">💬 本人からのコメント</div>
+        <div style="font-weight:700;font-size:11px;margin-bottom:3px;">【本人からのコメント】</div>
         <div style="font-size:12px;min-height:30px;">${r.employee_comment ? escHtml(r.employee_comment) : ''}</div>
       </td>
     </tr>

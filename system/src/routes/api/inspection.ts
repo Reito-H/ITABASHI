@@ -87,6 +87,65 @@ app.delete('/schedule/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// ===== 使用不可期間（代替等で長期間止まる車両の注記。画面表示のみ・印刷には出さない） =====
+export interface InspectionUnavailable {
+  id: number;
+  year_month: string;
+  ka: number;
+  vehicle_num: string;
+  start_day: number;
+  end_day: number;
+  memo: string | null;
+}
+
+app.get('/unavailable', async (c) => {
+  const ym = c.req.query('ym');
+  const ka = parseInt(c.req.query('ka') ?? '0');
+  if (!ym || !ka) return c.json({ error: 'パラメータ不足' }, 400);
+
+  const rows = await c.env.DB.prepare(
+    'SELECT id, year_month, ka, vehicle_num, start_day, end_day, memo FROM inspection_unavailable WHERE year_month = ? AND ka = ? ORDER BY start_day, id'
+  ).bind(ym, ka).all<InspectionUnavailable>();
+
+  return c.json(rows.results ?? []);
+});
+
+app.post('/unavailable', async (c) => {
+  const body = await c.req.json<{
+    ym: string; ka: number; vehicle_num: string; start_day: number; end_day: number; memo?: string;
+  }>();
+
+  const { ym, ka, vehicle_num, start_day, end_day, memo } = body;
+  if (!ym || !ka || !vehicle_num || !start_day || !end_day) {
+    return c.json({ error: 'パラメータ不足' }, 400);
+  }
+  if (end_day < start_day) return c.json({ error: '終了日は開始日以降にしてください' }, 400);
+
+  const result = await c.env.DB.prepare(
+    'INSERT INTO inspection_unavailable (year_month, ka, vehicle_num, start_day, end_day, memo) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(ym, ka, vehicle_num.trim(), start_day, end_day, memo?.trim() || null).run();
+
+  return c.json({ id: result.meta.last_row_id });
+});
+
+app.put('/unavailable/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  const body = await c.req.json<{ vehicle_num: string; start_day: number; end_day: number; memo?: string }>();
+  if (body.end_day < body.start_day) return c.json({ error: '終了日は開始日以降にしてください' }, 400);
+
+  await c.env.DB.prepare(
+    'UPDATE inspection_unavailable SET vehicle_num = ?, start_day = ?, end_day = ?, memo = ?, updated_at = datetime(\'now\', \'localtime\') WHERE id = ?'
+  ).bind(body.vehicle_num.trim(), body.start_day, body.end_day, body.memo?.trim() || null, id).run();
+
+  return c.json({ ok: true });
+});
+
+app.delete('/unavailable/:id', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  await c.env.DB.prepare('DELETE FROM inspection_unavailable WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
 // ===== 写真AI解析 =====
 const INS_TYPES = new Set(['inspect', 'shaken', 'bomb', 'sub', 'recall']);
 
@@ -224,6 +283,19 @@ app.delete('/schedule', async (c) => {
 
   await c.env.DB.prepare(
     'DELETE FROM inspection_schedules WHERE year_month = ? AND ka = ?'
+  ).bind(ym, ka).run();
+
+  return c.json({ ok: true });
+});
+
+// 月・課の使用不可期間一括削除
+app.delete('/unavailable', async (c) => {
+  const ym = c.req.query('ym');
+  const ka = parseInt(c.req.query('ka') ?? '0');
+  if (!ym || !ka) return c.json({ error: 'パラメータ不足' }, 400);
+
+  await c.env.DB.prepare(
+    'DELETE FROM inspection_unavailable WHERE year_month = ? AND ka = ?'
   ).bind(ym, ka).run();
 
   return c.json({ ok: true });

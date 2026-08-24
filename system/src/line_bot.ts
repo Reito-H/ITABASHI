@@ -204,7 +204,6 @@ const REG_COMMANDS = [
 function classifyBotFeature(inputText: string, state: string): string {
   if (state.startsWith('reg_')) return '登録・連携';
   if (state.startsWith('odo_')) return 'ODO記録';
-  if (state.startsWith('event_')) return '嫌なこと報告';
   if (inputText === 'uid' || inputText === 'UID') return 'UID確認';
   if (/^\d{1,6}$/.test(inputText)) return '車番検索';
   if (inputText === '売上記録' || inputText === '売上を記録') return '売上記録';
@@ -213,7 +212,6 @@ function classifyBotFeature(inputText: string, state: string): string {
   if (inputText === '事故報告' || inputText === '事故') return '事故報告';
   if (inputText === '違反報告' || inputText === '違反') return '違反報告';
   if (inputText === '一般報告' || inputText === '一般') return '一般報告';
-  if (inputText === '嫌なこと報告') return '嫌なこと報告';
   if (inputText === '報告') return '報告メニュー';
   if (inputText === 'シフト確認') return 'シフト確認';
   if (['シフト', 'シフト表', 'ベンテンシフト', 'ベンテン'].includes(inputText)) return 'ベンテンシフト';
@@ -874,7 +872,7 @@ async function handleSalesOdoFlow(
 }
 
 // ===================================================
-// 新人・乗務社員（共通: 嫌なこと報告・シフト確認・マイカレ）
+// 新人・乗務社員（共通: シフト確認・マイカレ）
 // ===================================================
 
 async function handleNewcomer(
@@ -892,29 +890,15 @@ async function handleNewcomer(
   }
 
   // メニューコマンドによるフロー割り込み
-  const MENU_CMDS = ['嫌なこと報告', '報告', 'シフト確認', 'マイカレ', '準備中'];
+  const MENU_CMDS = ['シフト確認', 'マイカレ', '準備中'];
   if (state !== 'idle' && MENU_CMDS.includes(inputText)) {
     await setState(env.DB, lineUid, 'idle');
   }
 
-  const { state: curState, data: curData } = await getState(env.DB, lineUid);
+  const { state: curState } = await getState(env.DB, lineUid);
 
   // ===== idle =====
   if (curState === 'idle') {
-    if (inputText === '嫌なこと報告' || inputText === '報告') {
-      await setState(env.DB, lineUid, 'event_category');
-      await reply(replyToken, at, [textWithQuickReply(
-        '報告のカテゴリを選んでください。',
-        [
-          { label: 'クレーマー', text: 'クレーマー' },
-          { label: '交通トラブル', text: '交通トラブル' },
-          { label: '社内の出来事', text: '社内の出来事' },
-          { label: 'その他', text: 'その他' },
-        ]
-      )]);
-      return;
-    }
-
     if (inputText === 'シフト確認') {
       if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return; }
       const today = todayJST();
@@ -960,47 +944,9 @@ async function handleNewcomer(
       [
         { label: '売上記録', text: '売上記録' },
         { label: 'ODO', text: 'ODO' },
-        { label: '嫌なこと報告', text: '嫌なこと報告' },
         { label: 'シフト確認', text: 'シフト確認' },
         { label: 'マイカレ', text: 'マイカレ' },
       ]
-    )]);
-    return;
-  }
-
-  // ===== 嫌なこと報告フロー =====
-  if (curState === 'event_category') {
-    const validCats = ['クレーマー', '交通トラブル', '社内の出来事', 'その他'];
-    if (!validCats.includes(inputText)) {
-      await reply(replyToken, at, [textWithQuickReply('カテゴリを選択してください。', validCats.map(c => ({ label: c, text: c })))]);
-      return;
-    }
-    await setState(env.DB, lineUid, 'event_content', { category: inputText });
-    await reply(replyToken, at, [text(`「${inputText}」について教えてください。\n\nどんな出来事があったか、経緯を詳しく書いてください。`)]);
-    return;
-  }
-
-  if (curState === 'event_content') {
-    if (inputText.length < 5) {
-      await reply(replyToken, at, [text('もう少し詳しく教えてください。')]); return;
-    }
-    await setState(env.DB, lineUid, 'event_feeling', { ...curData, content: inputText });
-    await reply(replyToken, at, [textWithQuickReply(
-      'その時の気持ちや感想を教えてください。\n（任意。スキップすることもできます）',
-      [{ label: 'スキップ', text: 'スキップ' }]
-    )]);
-    return;
-  }
-
-  if (curState === 'event_feeling') {
-    const feeling = inputText === 'スキップ' ? '' : inputText;
-    if (!empId) { await reply(replyToken, at, [text('社員情報が見つかりません。')]); return; }
-    await env.DB.prepare(
-      'INSERT INTO bad_events (emp_id, category, content, feeling) VALUES (?, ?, ?, ?)'
-    ).bind(empId, curData.category, curData.content, feeling || null).run();
-    await setState(env.DB, lineUid, 'idle');
-    await reply(replyToken, at, [text(
-      '✅ 記録しました。\n\n話してくれてありがとうございます。\n管理者が確認します。\n\nいつでも気になることがあれば報告してください。'
     )]);
     return;
   }

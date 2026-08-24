@@ -1,6 +1,7 @@
 import type { Env } from './auth';
 import { getPeriodSettings, getPeriodRange, getPeriod } from './auth';
 import { sendBentenDaily } from './benten';
+import { importJmaMonthlyWeather } from './utils/weather_jma';
 
 // LINE 連携済みの班長・指導者全員にプッシュ通知
 async function pushToInstructors(env: Env, messages: object[]): Promise<void> {
@@ -47,11 +48,6 @@ async function sendMorningReport(env: Env, todayStr: string): Promise<void> {
     WHERE sr.date >= ? AND sr.date <= ? AND e.is_active = 1
   `).bind(start, todayStr).first<{ avg_amount: number | null; emp_count: number }>();
 
-  // 本日の未対応報告数
-  const badCount = await env.DB.prepare(
-    "SELECT COUNT(*) as cnt FROM bad_events WHERE (admin_memo IS NULL OR admin_memo = '') AND DATE(created_at) = ?"
-  ).bind(todayStr).first<{ cnt: number }>();
-
   const attendees = schedules.results ?? [];
   let msg = `【本日の出勤状況 ${todayStr}】\n\n`;
 
@@ -68,28 +64,10 @@ async function sendMorningReport(env: Env, todayStr: string): Promise<void> {
 
   if (salesAvg?.avg_amount != null) {
     const avg = Math.round(salesAvg.avg_amount);
-    msg += `■ 今月度の平均売上\n${avg.toLocaleString('ja-JP')}円 / ${salesAvg.emp_count}名\n\n`;
-  }
-
-  if ((badCount?.cnt ?? 0) > 0) {
-    msg += `■ 嫌なこと報告（未対応）\n${badCount!.cnt}件 → 管理画面をご確認ください`;
-  } else {
-    msg += '■ 嫌なこと報告\n未対応なし';
+    msg += `■ 今月度の平均売上\n${avg.toLocaleString('ja-JP')}円 / ${salesAvg.emp_count}名`;
   }
 
   await pushToInstructors(env, [{ type: 'text', text: msg.trim() }]);
-}
-
-// 嫌なこと報告アラート（未対応があるときだけ送信）
-async function sendBadEventAlert(env: Env, todayStr: string): Promise<void> {
-  const badCount = await env.DB.prepare(
-    "SELECT COUNT(*) as cnt FROM bad_events WHERE admin_memo IS NULL OR admin_memo = ''"
-  ).first<{ cnt: number }>();
-
-  if ((badCount?.cnt ?? 0) === 0) return;
-
-  const msg = `【嫌なこと報告 アラート】\n\n未対応の報告が ${badCount!.cnt}件あります。\n管理画面でご確認ください。`;
-  await pushToInstructors(env, [{ type: 'text', text: msg }]);
 }
 
 // 班長シフト: 本日の出勤者通知（深夜0時 / 統括・運行管理者のうちオプトイン済みのみ）
@@ -167,8 +145,6 @@ export async function runNotification(env: Env, type: string): Promise<void> {
 
   if (type === 'morning_report') {
     await sendMorningReport(env, todayStr);
-  } else if (type === 'bad_event_alert') {
-    await sendBadEventAlert(env, todayStr);
   } else if (type === 'benten_shift_daily') {
     await sendBentenDaily(env);
   } else if (type === 'kancho_attendance') {
@@ -207,6 +183,16 @@ async function checkBirthdayFire(env: Env, nowJST: Date, todayStr: string, curre
   ).bind(todayStr, currentHour, JSON.stringify(ids)).run();
 }
 
+// AI売上分析: 前月分の気象庁データ（東京）を自動取込（気象庁側の確定を待つため月初数日空けて実行）
+async function checkMonthlyWeatherImport(env: Env, nowJST: Date, currentHour: number): Promise<void> {
+  if (nowJST.getUTCDate() !== 3 || currentHour !== 4) return;
+  let y = nowJST.getUTCFullYear();
+  let m = nowJST.getUTCMonth(); // 0始まりなので、そのままで「前月」(1始まり)の値になる
+  if (m < 1) { m = 12; y -= 1; }
+  const result = await importJmaMonthlyWeather(env.DB, y, m);
+  if (!result.ok) console.error('[checkMonthlyWeatherImport] failed', y, m, result.error);
+}
+
 // Cron ハンドラー（毎時 0 分に実行、設定時刻と照合）
 export async function handleCron(env: Env): Promise<void> {
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -219,6 +205,9 @@ export async function handleCron(env: Env): Promise<void> {
 
   // ハッピーバースデーモードの発火判定（毎時実行）
   await checkBirthdayFire(env, nowJST, todayStr, currentHour);
+
+  // 前月分の気象庁データ自動取込（毎月3日4時）
+  await checkMonthlyWeatherImport(env, nowJST, currentHour);
 
   const settings = await env.DB.prepare(
     'SELECT type, send_hour, send_minute, last_sent_date FROM notification_settings WHERE is_enabled = 1'

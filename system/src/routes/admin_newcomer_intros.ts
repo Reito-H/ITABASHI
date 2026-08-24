@@ -1,6 +1,6 @@
-// 総合新人管理: 新人紹介カード（事故モニターサイネージへの表示用）
+// 新人紹介カード（事故モニターサイネージへの表示用）。設定ページ配下に配置。
 // ページ: {ADMIN_PATH}/newcomer-intros
-// API   : {ADMIN_PATH}/api/newcomer-intros/*（管理パス配下・権限キーは newcomers を共用）
+// API   : {ADMIN_PATH}/api/newcomer-intros/*（管理パス配下・権限キーは settings.newcomer-intros）
 // 課は班から Math.ceil(team/2) で自動算出し、課の自由入力はさせない（feedback_division_team_mapping）
 import { Hono } from 'hono';
 import type { Env } from '../auth';
@@ -8,6 +8,7 @@ import { layout, safeJson } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { triggerNewcomerMonitorForceRefresh, getNewcomerCardIntervalSeconds, saveNewcomerCardIntervalSeconds } from './public_newcomer_monitor';
 import { triggerAccidentsMonitorForceRefresh } from './public_accidents_monitor';
+import { settingsSubHeader } from './admin';
 
 async function triggerMonitorRefresh(db: D1Database): Promise<void> {
   // 新人紹介モニターと、事故モニター（新人紹介モード/交互表示モード）の両方に即時反映させる
@@ -50,11 +51,8 @@ app.get('/newcomer-intros', async (c) => {
     hasPhoto: !!r.photo_r2_key,
   }));
 
-  const html = `
+  const html = settingsSubHeader('新人紹介カード管理') + `
     <div style="max-width:820px;">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
-        <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin:0;">新人紹介カード管理</h2>
-      </div>
       <p style="font-size:13px;color:#6b7280;margin-bottom:14px;">
         事故モニターサイネージ「新人紹介」表示に使うカードを管理します。写真・名前・班・一言コメントを登録してください（課は班から自動判定されます）。
         並び順はカード左側のハンドル（⠿）をドラッグして変更できます。
@@ -270,7 +268,7 @@ app.get('/newcomer-intros', async (c) => {
     renderList();
     </script>`;
 
-  return c.html(layout('新人紹介カード管理', html, 'newcomers'));
+  return c.html(layout('新人紹介カード管理', html, 'settings'));
 });
 
 // 追加（multipart/form-data: name, team, comment, photo?）

@@ -18,6 +18,9 @@ export type Employee = {
   training_completed: number | null;
   interview_target: number | null;
   status: string | null;
+  is_newcomer: number | null;
+  newcomer_type: 'normal' | 'shinsotsu' | null;
+  graduate_year: number | null;
 };
 
 export type ShiftEntry = {

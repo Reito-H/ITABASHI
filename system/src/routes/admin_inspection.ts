@@ -20,7 +20,7 @@ function inspectionPage(adminPath: string): string {
 .ins-legend{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:8px 14px;background:#fff;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.07);font-size:12px;align-items:center}
 .ins-legend-dot{width:12px;height:12px;border-radius:2px;flex-shrink:0;display:inline-block}
 .ins-dept-title{font-size:15px;font-weight:700;color:#1a4a8a;margin-bottom:8px}
-.ins-table-wrap{overflow-x:auto;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.ins-table-wrap{overflow-x:auto;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);flex:1 1 auto;min-width:0}
 .ins-table{border-collapse:collapse;width:100%;background:#fff;min-width:500px}
 .ins-table th{background:#d4e4f7;padding:9px 6px;font-size:13px;text-align:center;border:1px solid #b0c8e4;font-weight:700;color:#1a3a6a}
 .ins-table td{border:1px solid #d4dde8;vertical-align:top;padding:0}
@@ -79,6 +79,13 @@ function inspectionPage(adminPath: string): string {
 .btn-t{padding:5px 12px;border:1px solid #ccc;border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit;background:#f8f8f8;color:#444}
 .btn-t.red{border-color:#dc3545;color:#dc3545}
 .ins-save-badge{font-size:12px;color:#28a745;margin-left:auto}
+.ins-table-outer{display:flex;align-items:flex-start}
+.ins-unavail-col{position:relative;flex-shrink:0;width:2px}
+.ins-unavail-bar{position:absolute;display:flex;align-items:stretch;gap:2px;cursor:pointer}
+.ins-unavail-bar:hover .ins-unavail-label{text-decoration:underline}
+.ins-unavail-line{width:3px;background:#dc3545;border-radius:2px;flex-shrink:0}
+.ins-unavail-label{writing-mode:vertical-rl;font-size:10px;color:#dc3545;font-weight:700;white-space:nowrap;padding-top:2px}
+.ins-field textarea{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:5px;font-size:14px;font-family:inherit;resize:vertical}
 </style>
 
 <div class="ins-tab-bar">
@@ -117,16 +124,20 @@ function inspectionPage(adminPath: string): string {
     <span><span class="ins-legend-dot" style="background:#eef3ff;border:1px solid #0055bb"></span> ボンベ交換（青）</span>
     <span><span class="ins-legend-dot" style="background:#efffef;border:1px solid #077"></span> 代替（緑）</span>
     <span><span class="ins-legend-dot" style="background:#fff;border:2px solid #333"></span> リコール</span>
-    <span style="font-size:11px;color:#999;margin-left:6px">※ 車番クリックで編集・削除、＋で追加</span>
+    <span style="font-size:11px;color:#999;margin-left:6px">※ 車番クリックで編集・削除、＋で追加／赤い縦線は使用不可期間（クリックで編集）</span>
   </div>
 
   <div class="ins-dept-title" id="ins-dept-title"></div>
-  <div class="ins-table-wrap">
-    <div id="ins-table-container"></div>
+  <div class="ins-table-outer" id="ins-table-outer">
+    <div class="ins-unavail-col" id="ins-unavail-col"></div>
+    <div class="ins-table-wrap">
+      <div id="ins-table-container"></div>
+    </div>
   </div>
 
   <div class="ins-data-tools">
     <label style="font-size:12px;color:#666;font-weight:600">この月・課のデータ：</label>
+    <button class="btn-t" onclick="insOpenUnavailModal()">🚧 使用不可期間を追加</button>
     <button class="btn-t red" onclick="insClearMonth()">🗑 全削除</button>
   </div>
 </div>
@@ -190,6 +201,36 @@ ${saveToastHtml()}
   </div>
 </div>
 
+<!-- 使用不可期間モーダル -->
+<div id="ins-unavail-modal" class="ins-modal-overlay" style="display:none" onclick="if(event.target===this)insCloseUnavailModal()">
+  <div class="ins-modal-box">
+    <div class="ins-modal-title" id="ins-unavail-modal-title">使用不可期間を追加</div>
+    <div class="ins-field">
+      <label>車番</label>
+      <input type="text" id="ins-un-vnum" placeholder="例: 5226" maxlength="10">
+    </div>
+    <div class="ins-field" style="display:flex;gap:10px">
+      <div style="flex:1">
+        <label>開始日</label>
+        <select id="ins-un-start" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:5px;font-size:15px;font-family:inherit"></select>
+      </div>
+      <div style="flex:1">
+        <label>終了日</label>
+        <select id="ins-un-end" style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:5px;font-size:15px;font-family:inherit"></select>
+      </div>
+    </div>
+    <div class="ins-field">
+      <label>メモ（任意・画面表示のみ、印刷には出ません）</label>
+      <textarea id="ins-un-memo" rows="3" placeholder="例: 車検の為2週間ほど代替"></textarea>
+    </div>
+    <div class="ins-actions">
+      <button class="btn-d" id="ins-un-btn-del" style="display:none" onclick="insDeleteUnavail()">削除</button>
+      <button class="btn-s" onclick="insCloseUnavailModal()">キャンセル</button>
+      <button class="btn-p" onclick="insSaveUnavail()">保存</button>
+    </div>
+  </div>
+</div>
+
 <!-- AI取込モーダル -->
 <div id="ins-ai-modal" class="ins-modal-overlay" style="display:none" onclick="if(event.target===this&&!insAiBusy)insAiClose()">
   <div class="ins-modal-box" style="width:600px;max-height:88vh;overflow-y:auto">
@@ -207,7 +248,9 @@ const IS = {
   month: new Date().getMonth()+1,
   dept: 1,
   modal: {day:null,han:null,id:null},
-  cache: {}  // {YYYYMM_ka: [{id,day,han,vehicle_num,type,dep_time},...]}
+  unModal: {id:null},
+  cache: {},  // {YYYYMM_ka: [{id,day,han,vehicle_num,type,dep_time},...]}
+  unavailCache: {}  // {YYYYMM_ka: [{id,vehicle_num,start_day,end_day,memo},...]}
 };
 let insSelTypeCur = 'inspect';
 
@@ -279,6 +322,14 @@ async function insFetchData(ym, ka){
   return IS.cache[key];
 }
 
+async function insFetchUnavailable(ym, ka){
+  const key=ym+'_'+ka;
+  if(IS.unavailCache[key]) return IS.unavailCache[key];
+  const res=await fetch(INS_PATH+'/api/inspection/unavailable?ym='+ym+'&ka='+ka);
+  IS.unavailCache[key]=await res.json();
+  return IS.unavailCache[key];
+}
+
 function insGetDayVehicles(data,day){
   const h1=data.filter(r=>r.day===day&&r.han===1);
   const h2=data.filter(r=>r.day===day&&r.han===2);
@@ -309,10 +360,51 @@ async function insRefreshTable(){
   }
   html+='</tbody></table>';
   document.getElementById('ins-table-container').innerHTML=html;
+
+  const unavail=await insFetchUnavailable(ym,IS.dept);
+  insRenderUnavailOverlay(unavail);
 }
 
 function insRenderTags(vehicles,day,han){
   return vehicles.map(v=>'<span class="vtag vt-'+v.type+'" onclick="insOpenModal('+day+','+han+','+v.id+')" title="'+v.type+'">'+insEsc(v.vehicle_num)+(v.dep_time?'<span class="vt-time">'+insEsc(v.dep_time)+'</span>':'')+'</span>').join('');
+}
+
+// ===== 使用不可期間（代替等で長期間止まる車両。画面表示のみ・印刷には出さない） =====
+function insRenderUnavailOverlay(list){
+  const col=document.getElementById('ins-unavail-col');
+  const outer=document.getElementById('ins-table-outer');
+  const rows=document.querySelectorAll('#ins-table-container tbody tr');
+  col.innerHTML='';
+  if(!rows.length||!list.length){col.style.width='2px';return;}
+
+  // 期間が重なるものは横に並べる（レーン割り当て）
+  const sorted=[...list].sort((a,b)=>a.start_day-b.start_day);
+  const laneEnd=[]; // レーンごとの最終end_day
+  const placed=sorted.map(u=>{
+    let lane=laneEnd.findIndex(end=>end<u.start_day);
+    if(lane===-1){lane=laneEnd.length;laneEnd.push(u.end_day);}
+    else laneEnd[lane]=u.end_day;
+    return {u,lane};
+  });
+  const laneW=22;
+  col.style.width=(laneEnd.length*laneW+4)+'px';
+
+  const outerRect=outer.getBoundingClientRect();
+  placed.forEach(({u,lane})=>{
+    const sRow=rows[u.start_day-1], eRow=rows[u.end_day-1];
+    if(!sRow||!eRow) return;
+    const sRect=sRow.getBoundingClientRect(), eRect=eRow.getBoundingClientRect();
+    const top=sRect.top-outerRect.top, height=(eRect.bottom-outerRect.top)-top;
+    const bar=document.createElement('div');
+    bar.className='ins-unavail-bar';
+    bar.style.top=top+'px';
+    bar.style.height=height+'px';
+    bar.style.left=(lane*laneW)+'px';
+    bar.title='クリックで編集：使用不可 '+u.vehicle_num+(u.memo?'（'+u.memo+'）':'');
+    bar.innerHTML='<div class="ins-unavail-line"></div><div class="ins-unavail-label">使用不可 '+insEsc(u.vehicle_num)+'</div>';
+    bar.onclick=()=>insOpenUnavailModal(u.id);
+    col.appendChild(bar);
+  });
 }
 
 function insEsc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -389,12 +481,76 @@ function insShowBadge(){
   setTimeout(()=>{el.textContent='';},2000);
 }
 
+// ===== 使用不可期間モーダル =====
+function insOpenUnavailModal(id=null){
+  IS.unModal={id};
+  const ym=insGetYM();
+  const days=insDIM(IS.year,IS.month);
+  const startEl=document.getElementById('ins-un-start'), endEl=document.getElementById('ins-un-end');
+  startEl.innerHTML=''; endEl.innerHTML='';
+  for(let d=1;d<=days;d++){startEl.add(new Option(d+'日',d));endEl.add(new Option(d+'日',d));}
+
+  let num='',start=1,end=1,memo='';
+  if(id){
+    const u=(IS.unavailCache[ym+'_'+IS.dept]||[]).find(r=>r.id===id);
+    if(u){num=u.vehicle_num;start=u.start_day;end=u.end_day;memo=u.memo||'';}
+  }
+  document.getElementById('ins-unavail-modal-title').textContent=id?'使用不可期間を編集':'使用不可期間を追加';
+  document.getElementById('ins-un-btn-del').style.display=id?'':'none';
+  document.getElementById('ins-un-vnum').value=num;
+  startEl.value=start; endEl.value=end;
+  document.getElementById('ins-un-memo').value=memo;
+  document.getElementById('ins-unavail-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('ins-un-vnum').focus(),50);
+}
+function insCloseUnavailModal(){document.getElementById('ins-unavail-modal').style.display='none';}
+
+async function insSaveUnavail(){
+  const num=document.getElementById('ins-un-vnum').value.trim();
+  const start=+document.getElementById('ins-un-start').value;
+  const end=+document.getElementById('ins-un-end').value;
+  const memo=document.getElementById('ins-un-memo').value.trim();
+  if(!num){alert('車番を入力してください');return;}
+  if(end<start){alert('終了日は開始日以降にしてください');return;}
+  const ym=insGetYM();
+  const key=ym+'_'+IS.dept;
+  const {id}=IS.unModal;
+  if(id){
+    await fetch(INS_PATH+'/api/inspection/unavailable/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vehicle_num:num,start_day:start,end_day:end,memo})});
+    const u=(IS.unavailCache[key]||[]).find(r=>r.id===id);
+    if(u){u.vehicle_num=num;u.start_day=start;u.end_day=end;u.memo=memo;}
+  } else {
+    const res=await fetch(INS_PATH+'/api/inspection/unavailable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ym,ka:IS.dept,vehicle_num:num,start_day:start,end_day:end,memo})});
+    const j=await res.json();
+    if(!IS.unavailCache[key]) IS.unavailCache[key]=[];
+    IS.unavailCache[key].push({id:j.id,vehicle_num:num,start_day:start,end_day:end,memo});
+  }
+  insRenderUnavailOverlay(IS.unavailCache[key]);
+  insShowBadge();
+  insCloseUnavailModal();
+}
+
+async function insDeleteUnavail(){
+  const {id}=IS.unModal;
+  if(!id) return;
+  const ym=insGetYM();
+  const key=ym+'_'+IS.dept;
+  await fetch(INS_PATH+'/api/inspection/unavailable/'+id,{method:'DELETE'});
+  const arr=IS.unavailCache[key];
+  if(arr){const i=arr.findIndex(r=>r.id===id);if(i>=0)arr.splice(i,1);}
+  insRenderUnavailOverlay(arr||[]);
+  insShowBadge();
+  insCloseUnavailModal();
+}
+
 // ===== 月データ全削除 =====
 async function insClearMonth(){
   const ym=insGetYM();
   if(!confirm(IS.year+'年'+IS.month+'月 '+IS.dept+'課のデータを全て削除しますか？')) return;
   await fetch(INS_PATH+'/api/inspection/schedule?ym='+ym+'&ka='+IS.dept,{method:'DELETE'});
+  await fetch(INS_PATH+'/api/inspection/unavailable?ym='+ym+'&ka='+IS.dept,{method:'DELETE'});
   delete IS.cache[ym+'_'+IS.dept];
+  delete IS.unavailCache[ym+'_'+IS.dept];
   insRefreshTable();
 }
 

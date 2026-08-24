@@ -11,12 +11,12 @@ import adminDrivingRiskSettingsRoutes from './routes/admin_driving_risk_settings
 import adminCrewPortalRoutes from './routes/admin_crew_portal';
 import shiftApi from './routes/api/shift';
 import employeesApi from './routes/api/employees';
+import retireePdfApi from './routes/api/retiree_pdf';
 import salesAiApi from './routes/api/sales_ai';
 import fareRevisionApi from './routes/api/fare_revision';
 import salesApi from './routes/api/sales';
 import infoApi from './routes/api/info';
 import instructorApi from './routes/api/instructor';
-import eventsApi from './routes/api/events';
 import lineApiRoutes from './routes/api/line_api';
 import announcementsWebApi from './routes/api/announcements_web';
 import scheduleTypesApi from './routes/api/schedule_types';
@@ -331,11 +331,11 @@ app.use('/api/*', async (c, next) => {
 app.route('/api/shift', shiftApi);
 app.route('/api/instructor-schedule', instructorApi);
 app.route('/api/employees', employeesApi);
+app.route('/api/employees/retiree-pdf', retireePdfApi);
 app.route('/api/sales-ai', salesAiApi);
 app.route('/api/fare-revision', fareRevisionApi);
 app.route('/api/sales', salesApi);
 app.route('/api/info', infoApi);
-app.route('/api/events', eventsApi);
 app.route('/api/line', lineApiRoutes);
 app.route('/api/announcements/web', announcementsWebApi);
 app.route('/api/announcement-bar', announcementBarPublicApi);

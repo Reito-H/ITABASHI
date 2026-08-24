@@ -12,7 +12,8 @@
 //               vehicles / garage / accidents / inspection / settings / announcements / line / requests
 //   staff-search（社員絞り込み検索）は staff に統合済み（旧URL /staff/search は /staff にリダイレクト）
 //   個人データ参照（crew-portal）・乗務員ポータル配下（サイドバーからは非表示・社員管理の一覧/ヘッダーからリンク）: crew-portal / tantosha / crew-shift
-//   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift / events
+//   総合新人管理配下（サイドバーからは非表示・newcomers経由でリンク）: shift
+//   newcomers.register は新人登録（新人フラグ・種別・新卒年度の設定）のみを許可する新人管理のサブ権限
 //   設定カード: settings.liff / settings.lost-items / settings.accidents /
 //               settings.violations / settings.violation-types /
 //               settings.general-reports / settings.handover-memos /
@@ -97,13 +98,11 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/employees/,    'newcomers'],
   [/^\/followup/,     'newcomers'],
   [/^\/interviews/,   'newcomers'],
-  [/^\/info/,         'newcomers'],
-  [/^\/newcomer-intros/,     'newcomers'],
-  [/^\/api\/newcomer-intros/, 'newcomers'],
+  [/^\/newcomer-intros/,     'settings.newcomer-intros'],
+  [/^\/api\/newcomer-intros/, 'settings.newcomer-intros'],
   [/^\/staff/,        'staff'],
   [/^\/sales-ai/,     'sales-ai'],
   [/^\/sales/,        'staff'],
-  [/^\/events/,       'events'],
   [/^\/vehicles/,     'vehicles'],
   [/^\/garage/,       'garage'],
   [/^\/api\/garage/,  'garage'],
@@ -153,10 +152,10 @@ const ROOT_API_WRITE_PERMISSIONS: Array<[RegExp, string[]]> = [
   [/^\/api\/line\//,              ['line']],
   [/^\/api\/shift/,               ['shift']],
   [/^\/api\/instructor-schedule/, ['shift']],
+  [/^\/api\/employees\/\d+\/newcomer/, ['newcomers.register']],
   [/^\/api\/employees/,           ['staff', 'newcomers', 'shift']],
   [/^\/api\/sales/,               ['staff']],
   [/^\/api\/info/,                ['newcomers']],
-  [/^\/api\/events/,              ['events']],
   [/^\/api\/interviews/,          ['newcomers']],
   [/^\/api\/schedule-types/,      ['settings.schedule-types']],
   [/^\/api\/dia/,                 ['settings.dia']],
@@ -208,9 +207,9 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'todo',          label: 'やることリスト' },
     { key: 'crew-shift',    label: '乗務員シフト・配車管理・夏季稼働' },
     { key: 'newcomers',     label: '総合新人管理' },
+    { key: 'newcomers.register', label: '総合新人管理（新人登録・種別/新卒年度の設定）' },
     { key: 'staff',         label: '社員管理（詳細検索含む）' },
     { key: 'sales-ai',      label: 'AI売上分析' },
-    { key: 'events',        label: '報告一覧' },
     { key: 'vehicles',      label: '車両検索' },
     { key: 'garage',        label: '車庫見取り図' },
     { key: 'accidents',     label: '事故分析' },
@@ -241,6 +240,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.offices',              label: '営業所' },
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
     { key: 'settings.documents',            label: '資料センター' },
+    { key: 'settings.newcomer-intros',      label: '新人紹介カード管理' },
     { key: 'settings.tutorial',             label: 'チュートリアル' },
     { key: 'settings.status',               label: 'システムステータス' },
     { key: 'settings.announcement-bar',     label: 'アナウンスバー' },

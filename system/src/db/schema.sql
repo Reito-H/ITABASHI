@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS employees (
   status              TEXT DEFAULT 'training' CHECK(status IN ('training', 'completed', 'unassigned')),
   interview_target    INTEGER DEFAULT 0,
   training_completed  INTEGER DEFAULT 0,
+  is_newcomer         INTEGER DEFAULT 0,
+  newcomer_type       TEXT,
+  graduate_year       INTEGER,
   is_active           INTEGER DEFAULT 1,
   created_at          TEXT DEFAULT (datetime('now', 'localtime')),
   updated_at          TEXT DEFAULT (datetime('now', 'localtime'))
@@ -142,16 +145,6 @@ CREATE TABLE IF NOT EXISTS sales_records (
   UNIQUE(emp_id, date)
 );
 
--- 嫌なこと報告
-CREATE TABLE IF NOT EXISTS bad_events (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  emp_id      INTEGER NOT NULL REFERENCES employees(id),
-  category    TEXT NOT NULL CHECK(category IN ('クレーマー', '交通トラブル', '社内の出来事', 'その他')),
-  content     TEXT NOT NULL,
-  feeling     TEXT,
-  admin_memo  TEXT,
-  created_at  TEXT DEFAULT (datetime('now', 'localtime'))
-);
 
 -- アンケート配信ログ
 CREATE TABLE IF NOT EXISTS survey_logs (
@@ -196,6 +189,5 @@ CREATE INDEX IF NOT EXISTS idx_shift_entries_emp_date ON shift_entries(emp_id, d
 CREATE INDEX IF NOT EXISTS idx_shift_entries_date ON shift_entries(date);
 CREATE INDEX IF NOT EXISTS idx_sales_records_emp_date ON sales_records(emp_id, date);
 CREATE INDEX IF NOT EXISTS idx_sales_records_period ON sales_records(period_year, period_month);
-CREATE INDEX IF NOT EXISTS idx_bad_events_emp ON bad_events(emp_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time ON login_attempts(ip, failed_at);

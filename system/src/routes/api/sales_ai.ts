@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import type { Env } from '../../auth';
 import { getPeriod, getPeriodRange, getPeriodSettings } from '../../auth';
 import { getDayFactors, type DayFactors } from '../../utils/taxi_calendar';
+import { importJmaMonthlyWeather } from '../../utils/weather_jma';
+import { buildForecastCalendar, type DailyAggregate } from '../../utils/sales_forecast_calendar';
 import { buildShiftSalesPdf } from '../../utils/shift_sales_pdf';
 import { buildRuleBasedSalesAnalysis, type SalesAnalysisInput } from '../../utils/sales_trend_analysis';
 import {
@@ -87,9 +89,19 @@ function bucketHourlyAmount(rows: Array<{ amount: number; start_time: string | n
 
 type FactorBucket = { label: string; avgTrue: number | null; avgFalse: number | null; countTrue: number; countFalse: number; diffPct: number | null };
 
-function bucketBy(rows: { amount: number; f: DayFactors }[], label: string, pick: (f: DayFactors) => boolean): FactorBucket {
-  const trueVals = rows.filter(r => pick(r.f)).map(r => r.amount);
-  const falseVals = rows.filter(r => !pick(r.f)).map(r => r.amount);
+// weather_daily の1日分（未取込日は null）
+export type WeatherInfo = { precipitationMm: number | null; maxTempC: number | null; minTempC: number | null };
+type EnrichedRow = { amount: number; f: DayFactors; w?: WeatherInfo | null };
+
+// pick が null を返した行（天候データ未取込など）はどちらのバケットからも除外する
+function bucketBy(rows: EnrichedRow[], label: string, pick: (r: EnrichedRow) => boolean | null): FactorBucket {
+  const trueVals: number[] = [];
+  const falseVals: number[] = [];
+  for (const r of rows) {
+    const v = pick(r);
+    if (v === null) continue;
+    (v ? trueVals : falseVals).push(r.amount);
+  }
   const avgTrue = avg(trueVals);
   const avgFalse = avg(falseVals);
   const diffPct = avgTrue !== null && avgFalse !== null && avgFalse > 0
@@ -98,19 +110,33 @@ function bucketBy(rows: { amount: number; f: DayFactors }[], label: string, pick
   return { label, avgTrue, avgFalse, countTrue: trueVals.length, countFalse: falseVals.length, diffPct };
 }
 
-function buildFactorBreakdown(rows: { amount: number; f: DayFactors }[]) {
+function buildFactorBreakdown(rows: EnrichedRow[]) {
   return [
-    bucketBy(rows, '金・土（週末夜間）', f => f.isFriOrSat),
-    bucketBy(rows, '土日', f => f.isWeekend),
-    bucketBy(rows, '五十日（ごとおび）', f => f.isGotobi),
-    bucketBy(rows, '祝日', f => f.isHoliday),
-    bucketBy(rows, '大型連休', f => f.isLongHoliday),
-    bucketBy(rows, '忘新年会シーズン', f => f.isYearEndNewYearParty),
-    bucketBy(rows, '送別会シーズン', f => f.isFarewellSeason),
-    bucketBy(rows, '月末', f => f.isMonthEnd),
-    bucketBy(rows, '月初', f => f.isMonthStart),
-    bucketBy(rows, 'ボーナス月', f => f.isBonusMonth),
+    bucketBy(rows, '金・土（週末夜間）', r => r.f.isFriOrSat),
+    bucketBy(rows, '土日', r => r.f.isWeekend),
+    bucketBy(rows, '祝日', r => r.f.isHoliday),
+    bucketBy(rows, '連休前日（2連休以上の前日）', r => r.f.isBeforeLongWeekend),
+    bucketBy(rows, '連休明け（2連休以上の翌日）', r => r.f.isAfterLongWeekend),
+    bucketBy(rows, '大型連休', r => r.f.isLongHoliday),
+    bucketBy(rows, '雨天（日降水量1mm以上）', r => (r.w?.precipitationMm ?? null) === null ? null : r.w!.precipitationMm! >= 1),
+    bucketBy(rows, '猛暑日（最高気温35℃以上）', r => (r.w?.maxTempC ?? null) === null ? null : r.w!.maxTempC! >= 35),
+    bucketBy(rows, '冬日（最低気温0℃未満）', r => (r.w?.minTempC ?? null) === null ? null : r.w!.minTempC! < 0),
+    bucketBy(rows, '忘新年会シーズン', r => r.f.isYearEndNewYearParty),
+    bucketBy(rows, '送別会シーズン', r => r.f.isFarewellSeason),
+    bucketBy(rows, '月末', r => r.f.isMonthEnd),
+    bucketBy(rows, '月初', r => r.f.isMonthStart),
+    bucketBy(rows, 'ボーナス月', r => r.f.isBonusMonth),
   ];
+}
+
+async function loadWeatherMap(db: D1Database, sinceStr: string, untilStr?: string): Promise<Map<string, WeatherInfo>> {
+  const query = untilStr
+    ? db.prepare('SELECT date, precipitation_mm, max_temp_c, min_temp_c FROM weather_daily WHERE date >= ? AND date <= ?').bind(sinceStr, untilStr)
+    : db.prepare('SELECT date, precipitation_mm, max_temp_c, min_temp_c FROM weather_daily WHERE date >= ?').bind(sinceStr);
+  const rows = (await query.all<{ date: string; precipitation_mm: number | null; max_temp_c: number | null; min_temp_c: number | null }>()).results ?? [];
+  const map = new Map<string, WeatherInfo>();
+  for (const r of rows) map.set(r.date, { precipitationMm: r.precipitation_mm, maxTempC: r.max_temp_c, minTempC: r.min_temp_c });
+  return map;
 }
 
 function weekdayBreakdown(rows: { amount: number; f: DayFactors }[]) {
@@ -227,11 +253,15 @@ export async function computeEmployeeAnalytics(db: D1Database, empId: number, mo
   since.setMonth(since.getMonth() - months);
   const sinceStr = since.toISOString().slice(0, 10);
 
-  const dbRows = (await db.prepare(
-    'SELECT date, amount, duty_code, period_year, period_month, ride_count, distance_km, start_time, return_time FROM sales_records WHERE emp_id = ? AND date >= ? ORDER BY date'
-  ).bind(empId, sinceStr).all<Row>()).results ?? [];
+  const [dbRowsResult, weatherMap] = await Promise.all([
+    db.prepare(
+      'SELECT date, amount, duty_code, period_year, period_month, ride_count, distance_km, start_time, return_time FROM sales_records WHERE emp_id = ? AND date >= ? ORDER BY date'
+    ).bind(empId, sinceStr).all<Row>(),
+    loadWeatherMap(db, sinceStr),
+  ]);
+  const dbRows = dbRowsResult.results ?? [];
 
-  const enriched = dbRows.map(r => ({ ...r, f: getDayFactors(r.date) }));
+  const enriched = dbRows.map(r => ({ ...r, f: getDayFactors(r.date), w: weatherMap.get(r.date) ?? null }));
 
   const monthlyMap = new Map<string, MonthlyEntry>();
   for (const r of dbRows) {
@@ -371,7 +401,7 @@ export async function computeEmployeeAnalytics(db: D1Database, empId: number, mo
 
   return {
     emp, daily, monthly,
-    factorBreakdown: buildFactorBreakdown(enriched.map(r => ({ amount: r.amount, f: r.f }))),
+    factorBreakdown: buildFactorBreakdown(enriched.map(r => ({ amount: r.amount, f: r.f, w: r.w }))),
     weekdayBreakdown: weekdayBreakdown(enriched.map(r => ({ amount: r.amount, f: r.f }))),
     trend, relative, returnTime, wageEstimate, drivingRisk, minimumWage, hourlySales,
   };
@@ -453,11 +483,12 @@ app.get('/overview', async (c) => {
   const prev = getPeriodRange(prevY, prevM, settings);
   const isCurrentPeriod = curY === todayY && curM === todayM;
 
-  const [empRows, curRows, prevRows, wageSettings] = await Promise.all([
+  const [empRows, curRows, prevRows, wageSettings, weatherMap] = await Promise.all([
     c.env.DB.prepare('SELECT id, name, emp_no, division, team FROM employees WHERE is_active = 1').all<{ id: number; name: string; emp_no: string; division: number | null; team: number | null }>(),
     c.env.DB.prepare('SELECT emp_id, amount, duty_code, date, start_time, return_time, labor_hours, night_hours, overtime_hours FROM sales_records WHERE date >= ? AND date <= ?').bind(cur.start, cur.end).all<{ emp_id: number; amount: number; duty_code: string | null; date: string; start_time: string | null; return_time: string | null; labor_hours: number | null; night_hours: number | null; overtime_hours: number | null }>(),
     c.env.DB.prepare('SELECT emp_id, amount FROM sales_records WHERE date >= ? AND date <= ?').bind(prev.start, prev.end).all<{ emp_id: number; amount: number }>(),
     loadWageEstimateSettings(c.env.DB),
+    loadWeatherMap(c.env.DB, cur.start, cur.end),
   ]);
 
   const empDivTeam = new Map<number, { division: number | null; team: number | null }>();
@@ -538,7 +569,7 @@ app.get('/overview', async (c) => {
     .map(([team, t]) => ({ team, division: Math.ceil(team / 2), avgPerDuty: t.count ? Math.round(t.total / t.count) : 0, total: t.total, empCount: t.empIds.size }));
 
   // 全社横断の暦要因分析（当月度実績データ全体）
-  const enriched = (curRows.results ?? []).map(r => ({ amount: r.amount, f: getDayFactors(r.date) }));
+  const enriched = (curRows.results ?? []).map(r => ({ amount: r.amount, f: getDayFactors(r.date), w: weatherMap.get(r.date) ?? null }));
 
   // 時間帯別の売上の強さ（出庫〜帰庫時間で按分した推定値）
   const hourlySales = bucketHourlyAmount(curRows.results ?? []);
@@ -557,6 +588,59 @@ app.get('/overview', async (c) => {
     weekdayBreakdown: weekdayBreakdown(enriched),
     hourlySales,
   });
+});
+
+// ===================================================
+// 年間売上予想カレンダー（全社合計・平均日商ベース・ルールベース）
+//   過去24ヶ月の実績（曜日別・暦要因別の平均日商）から、指定年の365/366日分の予想値を組み立てる。
+//   天気は将来日には分からないため予想モデルには使用しない（過去実績の暦要因別分析にのみ使用）。
+// ===================================================
+app.get('/forecast-calendar', async (c) => {
+  const todayY = new Date().getFullYear();
+  const yearParam = parseInt(c.req.query('year') ?? '');
+  const targetYear = !isNaN(yearParam) && yearParam >= todayY - 1 && yearParam <= todayY + 2 ? yearParam : todayY;
+
+  const since = new Date();
+  since.setMonth(since.getMonth() - 24);
+  const sinceStr = since.toISOString().slice(0, 10);
+
+  const rows = (await c.env.DB.prepare(
+    `SELECT date, AVG(amount) as avgAmount, COUNT(*) as count FROM sales_records WHERE date >= ? GROUP BY date ORDER BY date`
+  ).bind(sinceStr).all<DailyAggregate>()).results ?? [];
+
+  const result = buildForecastCalendar(rows, targetYear);
+
+  return c.json({
+    year: targetYear,
+    sampleRange: { since: sinceStr, until: new Date().toISOString().slice(0, 10) },
+    ...result,
+  });
+});
+
+// ===================================================
+// 気象庁データ（東京）の取込状況・手動取込
+//   将来日の天気は不明のため、過去実績の暦要因分析にのみ使用する（売上予想カレンダーには使用しない）
+// ===================================================
+app.get('/weather/status', async (c) => {
+  const [monthRows, salesRange] = await Promise.all([
+    c.env.DB.prepare(`SELECT substr(date, 1, 7) as ym, COUNT(*) as cnt FROM weather_daily GROUP BY ym ORDER BY ym`).all<{ ym: string; cnt: number }>(),
+    c.env.DB.prepare(`SELECT MIN(date) as minDate, MAX(date) as maxDate FROM sales_records`).first<{ minDate: string | null; maxDate: string | null }>(),
+  ]);
+  return c.json({
+    importedMonths: monthRows.results ?? [],
+    salesDateRange: { min: salesRange?.minDate ?? null, max: salesRange?.maxDate ?? null },
+  });
+});
+
+// 1ヶ月分だけ取込む（Cloudflare無料プランのCPU時間制限を避けるため、複数月の取込はクライアント側でループして呼び出す）
+app.post('/weather/import', async (c) => {
+  const year = parseInt(c.req.query('year') ?? '');
+  const month = parseInt(c.req.query('month') ?? '');
+  if (!year || !month || month < 1 || month > 12) return c.json({ error: '年月を指定してください' }, 400);
+
+  const result = await importJmaMonthlyWeather(c.env.DB, year, month);
+  if (!result.ok) return c.json({ error: result.error }, 502);
+  return c.json({ ok: true, year, month, count: result.count });
 });
 
 // ===================================================

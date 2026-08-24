@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { layout, escHtml } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
+import { staffRetireesPage, type RetireeRow } from '../html/staff_retirees';
+import { getAdminPermissions } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -31,6 +33,9 @@ type StaffRow = {
   status: string | null;
   exclude_retirement_candidate: number;
   is_hanchyo: number;
+  is_newcomer: number;
+  newcomer_type: 'normal' | 'shinsotsu' | null;
+  graduate_year: number | null;
 };
 
 type StaffNav = { prevId: number | null; prevName: string | null; nextId: number | null; nextName: string | null };
@@ -255,6 +260,7 @@ app.get('/staff', async (c) => {
         <a href="${ADMIN_PATH}/crew-shift">乗務員シフト</a>
         <a href="${ADMIN_PATH}/sales-ai">AI売上分析（全社）</a>
         <a href="${ADMIN_PATH}/tantosha">担当車表</a>
+        <a href="${ADMIN_PATH}/staff/retirees">退職者リスト</a>
       </div>
     </div>`;
 
@@ -1410,6 +1416,35 @@ app.get('/staff/new', (c) => {
 });
 
 
+// ===== 退職者リスト =====
+app.get('/staff/retirees', async (c) => {
+  const filterDiv = c.req.query('div') ?? 'all';
+  const page = Math.max(1, parseInt(c.req.query('page') ?? '1') || 1);
+  const PAGE_SIZE = 50;
+
+  const conditions = ['is_active = 0'];
+  const params: (string | number)[] = [];
+  if (filterDiv !== 'all') { conditions.push('division = ?'); params.push(parseInt(filterDiv)); }
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
+  const countRow = await c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM employees ${where}`).bind(...params).first<{ cnt: number }>();
+  const totalCount = countRow?.cnt ?? 0;
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, emp_no, name, division, team, hire_date, retirement_date, retirement_reason
+     FROM employees ${where} ORDER BY retirement_date DESC, id DESC LIMIT ? OFFSET ?`
+  ).bind(...params, PAGE_SIZE, (page - 1) * PAGE_SIZE).all<RetireeRow>();
+
+  const content = staffRetireesPage({
+    rows: rows.results ?? [],
+    filterDiv,
+    page,
+    totalCount,
+    pageSize: PAGE_SIZE,
+  });
+  return c.html(layout('退職者リスト', content, 'staff'));
+});
+
 // ===== 社員絞り込み検索（詳細検索として /staff に統合済み） =====
 // 旧URLを踏んだ場合は /staff に条件を引き継いでリダイレクト
 app.get('/staff/search', (c) => {
@@ -1503,11 +1538,14 @@ app.get('/staff/:id', async (c) => {
   if (filterRetirement) qsObj.set('retire', filterRetirement);
   const qsStr = qsObj.toString();
 
-  return c.html(layout(`${emp.name} — 社員情報`, staffForm(emp, nav, qsStr), 'staff'));
+  const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
+  const canRegisterNewcomer = perms === null || perms.includes('newcomers.register.edit');
+
+  return c.html(layout(`${emp.name} — 社員情報`, staffForm(emp, nav, qsStr, canRegisterNewcomer), 'staff'));
 });
 
 // ===== フォームHTML生成 =====
-function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string {
+function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegisterNewcomer?: boolean): string {
   const isNew = !emp;
   const v = (key: keyof StaffRow) => (emp ? String(emp[key] ?? '') : '');
   const checked = (key: keyof StaffRow) => emp && emp[key] ? 'checked' : '';
@@ -1577,6 +1615,48 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string): string
   </div>
 
   ${isNewcomer && emp ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;display:flex;align-items:center;gap:8px;"><span style="font-weight:700;">新人シフト管理対象</span><span style="font-size:12px;">— 新人シフト管理に表示されています</span></div>` : ''}
+  ${!isNew && emp && emp.is_active ? (() => {
+    const curYear = new Date(Date.now() + 9 * 60 * 60 * 1000).getFullYear();
+    const yearOptions = [curYear, curYear - 1, curYear - 2, curYear - 3];
+    if (emp.graduate_year && !yearOptions.includes(emp.graduate_year)) yearOptions.push(emp.graduate_year);
+    const typeLabel = emp.newcomer_type === 'shinsotsu' ? `新卒${emp.graduate_year ? ' ' + emp.graduate_year + '年' : ''}` : '通常新人';
+
+    if (!canRegisterNewcomer) {
+      return emp.is_newcomer
+        ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;"><span style="font-weight:700;">総合新人管理: 登録済み</span> — ${escHtml(typeLabel)}</div>`
+        : '';
+    }
+
+    if (emp.is_newcomer) {
+      return `
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <span><span style="font-weight:700;color:#166534;">総合新人管理: 登録済み</span> — ${escHtml(typeLabel)}</span>
+          <button type="button" onclick="unregisterNewcomer(${emp.id},'${escHtml(emp.name)}')" style="padding:4px 12px;background:white;color:#dc2626;border:1px solid #fecaca;border-radius:6px;font-size:12px;cursor:pointer;">登録解除</button>
+        </div>
+      </div>`;
+    }
+
+    return `
+    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <span style="color:#92400e;">総合新人管理には未登録です</span>
+        <button type="button" onclick="document.getElementById('newcomer-reg-panel').style.display='flex'" style="padding:4px 12px;background:#fde68a;color:#92400e;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">総合新人管理に登録</button>
+      </div>
+      <div id="newcomer-reg-panel" style="display:none;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+        <select id="newcomer-reg-type" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;" onchange="document.getElementById('newcomer-reg-year-wrap').style.display=this.value==='shinsotsu'?'inline-block':'none'">
+          <option value="normal">通常新人</option>
+          <option value="shinsotsu">新卒</option>
+        </select>
+        <span id="newcomer-reg-year-wrap" style="display:none;">
+          <select id="newcomer-reg-year" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">
+            ${yearOptions.map(y => `<option value="${y}">${y}年</option>`).join('')}
+          </select>
+        </span>
+        <button type="button" onclick="submitNewcomerRegister(${emp.id})" style="padding:5px 14px;background:#1d4ed8;color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">登録する</button>
+      </div>
+    </div>`;
+  })() : ''}
   ${!emp?.is_active && emp ? `<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:16px;">この社員は退職済みです。退職日: ${escHtml(emp.retirement_date ?? '—')}</div>` : ''}
 
   ${!isNew ? `
@@ -1909,6 +1989,25 @@ async function toggleNewcomer(id, currentlyNewcomer, name) {
     });
     if (res.ok) location.reload(); else alert('更新に失敗しました');
   }
+}
+
+async function submitNewcomerRegister(id) {
+  const newcomerType = document.getElementById('newcomer-reg-type').value;
+  const graduateYear = newcomerType === 'shinsotsu' ? parseInt(document.getElementById('newcomer-reg-year').value) : null;
+  const res = await fetch('/api/employees/' + id + '/newcomer', {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ is_newcomer: 1, newcomer_type: newcomerType, graduate_year: graduateYear })
+  });
+  if (res.ok) location.reload(); else alert('登録に失敗しました');
+}
+
+async function unregisterNewcomer(id, name) {
+  if (!confirm(name + ' を総合新人管理から登録解除しますか？')) return;
+  const res = await fetch('/api/employees/' + id + '/newcomer', {
+    method: 'PUT', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ is_newcomer: 0, newcomer_type: null, graduate_year: null })
+  });
+  if (res.ok) location.reload(); else alert('解除に失敗しました');
 }
 
 async function toggleHanchyo(id, currentVal, name) {

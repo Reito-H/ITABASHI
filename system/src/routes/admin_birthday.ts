@@ -1,13 +1,16 @@
 // ハッピーバースデーモード: 一部の人だけを対象に、誕生日当日の設定時刻に全ページへお祝いポップアップを表示する
-// ページ: /settings/birthday（対象者の名前・誕生日・顔写真の管理、発火時刻の設定）
-// 管理API: /api/birthday/celebrants・/api/birthday/fire-hours（書き込みは settings.birthday.edit 必須）
+// ページ: /settings/birthday（対象者の名前・誕生日・顔写真の管理、発火時刻の設定、表示対象アカウント、テスト発火）
+// 管理API: /api/birthday/celebrants・/api/birthday/fire-hours・/api/birthday/enabled-admins・/api/birthday/test-fire
+//   （書き込みは settings.birthday.edit 必須）
 // 表示用API: /api/birthday/active・/api/birthday/photo/:id
-//   → 全アカウント共通で演出を表示するため、index.ts の権限ミドルウェアでページ権限チェックを免除している
-//     （root /api/* はGETを常に許可するため、実際には明示的な除外設定は不要）
+//   → 全アカウント共通で叩けるようにするため、index.ts の権限ミドルウェアでページ権限チェックを免除している
+//     （root /api/* はGETを常に許可するため、実際には明示的な除外設定は不要。ただしログインは必須で c.get('adminId') が使える）
+//   → 実際に演出を表示するかどうかは birthday_enabled_admins（表示対象アカウントのホワイトリスト）で絞り込む
 // 発火判定は cron.ts の checkBirthdayFire が毎時0分に行い、birthday_fire_events に1行記録する
+// テスト発火は birthday_test_triggers に1件保留し、対象アカウントの次回ポーリングで日時に関わらず消費・表示する
 import { Hono } from 'hono';
 import type { Env } from '../auth';
-import { layout, safeJson } from '../html/layout';
+import { layout, safeJson, escHtml } from '../html/layout';
 import { settingsSubHeader } from './admin';
 import { ADMIN_PATH } from '../config';
 import { getAdminPermissions } from '../permissions';
@@ -47,21 +50,37 @@ function isValidMonthDay(month: number, day: number): boolean {
 // ===== ページ =====
 app.get('/settings/birthday', async (c) => {
   const editable = await canEdit(c);
-  const [rows, hourRows] = await Promise.all([
+  const [rows, hourRows, adminRows, enabledRows] = await Promise.all([
     c.env.DB.prepare(
       'SELECT id, name, birth_month, birth_day, photo_r2_key, photo_mime_type, is_active FROM birthday_celebrants ORDER BY birth_month ASC, birth_day ASC, id ASC'
     ).all<CelebrantRow>(),
     c.env.DB.prepare('SELECT hour FROM birthday_fire_hours ORDER BY hour ASC').all<{ hour: number }>(),
+    c.env.DB.prepare('SELECT id, username FROM admins ORDER BY username ASC').all<{ id: number; username: string }>(),
+    c.env.DB.prepare('SELECT admin_id FROM birthday_enabled_admins').all<{ admin_id: number }>(),
   ]);
   const celebrants = (rows.results ?? []).map(r => ({
     id: r.id, name: r.name, birthMonth: r.birth_month, birthDay: r.birth_day,
     hasPhoto: !!r.photo_r2_key, isActive: !!r.is_active,
   }));
   const fireHours = (hourRows.results ?? []).map(r => r.hour);
+  const admins = (adminRows.results ?? []).map(r => ({ id: r.id, username: r.username }));
+  const enabledAdminIds = (enabledRows.results ?? []).map(r => r.admin_id);
 
   const hourCheckboxes = Array.from({ length: 24 }, (_, h) => `
     <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;">
       <input type="checkbox" class="fh-check" value="${h}" ${fireHours.includes(h) ? 'checked' : ''} ${editable ? '' : 'disabled'}>${h}時
+    </label>`).join('');
+
+  const adminCheckboxes = admins.map(a => `
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;">
+      <input type="checkbox" class="ea-check" value="${a.id}" ${enabledAdminIds.includes(a.id) ? 'checked' : ''} ${editable ? '' : 'disabled'}>${escHtml(a.username)}
+    </label>`).join('');
+
+  const testAccountOptions = admins.map(a => `<option value="${a.id}">${escHtml(a.username)}</option>`).join('');
+
+  const testCelebrantCheckboxes = celebrants.map(cel => `
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;">
+      <input type="checkbox" class="tc-check" value="${cel.id}" checked>${escHtml(cel.name)}
     </label>`).join('');
 
   const html = settingsSubHeader('ハッピーバースデーモード') + `
@@ -81,6 +100,34 @@ app.get('/settings/birthday', async (c) => {
         <button type="button" onclick="saveFireHours()" id="fh-save-btn" style="padding:7px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;">保存</button>
         <span id="fh-msg" style="font-size:12px;color:#dc2626;margin-left:10px;"></span>` : ''}
       </div>
+
+      <div style="background:white;border-radius:10px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:20px;">
+        <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">表示対象アカウント</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">チェックしたアカウントだけにお祝いポップアップが表示されます（1つも選ばれていない場合は誰にも表示されません）。</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${editable ? '12px' : '0'};">
+          ${adminCheckboxes || '<span style="font-size:12px;color:#9ca3af;">アカウントがありません</span>'}
+        </div>
+        ${editable ? `
+        <button type="button" onclick="saveEnabledAdmins()" id="ea-save-btn" style="padding:7px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;">保存</button>
+        <span id="ea-msg" style="font-size:12px;color:#dc2626;margin-left:10px;"></span>` : ''}
+      </div>
+
+      ${editable ? `
+      <div style="background:white;border-radius:10px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:20px;">
+        <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">テスト発火</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">指定したアカウントに対して、誕生日や発火時刻・表示対象アカウントの設定に関係なく次回のポップアップ表示を1回だけ強制します。演出に登場させる対象者も選べます（複数選ぶと1人ずつ画面が切り替わります）。</div>
+        <div style="font-size:11px;color:#374151;margin-bottom:4px;">演出に出す対象者</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
+          ${testCelebrantCheckboxes || '<span style="font-size:12px;color:#9ca3af;">対象者が登録されていません</span>'}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <select id="test-account" style="border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:13px;">
+            ${testAccountOptions || '<option value="">アカウントがありません</option>'}
+          </select>
+          <button type="button" onclick="fireTest()" id="test-fire-btn" style="padding:7px 20px;background:#b45309;color:white;border:none;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;">テスト実行</button>
+          <span id="test-msg" style="font-size:12px;color:#6b7280;"></span>
+        </div>
+      </div>` : ''}
 
       ${editable ? `
       <div style="margin-bottom:14px;">
@@ -238,6 +285,49 @@ app.get('/settings/birthday', async (c) => {
         .catch(function() { btn.disabled = false; btn.textContent = orig; msg.textContent = '通信エラーが発生しました'; });
     }
 
+    function saveEnabledAdmins() {
+      var ids = [];
+      document.querySelectorAll('.ea-check:checked').forEach(function(el) { ids.push(Number(el.value)); });
+      var btn = document.getElementById('ea-save-btn');
+      var msg = document.getElementById('ea-msg');
+      btn.disabled = true; var orig = btn.textContent; btn.textContent = '保存中…'; msg.textContent = '';
+      fetch(API + '/enabled-admins', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminIds: ids }),
+      })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          btn.disabled = false; btn.textContent = orig;
+          if (!res.ok) { msg.textContent = res.j.error || '保存に失敗しました'; return; }
+          msg.textContent = '保存しました';
+          setTimeout(function() { msg.textContent = ''; }, 2500);
+        })
+        .catch(function() { btn.disabled = false; btn.textContent = orig; msg.textContent = '通信エラーが発生しました'; });
+    }
+
+    function fireTest() {
+      var sel = document.getElementById('test-account');
+      var adminId = Number(sel.value);
+      if (!adminId) return;
+      var celebrantIds = [];
+      document.querySelectorAll('.tc-check:checked').forEach(function(el) { celebrantIds.push(Number(el.value)); });
+      var msg = document.getElementById('test-msg');
+      if (!celebrantIds.length) { msg.style.color = '#dc2626'; msg.textContent = '演出に出す対象者を1人以上選んでください'; return; }
+      var btn = document.getElementById('test-fire-btn');
+      btn.disabled = true; var orig = btn.textContent; btn.textContent = '実行中…'; msg.style.color = '#6b7280'; msg.textContent = '';
+      fetch(API + '/test-fire', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminId: adminId, celebrantIds: celebrantIds }),
+      })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          btn.disabled = false; btn.textContent = orig;
+          if (!res.ok) { msg.style.color = '#dc2626'; msg.textContent = res.j.error || '実行に失敗しました'; return; }
+          msg.style.color = '#059669';
+          msg.textContent = '「' + sel.options[sel.selectedIndex].textContent + '」の次回表示でポップアップが出ます';
+          setTimeout(function() { msg.textContent = ''; }, 4000);
+        })
+        .catch(function() { btn.disabled = false; btn.textContent = orig; msg.style.color = '#dc2626'; msg.textContent = '通信エラーが発生しました'; });
+    }
+
     renderList();
     </script>`;
 
@@ -352,6 +442,45 @@ app.post('/api/birthday/fire-hours', async (c) => {
   return c.json({ ok: true });
 });
 
+// ===== 管理API（表示対象アカウント） =====
+app.post('/api/birthday/enabled-admins', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ adminIds?: number[] }>().catch(() => ({}) as { adminIds?: number[] });
+  const adminIds = Array.isArray(b.adminIds)
+    ? Array.from(new Set(b.adminIds.map(Number).filter(n => Number.isInteger(n) && n > 0)))
+    : [];
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM birthday_enabled_admins'),
+    ...adminIds.map(id => c.env.DB.prepare('INSERT INTO birthday_enabled_admins (admin_id) VALUES (?)').bind(id)),
+  ]);
+  return c.json({ ok: true });
+});
+
+// ===== 管理API（テスト発火） =====
+// 指定アカウント×指定対象者で1件だけ保留する。誕生日・発火時刻・表示対象アカウントの設定に関わらず
+// そのアカウントの次回ポーリングで消費・表示される（/active 側で判定・削除する）
+app.post('/api/birthday/test-fire', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ adminId?: number; celebrantIds?: number[] }>().catch(() => ({}) as { adminId?: number; celebrantIds?: number[] });
+  const adminId = Number(b.adminId);
+  if (!Number.isInteger(adminId) || adminId <= 0) return c.json({ error: '対象アカウントを選択してください' }, 400);
+
+  const celebrantIds = Array.isArray(b.celebrantIds)
+    ? Array.from(new Set(b.celebrantIds.map(Number).filter(n => Number.isInteger(n) && n > 0)))
+    : [];
+  if (!celebrantIds.length) return c.json({ error: '対象者を1人以上選択してください' }, 400);
+
+  const admin = await c.env.DB.prepare('SELECT id FROM admins WHERE id = ?').bind(adminId).first();
+  if (!admin) return c.json({ error: 'アカウントが見つかりません' }, 404);
+
+  await c.env.DB.prepare(
+    `INSERT INTO birthday_test_triggers (admin_id, celebrant_ids, created_at) VALUES (?, ?, datetime('now','localtime'))
+     ON CONFLICT(admin_id) DO UPDATE SET celebrant_ids = excluded.celebrant_ids, created_at = excluded.created_at`
+  ).bind(adminId, JSON.stringify(celebrantIds)).run();
+  return c.json({ ok: true });
+});
+
 export default app;
 
 // ===== 表示用API（ADMIN_PATHの秘密パス配下ではなくルート /api/birthday にマウントする。
@@ -362,6 +491,45 @@ export const birthdayPublicApi = new Hono<{ Bindings: Env; Variables: { adminId:
 
 // 本日分で最後に発火したイベント（対象者一覧つき）を返す。存在しなければ event: null
 birthdayPublicApi.get('/active', async (c) => {
+  const adminId = c.get('adminId');
+
+  // テスト発火: 誕生日・発火時刻・表示対象アカウントの設定に関わらず最優先で1回だけ消費する
+  if (adminId) {
+    const testRow = await c.env.DB.prepare('SELECT celebrant_ids FROM birthday_test_triggers WHERE admin_id = ?')
+      .bind(adminId).first<{ celebrant_ids: string | null }>();
+    if (testRow) {
+      await c.env.DB.prepare('DELETE FROM birthday_test_triggers WHERE admin_id = ?').bind(adminId).run();
+
+      let testIds: number[] = [];
+      try { testIds = JSON.parse(testRow.celebrant_ids ?? '[]'); } catch { testIds = []; }
+      testIds = testIds.filter(n => Number.isInteger(n)).slice(0, 50);
+
+      const celebrants = testIds.length
+        ? await c.env.DB.prepare(
+            `SELECT id, name, photo_r2_key FROM birthday_celebrants WHERE id IN (${testIds.map(() => '?').join(',')}) ORDER BY birth_month ASC, birth_day ASC, id ASC`
+          ).bind(...testIds).all<{ id: number; name: string; photo_r2_key: string | null }>()
+        : await c.env.DB.prepare(
+            'SELECT id, name, photo_r2_key FROM birthday_celebrants WHERE is_active = 1 ORDER BY birth_month ASC, birth_day ASC, id ASC'
+          ).all<{ id: number; name: string; photo_r2_key: string | null }>();
+      const list = celebrants.results ?? [];
+      if (list.length) {
+        return c.json({
+          event: {
+            id: `test-${Date.now()}`,
+            celebrants: list.map(r => ({ id: r.id, name: r.name, hasPhoto: !!r.photo_r2_key })),
+          },
+        });
+      }
+      // 対象者が1人も見つからない場合はそのままテスト消費のみ行い、通常判定にフォールバックする
+    }
+  }
+
+  // 表示対象アカウントのホワイトリストに入っていなければ何も表示しない
+  if (!adminId) return c.json({ event: null });
+  const enabled = await c.env.DB.prepare('SELECT 1 FROM birthday_enabled_admins WHERE admin_id = ?')
+    .bind(adminId).first();
+  if (!enabled) return c.json({ event: null });
+
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const todayStr = nowJST.toISOString().split('T')[0];
 

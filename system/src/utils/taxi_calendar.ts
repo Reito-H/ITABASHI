@@ -1,5 +1,5 @@
 // 都内タクシー営収に影響しうる暦要因の判定ユーティリティ（外部API不使用・日付だけで完結）
-// 対象: 曜日 / 五十日(ごとおび) / 祝日・振替休日 / 大型連休 / 忘新年会シーズン / 送別会シーズン / 月末月初 / ボーナス月
+// 対象: 曜日 / 五十日(ごとおび) / 祝日・振替休日 / 大型連休 / 連休前後 / 忘新年会シーズン / 送別会シーズン / 月末月初 / ボーナス月
 
 export type DayFactors = {
   date: string;             // YYYY-MM-DD
@@ -12,6 +12,8 @@ export type DayFactors = {
   holidayName: string | null;
   isLongHoliday: boolean;   // GW/お盆/年末年始
   longHolidayName: string | null;
+  isBeforeLongWeekend: boolean; // 翌日から2連休以上が始まる平日（連休前日・行楽/送迎需要）
+  isAfterLongWeekend: boolean;  // 前日までの2連休以上が明けた平日（連休明け・帰宅ラッシュ需要）
   isYearEndNewYearParty: boolean; // 忘年会・新年会シーズン
   isFarewellSeason: boolean;      // 送別会・歓送迎会シーズン
   isMonthEnd: boolean;      // 月末3日間
@@ -175,6 +177,43 @@ function isMonthStartDay(dateStr: string): boolean {
   return d <= 3;
 }
 
+function addDaysStr(dateStr: string, delta: number): string {
+  const { y, m, d } = parseYmd(dateStr);
+  const dt = toDate(y, m, d);
+  dt.setDate(dt.getDate() + delta);
+  return ymd(dt);
+}
+
+// 土日または祝日（振替休日含む）＝タクシー需要の観点で「休みの日」とみなす
+function isDayOff(dateStr: string): boolean {
+  const wd = new Date(dateStr).getDay();
+  return wd === 0 || wd === 6 || !!getHolidayName(dateStr);
+}
+
+// 指定日を起点に、休みの日が何日連続するかを数える（起点自体が休みでなければ0）
+function consecutiveOffRun(startDateStr: string, direction: 1 | -1): number {
+  let count = 0;
+  let cursor = startDateStr;
+  for (let i = 0; i < 10; i++) {
+    if (!isDayOff(cursor)) break;
+    count++;
+    cursor = addDaysStr(cursor, direction);
+  }
+  return count;
+}
+
+// 連休前日: 自身は平日で、翌日から2連休以上が始まる
+function isBeforeLongWeekendDay(dateStr: string): boolean {
+  if (isDayOff(dateStr)) return false;
+  return consecutiveOffRun(addDaysStr(dateStr, 1), 1) >= 2;
+}
+
+// 連休明け: 自身は平日で、前日までの2連休以上が明けた
+function isAfterLongWeekendDay(dateStr: string): boolean {
+  if (isDayOff(dateStr)) return false;
+  return consecutiveOffRun(addDaysStr(dateStr, -1), -1) >= 2;
+}
+
 export function getDayFactors(dateStr: string): DayFactors {
   const dt = new Date(dateStr);
   const weekday = dt.getDay();
@@ -193,6 +232,8 @@ export function getDayFactors(dateStr: string): DayFactors {
     holidayName,
     isLongHoliday: !!longHol,
     longHolidayName: longHol,
+    isBeforeLongWeekend: isBeforeLongWeekendDay(dateStr),
+    isAfterLongWeekend: isAfterLongWeekendDay(dateStr),
     isYearEndNewYearParty: isYearEndNewYearParty(dateStr),
     isFarewellSeason: isFarewellSeason(dateStr),
     isMonthEnd: isMonthEndDay(dateStr),
@@ -207,6 +248,8 @@ export function getDayFactors(dateStr: string): DayFactors {
   if (f.isFriOrSat && !f.isHoliday) labels.push('週末夜間');
   if (f.isGotobi) labels.push('五十日');
   if (f.isLongHoliday) labels.push(f.longHolidayName!);
+  if (f.isBeforeLongWeekend) labels.push('連休前日');
+  if (f.isAfterLongWeekend) labels.push('連休明け');
   if (f.isYearEndNewYearParty) labels.push('忘新年会シーズン');
   if (f.isFarewellSeason) labels.push('送別会シーズン');
   if (f.isMonthEnd) labels.push('月末');
