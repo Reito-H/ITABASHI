@@ -21,8 +21,8 @@ export interface AccidentsTrainingRecordPrintOptions {
   backHref: string;
 }
 
-function row(label: string, w1h: string, value: string | null): string {
-  return `<div class="tp-row"><div class="tp-label"><span class="tp-w1h">${w1h}</span>${label}</div><div class="tp-value">${value ? escHtml(value) : '<span class="tp-empty">—</span>'}</div></div>`;
+function row(label: string, value: string | null): string {
+  return `<div class="tp-row"><div class="tp-label">${label}</div><div class="tp-value">${value ? escHtml(value) : '<span class="tp-empty">—</span>'}</div></div>`;
 }
 
 export function renderAccidentsTrainingRecordPrintPage(o: AccidentsTrainingRecordPrintOptions): string {
@@ -49,20 +49,25 @@ export function renderAccidentsTrainingRecordPrintPage(o: AccidentsTrainingRecor
 
   .tp-title { text-align: center; font-size: 24px; font-weight: 800; color: #0f172a; letter-spacing: .06em; margin-bottom: 22px; padding-bottom: 14px; border-bottom: 3px solid #1a3a5c; }
 
-  .tp-id-block { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 22px; font-size: 14px; color: #374151; }
-  .tp-id-name { font-size: 18px; font-weight: 800; color: #0f172a; }
-  .tp-id-sub { font-size: 13px; color: #6b7280; margin-left: 8px; }
+  .tp-id-block { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 22px; font-size: 14px; font-weight: 700; color: #000; }
+  .tp-id-name { font-size: 18px; font-weight: 800; color: #000; }
+  .tp-id-sub { font-size: 13px; font-weight: 700; color: #1e293b; margin-left: 8px; }
 
-  .tp-section-title { font-size: 13px; font-weight: 800; color: #1a3a5c; margin: 20px 0 8px; letter-spacing: .04em; }
-  .tp-box { border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; }
-  .tp-row { display: flex; border-bottom: 1px solid #e5e7eb; }
+  .tp-section-title { font-size: 13px; font-weight: 800; color: #0f172a; margin: 20px 0 8px; letter-spacing: .04em; }
+  .tp-box { border: 1px solid #94a3b8; border-radius: 8px; overflow: hidden; }
+  .tp-row { display: flex; border-bottom: 1px solid #cbd5e1; }
   .tp-row:last-child { border-bottom: none; }
-  .tp-label { width: 150px; flex: none; background: #f9fafb; font-size: 13px; font-weight: 700; color: #374151; padding: 12px 14px; display: flex; align-items: flex-start; gap: 6px; }
-  .tp-value { flex: 1; font-size: 13.5px; color: #111827; padding: 12px 14px; white-space: pre-wrap; line-height: 1.7; }
-  .tp-empty { color: #9ca3af; }
-  .tp-w1h { display: inline-block; font-size: 10px; font-weight: 800; color: #fff; background: #1a3a5c; border-radius: 4px; padding: 1px 5px; line-height: 1.5; flex-shrink: 0; }
+  .tp-label { width: 150px; flex: none; background: #f1f5f9; font-size: 13px; font-weight: 800; color: #0f172a; padding: 12px 14px; display: flex; align-items: flex-start; }
+  .tp-value { flex: 1; font-size: 13.5px; font-weight: 600; color: #000; padding: 12px 14px; white-space: pre-wrap; line-height: 1.7; }
+  .tp-empty { color: #6b7280; }
 
-  .tp-comment-box { border: 1px solid #d1d5db; border-radius: 8px; padding: 14px 16px; min-height: 32mm; font-size: 13.5px; line-height: 1.8; white-space: pre-wrap; color: #111827; }
+  .tp-comment-box { border: 1px solid #94a3b8; border-radius: 8px; padding: 14px 16px; min-height: 32mm; font-size: 13.5px; font-weight: 600; line-height: 1.8; white-space: pre-wrap; color: #000; }
+
+  .tp-stamp-footer { position: absolute; right: 18mm; bottom: 16mm; display: flex; justify-content: flex-end; }
+  .tp-stamp-row { display: flex; gap: 14px; }
+  .tp-stamp-box { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .tp-stamp-frame { width: 46px; height: 46px; border: 1.5px solid #334155; border-radius: 4px; }
+  .tp-stamp-label { font-size: 11px; font-weight: 700; color: #000; }
 
   @media print {
     @page { size: A4 portrait; margin: 0; }
@@ -88,19 +93,28 @@ export function renderAccidentsTrainingRecordPrintPage(o: AccidentsTrainingRecor
           <div>実施日：${escHtml(r.conducted_date.slice(0, 10))}</div>
         </div>
 
-        <div class="tp-section-title">実施記録（5W1H）</div>
+        <div class="tp-section-title">実施記録</div>
         <div class="tp-box">
-          ${row('実施日', 'When', r.conducted_date.slice(0, 10))}
-          ${row('実施場所', 'Where', r.location)}
-          ${row('対象者', 'Who', `${r.employee_name}${affiliation ? '（' + affiliation + '）' : ''}`)}
-          ${row('実施者', 'Who', r.trainer_name)}
-          ${row('研修内容', 'What', r.content)}
-          ${row('実施理由', 'Why', r.reason)}
-          ${row('実施方法', 'How', r.method)}
+          ${row('実施日', r.conducted_date.slice(0, 10))}
+          ${row('実施場所', r.location)}
+          ${row('対象者', `${r.employee_name}${affiliation ? '（' + affiliation + '）' : ''}`)}
+          ${row('実施者', r.trainer_name)}
+          ${row('研修内容', r.content)}
+          ${row('実施理由', r.reason)}
+          ${row('実施方法', r.method)}
         </div>
 
         <div class="tp-section-title">事故研修担当者の所感</div>
         <div class="tp-comment-box">${r.comment ? escHtml(r.comment) : '<span class="tp-empty">—</span>'}</div>
+      </div>
+      <div class="tp-stamp-footer">
+        <div class="tp-stamp-row">
+          ${['所長', '課長', '班長', '事故教育'].map(label => `
+            <div class="tp-stamp-box">
+              <div class="tp-stamp-frame"></div>
+              <div class="tp-stamp-label">${label}</div>
+            </div>`).join('')}
+        </div>
       </div>
     </div>
   </div>
