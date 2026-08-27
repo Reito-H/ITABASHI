@@ -6,6 +6,7 @@ import { layout } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 import { salesAiTabNav, SALES_AI_TABNAV_CSS } from './admin_sales_ai';
+import { settingsSubHeader } from './admin';
 import { computeFareRevisionOverview, computeFareRevisionEmployee } from './api/fare_revision';
 import { renderFareRevisionOverviewPrintPage, renderFareRevisionEmployeePrintPage } from '../html/fare_revision_print';
 
@@ -66,27 +67,11 @@ app.get('/sales-ai/fare-revision', async (c) => {
   <div class="frv-card">
     <div class="frv-toolbar">
       <div class="frv-field">
-        <label>比べ方</label>
-        <select id="mode-select" onchange="onModeChange()">
-          <option value="fare_revision">運賃改定の前後で比べる</option>
-          <option value="yoy">去年の同じ時期と比べる</option>
-          <option value="custom">自分で期間を指定する</option>
-        </select>
-      </div>
-      <div class="frv-field">
-        <label>前の期間（開始）</label>
-        <input type="date" id="before-start" disabled>
-      </div>
-      <div class="frv-field">
-        <label>前の期間（終了）</label>
-        <input type="date" id="before-end" disabled>
-      </div>
-      <div class="frv-field">
-        <label>後の期間（開始）</label>
+        <label>運賃改定後の期間（開始）</label>
         <input type="date" id="after-start">
       </div>
       <div class="frv-field">
-        <label>後の期間（終了）</label>
+        <label>運賃改定後の期間（終了）</label>
         <input type="date" id="after-end">
       </div>
       <div class="frv-field">
@@ -106,8 +91,7 @@ app.get('/sales-ai/fare-revision', async (c) => {
     </div>
     <div id="advanced-panel" class="frv-advanced">
       <div class="frv-field"><label>目標にする達成率(%)</label><input type="number" id="achievement-threshold" value="110" style="width:70px;"></div>
-      <div class="frv-field"><label>運賃改定でどれくらい単価が上がる想定か(%)</label><input type="number" id="fare-growth-expectation" value="110" style="width:70px;"></div>
-      <div class="frv-field"><label>↑からのズレの許容範囲(%)</label><input type="number" id="fare-tolerance-band" value="5" style="width:60px;"></div>
+      <div class="frv-field"><label>売上がこの範囲なら「ほぼ変わらない」とみなす(100±%)</label><input type="number" id="sales-flat-band" value="8" style="width:60px;"></div>
       <div class="frv-field"><label>働いた時間がこれより減ったら「減った」と判定(%)</label><input type="number" id="labor-hours-drop" value="97" style="width:70px;"></div>
       <div class="frv-field"><label>判定に必要な最低の乗務日数（各期間）</label><input type="number" id="min-duty-days" value="5" style="width:60px;"></div>
       <div class="frv-field"><label>労働時間データが必要な最低の割合(%)</label><input type="number" id="min-labor-coverage-pct" value="50" style="width:60px;"></div>
@@ -136,7 +120,7 @@ app.get('/sales-ai/fare-revision', async (c) => {
     <div id="ov-sub-summary" class="frv-subpanel">
       <div id="kpi-row" class="frv-kpi-row"></div>
       <div class="frv-card">
-        <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 4px;">売上の伸び具合の分布（人数）</h3>
+        <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 4px;">1日あたり売上の伸び具合の分布（人数）</h3>
         <div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">横軸は「後の期間の売上 ÷ 前の期間の売上」の割合です。100%より右なら売上が伸びた人です。</div>
         <canvas id="histogram-chart" height="70"></canvas>
       </div>
@@ -146,15 +130,15 @@ app.get('/sales-ai/fare-revision', async (c) => {
     <div id="ov-sub-breakdown" class="frv-subpanel" style="display:none;">
       <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap;">
         <div class="frv-card" style="flex:1;min-width:220px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">課ごとの売上の伸び（平均）</h3>
+          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">課ごとの1日あたり売上の伸び（平均）</h3>
           <table class="frv-table"><thead><tr><th>課</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody id="division-tbody"></tbody></table>
         </div>
         <div class="frv-card" style="flex:1;min-width:220px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">班ごとの売上の伸び（平均）</h3>
+          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">班ごとの1日あたり売上の伸び（平均）</h3>
           <table class="frv-table"><thead><tr><th>班</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody id="team-tbody"></tbody></table>
         </div>
         <div class="frv-card" style="flex:1;min-width:220px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">勤務の種類ごとの売上の伸び（平均）</h3>
+          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">勤務の種類ごとの1日あたり売上の伸び（平均）</h3>
           <table class="frv-table"><thead><tr><th>種類</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody id="duty-tbody"></tbody></table>
         </div>
       </div>
@@ -163,9 +147,9 @@ app.get('/sales-ai/fare-revision', async (c) => {
     <div id="ov-sub-flagged" class="frv-subpanel" style="display:none;">
       <div class="frv-card">
         <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 4px;">早めに切り上げていそうな人（一覧）</h3>
-        <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">1時間あたりの売上（単価）は運賃改定分だけほぼ上がっているのに、働いた時間がはっきり短くなっている人です。いつもの目標額に早く届いて、早めに仕事を切り上げているのかもしれません。行をクリックすると、その人の詳しい状況を見られます。</div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">売上は運賃改定前とほぼ変わっていないのに、働いた時間がはっきり短くなっている人です。いつもの目標額に早く届いて、早めに仕事を切り上げているのかもしれません。行をクリックすると、その人の詳しい状況を見られます。</div>
         <table class="frv-table">
-          <thead><tr><th>氏名</th><th>課/班</th><th id="th-flagged-before">前の1日平均売上</th><th id="th-flagged-after">後の1日平均売上</th><th>売上の伸び</th><th>単価の伸び</th><th>働いた時間の伸び</th><th>確からしさ</th></tr></thead>
+          <thead><tr><th>氏名</th><th>課/班</th><th id="th-flagged-before">前の1日平均売上</th><th id="th-flagged-after">後の1日平均売上</th><th>1日あたり売上の伸び</th><th>単価の伸び</th><th>1乗務あたり労働時間の伸び</th><th>確からしさ</th></tr></thead>
           <tbody id="flagged-tbody"></tbody>
         </table>
         <div id="flagged-empty" style="display:none;font-size:12px;color:#9ca3af;padding:10px 0;">該当する人はいません。</div>
@@ -185,14 +169,14 @@ app.get('/sales-ai/fare-revision', async (c) => {
           <div style="display:flex;gap:8px;" class="frv-no-print">
             <input type="text" id="all-emp-search" placeholder="社員名で検索" oninput="renderAllEmployeesTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
             <select id="all-emp-sort" onchange="renderAllEmployeesTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
-              <option value="growth-asc">売上の伸び 低い順</option>
-              <option value="growth-desc">売上の伸び 高い順</option>
+              <option value="growth-asc">1日あたり売上の伸び 低い順</option>
+              <option value="growth-desc">1日あたり売上の伸び 高い順</option>
               <option value="name-asc">名前順</option>
             </select>
           </div>
         </div>
         <table class="frv-table">
-          <thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>売上の伸び</th><th id="th-allemp-before">前の売上</th><th id="th-allemp-after">後の売上</th><th>働いた時間の伸び</th></tr></thead>
+          <thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th id="th-allemp-before">前の1日平均売上</th><th id="th-allemp-after">後の1日平均売上</th><th>1乗務あたり労働時間の伸び</th></tr></thead>
           <tbody id="all-emp-tbody"></tbody>
         </table>
         <div id="all-emp-empty" style="display:none;font-size:12px;color:#9ca3af;padding:10px 0;">該当する人はいません。</div>
@@ -271,12 +255,6 @@ function pctColor(v) {
 }
 const CATEGORY_LABELS = { above: '目標達成', met: '伸びたが未達', below: '減少', insufficient_data: 'データ不足' };
 
-function onModeChange() {
-  const mode = document.getElementById('mode-select').value;
-  const isCustom = mode === 'custom';
-  document.getElementById('before-start').disabled = !isCustom;
-  document.getElementById('before-end').disabled = !isCustom;
-}
 function toggleAdvanced() {
   document.getElementById('advanced-panel').classList.toggle('open');
 }
@@ -286,8 +264,7 @@ function toCamel(id) {
 }
 function buildQueryString() {
   const params = new URLSearchParams();
-  params.set('mode', document.getElementById('mode-select').value);
-  ['before-start', 'before-end', 'after-start', 'after-end'].forEach(function(id) {
+  ['after-start', 'after-end'].forEach(function(id) {
     const el = document.getElementById(id);
     if (el && el.value) params.set(toCamel(id), el.value);
   });
@@ -299,8 +276,7 @@ function buildQueryString() {
   if (duty) params.set('dutyCode', duty);
   const thresholdIds = {
     'achievement-threshold': 'achievementThresholdPct',
-    'fare-growth-expectation': 'fareGrowthExpectationPct',
-    'fare-tolerance-band': 'fareGrowthToleranceBandPct',
+    'sales-flat-band': 'salesFlatBandPct',
     'labor-hours-drop': 'laborHoursDropThresholdPct',
     'min-duty-days': 'minDutyDaysPerPeriod',
   };
@@ -373,8 +349,8 @@ function printCurrentView() {
 function updatePeriodHeaders(periods) {
   document.getElementById('th-flagged-before').textContent = periods.before.label + 'の1日平均売上';
   document.getElementById('th-flagged-after').textContent = periods.after.label + 'の1日平均売上';
-  document.getElementById('th-allemp-before').textContent = periods.before.label + 'の売上';
-  document.getElementById('th-allemp-after').textContent = periods.after.label + 'の売上';
+  document.getElementById('th-allemp-before').textContent = periods.before.label + 'の1日平均売上';
+  document.getElementById('th-allemp-after').textContent = periods.after.label + 'の1日平均売上';
   document.getElementById('emp-chart-title').textContent = '売上の移り変わり（' + periods.before.label + '・' + periods.after.label + 'を、乗務した日数でそろえて比較）';
 }
 
@@ -556,10 +532,10 @@ function renderEmployeeKpi(cmp) {
   const beforeLabel = cmp.before.range.label;
   const afterLabel = cmp.after.range.label;
   const items = [
-    { label: '売上の伸び', val: fmtPct(cmp.salesGrowthPct), color: pctColor(cmp.salesGrowthPct) },
+    { label: '1日あたり売上の伸び', val: fmtPct(cmp.salesGrowthPct), color: pctColor(cmp.salesGrowthPct) },
     { label: '判定', val: CATEGORY_LABELS[cmp.achievementCategory] || cmp.achievementCategory, color: '#1a3a5c' },
     { label: '1時間あたり売上の伸び', val: fmtPct(cmp.hourlyRateGrowthPct), color: '#1a3a5c' },
-    { label: '働いた時間の伸び', val: fmtPct(cmp.laborHoursGrowthPct), color: '#1a3a5c' },
+    { label: '1乗務あたり労働時間の伸び', val: fmtPct(cmp.laborHoursGrowthPct), color: '#1a3a5c' },
     { label: '平均の1日の売上（' + beforeLabel + '→' + afterLabel + '）', val: fmtYen(cmp.before.avgPerDuty) + ' → ' + fmtYen(cmp.after.avgPerDuty), color: '#1a3a5c' },
     { label: '平均の帰る時刻（' + beforeLabel + '→' + afterLabel + '）', val: (cmp.before.avgReturnTime ?? '—') + ' → ' + (cmp.after.avgReturnTime ?? '—'), color: '#1a3a5c' },
   ];
@@ -632,7 +608,6 @@ function loadEmployee(empId) {
     });
 }
 
-onModeChange();
 loadOverview();
 </script>`;
 
@@ -664,6 +639,85 @@ app.get('/sales-ai/fare-revision/print', async (c) => {
     ? (c.req.query('category') as 'above' | 'met' | 'below' | 'insufficient_data') : null;
   const result = await computeFareRevisionOverview(c.env.DB, c.req.query());
   return c.html(renderFareRevisionOverviewPrintPage(section, result, printedAtLabel, backHref, category));
+});
+
+// ===================================================
+// 運賃改定影響分析の計算ロジック解説（設定ページから遷移。閲覧専用・保存機能なし）
+// ===================================================
+app.get('/settings/fare-revision-guide', (c) => {
+  const content = settingsSubHeader('運賃改定影響分析のしくみ') + `
+<div style="max-width:760px;font-family:'Hiragino Sans','Meiryo',sans-serif;font-size:14px;line-height:1.9;color:#1f2937;">
+
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:16px 20px;margin-bottom:20px;">
+    <div style="font-weight:700;color:#1d4ed8;margin-bottom:6px;">ひとことで言うと</div>
+    <div style="color:#1e3a5f;">2026年4月20日に運賃が約10%値上げされました。「値上げの前」と「値上げの後」で、同じ人の売上や働いた時間がどう変わったかを、コンピューターが自動で計算して比べているだけです。<b>AIという名前がついていますが、ChatGPTのような外部のAIサービスには一切つないでいません。</b>すべて「〇〇円 ÷ 〇〇円」のような普通の割り算と、「もし〇〇より大きかったら」という条件分岐の組み合わせです。</div>
+  </div>
+
+  <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">① まず「前」と「後」の期間を決める</h3>
+  <p>この画面は運賃改定の前後の比較専用です。「後」＝4月20日〜今日（「運賃改定後の期間」で調整可）。「後」が仮に100日間なら、「前」も同じ100日間（4月19日からさかのぼって100日間）にします。日数をそろえないと、単純に日数が多いほうが売上合計も大きくなってしまい、フェアな比較になりません。</p>
+  <p style="color:#4b5563;">なお、「前」の期間が始まった時点でまだ入社していなかった人（入社が改定間近〜改定後の新人など）は、この分析の対象には含めていません。そのような人を含めてしまうと、単に在籍日数が「前」と「後」で大きく違うだけで、売上の伸び率が数百〜千数百%という運賃改定とは無関係な数字になってしまい、誤解を招くためです。去年の同じ時期との比較や、自分で自由に期間を指定した単純な比較は「AI売上分析」の別タブ「期間比較」で行えます。</p>
+
+  <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">② 1日あたり何時間働いたかを出す</h3>
+  <p>「時間あたりいくら稼いだか」を計算するには、働いた時間が必要です。</p>
+  <ul style="padding-left:22px;">
+    <li>ホシコンの記録に「実際の労働時間」があれば、それをそのまま使います（一番信頼できる数字）。</li>
+    <li>もし記録がなければ、「出庫した時刻」〜「帰庫した時刻」の差を代わりに使います。ただしこれは休憩時間も含んでしまうので、実際に働いた時間より少し長めに出ます。</li>
+    <li>夜勤などで日をまたぐ場合（例：出庫19:00→帰庫翌3:00）はちゃんと8時間として計算します。逆に0時間以下やあまりに長すぎる（20時間超）記録は、データがおかしいと判断して使いません。</li>
+  </ul>
+
+  <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">③ 伸び率（％）の計算のしかた</h3>
+  <p>これが一番の基本です。とてもシンプルな割り算です。</p>
+  <div style="background:#f8fafc;border-radius:8px;padding:14px 18px;margin:10px 0;font-size:13.5px;">
+    伸び率（％） ＝ 後の期間の数字 ÷ 前の期間の数字 × 100
+  </div>
+  <p style="color:#4b5563;">例えば「前」の1日あたり平均売上が20,000円、「後」が23,000円なら、23,000 ÷ 20,000 × 100 = <b>115%</b> です。100%より大きければ増えた、小さければ減ったという意味になります。これと同じ計算を、時間単価（1時間あたりの売上）・働いた時間・乗務日数のそれぞれについて行っています。</p>
+  <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 16px;margin:10px 0;font-size:13px;color:#1e3a5f;">
+    <b>「売上の伸び」は総売上（合計金額）ではなく、必ず「1日あたりの平均売上」で計算しています。</b>入社したばかりの人や、体調不良・家庭の事情などで働く日数自体が「前」と「後」で大きく変わった人がいると、総売上どうしを比べると本人の頑張り具合とは関係なく数字が大きくブレてしまうためです（例：前の期間は10日しか記録がなく、後の期間は120日ほぼフルで働いた場合、総売上は10倍以上になりますが、それは単に働いた日数が増えただけです）。1日あたりの平均で比べることで、日数の増減の影響を除いています。乗務日数そのものの伸び率も社員別の「判定理由」に表示されるので、日数が大きく変わっている場合はそちらで確認できます。</div>
+
+  <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">④ 「達成」「未達」「減少」をどう決めるか</h3>
+  <p>売上の伸び率をもとに、4つに振り分けます（目標ラインは「くわしい設定」で変更可能。既定は110%）。</p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin:10px 0;">
+    <tr style="background:#f3f4f6;"><th style="text-align:left;padding:6px 10px;border:1px solid #e5e7eb;">判定</th><th style="text-align:left;padding:6px 10px;border:1px solid #e5e7eb;">条件</th></tr>
+    <tr><td style="padding:6px 10px;border:1px solid #e5e7eb;color:#16a34a;font-weight:700;">目標達成</td><td style="padding:6px 10px;border:1px solid #e5e7eb;">伸び率が110%以上（値上げ分をしっかり上回って伸びた）</td></tr>
+    <tr><td style="padding:6px 10px;border:1px solid #e5e7eb;color:#b45309;font-weight:700;">伸びたが未達</td><td style="padding:6px 10px;border:1px solid #e5e7eb;">100%以上110%未満（伸びてはいるが目標には届いていない）</td></tr>
+    <tr><td style="padding:6px 10px;border:1px solid #e5e7eb;color:#dc2626;font-weight:700;">減少</td><td style="padding:6px 10px;border:1px solid #e5e7eb;">100%未満（前より売上が減った）</td></tr>
+    <tr><td style="padding:6px 10px;border:1px solid #e5e7eb;color:#6b7280;font-weight:700;">データ不足</td><td style="padding:6px 10px;border:1px solid #e5e7eb;">前後どちらかの期間の乗務日数が少なすぎる（既定：5日未満）ときは、判定せずに「わからない」として扱う</td></tr>
+  </table>
+  <p style="color:#4b5563;">乗務日数が少ないと、たまたま1日だけ調子が良かった／悪かっただけで伸び率が大きくブレてしまうため、一定日数に満たない人は判定を保留しています。</p>
+
+  <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">⑤ 「早めに切り上げていそうな人」はどう見つけているか</h3>
+  <p>これがこの機能でいちばん複雑な部分です。考え方はこうです。</p>
+  <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:14px 18px;margin:10px 0;">
+    もし「売上」は運賃改定の前とほとんど変わっていないのに、<br>
+    「働いた時間の合計」ははっきり短くなっている ―― それはつまり、<br>
+    <b>運賃が上がった分だけ、いつもの目標額に早く到達して、早めに仕事を切り上げている</b>可能性がある、という推測です。<br>
+    （売上が同じで時間だけ短くなれば、1時間あたりの単価は自動的に上がることになります）
+  </div>
+  <p>これを数字で判定すると、次の<b>2つの条件が両方とも</b>成り立ったときにフラグが立ちます（数字は「くわしい設定」で調整可能）。</p>
+  <ol style="padding-left:22px;">
+    <li>売上の伸び率が、100%を中心に既定±8%の範囲に収まっている＝「売上はほぼ変わっていない」</li>
+    <li>1乗務あたりの平均労働時間の伸び率が、既定97%を下回っている＝「1回の乗務そのものがはっきり短くなっている」（乗務日数そのものが減っただけの人と区別するため、合計労働時間ではなく1乗務あたりの平均で判定しています）</li>
+  </ol>
+  <p style="color:#4b5563;">「確からしさ」は、労働時間の記録が実際の記録中心なら<b>高い</b>、出退庫時刻からの推定を多く含む場合は<b>中くらい</b>と表示されます。あくまで参考情報であり、この判定だけで本人を評価するものではありません。</p>
+
+  <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">⑥ 全体の集計（グラフや課別の表）</h3>
+  <ul style="padding-left:22px;">
+    <li><b>分布グラフ</b>：全員の売上伸び率を「90%未満」「90〜100%」「100〜110%」「110〜120%」「120%以上」の5つの箱に振り分けて人数を数えているだけです。</li>
+    <li><b>課別・班別・勤務区分別の平均</b>：それぞれのグループに属する人（ただし④の「データ不足」の人は平均が歪むため除外）の伸び率を単純平均しています。</li>
+  </ul>
+
+  <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">⑦ 覚えておいてほしいこと</h3>
+  <ul style="padding-left:22px;">
+    <li>すべてホシコンの売上記録（<code>sales_records</code>）など、もともとあるデータの集計で、新しく特別なデータを作っているわけではありません。</li>
+    <li>あくまで自動集計＋しきい値判定であり、有給・欠勤・体調不良・イベントなど、数字に出ない事情までは考慮できません。最終的な判断は必ず人の目で確認してください。</li>
+    <li>「くわしい設定」のしきい値（目標達成ライン・売上ほぼ変わらないとみなす範囲・時間減少の目安・最低乗務日数など）は分析画面からその場で自由に変更して試せます。保存はされず、画面を開き直すと既定値に戻ります。</li>
+  </ul>
+
+  <div style="margin-top:28px;">
+    <a href="${ADMIN_PATH}/sales-ai/fare-revision" style="color:#2563eb;font-size:13px;">→ 運賃改定影響分析の画面に戻る</a>
+  </div>
+</div>`;
+  return c.html(layout('運賃改定影響分析のしくみ', content, 'settings'));
 });
 
 export default app;

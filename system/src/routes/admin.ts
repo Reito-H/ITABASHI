@@ -12,7 +12,10 @@ import type {
 } from '../html/shift';
 import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH, MONITOR_NEWCOMERS_PATH } from '../config';
 import qrcode from 'qrcode-generator';
-import { getMaintenanceMode, setMaintenanceMode, isAdminAccount } from '../utils/maintenance';
+import {
+  getMaintenanceMode, setMaintenanceMode, isAdminAccount,
+  getMaintenanceSchedule, setMaintenanceSchedule, isWithinSchedule, isMaintenanceActive,
+} from '../utils/maintenance';
 import { triggerAccidentsMonitorForceRefresh, getMonitorDisplaySettings, saveMonitorDisplaySettings, type MonitorDisplayMode } from './public_accidents_monitor';
 import { agoLabel } from './admin_line_usage';
 import { bucketCoarseBands, COARSE_BAND_LABELS } from '../html/accidents';
@@ -314,7 +317,7 @@ app.get('/', async (c) => {
       ? c.env.DB.prepare('SELECT username, permissions FROM admins WHERE id = ?')
           .bind(selfAdminId).first<{ username: string; permissions: string | null }>()
       : Promise.resolve(null),
-    getMaintenanceMode(c.env.DB).catch(() => false),
+    isMaintenanceActive(c.env.DB).catch(() => false),
     c.env.DB.prepare('SELECT 1').first().then(() => true).catch(() => false),
     // 今月の事故（件数・時間帯）
     c.env.DB.prepare(`SELECT occurred_time FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
@@ -345,6 +348,10 @@ app.get('/', async (c) => {
       ? `<a href="${s.href}" class="hm-stat">${inner}</a>`
       : `<div class="hm-stat">${inner}</div>`;
   }).join('');
+
+  // ===== 上部の指針（標語）=====
+  // 設定画面からの入力は不可。定期的にここを直接書き換える運用。
+  const HOME_MOTTO = '現状維持は、後退';
 
   // ===== よく使う操作（権限フィルタ: data-nav-id / data-perm-key で自動非表示）=====
   // サイドバーと重複するため、利用頻度の高い項目だけに絞る
@@ -522,17 +529,25 @@ app.get('/', async (c) => {
   const content = `
 <style>
   .hm { font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; }
-  .hm-sec-title { font-size:12px; font-weight:700; color:#94a3b8; letter-spacing:.08em; margin:0 2px 10px; }
+  .hm-sec-title { font-size:14px; font-weight:700; color:#64748b; letter-spacing:.06em; margin:0 2px 10px; }
+  /* 指針バナー */
+  .hm-motto { display:flex; align-items:center; gap:16px; background:linear-gradient(135deg,#1a3a5c,#2d6a9f); border-radius:14px; padding:18px 26px; margin-bottom:24px; box-shadow:0 4px 16px rgba(26,58,92,.18); }
+  .hm-motto-label { flex:none; font-size:12px; font-weight:700; letter-spacing:.1em; color:#cfe0f2; border:1px solid rgba(255,255,255,.35); border-radius:999px; padding:5px 12px; }
+  .hm-motto-text { font-size:24px; font-weight:800; color:#fff; letter-spacing:.03em; line-height:1.3; }
+  @media (max-width: 560px) {
+    .hm-motto { flex-direction:column; align-items:flex-start; gap:10px; padding:16px 20px; }
+    .hm-motto-text { font-size:19px; }
+  }
   /* サマリーカード */
   .hm-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-bottom:10px; }
   .hm-stat { display:flex; flex-direction:column; gap:6px; background:#fff; border:1px solid #e8edf3; border-radius:12px; padding:18px 20px; text-decoration:none; transition:border-color .15s, box-shadow .15s; }
   a.hm-stat:hover { border-color:#c3d3e4; box-shadow:0 4px 14px rgba(26,58,92,.08); }
-  .hm-stat-label { font-size:12px; color:#64748b; font-weight:600; letter-spacing:.03em; }
-  .hm-stat-value { font-size:30px; font-weight:800; line-height:1; }
-  .hm-stat-sub { font-size:11px; color:#94a3b8; }
+  .hm-stat-label { font-size:13px; color:#475569; font-weight:700; letter-spacing:.02em; }
+  .hm-stat-value { font-size:32px; font-weight:800; line-height:1; }
+  .hm-stat-sub { font-size:12px; color:#94a3b8; }
   /* クイックアクセス */
-  .hm-quicks { display:grid; grid-template-columns:repeat(auto-fill,minmax(158px,1fr)); gap:10px; margin-bottom:26px; }
-  .hm-quick { display:flex; align-items:center; background:#fff; border:1px solid #e8edf3; border-left:3px solid #1a3a5c; border-radius:10px; padding:13px 16px; font-size:13px; font-weight:600; color:#1e3a5f; text-decoration:none; transition:background .15s, border-color .15s, box-shadow .15s; }
+  .hm-quicks { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:12px; margin-bottom:26px; }
+  .hm-quick { display:flex; align-items:center; background:#fff; border:1px solid #e8edf3; border-left:5px solid #1a3a5c; border-radius:12px; padding:20px 22px; font-size:17px; font-weight:700; color:#1e3a5f; text-decoration:none; transition:background .15s, border-color .15s, box-shadow .15s; }
   .hm-quick:hover { background:#f4f8fc; border-color:#c3d3e4; border-left-color:#2d6a9f; box-shadow:0 3px 10px rgba(26,58,92,.08); }
   /* 分析カード */
   .hm-ana { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
@@ -576,6 +591,18 @@ app.get('/', async (c) => {
 </style>
 <div class="hm">
 
+  <!-- 指針 -->
+  <div class="hm-motto">
+    <span class="hm-motto-label">指針</span>
+    <span class="hm-motto-text">${escHtml(HOME_MOTTO)}</span>
+  </div>
+
+  <!-- よく使う操作 -->
+  <div class="hm-sec-title">よく使う操作</div>
+  <div class="hm-quicks">
+    ${quickHtml}
+  </div>
+
   <!-- 今日の対応 -->
   <div class="hm-sec-title">今日の対応</div>
   <div class="hm-stats">
@@ -591,12 +618,6 @@ app.get('/', async (c) => {
       </div>
       ${overdueRows}
     </div>
-  </div>
-
-  <!-- よく使う操作 -->
-  <div class="hm-sec-title">よく使う操作</div>
-  <div class="hm-quicks">
-    ${quickHtml}
   </div>
 
   <!-- 今月の状況 -->
@@ -1013,9 +1034,13 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
       { href: `${ADMIN}/cc-list`,                  perm: '',                         title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
     ]},
+    { heading: '研修・勉強会', cards: [
+      { href: `${ADMIN}/settings/study-sessions`, perm: 'settings.study-sessions', title: '勉強会募集', desc: '勉強会の作成・参加者確認・A3ポスター印刷。社員は共通QR/URLから社員番号を入力して参加登録', highlight: true },
+    ]},
     { heading: 'AI売上分析の設定', cards: [
       { href: `${ADMIN}/settings/wage-estimate`, perm: 'settings.wage-estimate', title: '賃金試算設定', desc: 'AI売上分析「賃金インパクト試算」で使う成果手当の概算計算パラメータ（曜日別基準額・歩合率）' },
       { href: `${ADMIN}/settings/driving-risk`,  perm: 'settings.driving-risk',  title: '運転リスク検証設定', desc: 'AI売上分析「安全運転リスク」判定のしきい値（急挙動件数・最高速度）' },
+      { href: `${ADMIN}/settings/fare-revision-guide`, perm: 'settings', title: '運賃改定影響分析のしくみ', desc: '「運賃改定影響分析」が何をどう計算しているか、やさしい言葉で解説' },
     ]},
     { heading: '経営・対外資料', cards: [
       { href: `${ADMIN}/presentation`, perm: 'settings.presentation', title: 'ホシコン発表資料', desc: '社内システムのDX事例プレゼンテーション（横スライド・印刷対応、フル権限adminのみ）' },
@@ -3198,10 +3223,14 @@ app.get('/employees/add', async (c) => {
 
 // メンテナンスモード状態（ステータスページ表示用）
 app.get('/settings/status/maintenance', async (c) => {
-  return c.json({ enabled: await getMaintenanceMode(c.env.DB) });
+  const [enabled, schedule] = await Promise.all([
+    getMaintenanceMode(c.env.DB),
+    getMaintenanceSchedule(c.env.DB),
+  ]);
+  return c.json({ enabled, schedule, active: enabled || isWithinSchedule(schedule) });
 });
 
-// メンテナンスモード切替（adminアカウントのみ）
+// メンテナンスモード切替（手動トグル、adminアカウントのみ）
 app.post('/settings/status/maintenance', async (c) => {
   const adminId = c.get('adminId');
   if (!adminId || !(await isAdminAccount(c.env.DB, adminId))) {
@@ -3216,7 +3245,37 @@ app.post('/settings/status/maintenance', async (c) => {
     return c.json({ error: 'enabled は true / false で指定してください' }, 400);
   }
   await setMaintenanceMode(c.env.DB, enabled);
-  return c.json({ ok: true, enabled });
+  const schedule = await getMaintenanceSchedule(c.env.DB);
+  return c.json({ ok: true, enabled, active: enabled || isWithinSchedule(schedule) });
+});
+
+// メンテナンス期間（予約メンテナンス）の設定（adminアカウントのみ）
+app.post('/settings/status/maintenance/schedule', async (c) => {
+  const adminId = c.get('adminId');
+  if (!adminId || !(await isAdminAccount(c.env.DB, adminId))) {
+    return c.json({ error: 'メンテナンス期間の設定はadminアカウントのみ実行できます' }, 403);
+  }
+  let start: string | null;
+  let end: string | null;
+  try {
+    const body = await c.req.json<{ start?: unknown; end?: unknown }>();
+    const normalize = (v: unknown): string | null => {
+      if (v === null || v === undefined || v === '') return null;
+      if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) throw new Error('invalid');
+      return v;
+    };
+    start = normalize(body.start);
+    end = normalize(body.end);
+  } catch {
+    return c.json({ error: '日時の形式が不正です' }, 400);
+  }
+  if (start && end && end < start) {
+    return c.json({ error: '終了日時は開始日時より後にしてください' }, 400);
+  }
+  await setMaintenanceSchedule(c.env.DB, start, end);
+  const enabled = await getMaintenanceMode(c.env.DB);
+  const scheduleActive = isWithinSchedule({ start, end });
+  return c.json({ ok: true, schedule: { start, end }, scheduleActive, active: enabled || scheduleActive });
 });
 
 app.get('/settings/status', async (c) => {
@@ -3242,7 +3301,10 @@ app.get('/settings/status', async (c) => {
 
   const adminId = c.get('adminId');
   const isAdmin = adminId ? await isAdminAccount(c.env.DB, adminId) : false;
-  const maintenanceOn = await getMaintenanceMode(c.env.DB);
+  const manualMaintenanceOn = await getMaintenanceMode(c.env.DB);
+  const maintenanceSchedule = await getMaintenanceSchedule(c.env.DB);
+  const scheduleActive = isWithinSchedule(maintenanceSchedule);
+  const maintenanceOn = manualMaintenanceOn || scheduleActive;
 
   // ===== 実データ収集（利用状況・DB統計・直近アクティビティ） =====
   const [usageStats, featureTop, dailyUsage, dbCounts, recentActivity, loginStats] = await Promise.all([
@@ -3357,24 +3419,48 @@ app.get('/settings/status', async (c) => {
       </div>`).join('');
 
   // メンテナンス制御カード（adminアカウントのみ表示）
+  const sysInputStyle = 'background:var(--sys-bg3);border:1px solid var(--sys-line);border-radius:4px;color:var(--sys-text);padding:6px 10px;font-size:12px;font-family:\'SF Mono\',SFMono-Regular,Menlo,Consolas,\'Courier New\',monospace;';
+  const sysBtnStyle = 'background:rgba(57,255,136,.1);border:1px solid rgba(57,255,136,.4);border-radius:4px;color:var(--sys-green);padding:6px 16px;font-size:11px;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:\'SF Mono\',SFMono-Regular,Menlo,Consolas,\'Courier New\',monospace;';
+  const sysBtnGhostStyle = 'background:transparent;border:1px solid var(--sys-line);border-radius:4px;color:var(--sys-text-dim);padding:6px 16px;font-size:11px;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:\'SF Mono\',SFMono-Regular,Menlo,Consolas,\'Courier New\',monospace;';
   const maintenanceCard = isAdmin ? `
       <div class="sys-panel gc-12">
         <div class="sys-ph"><span class="sys-pt mono"><span class="sys-dots"><span></span><span></span><span></span></span>MAINTENANCE CONTROL</span><span class="sys-ps mono">ADMIN ONLY</span></div>
         <div class="sys-pb">
           <div class="sys-row" style="flex-wrap:wrap;">
             <div style="flex:1;min-width:240px;">
-              <div style="font-size:14px;font-weight:700;color:var(--sys-text);">メンテナンスモード</div>
+              <div style="font-size:14px;font-weight:700;color:var(--sys-text);">メンテナンスモード（手動切替）</div>
               <div style="font-size:12px;color:var(--sys-text-dim);margin-top:4px;line-height:1.7;">
                 ONにすると admin 以外の全アクセス（管理画面・LIFF・フォーム・API）にメンテナンス画面を表示します。<br>
                 LINE Botはメンテナンス中メッセージを返信し、定時通知はそのまま送信されます。
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:12px;">
-              <span id="maint-state" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.1em;color:${maintenanceOn ? 'var(--sys-amber)' : 'var(--sys-green)'};">${maintenanceOn ? 'MAINT ON' : 'NORMAL'}</span>
-              <label class="sw"><input type="checkbox" id="maint-toggle" ${maintenanceOn ? 'checked' : ''} onchange="toggleMaintenance(this)"><span class="tr"></span></label>
+              <span id="maint-state" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.1em;color:${manualMaintenanceOn ? 'var(--sys-amber)' : 'var(--sys-green)'};">${manualMaintenanceOn ? 'MAINT ON' : 'NORMAL'}</span>
+              <label class="sw"><input type="checkbox" id="maint-toggle" ${manualMaintenanceOn ? 'checked' : ''} onchange="toggleMaintenance(this)"><span class="tr"></span></label>
             </div>
           </div>
           <div id="maint-msg" style="font-size:11px;color:var(--sys-text-dim2);margin-top:8px;"></div>
+
+          <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--sys-line-soft);">
+            <div style="font-size:14px;font-weight:700;color:var(--sys-text);margin-bottom:4px;">期間指定（予約メンテナンス）</div>
+            <div style="font-size:12px;color:var(--sys-text-dim);margin-bottom:10px;line-height:1.7;">
+              開始〜終了の期間中は、上の手動切替がOFFでも自動的にメンテナンス扱いになります。終了日時を空欄にすると開始以降は無期限で継続します。
+            </div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
+              <div>
+                <label style="display:block;font-size:10px;color:var(--sys-text-dim2);margin-bottom:4px;letter-spacing:.08em;" class="mono">開始日時</label>
+                <input type="datetime-local" id="maint-sch-start" value="${escHtml(maintenanceSchedule.start ?? '')}" style="${sysInputStyle}">
+              </div>
+              <div>
+                <label style="display:block;font-size:10px;color:var(--sys-text-dim2);margin-bottom:4px;letter-spacing:.08em;" class="mono">終了日時（任意）</label>
+                <input type="datetime-local" id="maint-sch-end" value="${escHtml(maintenanceSchedule.end ?? '')}" style="${sysInputStyle}">
+              </div>
+              <button type="button" style="${sysBtnStyle}" onclick="saveMaintenanceSchedule()">保存</button>
+              <button type="button" style="${sysBtnGhostStyle}" onclick="clearMaintenanceSchedule()">クリア</button>
+              <span id="maint-sch-active" class="mono" style="font-size:11px;font-weight:700;letter-spacing:.08em;color:${scheduleActive ? 'var(--sys-amber)' : 'var(--sys-text-dim2)'};">${scheduleActive ? '● 期間内（適用中）' : '期間外'}</span>
+            </div>
+            <div id="maint-sch-msg" style="font-size:11px;color:var(--sys-text-dim2);margin-top:8px;"></div>
+          </div>
         </div>
       </div>` : '';
 
@@ -3838,15 +3924,20 @@ app.get('/settings/status', async (c) => {
         .then(function(res) {
           el.disabled = false;
           if (!res.ok) { el.checked = !on; alert(res.j.error || '切替に失敗しました'); return; }
-          applyMaintState(res.j.enabled);
+          applyManualState(res.j.enabled);
+          applyEffectiveState(res.j.active);
+          var msg = document.getElementById('maint-msg');
+          if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
         }).catch(function() {
           el.disabled = false; el.checked = !on;
           alert('通信エラーで切り替えできませんでした');
         });
       }
-      function applyMaintState(on) {
+      function applyManualState(on) {
         var st = document.getElementById('maint-state');
         if (st) { st.textContent = on ? 'MAINT ON' : 'NORMAL'; st.style.color = on ? '#ffb930' : '#39ff88'; }
+      }
+      function applyEffectiveState(on) {
         var led = document.getElementById('head-led');
         if (led) { led.className = 'led ' + (on ? 'led-a' : 'led-g'); }
         var hs = document.getElementById('head-state');
@@ -3857,8 +3948,44 @@ app.get('/settings/status', async (c) => {
         }
         var bn = document.getElementById('maint-banner');
         if (bn) { bn.style.display = on ? 'block' : 'none'; }
-        var msg = document.getElementById('maint-msg');
-        if (msg) { msg.textContent = '変更を保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）'; }
+      }
+
+      // ---- 期間指定メンテナンス（予約メンテナンス） ----
+      function saveMaintenanceSchedule() {
+        var startEl = document.getElementById('maint-sch-start');
+        var endEl = document.getElementById('maint-sch-end');
+        var msg = document.getElementById('maint-sch-msg');
+        if (endEl.value && startEl.value && endEl.value < startEl.value) {
+          if (msg) msg.textContent = '終了日時は開始日時より後にしてください';
+          return;
+        }
+        postMaintenanceSchedule(startEl.value || null, endEl.value || null);
+      }
+      function clearMaintenanceSchedule() {
+        document.getElementById('maint-sch-start').value = '';
+        document.getElementById('maint-sch-end').value = '';
+        postMaintenanceSchedule(null, null);
+      }
+      function postMaintenanceSchedule(start, end) {
+        var msg = document.getElementById('maint-sch-msg');
+        if (msg) msg.textContent = '保存中…';
+        fetch(ADMIN_PATH + '/settings/status/maintenance/schedule', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start: start, end: end })
+        }).then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          if (!res.ok) { if (msg) msg.textContent = res.j.error || '保存に失敗しました'; return; }
+          if (msg) msg.textContent = '保存しました（' + new Date().toLocaleTimeString('ja-JP') + '）';
+          var act = document.getElementById('maint-sch-active');
+          if (act) {
+            act.textContent = res.j.scheduleActive ? '● 期間内（適用中）' : '期間外';
+            act.style.color = res.j.scheduleActive ? '#ffb930' : '#456b58';
+          }
+          applyEffectiveState(res.j.active);
+        }).catch(function() {
+          if (msg) msg.textContent = '通信エラーで保存できませんでした';
+        });
       }
 
       // ---- QRコード ----

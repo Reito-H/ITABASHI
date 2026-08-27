@@ -27,6 +27,67 @@ export async function setMaintenanceMode(db: D1Database, enabled: boolean): Prom
   `).bind(enabled ? '1' : '0').run();
 }
 
+// ===================================================
+// 期間指定メンテナンス（予約メンテナンス）
+//   maintenance_start_at / maintenance_end_at に 'YYYY-MM-DDTHH:MM' 形式（JST・
+//   datetime-local inputの値そのまま）で保存する。end は空欄可（無期限）。
+//   手動トグル（maintenance_mode）がOFFでも、この期間内であれば自動的にメンテ扱いになる。
+// ===================================================
+export interface MaintenanceSchedule {
+  start: string | null;
+  end: string | null;
+}
+
+export async function getMaintenanceSchedule(db: D1Database): Promise<MaintenanceSchedule> {
+  try {
+    const rows = await db.prepare(
+      "SELECT key, value FROM system_settings WHERE key IN ('maintenance_start_at', 'maintenance_end_at')"
+    ).all<{ key: string; value: string }>();
+    const map: Record<string, string> = {};
+    for (const r of rows.results ?? []) map[r.key] = r.value;
+    return { start: map.maintenance_start_at || null, end: map.maintenance_end_at || null };
+  } catch {
+    return { start: null, end: null };
+  }
+}
+
+export async function setMaintenanceSchedule(db: D1Database, start: string | null, end: string | null): Promise<void> {
+  await db.batch([
+    db.prepare(`
+      INSERT INTO system_settings (key, value, updated_at)
+      VALUES ('maintenance_start_at', ?, datetime('now', 'localtime'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).bind(start ?? ''),
+    db.prepare(`
+      INSERT INTO system_settings (key, value, updated_at)
+      VALUES ('maintenance_end_at', ?, datetime('now', 'localtime'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).bind(end ?? ''),
+  ]);
+}
+
+// 'YYYY-MM-DDTHH:MM' 形式のJST現在時刻（datetime-local inputの値と直接比較できる形式）
+function jstNowStamp(): string {
+  return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Tokyo' }).slice(0, 16).replace(' ', 'T');
+}
+
+export function isWithinSchedule(schedule: MaintenanceSchedule, now: string = jstNowStamp()): boolean {
+  if (!schedule.start) return false;
+  if (now < schedule.start) return false;
+  if (schedule.end && now > schedule.end) return false;
+  return true;
+}
+
+// 手動トグル・期間指定のいずれかが有効なら true（実際のアクセス制御・画面表示に使う総合判定）
+export async function isMaintenanceActive(db: D1Database): Promise<boolean> {
+  try {
+    if (await getMaintenanceMode(db)) return true;
+    return isWithinSchedule(await getMaintenanceSchedule(db));
+  } catch {
+    return false;
+  }
+}
+
 // メンテナンス除外対象は username = 'admin' のアカウントのみ
 // （permissions が NULL の全権限アカウントでも admin 以外はメンテ画面）
 export async function isAdminAccount(db: D1Database, adminId: number): Promise<boolean> {
@@ -103,6 +164,14 @@ export function maintenancePage(): string {
     }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
     .footer { margin-top: 24px; font-size: 11px; color: #94a3b8; }
+    /* PC版は大きく赤文字で強調表示する */
+    @media (min-width: 769px) {
+      .card { max-width: 680px; padding: 72px 64px 56px; }
+      .gears { width: 140px; height: 110px; margin-bottom: 32px; }
+      h1 { font-size: 44px; color: #dc2626; font-weight: 800; margin-bottom: 22px; }
+      p { font-size: 17px; color: #7f1d1d; }
+      .tag { font-size: 13px; padding: 8px 20px; }
+    }
   </style>
 </head>
 <body>

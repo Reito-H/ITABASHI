@@ -14,21 +14,13 @@ function parseDateUTC(dateStr: string): Date {
 function formatDateUTC(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
-function addDays(dateStr: string, days: number): string {
+export function addDays(dateStr: string, days: number): string {
   const d = parseDateUTC(dateStr);
   d.setUTCDate(d.getUTCDate() + days);
   return formatDateUTC(d);
 }
 function diffDaysInclusive(startStr: string, endStr: string): number {
   return Math.round((parseDateUTC(endStr).getTime() - parseDateUTC(startStr).getTime()) / 86400000) + 1;
-}
-// 年だけ±deltaYearsする（2/29は非うるう年では2/28に丸め）
-function shiftYears(dateStr: string, deltaYears: number): string {
-  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/)!;
-  const y = Number(m[1]) + deltaYears, mo = Number(m[2]), da = Number(m[3]);
-  const d = new Date(Date.UTC(y, mo - 1, da));
-  if (d.getUTCMonth() !== mo - 1) d.setUTCDate(0); // 繰り上がった場合は前月末に丸める
-  return formatDateUTC(d);
 }
 export function daysBetween(startStr: string, endStr: string): number {
   return Math.round((parseDateUTC(endStr).getTime() - parseDateUTC(startStr).getTime()) / 86400000);
@@ -52,51 +44,29 @@ function avgTimeOfDay(times: Array<string | null | undefined>): string | null {
 }
 
 // ===== 期間解決 =====
-export type ComparisonMode = 'fare_revision' | 'yoy' | 'custom';
 export interface ComparisonPeriodQuery {
-  mode?: string;
-  beforeStart?: string; beforeEnd?: string;
   afterStart?: string; afterEnd?: string;
 }
 export interface PeriodRange { start: string; end: string; label: string; days: number }
-export interface ResolvedPeriods { mode: ComparisonMode; before: PeriodRange; after: PeriodRange }
+export interface ResolvedPeriods { before: PeriodRange; after: PeriodRange }
 
-function makeRange(start: string, end: string, label: string): PeriodRange {
+// 期間比較機能（api/period_comparison.ts）など、他機能から任意の期間を組み立てる用途にも使う
+export function makeRange(start: string, end: string, label: string): PeriodRange {
   const safeEnd = end < start ? start : end;
   return { start, end: safeEnd, label, days: diffDaysInclusive(start, safeEnd) };
 }
 
-// mode省略時は'fare_revision'。
-//  - fare_revision: after=[afterStart??改定日, afterEnd??今日]。beforeはafterと同じ日数を改定前日から遡って算出（公平な日数比較）。
-//  - yoy: afterは上と同様に解決。beforeはafterの開始・終了日をそれぞれ年-1した前年同期。
-//  - custom: 4つのパラメータが揃っていればそのまま使用。不足時はfare_revisionにフォールバック。
+// 運賃改定前後の比較専用（日付を自由に指定する単純な期間比較は別機能「期間比較」で提供する）。
+// after=[afterStart??改定日, afterEnd??今日]。beforeはafterと同じ日数を改定前日から遡って算出（公平な日数比較）。
 export function resolveComparisonPeriods(q: ComparisonPeriodQuery, todayStr: string): ResolvedPeriods {
-  let mode: ComparisonMode = q.mode === 'yoy' ? 'yoy' : q.mode === 'custom' ? 'custom' : 'fare_revision';
-
-  if (mode === 'custom') {
-    if (q.beforeStart && q.beforeEnd && q.afterStart && q.afterEnd) {
-      return {
-        mode,
-        before: makeRange(q.beforeStart, q.beforeEnd, '指定した前の期間'),
-        after: makeRange(q.afterStart, q.afterEnd, '指定した後の期間'),
-      };
-    }
-    mode = 'fare_revision';
-  }
-
   const afterStart = q.afterStart ?? FARE_REVISION_DATE;
   const afterEndRaw = q.afterEnd ?? todayStr;
-  const after = makeRange(afterStart, afterEndRaw, mode === 'yoy' ? '今年同期' : '運賃改定後');
-
-  if (mode === 'yoy') {
-    const before = makeRange(shiftYears(after.start, -1), shiftYears(after.end, -1), '前年同期');
-    return { mode, before, after };
-  }
+  const after = makeRange(afterStart, afterEndRaw, '運賃改定後');
 
   const beforeEnd = addDays(after.start, -1);
   const beforeStart = addDays(beforeEnd, -(after.days - 1));
   const before = makeRange(beforeStart, beforeEnd, '運賃改定前');
-  return { mode, before, after };
+  return { before, after };
 }
 
 // ===== 日次データ・労働時間フォールバック =====
@@ -135,6 +105,7 @@ export interface PeriodAggregate {
   laborHoursActualDays: number;
   laborHoursEstimatedDays: number;
   laborHoursMissingDays: number;
+  avgLaborHoursPerDuty: number | null; // 1乗務あたりの平均労働時間（記録がある日のみで平均。乗務日数の増減の影響を受けない）
   hourlyRate: number | null; // totalAmount / laborHoursTotal
   avgReturnTime: string | null;
   avgReturnTimeCount: number;
@@ -155,6 +126,8 @@ export function aggregatePeriod(rows: FareRevisionDailyRow[], range: PeriodRange
     else missingDays++;
   }
   const hourlyRate = laborHoursTotal > 0 ? Math.round(totalAmount / laborHoursTotal) : null;
+  const laborHoursDataDays = actualDays + estimatedDays;
+  const avgLaborHoursPerDuty = laborHoursDataDays > 0 ? Math.round((laborHoursTotal / laborHoursDataDays) * 100) / 100 : null;
 
   const returnTimes = rows.map(r => r.returnTime).filter((t): t is string => !!t);
   const avgReturnTime = avgTimeOfDay(returnTimes);
@@ -170,7 +143,7 @@ export function aggregatePeriod(rows: FareRevisionDailyRow[], range: PeriodRange
     range, dutyDays, totalAmount, avgPerDuty,
     laborHoursTotal: Math.round(laborHoursTotal * 100) / 100,
     laborHoursActualDays: actualDays, laborHoursEstimatedDays: estimatedDays, laborHoursMissingDays: missingDays,
-    hourlyRate, avgReturnTime, avgReturnTimeCount: returnTimes.length,
+    avgLaborHoursPerDuty, hourlyRate, avgReturnTime, avgReturnTimeCount: returnTimes.length,
     avgRidePerDuty, avgDistancePerDuty,
   };
 }
@@ -187,16 +160,14 @@ function growthPct(before: number | null, after: number | null): number | null {
 // ===== 閾値（すべて可変、UIから調整可能） =====
 export interface FareRevisionThresholds {
   achievementThresholdPct: number;    // 達成率の目標ライン（既定110）
-  fareGrowthExpectationPct: number;   // 運賃改定による単価上昇の期待値（既定110＝10%増）
-  fareGrowthToleranceBandPct: number; // 上記からの許容乖離幅（既定5）
+  salesFlatBandPct: number;           // 売上の伸びがこの範囲内なら「ほぼ変わらない」とみなす、100からの許容乖離幅（既定8）
   laborHoursDropThresholdPct: number; // これ未満なら「労働時間が明確に減少」とみなす（既定97）
   minDutyDaysPerPeriod: number;       // 判定に必要な最低乗務日数/期間（既定5）
   minLaborHoursCoverageRatio: number; // 労働時間データが必要な最低カバレッジ比率（既定0.5）
 }
 export const DEFAULT_FARE_REVISION_THRESHOLDS: FareRevisionThresholds = {
   achievementThresholdPct: 110,
-  fareGrowthExpectationPct: 110,
-  fareGrowthToleranceBandPct: 5,
+  salesFlatBandPct: 8,
   laborHoursDropThresholdPct: 97,
   minDutyDaysPerPeriod: 5,
   minLaborHoursCoverageRatio: 0.5,
@@ -213,23 +184,22 @@ export function classifyAchievement(salesGrowthPct: number | null, thresholdPct:
 }
 
 // ===== 早期切り上げ疑い判定 =====
-// 達成率が目標未満 かつ 時間単価の伸びは運賃改定分をほぼ反映している一方、労働時間が明確に減少している場合、
+// 売上はほぼ変わっていない（伸びても減ってもいない）のに、働いた時間だけが明確に短くなっている場合、
 // 「従来通りの目標額に早く到達し、早めに切り上げて帰っている」可能性が高いとみなす。
+// （売上が変わらず時間だけ短くなれば、時間単価が自然と上がることになるため、単価の伸びは判定条件には使わず参考情報として表示するのみ）
 export function detectEarlyLeaveSuspicion(
-  achievementCategory: AchievementCategory,
-  hourlyRateGrowthPct: number | null,
+  salesGrowthPct: number | null,
   laborHoursGrowthPct: number | null,
   before: PeriodAggregate, after: PeriodAggregate,
   dataSufficient: boolean, laborHoursDataSufficient: boolean,
   t: FareRevisionThresholds,
 ): { flag: boolean; confidence: 'high' | 'medium' | null } {
   if (!dataSufficient || !laborHoursDataSufficient) return { flag: false, confidence: null };
-  if (achievementCategory !== 'met' && achievementCategory !== 'below') return { flag: false, confidence: null };
-  if (hourlyRateGrowthPct === null || laborHoursGrowthPct === null) return { flag: false, confidence: null };
+  if (salesGrowthPct === null || laborHoursGrowthPct === null) return { flag: false, confidence: null };
 
-  const fareOk = hourlyRateGrowthPct >= t.fareGrowthExpectationPct - t.fareGrowthToleranceBandPct;
+  const salesFlat = Math.abs(salesGrowthPct - 100) <= t.salesFlatBandPct;
   const hoursDown = laborHoursGrowthPct < t.laborHoursDropThresholdPct;
-  if (!(fareOk && hoursDown)) return { flag: false, confidence: null };
+  if (!(salesFlat && hoursDown)) return { flag: false, confidence: null };
 
   const actualDays = before.laborHoursActualDays + after.laborHoursActualDays;
   const estimatedDays = before.laborHoursEstimatedDays + after.laborHoursEstimatedDays;
@@ -239,7 +209,7 @@ export function detectEarlyLeaveSuspicion(
 // ===== ルールベース文章生成（外部AI API不使用。if/thresholdとテンプレート文言のみ） =====
 export interface ReasoningInput {
   achievementCategory: AchievementCategory; salesGrowthPct: number | null;
-  hourlyRateGrowthPct: number | null; laborHoursGrowthPct: number | null;
+  hourlyRateGrowthPct: number | null; laborHoursGrowthPct: number | null; dutyDaysGrowthPct: number | null;
   earlyLeaveSuspicion: boolean; earlyLeaveConfidence: 'high' | 'medium' | null;
   dataSufficient: boolean; laborHoursDataSufficient: boolean;
   before: PeriodAggregate; after: PeriodAggregate;
@@ -254,7 +224,10 @@ export function buildEmployeeReasoning(cmp: ReasoningInput, t: FareRevisionThres
     return lines;
   }
   if (cmp.salesGrowthPct !== null) {
-    lines.push(`売上は${beforeLabel}の1日平均 ${cmp.before.avgPerDuty?.toLocaleString() ?? '-'}円 から、${afterLabel}は ${cmp.after.avgPerDuty?.toLocaleString() ?? '-'}円 になりました（${cmp.salesGrowthPct}%）。`);
+    lines.push(`1日あたりの売上（平均）は${beforeLabel}の ${cmp.before.avgPerDuty?.toLocaleString() ?? '-'}円 から、${afterLabel}は ${cmp.after.avgPerDuty?.toLocaleString() ?? '-'}円 になりました（${cmp.salesGrowthPct}%）。乗務した日数の増減は含まず、1日あたりで比べています。`);
+  }
+  if (cmp.dutyDaysGrowthPct !== null && (cmp.dutyDaysGrowthPct >= 130 || cmp.dutyDaysGrowthPct <= 70)) {
+    lines.push(`なお、乗務した日数は${beforeLabel} ${cmp.before.dutyDays}日 から ${afterLabel} ${cmp.after.dutyDays}日 に変わっており（${cmp.dutyDaysGrowthPct}%）、働く日数そのものが大きく変わっています。総売上（合計金額）で比べると、この日数の増減の影響で実際の頑張り具合以上に伸びた／減ったように見えるため、ここでは使っていません。`);
   }
   if (cmp.achievementCategory === 'above') {
     lines.push(`目標の${t.achievementThresholdPct}%以上に伸びています。`);
@@ -267,9 +240,9 @@ export function buildEmployeeReasoning(cmp: ReasoningInput, t: FareRevisionThres
     lines.push(`働いた時間の記録が少ないため、単価や労働時間についての詳しい分析はできません。`);
   } else {
     if (cmp.hourlyRateGrowthPct !== null) lines.push(`1時間あたりの売上（単価）は ${cmp.hourlyRateGrowthPct}% になりました。`);
-    if (cmp.laborHoursGrowthPct !== null) lines.push(`働いた時間の合計は ${cmp.laborHoursGrowthPct}% になりました。`);
+    if (cmp.laborHoursGrowthPct !== null) lines.push(`1乗務あたりの平均労働時間は ${cmp.laborHoursGrowthPct}% になりました。`);
     if (cmp.earlyLeaveSuspicion) {
-      lines.push(`【早めに切り上げている可能性】1時間あたりの単価はほぼ運賃改定分だけ上がっている一方、働いた時間ははっきり短くなっています。いつもの目標額に早く届くため、早めに仕事を切り上げている可能性があります（確からしさ: ${cmp.earlyLeaveConfidence === 'high' ? '高い（実際の記録が中心）' : '中くらい（出退庫の時刻からの推定を含む）'}）。`);
+      lines.push(`【早めに切り上げている可能性】売上は${beforeLabel}とほぼ変わっていない一方、働いた時間ははっきり短くなっています（この結果、1時間あたりの単価は${cmp.hourlyRateGrowthPct !== null ? cmp.hourlyRateGrowthPct + '%に' : ''}上がっています）。いつもの目標額に早く届くため、早めに仕事を切り上げている可能性があります（確からしさ: ${cmp.earlyLeaveConfidence === 'high' ? '高い（実際の記録が中心）' : '中くらい（出退庫の時刻からの推定を含む）'}）。`);
     }
   }
   if (cmp.before.avgReturnTime && cmp.after.avgReturnTime) {
@@ -290,7 +263,6 @@ export interface EmployeeComparison {
   repDutyCode: string | null; wageCategory: WageCategory | null; wageCategoryLabel: string | null;
   before: PeriodAggregate; after: PeriodAggregate;
   salesGrowthPct: number | null;
-  avgPerDutyGrowthPct: number | null;
   hourlyRateGrowthPct: number | null;
   laborHoursGrowthPct: number | null;
   dutyDaysGrowthPct: number | null;
@@ -316,10 +288,14 @@ export function compareEmployeePeriods(
   const beforeAgg = aggregatePeriod(beforeRows, before);
   const afterAgg = aggregatePeriod(afterRows, after);
 
-  const salesGrowthPct = growthPct(beforeAgg.totalAmount, afterAgg.totalAmount);
-  const avgPerDutyGrowthPct = growthPct(beforeAgg.avgPerDuty, afterAgg.avgPerDuty);
+  // 総売上（totalAmount）は乗務日数が前後で違うと差が過大に出てしまう（休職・入社時期のズレ等で
+  // 日数が大きく変わる人がいるため）。「1日あたりの平均売上」を主要な伸び率として使うことで、
+  // 働いた日数の増減ではなく、1日働いたときの稼ぎ方そのものが運賃改定でどう変わったかを見る。
+  const salesGrowthPct = growthPct(beforeAgg.avgPerDuty, afterAgg.avgPerDuty);
   const hourlyRateGrowthPct = growthPct(beforeAgg.hourlyRate, afterAgg.hourlyRate);
-  const laborHoursGrowthPct = growthPct(beforeAgg.laborHoursTotal, afterAgg.laborHoursTotal);
+  // 労働時間の合計（laborHoursTotal）も乗務日数が前後で違うと差が過大に出る。「1乗務あたりの平均労働時間」を使うことで、
+  // 「乗務日数が減った」ことと「1回の乗務そのものが短くなった（＝早めに切り上げている）」ことを区別する。
+  const laborHoursGrowthPct = growthPct(beforeAgg.avgLaborHoursPerDuty, afterAgg.avgLaborHoursPerDuty);
   const dutyDaysGrowthPct = growthPct(beforeAgg.dutyDays, afterAgg.dutyDays);
 
   const dataSufficient = beforeAgg.dutyDays >= thresholds.minDutyDaysPerPeriod && afterAgg.dutyDays >= thresholds.minDutyDaysPerPeriod;
@@ -330,14 +306,14 @@ export function compareEmployeePeriods(
   const achievementCategory = dataSufficient ? classifyAchievement(salesGrowthPct, thresholds.achievementThresholdPct) : 'insufficient_data';
 
   const { flag, confidence } = detectEarlyLeaveSuspicion(
-    achievementCategory, hourlyRateGrowthPct, laborHoursGrowthPct, beforeAgg, afterAgg, dataSufficient, laborHoursDataSufficient, thresholds
+    salesGrowthPct, laborHoursGrowthPct, beforeAgg, afterAgg, dataSufficient, laborHoursDataSufficient, thresholds
   );
 
   const repDutyCode = representativeDutyCode([...afterRows, ...beforeRows]);
   const wageCategory = repDutyCode ? wageCategoryOfDuty(repDutyCode) : null;
 
   const reasoning = buildEmployeeReasoning({
-    achievementCategory, salesGrowthPct, hourlyRateGrowthPct, laborHoursGrowthPct,
+    achievementCategory, salesGrowthPct, hourlyRateGrowthPct, laborHoursGrowthPct, dutyDaysGrowthPct,
     earlyLeaveSuspicion: flag, earlyLeaveConfidence: confidence,
     dataSufficient, laborHoursDataSufficient, before: beforeAgg, after: afterAgg,
   }, thresholds);
@@ -346,7 +322,7 @@ export function compareEmployeePeriods(
     empId: emp.id, empName: emp.name, division: emp.division, team: emp.team,
     repDutyCode, wageCategory, wageCategoryLabel: wageCategory ? WAGE_CATEGORY_LABELS[wageCategory] : null,
     before: beforeAgg, after: afterAgg,
-    salesGrowthPct, avgPerDutyGrowthPct, hourlyRateGrowthPct, laborHoursGrowthPct, dutyDaysGrowthPct,
+    salesGrowthPct, hourlyRateGrowthPct, laborHoursGrowthPct, dutyDaysGrowthPct,
     achievementCategory, dataSufficient, laborHoursDataSufficient,
     earlyLeaveSuspicion: flag, earlyLeaveConfidence: confidence, reasoning,
   };
@@ -404,11 +380,14 @@ export function buildOverviewAggregate(comparisons: EmployeeComparison[]): Overv
     .filter(k => dutyMap.has(k))
     .map(k => ({ category: k, label: WAGE_CATEGORY_LABELS[k], avgSalesGrowthPct: avgGrowth(dutyMap.get(k)!), empCount: dutyMap.get(k)!.length }));
 
+  // 確からしさが高い順、同じ確からしさなら「売上が特に変わっていない（100%に近い）」順・働いた時間の減り方が大きい順に並べる
   const flagged = comparisons.filter(c => c.earlyLeaveSuspicion).sort((a, b) => {
     const rank = (c: EmployeeComparison) => c.earlyLeaveConfidence === 'high' ? 0 : 1;
     const rc = rank(a) - rank(b);
     if (rc !== 0) return rc;
-    return (a.salesGrowthPct ?? 0) - (b.salesGrowthPct ?? 0);
+    const flatDiff = Math.abs((a.salesGrowthPct ?? 100) - 100) - Math.abs((b.salesGrowthPct ?? 100) - 100);
+    if (flatDiff !== 0) return flatDiff;
+    return (a.laborHoursGrowthPct ?? 100) - (b.laborHoursGrowthPct ?? 100);
   });
 
   const counts = {

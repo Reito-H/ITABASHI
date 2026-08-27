@@ -6,6 +6,7 @@ import adminExtraRoutes from './routes/admin_extra';
 import adminStaffRoutes from './routes/admin_staff';
 import adminSalesAiRoutes from './routes/admin_sales_ai';
 import adminFareRevisionRoutes from './routes/admin_fare_revision';
+import adminPeriodComparisonRoutes from './routes/admin_period_comparison';
 import adminWageSettingsRoutes from './routes/admin_wage_settings';
 import adminDrivingRiskSettingsRoutes from './routes/admin_driving_risk_settings';
 import adminCrewPortalRoutes from './routes/admin_crew_portal';
@@ -14,6 +15,7 @@ import employeesApi from './routes/api/employees';
 import retireePdfApi from './routes/api/retiree_pdf';
 import salesAiApi from './routes/api/sales_ai';
 import fareRevisionApi from './routes/api/fare_revision';
+import periodComparisonApi from './routes/api/period_comparison';
 import salesApi from './routes/api/sales';
 import infoApi from './routes/api/info';
 import instructorApi from './routes/api/instructor';
@@ -76,15 +78,17 @@ import adminAccidentsPersonRoutes from './routes/admin_accidents_person';
 import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import adminNewcomerIntrosRoutes from './routes/admin_newcomer_intros';
+import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import publicAccidentsMonitorRoutes from './routes/public_accidents_monitor';
 import publicAccidentsUploadRoutes from './routes/public_accidents_upload';
 import publicNewcomerMonitorRoutes from './routes/public_newcomer_monitor';
+import publicStudySessionsRoutes from './routes/public_study_sessions';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
-import { getMaintenanceMode, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
+import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
 import { ADMIN_PATH, SECRET } from './config';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -175,7 +179,7 @@ app.use('*', async (c, next) => {
   if (path === '/' || path === '/robots.txt' || path === '/api/line/webhook') return next();
   if (path.startsWith(`/${SECRET}/admin`) && isPublicAdminSubPath(path.slice(`/${SECRET}/admin`.length) || '/')) return next();
 
-  if (!(await getMaintenanceMode(c.env.DB))) return next();
+  if (!(await isMaintenanceActive(c.env.DB))) return next();
 
   // admin アカウントのセッションのみ通常利用可
   const sessionId = getSessionFromCookie(c.req.header('Cookie') ?? null);
@@ -255,6 +259,7 @@ app.route(`/${SECRET}/admin`, adminExtraRoutes);
 app.route(`/${SECRET}/admin`, adminStaffRoutes);
 app.route(`/${SECRET}/admin`, adminSalesAiRoutes);
 app.route(`/${SECRET}/admin`, adminFareRevisionRoutes);
+app.route(`/${SECRET}/admin`, adminPeriodComparisonRoutes);
 app.route(`/${SECRET}/admin`, adminWageSettingsRoutes);
 app.route(`/${SECRET}/admin`, adminDrivingRiskSettingsRoutes);
 app.route(`/${SECRET}/admin`, adminCrewPortalRoutes);
@@ -296,6 +301,7 @@ app.route(`/${SECRET}/admin`, adminAccidentsPersonRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 app.route(`/${SECRET}/admin`, adminNewcomerIntrosRoutes);
+app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 
 // =====================
 // API（認証必須）
@@ -334,6 +340,7 @@ app.route('/api/employees', employeesApi);
 app.route('/api/employees/retiree-pdf', retireePdfApi);
 app.route('/api/sales-ai', salesAiApi);
 app.route('/api/fare-revision', fareRevisionApi);
+app.route('/api/period-comparison', periodComparisonApi);
 app.route('/api/sales', salesApi);
 app.route('/api/info', infoApi);
 app.route('/api/line', lineApiRoutes);
@@ -380,7 +387,7 @@ app.post('/api/line/webhook', async (c) => {
   const events: Record<string, unknown>[] = JSON.parse(body)?.events ?? [];
 
   // メンテナンス中はBot処理を止め、メンテ中メッセージのみ返信する
-  if (await getMaintenanceMode(c.env.DB)) {
+  if (await isMaintenanceActive(c.env.DB)) {
     c.executionCtx.waitUntil(
       Promise.all(events.map(event => replyMaintenanceToLineEvent(c.env, event)))
     );
@@ -406,6 +413,7 @@ app.route('', publicKanchoWishRoutes);
 app.route('', publicAccidentsMonitorRoutes);
 app.route('', publicAccidentsUploadRoutes);
 app.route('', publicNewcomerMonitorRoutes);
+app.route('', publicStudySessionsRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

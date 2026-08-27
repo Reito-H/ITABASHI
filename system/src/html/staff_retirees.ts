@@ -52,6 +52,9 @@ export function staffRetireesPage(params: {
       <td style="${TD}white-space:nowrap;">${escHtml(r.retirement_date ?? '—')}</td>
       <td style="${TD}white-space:nowrap;color:#6b7280;">${tenureLabel(r.hire_date, r.retirement_date)}</td>
       <td style="${TD}color:#374151;">${escHtml(r.retirement_reason ?? '—')}</td>
+      <td style="${TD}white-space:nowrap;text-align:center;">
+        <button onclick="undoRetire(${r.id},'${escHtml(r.name)}')" style="padding:4px 12px;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">取り消す</button>
+      </td>
     </tr>`).join('');
 
   const pager = totalPages > 1 ? `
@@ -93,7 +96,7 @@ export function staffRetireesPage(params: {
         <span style="font-size:12px;color:#9ca3af;">${totalCount}件</span>
       </div>
       <div style="overflow:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:820px;">
+        <table style="width:100%;border-collapse:collapse;min-width:900px;">
           <thead style="background:#f9fafb;">
             <tr>
               <th style="${TH}">課・班</th>
@@ -103,9 +106,10 @@ export function staffRetireesPage(params: {
               <th style="${TH}">退職日</th>
               <th style="${TH}">在籍期間</th>
               <th style="${TH}">退職理由</th>
+              <th style="${TH}text-align:center;">操作</th>
             </tr>
           </thead>
-          <tbody>${tableRows || `<tr><td colspan="7" style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">退職者データがありません</td></tr>`}</tbody>
+          <tbody>${tableRows || `<tr><td colspan="8" style="padding:24px;text-align:center;color:#9ca3af;font-size:13px;">退職者データがありません</td></tr>`}</tbody>
         </table>
       </div>
       ${pager}
@@ -191,6 +195,17 @@ export function staffRetireesPage(params: {
 
     var anyCheckable = data.rows.some(function(r) { return r.match_status === 'matched' || r.match_status === 'already_retired'; });
     btn.disabled = !anyCheckable; btn.style.opacity = anyCheckable ? '1' : '0.5';
+  }
+
+  async function undoRetire(id, name) {
+    if (!confirm(name + ' の退職処理を取り消して在籍に戻しますか？')) return;
+    try {
+      var res = await fetch('/api/employees/' + id + '/reinstate', { method: 'POST' });
+      if (res.ok) { location.reload(); }
+      else { alert('取り消しに失敗しました'); }
+    } catch (e) {
+      alert('通信エラー: ' + e.message);
+    }
   }
 
   async function previewRetireePdf() {

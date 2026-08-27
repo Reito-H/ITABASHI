@@ -551,6 +551,30 @@ app.post('/bulk-retire', async (c) => {
   }
 });
 
+// 一括在籍復帰（誤って退職処理された社員のまとめ取り消し）
+app.post('/bulk-reinstate', async (c) => {
+  try {
+    const data = await c.req.json<{ ids: number[] }>();
+    if (!Array.isArray(data?.ids) || data.ids.length === 0) return c.json({ error: 'IDが指定されていません' }, 400);
+    const ids = data.ids.filter(id => Number.isInteger(id) && id > 0);
+    if (ids.length === 0) return c.json({ error: '有効なIDがありません' }, 400);
+    const CHUNK = 100;
+    let total = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const placeholders = chunk.map(() => '?').join(',');
+      await c.env.DB.prepare(
+        `UPDATE employees SET is_active = 1, retirement_date = NULL, updated_at = datetime('now','localtime')
+         WHERE id IN (${placeholders})`
+      ).bind(...chunk).run();
+      total += chunk.length;
+    }
+    return c.json({ ok: true, count: total });
+  } catch (e: unknown) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
 // 一括完全削除（物理削除）
 app.post('/bulk-purge', async (c) => {
   try {

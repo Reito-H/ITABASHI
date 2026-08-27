@@ -128,7 +128,10 @@ app.get('/staff', async (c) => {
     conditions.push('(enrollment_status = \'長欠\' OR (retirement_date IS NOT NULL AND retirement_date != \'\' AND retirement_date < ?))');
     params.push(todayStr);
   } else {
-    if (filterActive === '1') conditions.push('is_active = 1');
+    // 検索語がある場合はデフォルトの「在籍のみ」を無視して全員から検索する
+    // （誤って退職処理された人などが検索でヒットしなくなるのを防ぐ）
+    if (filterActive === '1' && !q) conditions.push('is_active = 1');
+    else if (filterActive === '0') conditions.push('is_active = 0');
     if (filterRetirement === 'soon') {
       conditions.push('retirement_date IS NOT NULL AND retirement_date != \'\' AND retirement_date >= ? AND retirement_date <= ?');
       params.push(todayStr, in30Days);
@@ -337,6 +340,7 @@ app.get('/staff', async (c) => {
         </div>
         ${e.name_kana ? `<div style="font-size:11px;color:#9ca3af;">${escHtml(e.name_kana)}</div>` : ''}
         <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+          ${!e.is_active ? '<span style="background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">退職済み</span>' : ''}
           ${e.is_hanchyo ? '<span style="background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">班長</span>' : ''}
           ${isNewcomer ? '<span style="background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:700;">新人</span>' : ''}
           ${e.exclude_retirement_candidate ? '<span style="background:#f3f4f6;color:#6b7280;padding:1px 5px;border-radius:3px;font-size:10px;">候補除外</span>' : ''}
@@ -634,6 +638,7 @@ app.get('/staff', async (c) => {
   <div id="bulk-bar" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a3a5c;color:white;border-radius:12px;padding:12px 20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:none;align-items:center;gap:12px;z-index:100;white-space:nowrap;">
     <span id="bulk-count" style="font-size:13px;font-weight:600;"></span>
     <button onclick="bulkRetire()" style="padding:6px 14px;background:#d97706;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">退職処理</button>
+    <button onclick="bulkReinstate()" style="padding:6px 14px;background:#166534;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">在籍に戻す</button>
     <button onclick="bulkPurge()" style="padding:6px 14px;background:#dc2626;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">完全削除</button>
     <button onclick="clearSel()" style="padding:6px 12px;background:rgba(255,255,255,0.15);color:white;border:none;border-radius:6px;font-size:13px;cursor:pointer;">キャンセル</button>
   </div>
@@ -870,6 +875,25 @@ async function bulkRetire() {
     } else {
       const json = await res.json().catch(() => ({}));
       alert('退職処理に失敗しました: ' + (json.error || res.status));
+    }
+  } catch (err) {
+    alert('通信エラー: ' + err.message);
+  }
+}
+
+async function bulkReinstate() {
+  const ids = getSelectedIds();
+  if (!ids.length) return;
+  if (!confirm(ids.length + '名を在籍に戻しますか？（退職日はクリアされます）')) return;
+  try {
+    const res = await fetch('/api/employees/bulk-reinstate', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ ids })
+    });
+    if (res.ok) {
+      location.reload();
+    } else {
+      const json = await res.json().catch(() => ({}));
+      alert('復帰処理に失敗しました: ' + (json.error || res.status));
     }
   } catch (err) {
     alert('通信エラー: ' + err.message);
@@ -1488,7 +1512,8 @@ app.get('/staff/:id', async (c) => {
     conditions.push("(enrollment_status = '長欠' OR (retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date < ?))");
     navParams.push(todayStr);
   } else {
-    if (filterActive === '1') conditions.push('is_active = 1');
+    if (filterActive === '1' && !q) conditions.push('is_active = 1');
+    else if (filterActive === '0') conditions.push('is_active = 0');
     if (filterRetirement === 'soon') {
       conditions.push("retirement_date IS NOT NULL AND retirement_date != '' AND retirement_date >= ? AND retirement_date <= ?");
       navParams.push(todayStr, in30Days);

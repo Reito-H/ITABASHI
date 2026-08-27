@@ -14,12 +14,13 @@ import { summarizeDrivingRisk, type DrivingSafetyRow } from '../utils/driving_ri
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
-// AI売上分析 配下（全社サマリー／運賃改定影響分析／売上予想カレンダー）共通のタブナビ
-export function salesAiTabNav(active: 'summary' | 'fare-revision' | 'forecast-calendar'): string {
+// AI売上分析 配下（全社サマリー／売上予想カレンダー／運賃改定影響分析／期間比較）共通のタブナビ
+export function salesAiTabNav(active: 'summary' | 'fare-revision' | 'forecast-calendar' | 'period-comparison'): string {
   const tabs: Array<{ id: typeof active; label: string; href: string }> = [
     { id: 'summary', label: '全社サマリー', href: `${ADMIN_PATH}/sales-ai` },
     { id: 'forecast-calendar', label: '売上予想カレンダー', href: `${ADMIN_PATH}/sales-ai/forecast-calendar` },
     { id: 'fare-revision', label: '運賃改定影響分析', href: `${ADMIN_PATH}/sales-ai/fare-revision` },
+    { id: 'period-comparison', label: '期間比較', href: `${ADMIN_PATH}/sales-ai/period-comparison` },
   ];
   return `<div class="sai-tabnav">` + tabs.map(t =>
     `<a class="sai-tab-link${t.id === active ? ' active' : ''}" href="${t.href}">${t.label}</a>`

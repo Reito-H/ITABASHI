@@ -22,7 +22,7 @@
 //               settings.offices / settings.vehicle-search-guide / settings.documents /
 //               settings.tutorial / settings.status / settings.kancho-logic /
 //               settings.wage-estimate / settings.driving-risk /
-//               settings.announcement-bar / settings.birthday
+//               settings.announcement-bar / settings.birthday / settings.study-sessions
 
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
 // キーは '|' 区切りで複数指定可（いずれか1つでも権限があればOK）。例: 'a|b|c'
@@ -54,6 +54,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
+  [/^\/settings\/study-sessions/,       'settings.study-sessions'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
   [/^\/settings\/kancho-logic/,         'settings.kancho-logic'],
@@ -70,6 +71,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/liff\/general-reports/,     'settings.general-reports'],
   [/^\/api\/handover-memos/,            'settings.handover-memos'],
   [/^\/api\/violation-types/,           'settings.violation-types'],
+  [/^\/api\/study-sessions/,            'settings.study-sessions'],
   [/^\/api\/kancho-wish-settings/,      'settings.kancho-wish'],
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
@@ -249,6 +251,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.kancho-roster',        label: '班長リスト（班長登録の解除のみ編集可）' },
     { key: 'settings.kancho-wish',          label: '希望休フォーム' },
     { key: 'settings.kancho-logic',         label: '班長シフト ロジック仕様（閲覧のみ）' },
+    { key: 'settings.study-sessions',       label: '勉強会募集' },
   ]},
 ];
 

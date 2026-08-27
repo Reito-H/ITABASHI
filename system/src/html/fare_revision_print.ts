@@ -98,7 +98,7 @@ function condLinesFromOverview(data: FareRevisionOverviewResult): string[] {
   return [
     `<b>比べている期間</b> — ${escHtml(data.periods.before.label)}: ${data.periods.before.start}〜${data.periods.before.end}（${data.periods.before.days}日間） ／ ${escHtml(data.periods.after.label)}: ${data.periods.after.start}〜${data.periods.after.end}（${data.periods.after.days}日間）`,
     `<b>絞り込み</b> — 課: ${f.division ? f.division + '課' : '全課'} ／ 班: ${f.team ? f.team + '班' : '全班'} ／ 勤務区分: ${f.dutyCode ?? '全区分'}`,
-    `<b>判定条件</b> — 目標達成率${t.achievementThresholdPct}%以上 ／ 運賃改定の期待上昇率${t.fareGrowthExpectationPct}%（許容${t.fareGrowthToleranceBandPct}%） ／ 労働時間減少ライン${t.laborHoursDropThresholdPct}%未満 ／ 最低乗務日数${t.minDutyDaysPerPeriod}日`,
+    `<b>判定条件</b> — 目標達成率${t.achievementThresholdPct}%以上 ／ 売上ほぼ変わらずとみなす範囲 100±${t.salesFlatBandPct}% ／ 労働時間減少ライン${t.laborHoursDropThresholdPct}%未満 ／ 最低乗務日数${t.minDutyDaysPerPeriod}日`,
   ];
 }
 
@@ -126,7 +126,7 @@ export function renderFareRevisionOverviewPrintPage(
       ['労働時間データがある割合', data.dataCoverage.coverageRatio + '%'],
     ];
     body += `<table class="fp-kpi-table">${rows.map(([l, v]) => `<tr><td class="label">${escHtml(l)}</td><td class="val">${escHtml(v)}</td></tr>`).join('')}</table>`;
-    body += `<div class="fp-section-title">売上の伸び具合の分布</div>`;
+    body += `<div class="fp-section-title">1日あたり売上の伸び具合の分布</div>`;
     body += `<table class="fp-table"><thead><tr><th>伸び</th><th>人数</th></tr></thead><tbody>${
       data.histogram.map(h => `<tr><td>${escHtml(h.bucketLabel)}</td><td>${h.count}名</td></tr>`).join('')
     }</tbody></table>`;
@@ -134,22 +134,22 @@ export function renderFareRevisionOverviewPrintPage(
     body += `<div style="font-size:10.5px;color:#6b7280;">労働時間データの内訳（対象の全${cov.totalRecordDays}日のうち）: 実際の記録 ${cov.actualLaborHoursDays}日 ／ 出退庫の時刻から計算 ${cov.estimatedLaborHoursDays}日 ／ 記録なし ${cov.missingLaborHoursDays}日</div>`;
   } else if (section === 'breakdown') {
     sectionLabel = '課・班・勤務別';
-    body += `<div class="fp-section-title">課ごとの売上の伸び（平均）</div>`;
+    body += `<div class="fp-section-title">課ごとの1日あたり売上の伸び（平均）</div>`;
     body += `<table class="fp-table"><thead><tr><th>課</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody>${
       data.divisionBreakdown.map(d => `<tr><td>${d.division}課</td><td class="${pctClass(d.avgSalesGrowthPct)}">${pct(d.avgSalesGrowthPct)}</td><td>${d.empCount}名</td></tr>`).join('')
     }</tbody></table>`;
-    body += `<div class="fp-section-title">班ごとの売上の伸び（平均）</div>`;
+    body += `<div class="fp-section-title">班ごとの1日あたり売上の伸び（平均）</div>`;
     body += `<table class="fp-table"><thead><tr><th>班</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody>${
       data.teamBreakdown.map(t => `<tr><td>${t.team}班</td><td class="${pctClass(t.avgSalesGrowthPct)}">${pct(t.avgSalesGrowthPct)}</td><td>${t.empCount}名</td></tr>`).join('')
     }</tbody></table>`;
-    body += `<div class="fp-section-title">勤務の種類ごとの売上の伸び（平均）</div>`;
+    body += `<div class="fp-section-title">勤務の種類ごとの1日あたり売上の伸び（平均）</div>`;
     body += `<table class="fp-table"><thead><tr><th>種類</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody>${
       data.dutyCategoryBreakdown.map(d => `<tr><td>${escHtml(d.label)}</td><td class="${pctClass(d.avgSalesGrowthPct)}">${pct(d.avgSalesGrowthPct)}</td><td>${d.empCount}名</td></tr>`).join('')
     }</tbody></table>`;
   } else if (section === 'flagged') {
     sectionLabel = '早めに切り上げていそうな人';
-    body += `<div style="font-size:10.5px;color:#6b7280;margin-bottom:8px;">1時間あたりの売上（単価）は運賃改定分だけほぼ上がっているのに、働いた時間がはっきり短くなっている人です。</div>`;
-    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>${escHtml(data.periods.before.label)}の1日平均売上</th><th>${escHtml(data.periods.after.label)}の1日平均売上</th><th>売上の伸び</th><th>単価の伸び</th><th>働いた時間の伸び</th><th>確からしさ</th></tr></thead><tbody>${
+    body += `<div style="font-size:10.5px;color:#6b7280;margin-bottom:8px;">売上はほぼ変わっていないのに、働いた時間がはっきり短くなっている人です。</div>`;
+    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>${escHtml(data.periods.before.label)}の1日平均売上</th><th>${escHtml(data.periods.after.label)}の1日平均売上</th><th>1日あたり売上の伸び</th><th>単価の伸び</th><th>1乗務あたり労働時間の伸び</th><th>確からしさ</th></tr></thead><tbody>${
       data.flagged.length
         ? data.flagged.map(e => `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${pct(e.hourlyRateGrowthPct)}</td><td>${pct(e.laborHoursGrowthPct)}</td><td>${e.earlyLeaveConfidence === 'high' ? '高' : '中'}</td></tr>`).join('')
         : `<tr><td colspan="8" style="color:#9ca3af;">該当する人はいません。</td></tr>`
@@ -158,7 +158,7 @@ export function renderFareRevisionOverviewPrintPage(
     const cat = category ?? 'above';
     sectionLabel = `社員ごとの一覧（${CATEGORY_LABELS[cat]}）`;
     const list = data.employees.filter(e => e.achievementCategory === cat);
-    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>働いた時間の伸び</th></tr></thead><tbody>${
+    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>1乗務あたり労働時間の伸び</th></tr></thead><tbody>${
       list.length
         ? list.map(e => `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.wageCategoryLabel ? escHtml(e.wageCategoryLabel) : '—'}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${pct(e.laborHoursGrowthPct)}</td></tr>`).join('')
         : `<tr><td colspan="7" style="color:#9ca3af;">該当する人はいません。</td></tr>`
@@ -190,10 +190,10 @@ export function renderFareRevisionEmployeePrintPage(
   ];
 
   const rows: Array<[string, string]> = [
-    ['売上の伸び', pct(cmp.salesGrowthPct)],
+    ['1日あたり売上の伸び', pct(cmp.salesGrowthPct)],
     ['判定', CATEGORY_LABELS[cmp.achievementCategory]],
     ['1時間あたり売上の伸び', pct(cmp.hourlyRateGrowthPct)],
-    ['働いた時間の伸び', pct(cmp.laborHoursGrowthPct)],
+    ['1乗務あたり労働時間の伸び', pct(cmp.laborHoursGrowthPct)],
     [`平均の1日の売上（${beforeLabel}→${afterLabel}）`, `${yen(cmp.before.avgPerDuty)} → ${yen(cmp.after.avgPerDuty)}`],
     [`平均の帰る時刻（${beforeLabel}→${afterLabel}）`, `${cmp.before.avgReturnTime ?? '—'} → ${cmp.after.avgReturnTime ?? '—'}`],
   ];
