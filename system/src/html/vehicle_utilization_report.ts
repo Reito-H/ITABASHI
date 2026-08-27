@@ -77,7 +77,7 @@ export function renderUtilizationReportPage(
   .sheet .date-label { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
 
   table { width: 100%; border-collapse: collapse; }
-  th, td { border: 1px solid #d1d5db; font-size: 12px; text-align: center; padding: 4px 2px; }
+  th, td { border: 1px solid #94a3b8; font-size: 12px; text-align: center; padding: 4px 2px; }
   th { background: #1e3a5f; color: #fff; font-weight: 600; white-space: nowrap; }
   td.u-div { font-weight: 700; background: #f3f4f6; white-space: nowrap; }
   td.u-auto { background: #eff6ff; color: #1e3a5f; font-weight: 600; }

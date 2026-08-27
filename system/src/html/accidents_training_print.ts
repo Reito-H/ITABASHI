@@ -89,22 +89,22 @@ export function renderAccidentsTrainingPrintPage(o: AccidentsTrainingPrintOption
   .body-text { font-size: 14px; line-height: 2; color: #1f2937; padding: 4px 2px 20px; outline: none; }
   .body-text:focus { background: #fffbeb; }
 
-  .summary-table { border: 1px solid #d1d5db; border-radius: 6px; margin-bottom: 18px; overflow: hidden; }
-  .summary-row { display: flex; border-bottom: 1px solid #e5e7eb; }
+  .summary-table { border: 1px solid #94a3b8; border-radius: 6px; margin-bottom: 18px; overflow: hidden; }
+  .summary-row { display: flex; border-bottom: 1px solid #cbd5e1; }
   .summary-row:last-child { border-bottom: none; }
   .summary-label { width: 140px; flex: none; background: #f9fafb; font-size: 12px; color: #6b7280; padding: 9px 12px; font-weight: 600; }
   .summary-value { flex: 1; padding: 9px 12px; font-size: 13px; color: #111827; }
   .summary-value-strong { font-weight: 800; color: #991b1b; font-size: 15px; }
 
-  .notes-field { min-height: 100mm; border: 1px dashed #d1d5db; border-radius: 6px; padding: 12px 14px; font-size: 13px; line-height: 1.9; outline: none; margin-bottom: 18px; }
+  .notes-field { min-height: 100mm; border: 1px dashed #94a3b8; border-radius: 6px; padding: 12px 14px; font-size: 13px; line-height: 1.9; outline: none; margin-bottom: 18px; }
   .notes-field:empty:before { content: attr(data-placeholder); color: #9ca3af; }
   .notes-field:focus { border-color: #2563eb; }
 
-  .f-edit { outline: none; border-bottom: 1px dashed #cbd5e1; padding: 0 3px; }
+  .f-edit { outline: none; border-bottom: 1px dashed #94a3b8; padding: 0 3px; }
   .f-edit:empty:before { content: attr(data-placeholder); color: #9ca3af; }
   @media print { .f-edit { border-color: transparent !important; } }
 
-  .sheet-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid #d1d5db; font-size: 10px; color: #6b7280; }
+  .sheet-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; padding-top: 8px; border-top: 1px solid #94a3b8; font-size: 10px; color: #6b7280; }
 
   @media print {
     .toolbar { display: none; }

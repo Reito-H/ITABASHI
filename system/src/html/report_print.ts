@@ -122,7 +122,7 @@ export function renderReportPrintPage(o: ReportPrintOptions): string {
   }
   .to-field:empty:before { content: attr(data-placeholder); color: #9ca3af; font-weight: 400; }
   .preset-btn {
-    font-size: 11px; padding: 2px 8px; border-radius: 12px; border: 1px solid #d1d5db;
+    font-size: 11px; padding: 2px 8px; border-radius: 12px; border: 1px solid #94a3b8;
     background: #f9fafb; color: #374151; cursor: pointer;
   }
   .preset-btn:hover { background: #eef2ff; border-color: #a5b4fc; }
@@ -130,15 +130,15 @@ export function renderReportPrintPage(o: ReportPrintOptions): string {
 
   .detail-title { font-size: 12px; font-weight: 700; color: #1e3a5f; margin: 6px 0 3px; padding-left: 6px; border-left: 4px solid #1e3a5f; }
   /* 短い項目(時刻・車番など)をw-quarter/w-thirdにして1行に複数まとめ、行数を抑える */
-  .grid { display: flex; flex-wrap: wrap; border: 1px solid #d1d5db; border-bottom: none; }
-  .f-row { display: flex; border-bottom: 1px solid #d1d5db; border-right: 1px solid #d1d5db; min-height: 20px; flex: 0 0 50%; }
+  .grid { display: flex; flex-wrap: wrap; border: 1px solid #94a3b8; border-bottom: none; }
+  .f-row { display: flex; border-bottom: 1px solid #94a3b8; border-right: 1px solid #94a3b8; min-height: 20px; flex: 0 0 50%; }
   .f-row.w-full { flex-basis: 100%; }
   .f-row.w-third { flex-basis: 33.334%; }
   .f-row.w-quarter { flex-basis: 25%; }
-  .f-label { width: 88px; flex-shrink: 0; background: #f3f4f6; font-size: 11px; font-weight: 600; color: #4b5563; padding: 3px 6px; display: flex; align-items: center; border-right: 1px solid #d1d5db; }
+  .f-label { width: 88px; flex-shrink: 0; background: #f3f4f6; font-size: 11px; font-weight: 600; color: #4b5563; padding: 3px 6px; display: flex; align-items: center; border-right: 1px solid #94a3b8; }
   .f-value { flex: 1; min-width: 0; font-size: 12px; padding: 3px 8px; display: flex; align-items: center; white-space: pre-wrap; word-break: break-word; }
   .f-edit { width: 100%; border: 1px solid transparent; border-radius: 3px; background: transparent; font: inherit; color: #111827; padding: 2px 4px; outline: none; }
-  .f-edit:hover { border-color: #d1d5db; }
+  .f-edit:hover { border-color: #94a3b8; }
   .f-edit:focus { border-color: #1e3a5f; background: #eff6ff; }
   .f-edit-combo { width: 24px; flex: 0 0 auto; text-align: center; }
   .f-combo-sep { color: #9ca3af; padding: 0 2px; }
@@ -152,18 +152,18 @@ export function renderReportPrintPage(o: ReportPrintOptions): string {
 
   .notes-block { margin-top: 8px; }
   .notes-field {
-    width: 100%; display: block; border: 1px solid #d1d5db; border-radius: 4px; min-height: 10mm; padding: 5px 8px;
+    width: 100%; display: block; border: 1px solid #94a3b8; border-radius: 4px; min-height: 10mm; padding: 5px 8px;
     font: inherit; font-size: 12px; line-height: 1.5; outline: none; white-space: pre-wrap; resize: none; overflow: hidden;
     color: #111827; background: #fff;
   }
   .notes-field::placeholder { color: #9ca3af; }
   @media print { .notes-field { border-color: transparent !important; } }
 
-  .sheet-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px; padding-top: 5px; border-top: 1px solid #d1d5db; font-size: 10px; color: #6b7280; }
+  .sheet-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px; padding-top: 5px; border-top: 1px solid #94a3b8; font-size: 10px; color: #6b7280; }
   .sign-box { display: flex; gap: 20px; }
-  .sign-box .sign { border-bottom: 1px solid #9ca3af; width: 100px; height: 20px; }
+  .sign-box .sign { border-bottom: 1px solid #64748b; width: 100px; height: 20px; }
   .sign-box .sign-label { font-size: 10px; color: #6b7280; margin-bottom: 2px; }
-  .sign-input { width: 100px; border: none; border-bottom: 1px solid #9ca3af; background: transparent; font: inherit; font-size: 11px; color: #111827; padding: 2px 2px; outline: none; }
+  .sign-input { width: 100px; border: none; border-bottom: 1px solid #64748b; background: transparent; font: inherit; font-size: 11px; color: #111827; padding: 2px 2px; outline: none; }
   .sign-input:hover { background: #f9fafb; }
   .sign-input:focus { border-bottom-color: #1e3a5f; background: #eff6ff; }
   @media print { .sign-input { background: transparent !important; } }

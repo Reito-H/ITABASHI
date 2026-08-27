@@ -20,28 +20,28 @@ export const FARE_REVISION_PRINT_CSS = `
   .fp-head { border-bottom: 3px solid #1a3a5c; padding-bottom: 10px; margin-bottom: 12px; }
   .fp-head h1 { font-size: 18px; margin: 0; color: #1a3a5c; }
   .fp-head .sub { font-size: 11px; color: #6b7280; margin-top: 4px; line-height: 1.6; }
-  .fp-cond { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 10.5px; color: #475569; line-height: 1.8; margin-bottom: 14px; }
+  .fp-cond { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; font-size: 10.5px; color: #475569; line-height: 1.8; margin-bottom: 14px; }
   .fp-cond b { color: #1a3a5c; }
 
   .fp-kpi-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 12px; }
-  .fp-kpi-table td { padding: 6px 10px; border: 1px solid #e5e7eb; }
+  .fp-kpi-table td { padding: 6px 10px; border: 1px solid #cbd5e1; }
   .fp-kpi-table td.label { background: #f8fafc; color: #475569; width: 55%; }
   .fp-kpi-table td.val { font-weight: 700; color: #1a3a5c; }
 
   .fp-section-title { font-size: 12.5px; font-weight: 700; color: #1a3a5c; margin: 16px 0 8px; padding-left: 7px; border-left: 4px solid #1a3a5c; }
   table.fp-table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-bottom: 12px; }
   table.fp-table thead { display: table-header-group; }
-  table.fp-table th { text-align: left; padding: 5px 7px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; white-space: nowrap; }
-  table.fp-table td { padding: 5px 7px; border: 1px solid #e2e8f0; }
+  table.fp-table th { text-align: left; padding: 5px 7px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; white-space: nowrap; }
+  table.fp-table td { padding: 5px 7px; border: 1px solid #cbd5e1; }
   table.fp-table tr { break-inside: avoid; }
   .fp-flag { color: #16a34a; font-weight: 700; }
   .fp-drop { color: #dc2626; font-weight: 700; }
 
   .fp-reasoning { list-style: none; padding: 0; margin: 0; font-size: 11.5px; line-height: 1.8; }
-  .fp-reasoning li { padding: 6px 10px; background: #f8fafc; border-radius: 6px; margin-bottom: 6px; border: 1px solid #eef2f6; break-inside: avoid; }
+  .fp-reasoning li { padding: 6px 10px; background: #f8fafc; border-radius: 6px; margin-bottom: 6px; border: 1px solid #cbd5e1; break-inside: avoid; }
   .fp-reasoning li.flag { background: #fff7ed; border-color: #fed7aa; color: #9a3412; font-weight: 600; }
 
-  .fp-foot { margin-top: 16px; padding-top: 8px; border-top: 1px dashed #d1d5db; font-size: 9.5px; color: #9ca3af; display: flex; justify-content: space-between; }
+  .fp-foot { margin-top: 16px; padding-top: 8px; border-top: 1px dashed #94a3b8; font-size: 9.5px; color: #9ca3af; display: flex; justify-content: space-between; }
 
   @media print {
     @page { size: A4 portrait; margin: 12mm; }

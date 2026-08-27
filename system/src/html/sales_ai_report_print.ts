@@ -52,7 +52,7 @@ export const SALES_AI_REPORT_PRINT_CSS = `
   .sr-to-sub { font-size: 12px; color: #6b7280; margin-bottom: 14px; }
 
   .sr-kpis { display: flex; gap: 10px; margin-bottom: 16px; }
-  .sr-kpi { flex: 1; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; text-align: center; }
+  .sr-kpi { flex: 1; background: #f9fafb; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; text-align: center; }
   .sr-kpi-label { font-size: 10px; color: #9ca3af; font-weight: 700; }
   .sr-kpi-value { font-size: 16px; font-weight: 800; color: #1a3a5c; margin-top: 2px; }
 
@@ -77,7 +77,7 @@ export const SALES_AI_REPORT_PRINT_CSS = `
 
   .sr-closing { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 10px 14px; font-size: 11.5px; line-height: 1.75; color: #0c4a6e; margin-bottom: 12px; }
 
-  .sr-disclaimer { font-size: 9.5px; color: #9ca3af; line-height: 1.6; border-top: 1px dashed #d1d5db; padding-top: 7px; margin-top: 8px; }
+  .sr-disclaimer { font-size: 9.5px; color: #9ca3af; line-height: 1.6; border-top: 1px dashed #94a3b8; padding-top: 7px; margin-top: 8px; }
   .sr-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 6px; padding-top: 6px; }
   .sr-foot .left { font-size: 9.5px; color: #9ca3af; }
   .sr-foot .right { text-align: right; font-size: 9.5px; color: #9ca3af; line-height: 1.6; }
@@ -87,8 +87,8 @@ export const SALES_AI_REPORT_PRINT_CSS = `
 
   /* 2枚目: 所感記入シート */
   .sr-comment-title { font-size: 13px; font-weight: 700; color: #1a3a5c; margin: 6px 0 14px; padding-left: 8px; border-left: 4px solid #1a3a5c; }
-  .sr-comment-box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px 20px; }
-  .sr-comment-line { height: 30px; border-bottom: 1px solid #cbd5e1; }
+  .sr-comment-box { border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px 20px; }
+  .sr-comment-line { height: 30px; border-bottom: 1px solid #94a3b8; }
   .sr-comment-line:last-child { border-bottom: none; }
 
   /* .sheet-fit（自動縮小の対象）の外に置き、.sheet基準の絶対位置に固定することで、

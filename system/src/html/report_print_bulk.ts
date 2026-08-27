@@ -78,14 +78,14 @@ export function renderReportPrintBulkPage(o: ReportPrintBulkOptions): string {
   }
   .to-field:empty:before { content: attr(data-placeholder); color: #9ca3af; font-weight: 400; }
   .preset-btn {
-    font-size: 11px; padding: 3px 9px; border-radius: 12px; border: 1px solid #d1d5db;
+    font-size: 11px; padding: 3px 9px; border-radius: 12px; border: 1px solid #94a3b8;
     background: #f9fafb; color: #374151; cursor: pointer;
   }
   .preset-btn:hover { background: #eef2ff; border-color: #a5b4fc; }
   .preset-wrap { display: flex; gap: 6px; flex-wrap: wrap; }
 
   table.items { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  table.items th, table.items td { border: 1px solid #d1d5db; font-size: 11px; padding: 4px 6px; vertical-align: top; white-space: pre-wrap; word-break: break-word; }
+  table.items th, table.items td { border: 1px solid #94a3b8; font-size: 11px; padding: 4px 6px; vertical-align: top; white-space: pre-wrap; word-break: break-word; }
   table.items th { background: #f3f4f6; color: #4b5563; font-weight: 700; text-align: left; }
   .c-idx { width: 22px; text-align: center; }
   .c-kind { width: 86px; white-space: nowrap; }
@@ -98,14 +98,14 @@ export function renderReportPrintBulkPage(o: ReportPrintBulkOptions): string {
   .notes-block { margin-top: 8px; }
   .detail-title { font-size: 12px; font-weight: 700; color: #1e3a5f; margin: 0 0 3px; padding-left: 6px; border-left: 4px solid #1e3a5f; }
   .notes-field {
-    border: 1px solid #d1d5db; border-radius: 4px; min-height: 14mm; padding: 6px 10px;
+    border: 1px solid #94a3b8; border-radius: 4px; min-height: 14mm; padding: 6px 10px;
     font-size: 12px; line-height: 1.5; outline: none; white-space: pre-wrap;
   }
   .notes-field:empty:before { content: attr(data-placeholder); color: #9ca3af; }
 
-  .sheet-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px; padding-top: 5px; border-top: 1px solid #d1d5db; font-size: 10px; color: #6b7280; }
+  .sheet-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 8px; padding-top: 5px; border-top: 1px solid #94a3b8; font-size: 10px; color: #6b7280; }
   .sign-box { display: flex; gap: 20px; }
-  .sign-box .sign { border-bottom: 1px solid #9ca3af; width: 100px; height: 20px; }
+  .sign-box .sign { border-bottom: 1px solid #64748b; width: 100px; height: 20px; }
   .sign-box .sign-label { font-size: 10px; color: #6b7280; margin-bottom: 2px; }
 
   @media print {

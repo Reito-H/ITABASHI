@@ -87,17 +87,17 @@ export function renderAccidentsRiskReportPrintPage(o: AccidentsRiskReportPrintOp
 
   .rr-to { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
 
-  .rr-filter-note { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; font-size: 11.5px; color: #475569; margin-bottom: 12px; }
+  .rr-filter-note { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; font-size: 11.5px; color: #475569; margin-bottom: 12px; }
   .rr-filter-note b { color: #1a3a5c; }
 
   table.rr-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-  table.rr-table th { padding: 6px 8px; text-align: left; background: #f3f4f6; color: #4b5563; font-weight: 700; border-bottom: 1px solid #d1d5db; white-space: nowrap; }
-  table.rr-table td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; }
+  table.rr-table th { padding: 6px 8px; text-align: left; background: #f3f4f6; color: #4b5563; font-weight: 700; border-bottom: 1px solid #94a3b8; white-space: nowrap; }
+  table.rr-table td { padding: 6px 8px; border-bottom: 1px solid #cbd5e1; }
   table.rr-table .num { font-variant-numeric: tabular-nums; }
   .rr-empty { text-align: center; color: #9ca3af; padding: 20px 8px; }
   .rr-badge { display: inline-block; border-radius: 20px; padding: 1px 9px; font-size: 10px; font-weight: 700; border: 1px solid transparent; white-space: nowrap; }
 
-  .rr-disclaimer { font-size: 9.5px; color: #9ca3af; line-height: 1.6; border-top: 1px dashed #d1d5db; padding-top: 7px; margin-top: 10px; }
+  .rr-disclaimer { font-size: 9.5px; color: #9ca3af; line-height: 1.6; border-top: 1px dashed #94a3b8; padding-top: 7px; margin-top: 10px; }
   .rr-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4px; font-size: 9.5px; color: #9ca3af; }
 
   /* .sheet-fit（自動縮小の対象）の外に置き、.sheet基準の絶対位置に固定することで、

@@ -47,7 +47,7 @@ export function renderAccidentsRideAlongNoticePrintPage(o: AccidentsRideAlongNot
   .rn-badge-row { text-align: center; margin-bottom: 26px; }
   .rn-badge { display: inline-block; background: #eff6ff; color: #1a3a5c; border: 1px solid #bfdbfe; border-radius: 20px; padding: 4px 18px; font-size: 13px; font-weight: 700; }
 
-  .rn-id-block { border: 1px solid #d1d5db; border-radius: 8px; padding: 16px 20px; margin-bottom: 26px; }
+  .rn-id-block { border: 1px solid #94a3b8; border-radius: 8px; padding: 16px 20px; margin-bottom: 26px; }
   .rn-id-row { display: flex; align-items: baseline; gap: 10px; font-size: 14px; margin-bottom: 12px; }
   .rn-id-row:last-child { margin-bottom: 0; }
   .rn-id-label { font-weight: 700; color: #374151; flex-shrink: 0; }
@@ -59,8 +59,8 @@ export function renderAccidentsRideAlongNoticePrintPage(o: AccidentsRideAlongNot
 
   .rn-body-text { font-size: 14px; line-height: 2.1; color: #1f2937; margin-bottom: 16px; }
 
-  .rn-detail-box { border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; margin: 22px 0; }
-  .rn-detail-row { display: flex; border-bottom: 1px solid #e5e7eb; }
+  .rn-detail-box { border: 1px solid #94a3b8; border-radius: 8px; overflow: hidden; margin: 22px 0; }
+  .rn-detail-row { display: flex; border-bottom: 1px solid #cbd5e1; }
   .rn-detail-row:last-child { border-bottom: none; }
   .rn-detail-label { width: 130px; flex: none; background: #f9fafb; font-size: 13px; font-weight: 700; color: #374151; padding: 13px 14px; }
   .rn-detail-value { flex: 1; font-size: 14px; color: #111827; padding: 13px 14px; display: flex; align-items: baseline; gap: 8px; }

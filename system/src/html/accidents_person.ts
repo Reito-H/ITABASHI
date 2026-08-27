@@ -190,7 +190,7 @@ export function renderAccidentPersonDetailPrintPage(o: AccidentPersonDetailPrint
   .period { font-size: 12px; color: #6b7280; margin-bottom: 12px; }
 
   .kpis { display: flex; gap: 10px; margin-bottom: 10px; }
-  .kpi { flex: 1; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 10px; text-align: center; }
+  .kpi { flex: 1; background: #f9fafb; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; text-align: center; }
   .kpi-label { font-size: 10px; color: #9ca3af; font-weight: 700; }
   .kpi-value { font-size: 15px; font-weight: 800; color: #1a3a5c; margin-top: 1px; }
 
@@ -198,18 +198,18 @@ export function renderAccidentPersonDetailPrintPage(o: AccidentPersonDetailPrint
   .fault-chip { font-size: 11px; color: #374151; background: #f1f5f9; border-radius: 6px; padding: 4px 10px; }
   .fault-chip b { color: #1a3a5c; }
 
-  .safety-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .safety-box { background: #f9fafb; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
   .safety-box-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
   .safety-box-title { font-size: 11.5px; font-weight: 700; color: #1a3a5c; }
   .safety-box-empty { font-size: 11px; color: #9ca3af; }
 
   table.rec-table { width: 100%; border-collapse: collapse; font-size: 11px; }
   table.rec-table thead { display: table-header-group; }
-  table.rec-table th { padding: 6px 8px; text-align: left; background: #f3f4f6; color: #4b5563; font-weight: 700; border-bottom: 1px solid #d1d5db; white-space: nowrap; }
-  table.rec-table td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; }
+  table.rec-table th { padding: 6px 8px; text-align: left; background: #f3f4f6; color: #4b5563; font-weight: 700; border-bottom: 1px solid #94a3b8; white-space: nowrap; }
+  table.rec-table td { padding: 6px 8px; border-bottom: 1px solid #cbd5e1; }
   table.rec-table tr { page-break-inside: avoid; }
 
-  .foot { margin-top: 10px; padding-top: 6px; border-top: 1px solid #d1d5db; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; }
+  .foot { margin-top: 10px; padding-top: 6px; border-top: 1px solid #94a3b8; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; }
 
   @media print {
     @page { size: A4 landscape; margin: 8mm; }

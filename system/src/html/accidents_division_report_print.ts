@@ -98,7 +98,7 @@ export function renderAccidentDivisionReportPrintPage(o: AccidentDivisionReportP
   .ar-to { font-size: 19px; font-weight: 800; margin-bottom: 14px; }
 
   .ar-kpis { display: flex; gap: 10px; margin-bottom: 16px; }
-  .ar-kpi { flex: 1; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; text-align: center; }
+  .ar-kpi { flex: 1; background: #f9fafb; border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; text-align: center; }
   .ar-kpi-label { font-size: 10px; color: #9ca3af; font-weight: 700; }
   .ar-kpi-value { font-size: 17px; font-weight: 800; color: #1a3a5c; margin-top: 2px; }
 
@@ -119,7 +119,7 @@ export function renderAccidentDivisionReportPrintPage(o: AccidentDivisionReportP
 
   .ar-closing { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 12px 14px; font-size: 12.5px; line-height: 1.85; color: #0c4a6e; margin-bottom: 14px; }
 
-  .ar-disclaimer { font-size: 10px; color: #9ca3af; line-height: 1.6; border-top: 1px dashed #d1d5db; padding-top: 8px; margin-top: 10px; }
+  .ar-disclaimer { font-size: 10px; color: #9ca3af; line-height: 1.6; border-top: 1px dashed #94a3b8; padding-top: 8px; margin-top: 10px; }
   .ar-foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 6px; padding-top: 6px; font-size: 10px; color: #9ca3af; }
 
   @media print {

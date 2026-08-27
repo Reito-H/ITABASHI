@@ -75,7 +75,7 @@ export const MATERIAL_PAGE_CSS = `
   .m-cover-id-blank { display:inline-block; width:150px; border-bottom:1px solid #334155; height:19px; }
 
   .m-kpis { display:flex; gap:10px; margin-bottom:17px; }
-  .m-kpi { flex:1; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:11px 12px; text-align:center; }
+  .m-kpi { flex:1; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:11px 12px; text-align:center; }
   .m-kpi-label { font-size:10.5px; color:#94a3b8; font-weight:700; }
   .m-kpi-value { font-size:20px; font-weight:800; color:#0f766e; margin-top:4px; }
 
@@ -86,17 +86,17 @@ export const MATERIAL_PAGE_CSS = `
   .m-bar-fill { background:#0f766e; height:100%; border-radius:4px; }
   .m-bar-val { width:92px; text-align:right; font-size:12px; color:#64748b; flex-shrink:0; }
 
-  .m-scene { background:#f8fafc; border:1px solid #e2e8f0; border-left:4px solid #0f766e; border-radius:8px; padding:15px 17px; font-size:13.5px; line-height:2; color:#1e293b; margin-bottom:17px; }
+  .m-scene { background:#f8fafc; border:1px solid #cbd5e1; border-left:4px solid #0f766e; border-radius:8px; padding:15px 17px; font-size:13.5px; line-height:2; color:#1e293b; margin-bottom:17px; }
   .m-scene-label { font-size:11px; font-weight:700; color:#0f766e; margin-bottom:7px; display:flex; align-items:center; gap:4px; }
   .m-scene-label svg { width:13px; height:13px; }
 
   .m-quiz-q { font-size:15px; font-weight:700; color:#0f172a; margin-bottom:11px; }
   .m-quiz-choices { margin-bottom:11px; }
-  .m-quiz-choice { border:1px solid #cbd5e1; border-radius:8px; padding:11px 15px; margin-bottom:9px; font-size:13px; line-height:1.7; }
+  .m-quiz-choice { border:1px solid #94a3b8; border-radius:8px; padding:11px 15px; margin-bottom:9px; font-size:13px; line-height:1.7; }
   .m-quiz-hint { font-size:11px; color:#94a3b8; }
 
   .m-answer-list { margin-bottom:17px; }
-  .m-answer-item { display:flex; gap:10px; padding:10px 0; border-bottom:1px dashed #e2e8f0; }
+  .m-answer-item { display:flex; gap:10px; padding:10px 0; border-bottom:1px dashed #cbd5e1; }
   .m-answer-item:last-child { border-bottom:none; }
   .m-answer-mark { width:21px; height:21px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:800; flex-shrink:0; background:#f1f5f9; color:#94a3b8; }
   .m-answer-item.is-correct .m-answer-mark { background:#dcfce7; color:#16a34a; }
@@ -116,21 +116,21 @@ export const MATERIAL_PAGE_CSS = `
   .m-psy-title svg { width:23px; height:23px; color:#0f766e; }
 
   .m-diag-list { list-style:none; padding:0; margin:0; }
-  .m-diag-item { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px dashed #e2e8f0; font-size:13px; color:#1e293b; }
+  .m-diag-item { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px dashed #cbd5e1; font-size:13px; color:#1e293b; }
   .m-diag-check { width:16px; height:16px; margin-top:1px; flex-shrink:0; accent-color:#0f766e; }
   .m-checklist-cat { font-size:13px; font-weight:700; color:#0f766e; margin:16px 0 7px; }
   .m-checklist-cat:first-child { margin-top:0; }
   .m-checklist-item { display:flex; align-items:flex-start; gap:10px; padding:7px 0; font-size:13px; color:#1e293b; }
 
   .m-tally-list { margin-bottom:17px; }
-  .m-tally-row { display:flex; justify-content:space-between; align-items:center; padding:11px 4px; border-bottom:1px dashed #cbd5e1; font-size:14px; color:#1e293b; }
+  .m-tally-row { display:flex; justify-content:space-between; align-items:center; padding:11px 4px; border-bottom:1px dashed #94a3b8; font-size:14px; color:#1e293b; }
   .m-tally-box { border:1px solid #94a3b8; border-radius:6px; width:78px; height:32px; display:inline-flex; align-items:center; justify-content:center; font-size:12px; color:#94a3b8; }
   .m-tally-result { font-size:14px; color:#1e293b; }
   .m-tally-blank { display:inline-block; width:220px; border-bottom:1px solid #334155; margin-left:8px; }
 
   .m-personal-empty { background:#f0fdfa; border:1px solid #99f6e4; border-radius:8px; padding:16px; font-size:13.5px; line-height:2; color:#0f766e; }
 
-  .m-advice-card { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:15px 17px; margin-bottom:15px; }
+  .m-advice-card { background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:15px 17px; margin-bottom:15px; }
   .m-advice-name { font-size:15px; font-weight:800; color:#0f172a; margin-bottom:5px; }
   .m-advice-desc { font-size:12.5px; color:#475569; line-height:1.8; margin-bottom:11px; }
   .m-advice-title { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700; color:#0f766e; margin-bottom:7px; }
@@ -145,14 +145,14 @@ export const MATERIAL_PAGE_CSS = `
   .m-vow-type-icon { flex-shrink:0; color:#0f766e; }
   .m-vow-type-icon svg { width:20px; height:20px; display:block; }
   .m-vow-list { margin:15px 0 18px; }
-  .m-vow-item { display:flex; align-items:flex-start; gap:12px; font-size:13.5px; line-height:1.8; color:#1e293b; padding:11px 13px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:10px; }
+  .m-vow-item { display:flex; align-items:flex-start; gap:12px; font-size:13.5px; line-height:1.8; color:#1e293b; padding:11px 13px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:10px; }
   .m-vow-num { width:22px; height:22px; border-radius:50%; background:#0f766e; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
   .m-vow-sign { display:flex; gap:40px; margin:18px 0 20px; }
   .m-vow-sign-field { display:flex; align-items:center; gap:8px; font-size:12.5px; color:#64748b; }
   .m-vow-sign-blank { display:inline-block; width:140px; border-bottom:1px solid #334155; height:20px; }
 
   .m-report-lines { margin-bottom:18px; }
-  .m-report-line { border-bottom:1px solid #cbd5e1; height:27px; }
+  .m-report-line { border-bottom:1px solid #94a3b8; height:27px; }
   .m-closing-wrap { padding-bottom:24mm; }
 
   /* .sheet-fit（自動縮小の対象）の外に置き、.sheet基準の絶対位置に固定することで、
@@ -163,7 +163,7 @@ export const MATERIAL_PAGE_CSS = `
   .m-stamp-frame { width:48px; height:48px; border:1.5px solid #64748b; border-radius:4px; }
   .m-stamp-label { font-size:10.5px; color:#475569; }
 
-  .m-merged-divider { margin-top:6px; padding-top:15px; border-top:1px dashed #cbd5e1; }
+  .m-merged-divider { margin-top:6px; padding-top:15px; border-top:1px dashed #94a3b8; }
 `;
 
 // ---------------------------------------------------------------------------
