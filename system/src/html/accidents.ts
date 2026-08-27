@@ -94,14 +94,15 @@ export function bucketWeekday(dates: Array<string | null | undefined>): number[]
   return bands;
 }
 
-// 事故データ配下8画面（月次一覧/分析・ランキング/予測カレンダー/研修案内印刷/個人別/事故防止AI/教材/安全運転リスク）共通のタブナビ
-export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'training' | 'person' | 'division' | 'material' | 'risk'): string {
+// 事故データ配下9画面（月次一覧/分析・ランキング/予測カレンダー/研修案内印刷/研修記録/個人別/事故防止AI/教材/安全運転リスク）共通のタブナビ
+export function accidentsTabNav(active: 'list' | 'analysis' | 'forecast' | 'training' | 'training_record' | 'person' | 'division' | 'material' | 'risk'): string {
   const tabs: Array<{ id: typeof active; label: string; href: string }> = [
     { id: 'list', label: '月次一覧', href: `${ADMIN_PATH}/accidents` },
     { id: 'analysis', label: '分析・ランキング', href: `${ADMIN_PATH}/accidents/analysis` },
     { id: 'risk', label: '安全運転リスクランキング', href: `${ADMIN_PATH}/accidents/risk` },
     { id: 'forecast', label: '予測カレンダー', href: `${ADMIN_PATH}/accidents/forecast` },
     { id: 'training', label: '事故研修案内', href: `${ADMIN_PATH}/accidents/training` },
+    { id: 'training_record', label: '研修記録', href: `${ADMIN_PATH}/accidents/training-record` },
     { id: 'person', label: '個人別レポート', href: `${ADMIN_PATH}/accidents/person` },
     { id: 'division', label: '事故防止AI', href: `${ADMIN_PATH}/accidents/division` },
     { id: 'material', label: '教材', href: `${ADMIN_PATH}/accidents/material` },
