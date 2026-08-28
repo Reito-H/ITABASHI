@@ -69,6 +69,33 @@ export function resolveComparisonPeriods(q: ComparisonPeriodQuery, todayStr: str
   return { before, after };
 }
 
+// ===== 前年同月比較 =====
+// 「2025年4月度と2026年4月度」のように、同じ月を1年ずらして比べる専用モード。
+// 日数を厳密にそろえる運賃改定前後比較と違い、同じ月同士を比べることで曜日構成・季節行事などの
+// 差をできるだけそろえる（運賃改定前後の比較とは目的が異なるため、別モードとして提供する）。
+export interface YoyMonthQuery { year: number; month: number }
+
+function daysInMonthUTC(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+export function resolveYoyMonthPeriods(q: YoyMonthQuery, todayStr: string): ResolvedPeriods {
+  const mm = String(q.month).padStart(2, '0');
+  const afterYear = q.year;
+  const beforeYear = q.year - 1;
+
+  const afterStart = `${afterYear}-${mm}-01`;
+  const afterEndFull = `${afterYear}-${mm}-${String(daysInMonthUTC(afterYear, q.month)).padStart(2, '0')}`;
+  const afterEnd = afterEndFull > todayStr ? todayStr : afterEndFull; // 今月分などまだ終わっていない月は今日まで
+  const after = makeRange(afterStart, afterEnd, `${afterYear}年${q.month}月度`);
+
+  const beforeStart = `${beforeYear}-${mm}-01`;
+  const beforeEnd = `${beforeYear}-${mm}-${String(daysInMonthUTC(beforeYear, q.month)).padStart(2, '0')}`;
+  const before = makeRange(beforeStart, beforeEnd, `${beforeYear}年${q.month}月度`);
+
+  return { before, after };
+}
+
 // ===== 日次データ・労働時間フォールバック =====
 export interface FareRevisionDailyRow {
   date: string; amount: number; dutyCode: string | null;
@@ -274,16 +301,34 @@ export interface EmployeeComparison {
   reasoning: string[];
 }
 
-function representativeDutyCode(rows: FareRevisionDailyRow[]): string | null {
+export function representativeDutyCode(rows: FareRevisionDailyRow[]): string | null {
   const freq = new Map<string, number>();
   for (const r of rows) { if (r.dutyCode) freq.set(r.dutyCode, (freq.get(r.dutyCode) ?? 0) + 1); }
   return [...freq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+// 隔日勤務（約24時間・日勤の約2乗務分に相当）が主な勤務区分の社員が、たまたま昼日勤務／夜日勤務
+// （通常の半分程度の拘束時間）で乗務した日は、そのままでは1乗務あたりの水準が違いすぎて
+// 「1日あたり平均売上」が本来の実力より不当に低く出てしまう。そのため、主たる勤務区分が
+// 隔日勤務の社員については、日勤で乗務した日の売上を2倍にしたうえで隔日勤務の実績として
+// 合算する（ユーザー確認済みの業務ルール）。
+export function adjustRowsForKakujitsuMajority(
+  rows: FareRevisionDailyRow[], repCategory: WageCategory
+): FareRevisionDailyRow[] {
+  if (repCategory !== 'kakujitsu') return rows;
+  return rows.map(r => {
+    const cat = wageCategoryOfDuty(r.dutyCode);
+    return cat === 'kakujitsu' ? r : { ...r, amount: r.amount * 2 };
+  });
 }
 
 export function compareEmployeePeriods(
   emp: { id: number; name: string; division: number | null; team: number | null },
   beforeRows: FareRevisionDailyRow[], afterRows: FareRevisionDailyRow[],
   before: PeriodRange, after: PeriodRange, thresholds: FareRevisionThresholds,
+  // 全社概要（computeFareRevisionOverview）は判定理由の文章を画面に出さないため、
+  // 数百人ぶんの文章生成を丸ごと省いてCPU時間を節約する。個人ページでは従来通り生成する。
+  opts: { skipReasoning?: boolean } = {},
 ): EmployeeComparison {
   const beforeAgg = aggregatePeriod(beforeRows, before);
   const afterAgg = aggregatePeriod(afterRows, after);
@@ -312,7 +357,7 @@ export function compareEmployeePeriods(
   const repDutyCode = representativeDutyCode([...afterRows, ...beforeRows]);
   const wageCategory = repDutyCode ? wageCategoryOfDuty(repDutyCode) : null;
 
-  const reasoning = buildEmployeeReasoning({
+  const reasoning = opts.skipReasoning ? [] : buildEmployeeReasoning({
     achievementCategory, salesGrowthPct, hourlyRateGrowthPct, laborHoursGrowthPct, dutyDaysGrowthPct,
     earlyLeaveSuspicion: flag, earlyLeaveConfidence: confidence,
     dataSufficient, laborHoursDataSufficient, before: beforeAgg, after: afterAgg,

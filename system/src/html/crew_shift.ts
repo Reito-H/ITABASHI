@@ -138,7 +138,7 @@ export function crewShiftPage(
       <a href="${ADMIN_PATH}/utilization-report" class="btn-secondary" target="_blank">稼働台数報告表</a>
       <button onclick="openHistory()" class="btn-secondary" style="border:none;cursor:pointer;">履歴</button>
       <button onclick="openIntegrityCheck()" class="btn-secondary" style="border:none;cursor:pointer;">整合性チェック</button>
-      ${editable ? `<button onclick="openImport()" class="btn-secondary" style="border:none;cursor:pointer;background:#166534;">📄 PDFアップロード</button>` : ''}
+      ${editable ? `<a href="${ADMIN_PATH}/settings/documents?tab=crew-shift-pdf" class="btn-secondary" style="border:none;background:#166534;color:white;text-decoration:none;">📄 PDFアップロードはデータセンターへ</a>` : ''}
     </div>
   </div>
 
@@ -274,25 +274,6 @@ export function crewShiftPage(
     <div id="history-body" style="font-size:12px;color:#6b7280;">読み込み中...</div>
   </div>
 </div>
-
-${editable ? `
-<!-- PDFアップロードモーダル -->
-<div id="import-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:520px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-      <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">月間勤務予定表PDFの取込</h3>
-      <button onclick="sel('#import-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
-    </div>
-    <div style="font-size:11px;color:#9ca3af;margin-bottom:12px;">
-      「◆月初勤務予定表◆」形式のPDFをアップロードします。PDF内の期間と重なる既存データは新しい内容で上書きされます。氏名・記号はテキストとして読み取るため、AIによる誤読はありません（レイアウトが想定と大きく異なる場合のみ取込に失敗します）。
-    </div>
-    <input type="file" id="import-file" accept="application/pdf" style="margin-bottom:12px;">
-    <div id="import-result" style="font-size:12px;margin-bottom:10px;"></div>
-    <div style="display:flex;justify-content:flex-end;">
-      <button onclick="doImport()" id="import-btn" style="padding:9px 20px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">取込実行</button>
-    </div>
-  </div>
-</div>` : ''}
 
 ${saveToastHtml()}
 
@@ -677,115 +658,6 @@ async function openHistory() {
 }
 
 ${editable ? `
-// ===== PDFアップロード =====
-// PDF解析はブラウザ側で行い（CPU時間に制限がないため）、結果を小分けにして
-// サーバーへ送信する（Worker側のCPU時間上限に収まる件数ずつ）。
-var CHUNK_MEMBERS = 300;
-var CHUNK_SHIFTS = 3000;
-var _pdfParserLoadPromise = null;
-function loadPdfParser() {
-  if (window.parseCrewShiftPdf) return Promise.resolve();
-  if (_pdfParserLoadPromise) return _pdfParserLoadPromise;
-  _pdfParserLoadPromise = new Promise(function(resolve, reject) {
-    var s = document.createElement('script');
-    s.src = API + '/pdf-parser.js';
-    s.onload = function() { resolve(); };
-    s.onerror = function() { reject(new Error('解析ライブラリの読込に失敗しました')); };
-    document.head.appendChild(s);
-  });
-  return _pdfParserLoadPromise;
-}
-function chunkArray(arr, size) {
-  var out = [];
-  for (var i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-async function postJson(url, body) {
-  var res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-  var d = await res.json().catch(function(){ return {}; });
-  if (!res.ok) throw new Error(d.error || 'server');
-  return d;
-}
-function openImport() {
-  sel('#import-result').textContent = '';
-  sel('#import-file').value = '';
-  sel('#import-modal').style.display = 'flex';
-}
-function setImportProgress(text) {
-  sel('#import-result').innerHTML = '<span style="color:#374151;">' + escH(text) + '</span>';
-}
-async function doImport() {
-  var f = sel('#import-file').files[0];
-  if (!f) { sel('#import-result').innerHTML = '<span style="color:#dc2626;">PDFファイルを選択してください</span>'; return; }
-  var btn = sel('#import-btn');
-  btn.disabled = true; btn.textContent = '取込中...';
-  sel('#import-result').textContent = '';
-  try {
-    setImportProgress('解析ライブラリ読込中...');
-    await loadPdfParser();
-
-    setImportProgress('PDF解析中...');
-    var buf = await f.arrayBuffer();
-    var parsed = await window.parseCrewShiftPdf(new Uint8Array(buf));
-    if (!parsed.members.length) {
-      var noDataMsg = 'PDFから乗務員データを読み取れませんでした。「月初勤務予定表」形式のPDFか確認してください';
-      if (parsed.warnings && parsed.warnings.length) noDataMsg += '<br><span style="color:#d97706;">' + parsed.warnings.map(escH).join('<br>') + '</span>';
-      sel('#import-result').innerHTML = '<span style="color:#dc2626;">' + noDataMsg + '</span>';
-      return;
-    }
-
-    var divisions = Array.from(new Set(parsed.members.map(function(m){ return m.division; }))).sort();
-    var empDivision = {};
-    var memberCountByDivision = {};
-    parsed.members.forEach(function(m) {
-      empDivision[m.emp_code] = m.division;
-      memberCountByDivision[m.division] = (memberCountByDivision[m.division] || 0) + 1;
-    });
-    var cellCountByDivision = {};
-    parsed.shifts.forEach(function(s) {
-      var div = empDivision[s.emp_code] || '';
-      cellCountByDivision[div] = (cellCountByDivision[div] || 0) + 1;
-    });
-
-    var memberChunks = chunkArray(parsed.members.map(function(m, i) {
-      return { emp_code: m.emp_code, name: m.name, car_no: m.car_no, division: m.division, team: m.team, sort_order: (i + 1) * 10 };
-    }), CHUNK_MEMBERS);
-    for (var mi = 0; mi < memberChunks.length; mi++) {
-      setImportProgress('乗務員登録中... (' + (mi + 1) + '/' + memberChunks.length + ')');
-      await postJson(API + '/import/members', { members: memberChunks[mi] });
-    }
-
-    setImportProgress('既存シフトのクリア中...');
-    await postJson(API + '/import/clear', { divisions: divisions, start_date: parsed.startDate, end_date: parsed.endDate });
-
-    var shiftChunks = chunkArray(parsed.shifts, CHUNK_SHIFTS);
-    for (var si = 0; si < shiftChunks.length; si++) {
-      setImportProgress('シフト登録中... (' + (si + 1) + '/' + shiftChunks.length + ')');
-      await postJson(API + '/import/shifts', { shifts: shiftChunks[si] });
-    }
-
-    setImportProgress('仕上げ処理中...');
-    await postJson(API + '/import/finish', {
-      file_name: f.name,
-      start_date: parsed.startDate,
-      end_date: parsed.endDate,
-      divisions: divisions.map(function(div) {
-        return { division: div, member_count: memberCountByDivision[div] || 0, cell_count: cellCountByDivision[div] || 0 };
-      }),
-    });
-
-    var divLabel = divisions.join('・');
-    var msg = '取込完了: ' + parsed.members.length + '名 / ' + parsed.shifts.length + '件（' + parsed.startDate + '〜' + parsed.endDate + '）' + (divLabel ? '<br>対象: ' + escH(divLabel) : '');
-    if (parsed.warnings && parsed.warnings.length) msg += '<br><span style="color:#d97706;">' + parsed.warnings.map(escH).join('<br>') + '</span>';
-    sel('#import-result').innerHTML = '<span style="color:#166534;">' + msg + '</span>';
-    var nextDivision = (divisions.indexOf(CUR_DIVISION) === -1) ? divisions[0] : CUR_DIVISION;
-    setTimeout(function() { location.href = '${ADMIN_PATH}/crew-shift?division=' + encodeURIComponent(nextDivision) + '&start=' + parsed.startDate + '&end=' + parsed.endDate; }, 1200);
-  } catch (e) {
-    sel('#import-result').innerHTML = '<span style="color:#dc2626;">' + escH(e.message || '取込に失敗しました') + '</span>';
-  } finally {
-    btn.disabled = false; btn.textContent = '取込実行';
-  }
-}
 ` : ''}
 </script>`;
 }

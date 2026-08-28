@@ -3,7 +3,6 @@
 // サーバー側は emp_no 照合によるプレビューと、確認後のバッチ更新のみを担当する。
 import { Hono } from 'hono';
 import type { Env } from '../../auth';
-import { PDF_PARSERS_CLIENT_JS_BASE64 } from '../../assets/pdf_parsers_client_bundle';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -39,7 +38,9 @@ type EmployeeMatch = {
 // PDF解析用バンドル配信（unpdfによるPDF座標解析はWorker CPU時間上限に収まらないため、ブラウザで実行する）
 // 配車PDF・乗務員シフトPDF・退職者名簿PDFの3機能で共通バンドルを配信する（unpdfの重複を避けるため）。
 // src/utils/retiree_pdf.ts を編集したら `npm run build:pdf-parsers-bundle` で再生成すること。
-app.get('/parser.js', (c) => {
+app.get('/parser.js', async (c) => {
+  // 2.1MBのbase64定数。コールドスタートのCPU予算を圧迫するため、この配信時のみ動的import。
+  const { PDF_PARSERS_CLIENT_JS_BASE64 } = await import('../../assets/pdf_parsers_client_bundle');
   const bytes = Uint8Array.from(atob(PDF_PARSERS_CLIENT_JS_BASE64), (ch) => ch.charCodeAt(0));
   return new Response(bytes, {
     headers: {

@@ -2,7 +2,9 @@
 // 事故モニター(accidents_monitor.ts)と同じく別デバイスに映しっぱなしにする想定の独立ページ。
 // 新人紹介カード（写真・名前・課/班・一言コメント）を1人ずつ大きく表示し、一定間隔で自動的に次のカードへ送る。
 // レイアウト(layout.ts)は使わず、完全に独立したスタンドアロンページとして描画する。
-export function newcomerMonitorPage(): string {
+import { safeJson } from './layout';
+
+export function newcomerMonitorPage(token: string): string {
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -108,6 +110,7 @@ export function newcomerMonitorPage(): string {
 
 <script>
 (function () {
+  var TOKEN = ${safeJson(token)};
   var REFRESH_MS = 3 * 60 * 60 * 1000;
   var CARD_INTERVAL_MS = 8000; // データ取得後、設定値（cardIntervalSeconds）に置き換わる
 
@@ -207,7 +210,7 @@ export function newcomerMonitorPage(): string {
   }
 
   async function loadData() {
-    var res = await fetch('/api/public/newcomer-intros');
+    var res = await fetch('/api/public/newcomer-intros?t=' + encodeURIComponent(TOKEN));
     if (!res.ok) throw new Error('http ' + res.status);
     return res.json();
   }

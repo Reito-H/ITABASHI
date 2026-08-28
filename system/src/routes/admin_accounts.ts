@@ -6,7 +6,7 @@ import type { Env } from '../auth';
 import { hashPassword } from '../auth';
 import { layout, safeJson } from '../html/layout';
 import { ADMIN_PATH } from '../config';
-import { PERMISSION_CATALOG, parsePermissions } from '../permissions';
+import { PERMISSION_CATALOG, parsePermissions, getAdminPermissions } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -33,6 +33,8 @@ app.get('/settings/accounts', async (c) => {
     created_at: a.created_at,
   }));
   const selfId = c.get('adminId');
+  const viewerPerms = await getAdminPermissions(c.env.DB, selfId);
+  const canEdit = viewerPerms === null || viewerPerms.includes('settings.accounts.edit');
 
   const html = `
   <div style="max-width:760px;">
@@ -43,10 +45,12 @@ app.get('/settings/accounts', async (c) => {
     <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.6;">
       機能ごとに「閲覧」「編集」を分けて設定できます。編集にチェックを入れるとデータの追加・変更・削除が可能になります。<br>
       <b>全権限</b>のアカウントはすべての機能にアクセスできます（統括管理者向け）。このページの編集権限を持つアカウントは他人に権限を付与できるため、付与先には注意してください。
+      ${canEdit ? '' : '<br><b style="color:#b45309;">このアカウントは閲覧のみの権限です。作成・変更・削除はできません。</b>'}
     </div>
 
     <div id="account-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px;"></div>
 
+    ${canEdit ? `
     <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:16px;">
       <div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">＋ 新規アカウント作成</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -66,7 +70,7 @@ app.get('/settings/accounts', async (c) => {
         <button onclick="createAccount()" style="padding:8px 18px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">作成して権限を設定</button>
       </div>
       <div style="font-size:11px;color:#9ca3af;margin-top:6px;">作成直後は権限なしの状態です。続けて表示される画面で権限を設定してください。</div>
-    </div>
+    </div>` : ''}
   </div>
 
   <!-- 権限編集モーダル -->
@@ -98,6 +102,7 @@ app.get('/settings/accounts', async (c) => {
   var API = '${ADMIN_PATH}/api/accounts';
   var CATALOG = ${safeJson(PERMISSION_CATALOG)};
   var SELF_ID = ${selfId};
+  var CAN_EDIT = ${canEdit ? 'true' : 'false'};
   var _accounts = ${safeJson(accounts)};
   var _editingId = null;
 
@@ -122,6 +127,10 @@ app.get('/settings/accounts', async (c) => {
   ];
   function divisionSelectHtml(a) {
     var cur = a.division || '';
+    if (!CAN_EDIT) {
+      var label = DIVISION_OPTIONS.find(function(o) { return o.v === cur; });
+      return '<span style="font-size:12px;color:#6b7280;">' + escH(label ? label.label : '所属課: 未設定') + '</span>';
+    }
     var opts = DIVISION_OPTIONS.map(function(o) {
       return '<option value="' + o.v + '"' + (o.v === cur ? ' selected' : '') + '>' + o.label + '</option>';
     }).join('');
@@ -143,11 +152,14 @@ app.get('/settings/accounts', async (c) => {
         + '<div style="font-size:14px;font-weight:700;color:#1e3a5f;min-width:110px;">' + escH(a.username) + (a.id === SELF_ID ? ' <span style="font-size:10px;color:#9ca3af;">(自分)</span>' : '') + '</div>'
         + '<div>' + permSummary(a.permissions) + '</div>'
         + '<div>' + divisionSelectHtml(a) + '</div>'
-        + '<div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">'
-        + '<button onclick="openPerm(' + a.id + ')" style="padding:6px 12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:6px;font-size:12px;cursor:pointer;">権限編集</button>'
-        + '<button onclick="resetPassword(' + a.id + ')" style="padding:6px 12px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:6px;font-size:12px;cursor:pointer;">パスワード再設定</button>'
-        + (a.id === SELF_ID ? '' : '<button onclick="deleteAccount(' + a.id + ')" style="padding:6px 12px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:12px;cursor:pointer;">削除</button>')
-        + '</div></div>';
+        + (CAN_EDIT ? (
+          '<div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">'
+          + '<button onclick="openPerm(' + a.id + ')" style="padding:6px 12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;border-radius:6px;font-size:12px;cursor:pointer;">権限編集</button>'
+          + '<button onclick="resetPassword(' + a.id + ')" style="padding:6px 12px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:6px;font-size:12px;cursor:pointer;">パスワード再設定</button>'
+          + (a.id === SELF_ID ? '' : '<button onclick="deleteAccount(' + a.id + ')" style="padding:6px 12px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:12px;cursor:pointer;">削除</button>')
+          + '</div>'
+        ) : '')
+        + '</div>';
     }).join('');
   }
   renderList();

@@ -138,7 +138,8 @@ app.post('/login', async (c) => {
 });
 
 // ===== ログアウト =====
-app.get('/logout', async (c) => {
+// GETだと単なるリンク・プリフェッチ・クローラ巡回でもログアウトが発火してしまうためPOST限定にしている
+app.post('/logout', async (c) => {
   const cookie = c.req.header('Cookie') ?? null;
   const sid = getSessionFromCookie(cookie);
   if (sid) await deleteSession(c.env.DB, sid);
@@ -2407,7 +2408,7 @@ app.get('/employees', async (c) => {
   ).all<Employee & { status: string; mental_status: string | null; driving_skill: string | null }>();
 
   const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
-  const canViewSalesAi = perms === null || perms.includes('sales-ai');
+  const canViewCrewCard = perms === null || perms.includes('crew-portal');
 
   // 配属年の一覧（年フィルター用）
   const years = await c.env.DB.prepare(
@@ -2482,8 +2483,8 @@ app.get('/employees', async (c) => {
         ${e.hire_date ? e.hire_date.slice(5).replace('-', '/') : '—'}
       </td>
       <td style="${C}white-space:nowrap;text-align:center;">
-        ${(e.first_duty_date && canViewSalesAi)
-          ? `<a href="${ADMIN_PATH}/sales-ai/employee/${e.id}" onclick="event.stopPropagation();" style="font-size:11px;padding:3px 8px;background:#eff6ff;color:#1d4ed8;border-radius:4px;text-decoration:none;white-space:nowrap;">実績を見る</a>`
+        ${(e.first_duty_date && canViewCrewCard)
+          ? `<a href="${ADMIN_PATH}/crew-portal/employee/${e.id}" onclick="event.stopPropagation();" style="font-size:11px;padding:3px 8px;background:#eff6ff;color:#1d4ed8;border-radius:4px;text-decoration:none;white-space:nowrap;">実績を見る</a>`
           : '<span style="color:#d1d5db;font-size:11px;">—</span>'}
       </td>
       <td style="${C}white-space:nowrap;">
@@ -2773,7 +2774,7 @@ app.get('/employees/:id/edit', async (c) => {
 
   const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
   const canRegister = perms === null || perms.includes('newcomers.register.edit');
-  const canViewSalesAi = perms === null || perms.includes('sales-ai');
+  const canViewCrewCard = perms === null || perms.includes('crew-portal');
 
   const S = 'border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;font-size:13px;width:100%;outline:none;background:white;';
   const DS = 'border:1px solid #e5e7eb;border-radius:8px;padding:11px 14px;font-size:15px;width:100%;outline:none;background:white;color:#374151;';
@@ -2857,9 +2858,9 @@ app.get('/employees/:id/edit', async (c) => {
             <span style="color:#9ca3af;">— 登録/解除には権限が必要です</span>
           </div>
           `}
-          ${(emp.first_duty_date && canViewSalesAi) ? `
+          ${(emp.first_duty_date && canViewCrewCard) ? `
           <div style="margin-top:10px;">
-            <a href="${ADMIN_PATH}/sales-ai/employee/${emp.id}" style="font-size:12px;padding:5px 12px;background:#eff6ff;color:#1d4ed8;border-radius:6px;text-decoration:none;">売上・安全運転記録を見る</a>
+            <a href="${ADMIN_PATH}/crew-portal/employee/${emp.id}" style="font-size:12px;padding:5px 12px;background:#eff6ff;color:#1d4ed8;border-radius:6px;text-decoration:none;">売上・安全運転記録を見る</a>
           </div>
           ` : ''}
 
@@ -3714,7 +3715,7 @@ app.get('/settings/status', async (c) => {
       </div>
       </div>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
     <script>
       var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
 

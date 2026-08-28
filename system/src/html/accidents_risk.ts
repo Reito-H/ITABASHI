@@ -59,7 +59,7 @@ export function accidentsRiskPage(opts: AccidentsRiskPageOpts): string {
       const rc = recencyChip(r.accidentCount, r.monthsSinceLastAccident);
       return `
         <tr data-name="${escHtml(r.name)}" data-harsh="${r.totalHarshEvents}" data-per-duty="${r.harshEventsPerDuty}" data-speeding-days="${r.speedingDays}" data-risk="${r.riskLevel}" data-accident-count="${r.accidentCount}" data-months-since="${r.monthsSinceLastAccident ?? ''}">
-          <td><a href="${ADMIN_PATH}/sales-ai/employee/${r.empId}" class="srr-name-link">${escHtml(r.name)}</a></td>
+          <td><a href="${ADMIN_PATH}/crew-portal/employee/${r.empId}?tab=safety" class="srr-name-link">${escHtml(r.name)}</a></td>
           <td style="color:#6b7280;">${r.division ?? '—'}課${r.team ? `${r.team}班` : ''}</td>
           <td class="srr-num" style="font-weight:700;">${r.totalHarshEvents}件</td>
           <td class="srr-num">${r.harshEventsPerDuty}件</td>

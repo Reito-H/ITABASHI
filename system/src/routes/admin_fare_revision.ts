@@ -67,12 +67,32 @@ app.get('/sales-ai/fare-revision', async (c) => {
   <div class="frv-card">
     <div class="frv-toolbar">
       <div class="frv-field">
+        <label>比較のしかた</label>
+        <select id="compare-mode" onchange="onCompareModeChange()">
+          <option value="revision">運賃改定の前後で比較</option>
+          <option value="yoyMonth" selected>前年の同じ月と比較</option>
+        </select>
+      </div>
+      <div class="frv-field" id="revision-field-start">
         <label>運賃改定後の期間（開始）</label>
         <input type="date" id="after-start">
       </div>
-      <div class="frv-field">
+      <div class="frv-field" id="revision-field-end">
         <label>運賃改定後の期間（終了）</label>
         <input type="date" id="after-end">
+      </div>
+      <div class="frv-field" id="yoy-field-year" style="display:none;">
+        <label>比較する年（後の年）</label>
+        <select id="yoy-year"></select>
+      </div>
+      <div class="frv-field" id="yoy-field-month" style="display:none;">
+        <label>比較する月</label>
+        <select id="yoy-month">
+          <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+          <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+          <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+          <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+        </select>
       </div>
       <div class="frv-field">
         <label>課</label>
@@ -97,6 +117,7 @@ app.get('/sales-ai/fare-revision', async (c) => {
       <div class="frv-field"><label>労働時間データが必要な最低の割合(%)</label><input type="number" id="min-labor-coverage-pct" value="50" style="width:60px;"></div>
     </div>
     <div id="period-note" class="frv-period-note"></div>
+    <div id="yoy-note" class="frv-period-note" style="display:none;">「前年の同じ月と比較」は、去年と今年の同じ月同士（例: 2025年4月度と2026年4月度）を比べるモードです。曜日構成や季節行事の影響をそろえた比較ができます。運賃改定の前後で日数をそろえた比較をしたいときは「運賃改定の前後で比較」を選んでください。</div>
   </div>
 
   <div class="frv-view-toggle frv-no-print">
@@ -112,6 +133,7 @@ app.get('/sales-ai/fare-revision', async (c) => {
   <div id="view-overview" style="display:none;">
     <div class="frv-subtabnav frv-no-print" id="ov-subtabnav">
       <button type="button" class="frv-subtab-btn active" data-sub="summary" onclick="switchOverviewSub('summary')">サマリー</button>
+      <button type="button" class="frv-subtab-btn" data-sub="honbun" onclick="switchOverviewSub('honbun')">本分析結果</button>
       <button type="button" class="frv-subtab-btn" data-sub="breakdown" onclick="switchOverviewSub('breakdown')">課・班・勤務別</button>
       <button type="button" class="frv-subtab-btn" data-sub="flagged" onclick="switchOverviewSub('flagged')">早めに切り上げていそうな人</button>
       <button type="button" class="frv-subtab-btn" data-sub="allemp" onclick="switchOverviewSub('allemp')">社員ごとの一覧</button>
@@ -125,6 +147,29 @@ app.get('/sales-ai/fare-revision', async (c) => {
         <canvas id="histogram-chart" height="70"></canvas>
       </div>
       <div id="coverage-note" class="frv-coverage"></div>
+    </div>
+
+    <div id="ov-sub-honbun" class="frv-subpanel" style="display:none;">
+      <div class="frv-card">
+        <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 8px;">目標未達率</h3>
+        <div id="honbun-kpi-row" class="frv-kpi-row"></div>
+        <div id="honbun-excluded-note" style="font-size:11px;color:#9ca3af;margin-top:6px;"></div>
+      </div>
+      <div class="frv-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0;">目標未達の社員一覧</h3>
+          <select id="honbun-sort" onchange="renderHonbunEmpTable()" class="frv-no-print" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+            <option value="growth-asc">1日あたり売上の伸び 低い順</option>
+            <option value="return-earlier">帰る時間が早くなった順</option>
+            <option value="return-after-asc">後の帰る時刻 早い順</option>
+          </select>
+        </div>
+        <table class="frv-table">
+          <thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th id="th-honbun-before">前の1日平均売上</th><th id="th-honbun-after">後の1日平均売上</th><th id="th-honbun-return-before">前の帰る時刻</th><th id="th-honbun-return-after">後の帰る時刻</th></tr></thead>
+          <tbody id="honbun-emp-tbody"></tbody>
+        </table>
+        <div id="honbun-emp-empty" style="display:none;font-size:12px;color:#9ca3af;padding:10px 0;">該当する人はいません。</div>
+      </div>
     </div>
 
     <div id="ov-sub-breakdown" class="frv-subpanel" style="display:none;">
@@ -228,11 +273,13 @@ app.get('/sales-ai/fare-revision', async (c) => {
     </div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
 <script>
 const ADMIN_PATH = '${ADMIN_PATH}';
 let overviewData = null;
+let honbunData = null;
 let currentEmpId = null;
+let currentEmpWageCategory = null;
 let histogramChart = null;
 let empChart = null;
 let currentPeriods = null;
@@ -253,7 +300,44 @@ function pctColor(v) {
   if (v >= 100) return '#b45309';
   return '#dc2626';
 }
+function returnTimeToMin(s) {
+  if (!s || typeof s !== 'string') return null;
+  const m = s.match(/^(\\d{1,2}):(\\d{2})/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+// 「後の帰る時刻 − 前の帰る時刻」を分で返す。マイナスなら帰る時間が早くなった。日跨ぎ帰庫の大きな逆転は補正。
+function returnTimeDiffMin(e) {
+  const b = returnTimeToMin(e && e.before && e.before.avgReturnTime);
+  let a = returnTimeToMin(e && e.after && e.after.avgReturnTime);
+  if (b === null || a === null) return null;
+  if (a < b - 12 * 60) a += 24 * 60;
+  return a - b;
+}
 const CATEGORY_LABELS = { above: '目標達成', met: '伸びたが未達', below: '減少', insufficient_data: 'データ不足' };
+
+// fetch + JSON パース。サーバーがエラーページ（HTML）を返したとき、素の r.json() だと
+// Safari で「SyntaxError: The string did not match the expected pattern.」となって原因が
+// 分からないので、共通の分かりやすいメッセージに変換する（詳細は console に出す）。
+function fetchJsonOrThrow(url) {
+  var MSG = '読み込みに失敗しました。時間をおいて再度お試しください。';
+  return fetch(url).catch(function() {
+    throw new Error(MSG);
+  }).then(function(r) {
+    return r.text().then(function(text) {
+      if (!r.ok || (text && text.charAt(0) !== '{' && text.charAt(0) !== '[')) {
+        console.error('fare-revision fetch failed', r.status, (text || '').slice(0, 300));
+        throw new Error(MSG);
+      }
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        console.error('fare-revision JSON parse failed', (text || '').slice(0, 300));
+        throw new Error(MSG);
+      }
+    });
+  });
+}
 
 function toggleAdvanced() {
   document.getElementById('advanced-panel').classList.toggle('open');
@@ -262,12 +346,40 @@ function toggleAdvanced() {
 function toCamel(id) {
   return id.replace(/-([a-z])/g, function(_, ch) { return ch.toUpperCase(); });
 }
+function onCompareModeChange() {
+  const mode = document.getElementById('compare-mode').value;
+  document.getElementById('revision-field-start').style.display = mode === 'yoyMonth' ? 'none' : '';
+  document.getElementById('revision-field-end').style.display = mode === 'yoyMonth' ? 'none' : '';
+  document.getElementById('yoy-field-year').style.display = mode === 'yoyMonth' ? '' : 'none';
+  document.getElementById('yoy-field-month').style.display = mode === 'yoyMonth' ? '' : 'none';
+  document.getElementById('yoy-note').style.display = mode === 'yoyMonth' ? '' : 'none';
+}
+
+function populateYoyYearOptions() {
+  const sel = document.getElementById('yoy-year');
+  const nowYear = new Date().getFullYear();
+  let html = '';
+  for (let y = nowYear; y >= nowYear - 3; y--) {
+    html += '<option value="' + y + '">' + y + '年</option>';
+  }
+  sel.innerHTML = html;
+  sel.value = String(nowYear);
+  document.getElementById('yoy-month').value = String(new Date().getMonth() + 1);
+}
+
 function buildQueryString() {
   const params = new URLSearchParams();
-  ['after-start', 'after-end'].forEach(function(id) {
-    const el = document.getElementById(id);
-    if (el && el.value) params.set(toCamel(id), el.value);
-  });
+  const compareMode = document.getElementById('compare-mode').value;
+  params.set('compareMode', compareMode);
+  if (compareMode === 'yoyMonth') {
+    params.set('yoyYear', document.getElementById('yoy-year').value);
+    params.set('yoyMonth', document.getElementById('yoy-month').value);
+  } else {
+    ['after-start', 'after-end'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el && el.value) params.set(toCamel(id), el.value);
+    });
+  }
   const division = document.getElementById('division-filter').value;
   if (division) params.set('division', division);
   const team = document.getElementById('team-filter').value;
@@ -291,7 +403,9 @@ function buildQueryString() {
 
 function applyFilters() {
   loadOverview();
-  if (currentEmpId) loadEmployee(currentEmpId);
+  honbunData = null;
+  if (currentOverviewSub === 'honbun') loadHonbunResult();
+  if (currentEmpId) loadEmployee(currentEmpId, currentEmpWageCategory);
 }
 
 function switchView(view) {
@@ -303,12 +417,117 @@ function switchView(view) {
 
 function switchOverviewSub(name) {
   currentOverviewSub = name;
-  ['summary', 'breakdown', 'flagged', 'allemp'].forEach(function(n) {
+  ['summary', 'honbun', 'breakdown', 'flagged', 'allemp'].forEach(function(n) {
     document.getElementById('ov-sub-' + n).style.display = n === name ? '' : 'none';
   });
   document.querySelectorAll('#ov-subtabnav .frv-subtab-btn').forEach(function(btn) {
     btn.classList.toggle('active', btn.dataset.sub === name);
   });
+  if (name === 'honbun' && !honbunData) loadHonbunResult();
+}
+
+function renderHonbunResult(data) {
+  const c = data.counts;
+  const total = c.above + c.met + c.below + c.insufficientData;
+  const achieved = c.above;
+  const notAchieved = c.met + c.below;
+  const judgedTotal = achieved + notAchieved;
+  const items = [
+    { label: '対象人数', val: total + '名' },
+    { label: '目標達成', val: achieved + '名', sub: judgedTotal ? Math.round(achieved / judgedTotal * 1000) / 10 + '%' : '' },
+    { label: '目標未達', val: notAchieved + '名', sub: judgedTotal ? Math.round(notAchieved / judgedTotal * 1000) / 10 + '%' : '' },
+    { label: '　内訳：伸びているが未達', val: c.met + '名' },
+    { label: '　内訳：売上が下がった（100%未満）', val: c.below + '名' },
+    { label: 'データが少なくて判定できない人', val: c.insufficientData + '名' },
+  ];
+  let html = '';
+  items.forEach(function(it) {
+    html += '<div class="frv-kpi"><div class="frv-kpi-label">' + escHtmlJs(it.label) + '</div><div class="frv-kpi-val">' + escHtmlJs(it.val) + '</div>' +
+      (it.sub ? '<div class="frv-kpi-sub">判定対象の' + escHtmlJs(it.sub) + '</div>' : '') + '</div>';
+  });
+  document.getElementById('honbun-kpi-row').innerHTML = html;
+  document.getElementById('honbun-excluded-note').textContent =
+    data.excludedCount ? '※ 伸び率95%未満（病気・休職等による著しい落ち込みとみなす）の' + data.excludedCount + '名を集計対象から除外しています。' : '';
+
+  document.getElementById('th-honbun-before').textContent = data.periods.before.label + 'の1日平均売上';
+  document.getElementById('th-honbun-after').textContent = data.periods.after.label + 'の1日平均売上';
+  document.getElementById('th-honbun-return-before').textContent = data.periods.before.label + 'の帰る時刻';
+  document.getElementById('th-honbun-return-after').textContent = data.periods.after.label + 'の帰る時刻';
+  renderHonbunEmpTable();
+}
+
+function renderHonbunEmpTable() {
+  if (!honbunData) return;
+  const sortEl = document.getElementById('honbun-sort');
+  const sort = sortEl ? sortEl.value : 'growth-asc';
+  const byGrowthAsc = function(a, b) { return (a.salesGrowthPct ?? -Infinity) - (b.salesGrowthPct ?? -Infinity); };
+  const list = honbunData.employees
+    .filter(function(e) { return e.achievementCategory === 'met' || e.achievementCategory === 'below'; })
+    .slice();
+  list.sort(function(a, b) {
+    if (sort === 'return-earlier') {
+      const da = returnTimeDiffMin(a), db = returnTimeDiffMin(b);
+      if (da === null && db === null) return byGrowthAsc(a, b);
+      if (da === null) return 1;
+      if (db === null) return -1;
+      return da - db;
+    }
+    if (sort === 'return-after-asc') {
+      const ta = returnTimeToMin(a.after && a.after.avgReturnTime);
+      const tb = returnTimeToMin(b.after && b.after.avgReturnTime);
+      if (ta === null && tb === null) return byGrowthAsc(a, b);
+      if (ta === null) return 1;
+      if (tb === null) return -1;
+      return ta - tb;
+    }
+    return byGrowthAsc(a, b);
+  });
+  const emptyEl = document.getElementById('honbun-emp-empty');
+  emptyEl.textContent = '該当する人はいません。';
+  emptyEl.style.display = list.length ? 'none' : '';
+  let tblHtml = '';
+  list.forEach(function(e) {
+    const diff = returnTimeDiffMin(e);
+    const earlier = diff !== null && diff <= -5;
+    const afterCell = earlier
+      ? '<td><span style="background:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap;">' + (e.after.avgReturnTime ?? '—') + '<span style="font-weight:400;font-size:11px;"> ' + Math.abs(diff) + '分早い</span></span></td>'
+      : '<td>' + (e.after.avgReturnTime ?? '—') + '</td>';
+    const down = e.achievementCategory === 'below';
+    const growthCell = down
+      ? '<td><span style="background:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap;">' + fmtPct(e.salesGrowthPct) + '<span style="font-weight:400;font-size:11px;"> 減少</span></span></td>'
+      : '<td style="color:' + pctColor(e.salesGrowthPct) + ';font-weight:700;">' + fmtPct(e.salesGrowthPct) + '</td>';
+    tblHtml += '<tr>' +
+      '<td>' + escHtmlJs(e.empName) + '</td>' +
+      '<td>' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</td>' +
+      '<td>' + (e.wageCategoryLabel ? escHtmlJs(e.wageCategoryLabel) : '—') + '</td>' +
+      growthCell +
+      '<td>' + fmtYen(e.before.avgPerDuty) + '</td>' +
+      '<td>' + fmtYen(e.after.avgPerDuty) + '</td>' +
+      '<td>' + (e.before.avgReturnTime ?? '—') + '</td>' +
+      afterCell +
+      '</tr>';
+  });
+  document.getElementById('honbun-emp-tbody').innerHTML = tblHtml;
+}
+
+function loadHonbunResult() {
+  const params = new URLSearchParams(buildQueryString());
+  params.set('achievementThresholdPct', '103');
+  params.set('excludeBelowGrowthPct', '95');
+  const emptyEl = document.getElementById('honbun-emp-empty');
+  emptyEl.textContent = '読み込み中…';
+  emptyEl.style.display = '';
+  fetchJsonOrThrow('/api/fare-revision/overview?' + params.toString())
+    .then(function(data) {
+      honbunData = data;
+      renderHonbunResult(data);
+    })
+    .catch(function(err) {
+      honbunData = null;
+      document.getElementById('honbun-emp-tbody').innerHTML = '';
+      emptyEl.textContent = String((err && err.message) || err);
+      emptyEl.style.display = '';
+    });
 }
 
 function switchAllEmpCategory(cat) {
@@ -337,11 +556,13 @@ function printCurrentView() {
     if (!currentEmpId) { alert('先に個人ビューで社員を選んでください。'); return; }
     params.set('view', 'individual');
     params.set('empId', currentEmpId);
+    if (currentEmpWageCategory) params.set('wageCategory', currentEmpWageCategory);
     // 個人レポートはサマリー＋判定理由をまとめた1枚のレポートとして印刷する（日ごとの記録はコピー用途では不要なので対象外）
   } else {
     params.set('view', 'overview');
     params.set('section', currentOverviewSub);
     if (currentOverviewSub === 'allemp') params.set('category', currentAllEmpCategory);
+    if (currentOverviewSub === 'honbun') { params.set('achievementThresholdPct', '103'); params.set('excludeBelowGrowthPct', '95'); }
   }
   window.open(ADMIN_PATH + '/sales-ai/fare-revision/print?' + params.toString(), '_blank');
 }
@@ -420,7 +641,7 @@ function renderFlaggedTable(flagged) {
   document.getElementById('flagged-empty').style.display = flagged.length ? 'none' : '';
   let html = '';
   flagged.forEach(function(e) {
-    html += '<tr class="frv-row-clickable" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\')">' +
+    html += '<tr class="frv-row-clickable" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\', \\'' + (e.wageCategory || '') + '\\')">' +
       '<td>' + empLabel(e) + '</td>' +
       '<td>' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</td>' +
       '<td>' + fmtYen(e.before.avgPerDuty) + '</td>' +
@@ -456,7 +677,7 @@ function renderAllEmployeesTable() {
   document.getElementById('all-emp-empty').style.display = list.length ? 'none' : '';
   let html = '';
   list.forEach(function(e) {
-    html += '<tr class="frv-row-clickable" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\')">' +
+    html += '<tr class="frv-row-clickable" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\', \\'' + (e.wageCategory || '') + '\\')">' +
       '<td>' + escHtmlJs(e.empName) + '</td>' +
       '<td>' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</td>' +
       '<td>' + (e.wageCategoryLabel ? escHtmlJs(e.wageCategoryLabel) : '—') + '</td>' +
@@ -476,14 +697,13 @@ function renderCoverageNote(cov) {
 
 function populateDatalist(employees) {
   let html = '';
-  employees.forEach(function(e) { html += '<option data-id="' + e.empId + '" value="' + escHtmlJs(e.empName) + '"></option>'; });
+  employees.forEach(function(e) { html += '<option data-id="' + e.empId + '" data-category="' + (e.wageCategory || '') + '" value="' + escHtmlJs(e.empName) + '"></option>'; });
   document.getElementById('emp-datalist').innerHTML = html;
 }
 
 function loadOverview() {
   document.getElementById('loading').style.display = '';
-  fetch('/api/fare-revision/overview?' + buildQueryString())
-    .then(function(r) { return r.json(); })
+  fetchJsonOrThrow('/api/fare-revision/overview?' + buildQueryString())
     .then(function(data) {
       overviewData = data;
       currentPeriods = data.periods;
@@ -502,7 +722,9 @@ function loadOverview() {
       populateDatalist(data.employees);
     })
     .catch(function(err) {
-      document.getElementById('loading').textContent = '読み込みに失敗しました: ' + err;
+      const el = document.getElementById('loading');
+      el.style.display = '';
+      el.textContent = String((err && err.message) || err);
     });
 }
 
@@ -511,15 +733,16 @@ function onIndividualSearchInput() {
   const val = input.value;
   const opts = document.getElementById('emp-datalist').querySelectorAll('option');
   for (let i = 0; i < opts.length; i++) {
-    if (opts[i].value === val) { selectEmployee(Number(opts[i].dataset.id), val); return; }
+    if (opts[i].value === val) { selectEmployee(Number(opts[i].dataset.id), val, opts[i].dataset.category || null); return; }
   }
 }
 
-function selectEmployee(empId, empName) {
+function selectEmployee(empId, empName, wageCategory) {
   currentEmpId = empId;
+  currentEmpWageCategory = wageCategory || null;
   switchView('individual');
   document.getElementById('individual-search').value = empName;
-  loadEmployee(empId);
+  loadEmployee(empId, currentEmpWageCategory);
 }
 
 function laborHoursSourceLabel(s) {
@@ -593,11 +816,12 @@ function renderEmployeeDaily(dailyBefore, dailyAfter, periods) {
   document.getElementById('emp-daily-tbody').innerHTML = html;
 }
 
-function loadEmployee(empId) {
+function loadEmployee(empId, wageCategory) {
   document.getElementById('individual-empty').style.display = 'none';
   document.getElementById('individual-content').style.display = 'none';
-  fetch('/api/fare-revision/employee/' + empId + '?' + buildQueryString())
-    .then(function(r) { return r.json(); })
+  const params = new URLSearchParams(buildQueryString());
+  if (wageCategory) params.set('wageCategory', wageCategory);
+  fetchJsonOrThrow('/api/fare-revision/employee/' + empId + '?' + params.toString())
     .then(function(data) {
       if (data.error) { document.getElementById('individual-empty').textContent = data.error; document.getElementById('individual-empty').style.display = ''; return; }
       document.getElementById('individual-content').style.display = '';
@@ -605,9 +829,16 @@ function loadEmployee(empId) {
       renderEmployeeChart(data.dailyBefore, data.dailyAfter, data.periods);
       renderEmployeeReasoning(data.comparison.reasoning);
       renderEmployeeDaily(data.dailyBefore, data.dailyAfter, data.periods);
+    })
+    .catch(function(err) {
+      const el = document.getElementById('individual-empty');
+      el.textContent = String((err && err.message) || err);
+      el.style.display = '';
     });
 }
 
+populateYoyYearOptions();
+onCompareModeChange();
 loadOverview();
 </script>`;
 
@@ -633,8 +864,8 @@ app.get('/sales-ai/fare-revision/print', async (c) => {
     return c.html(renderFareRevisionEmployeePrintPage(result, printedAtLabel, backHref));
   }
 
-  const section = (['summary', 'breakdown', 'flagged', 'allemp'] as const).includes(c.req.query('section') as any)
-    ? (c.req.query('section') as 'summary' | 'breakdown' | 'flagged' | 'allemp') : 'summary';
+  const section = (['summary', 'honbun', 'breakdown', 'flagged', 'allemp'] as const).includes(c.req.query('section') as any)
+    ? (c.req.query('section') as 'summary' | 'honbun' | 'breakdown' | 'flagged' | 'allemp') : 'summary';
   const category = (['above', 'met', 'below', 'insufficient_data'] as const).includes(c.req.query('category') as any)
     ? (c.req.query('category') as 'above' | 'met' | 'below' | 'insufficient_data') : null;
   const result = await computeFareRevisionOverview(c.env.DB, c.req.query());
@@ -654,7 +885,8 @@ app.get('/settings/fare-revision-guide', (c) => {
   </div>
 
   <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">① まず「前」と「後」の期間を決める</h3>
-  <p>この画面は運賃改定の前後の比較専用です。「後」＝4月20日〜今日（「運賃改定後の期間」で調整可）。「後」が仮に100日間なら、「前」も同じ100日間（4月19日からさかのぼって100日間）にします。日数をそろえないと、単純に日数が多いほうが売上合計も大きくなってしまい、フェアな比較になりません。</p>
+  <p>「比較のしかた」で2つのモードを選べます。既定は運賃改定の前後比較専用です。「後」＝4月20日〜今日（「運賃改定後の期間」で調整可）。「後」が仮に100日間なら、「前」も同じ100日間（4月19日からさかのぼって100日間）にします。日数をそろえないと、単純に日数が多いほうが売上合計も大きくなってしまい、フェアな比較になりません。</p>
+  <p style="color:#4b5563;">もう1つの「前年の同じ月と比較」モードでは、日数をそろえる代わりに、去年と今年の同じ月同士（例: 2025年4月度と2026年4月度、2025年7月度と2026年7月度）を比べます。運賃改定日をまたがない月同士の比較にも使え、曜日の並びや季節のイベント（お盆・年末年始など）の影響をある程度そろえた比較ができます。まだ終わっていない月を選ぶと、今日までのデータで計算します。</p>
   <p style="color:#4b5563;">なお、「前」の期間が始まった時点でまだ入社していなかった人（入社が改定間近〜改定後の新人など）は、この分析の対象には含めていません。そのような人を含めてしまうと、単に在籍日数が「前」と「後」で大きく違うだけで、売上の伸び率が数百〜千数百%という運賃改定とは無関係な数字になってしまい、誤解を招くためです。去年の同じ時期との比較や、自分で自由に期間を指定した単純な比較は「AI売上分析」の別タブ「期間比較」で行えます。</p>
 
   <h3 style="font-size:15px;color:#1a3a5c;border-bottom:2px solid #e5e7eb;padding-bottom:6px;margin-top:28px;">② 1日あたり何時間働いたかを出す</h3>

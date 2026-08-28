@@ -49,7 +49,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/notifications/,        'settings.notifications'],
   [/^\/settings\/offices/,              'settings.offices'],
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
-  [/^\/settings\/documents/,            'settings.documents'],
+  // データセンター（資料センター拡張）: 資料/社員CSV/点検写真AI/乗務員シフトPDFの入口。各タブの表示は data-perm-key で個別制御
+  [/^\/settings\/documents/,            'settings.documents|staff|inspection|crew-shift'],
   [/^\/settings\/tutorial/,             'settings.tutorial'],
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],

@@ -287,7 +287,9 @@ export function layout(title: string, content: string, activePage: string = '', 
       </a>
     </nav>
     <div style="padding:12px 0;border-top:1px solid rgba(255,255,255,0.1);">
-      <a href="${ADMIN_PATH}/logout" class="nav-item" style="color:#fca5a5;">ログアウト</a>
+      <form method="POST" action="${ADMIN_PATH}/logout" style="margin:0;">
+        <button type="submit" class="nav-item" style="color:#fca5a5;background:none;border:none;width:100%;text-align:left;font:inherit;cursor:pointer;">ログアウト</button>
+      </form>
     </div>
   </div>
 

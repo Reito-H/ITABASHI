@@ -10,7 +10,6 @@ import { getAdminPermissions } from '../permissions';
 import { todayJST } from '../benten';
 import { loadTimeMasterMap, computeDailyAlerts, type CarAssignmentForAlert } from '../utils/dispatch_alerts';
 import { getTantoshaPriorityMap } from '../utils/tantosha_lookup';
-import { PDF_PARSERS_CLIENT_JS_BASE64 } from '../assets/pdf_parsers_client_bundle';
 import { vehicleRotationPage, type RotationVehicleRow, type RotationCell, type RotationAlertLevel } from '../html/vehicle_rotation';
 import type { DispatchLimitInfo as RotationLimitInfo } from '../html/dispatch_board';
 
@@ -335,7 +334,9 @@ app.post('/api/dispatch/time-master/save', async (c) => {
 // PDF解析（座標マッチング等の重い処理）はサーバーではなくブラウザ側で実行する。
 // 配車PDF・乗務員シフトPDF・退職者名簿PDFの3機能で共通バンドルを配信する（unpdfの重複を避けるため）。
 // src/utils/dispatch_pdf.ts を編集したら `npm run build:pdf-parsers-bundle` で再生成すること。
-app.get('/api/dispatch/pdf-parser.js', (c) => {
+app.get('/api/dispatch/pdf-parser.js', async (c) => {
+  // 2.1MBのbase64定数。コールドスタートのCPU予算を圧迫するため、この配信時のみ動的import。
+  const { PDF_PARSERS_CLIENT_JS_BASE64 } = await import('../assets/pdf_parsers_client_bundle');
   const bytes = Uint8Array.from(atob(PDF_PARSERS_CLIENT_JS_BASE64), (ch) => ch.charCodeAt(0));
   return new Response(bytes, {
     headers: {

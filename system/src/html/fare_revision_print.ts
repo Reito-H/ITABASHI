@@ -36,6 +36,8 @@ export const FARE_REVISION_PRINT_CSS = `
   table.fp-table tr { break-inside: avoid; }
   .fp-flag { color: #16a34a; font-weight: 700; }
   .fp-drop { color: #dc2626; font-weight: 700; }
+  .fp-early { color: #b91c1c; font-weight: 700; background: #fee2e2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .fp-down { color: #b91c1c; font-weight: 700; background: #fee2e2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
   .fp-reasoning { list-style: none; padding: 0; margin: 0; font-size: 11.5px; line-height: 1.8; }
   .fp-reasoning li { padding: 6px 10px; background: #f8fafc; border-radius: 6px; margin-bottom: 6px; border: 1px solid #cbd5e1; break-inside: avoid; }
@@ -58,6 +60,19 @@ function pctClass(v: number | null): string {
   if (v >= 110) return 'fp-flag';
   if (v < 100) return 'fp-drop';
   return '';
+}
+function returnTimeToMin(s: string | null): number | null {
+  if (!s) return null;
+  const m = /^(\d{1,2}):(\d{2})/.exec(s);
+  return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : null;
+}
+// 「後の帰る時刻 − 前の帰る時刻」を分で返す。マイナスなら帰る時間が早くなった。
+function returnTimeDiffMin(e: EmployeeComparison): number | null {
+  const b = returnTimeToMin(e.before.avgReturnTime);
+  let a = returnTimeToMin(e.after.avgReturnTime);
+  if (b === null || a === null) return null;
+  if (a < b - 12 * 60) a += 24 * 60;
+  return a - b;
 }
 const CATEGORY_LABELS: Record<EmployeeComparison['achievementCategory'], string> = {
   above: '目標達成', met: '伸びたが未達', below: '減少', insufficient_data: 'データ不足',
@@ -103,7 +118,7 @@ function condLinesFromOverview(data: FareRevisionOverviewResult): string[] {
 }
 
 export function renderFareRevisionOverviewPrintPage(
-  section: 'summary' | 'breakdown' | 'flagged' | 'allemp',
+  section: 'summary' | 'honbun' | 'breakdown' | 'flagged' | 'allemp',
   data: FareRevisionOverviewResult,
   printedAtLabel: string,
   backHref: string,
@@ -132,6 +147,51 @@ export function renderFareRevisionOverviewPrintPage(
     }</tbody></table>`;
     const cov = data.dataCoverage;
     body += `<div style="font-size:10.5px;color:#6b7280;">労働時間データの内訳（対象の全${cov.totalRecordDays}日のうち）: 実際の記録 ${cov.actualLaborHoursDays}日 ／ 出退庫の時刻から計算 ${cov.estimatedLaborHoursDays}日 ／ 記録なし ${cov.missingLaborHoursDays}日</div>`;
+  } else if (section === 'honbun') {
+    sectionLabel = '本分析結果';
+    const achieved = data.counts.above;
+    const notAchieved = data.counts.met + data.counts.below;
+    const judgedTotal = achieved + notAchieved;
+    const rows: Array<[string, string]> = [
+      ['対象人数', total + '名'],
+      ['目標達成', achieved + '名' + (judgedTotal ? `（判定対象の${Math.round(achieved / judgedTotal * 1000) / 10}%）` : '')],
+      ['目標未達', notAchieved + '名' + (judgedTotal ? `（判定対象の${Math.round(notAchieved / judgedTotal * 1000) / 10}%）` : '')],
+      ['　内訳：伸びているが未達', data.counts.met + '名'],
+      ['　内訳：売上が下がった（100%未満）', data.counts.below + '名'],
+      ['データが少なくて判定できない人', data.counts.insufficientData + '名'],
+    ];
+    body += `<table class="fp-kpi-table">${rows.map(([l, v]) => `<tr><td class="label">${escHtml(l)}</td><td class="val">${escHtml(v)}</td></tr>`).join('')}</table>`;
+    if (data.excludedCount) {
+      body += `<div style="font-size:10.5px;color:#6b7280;margin-top:6px;">※ 伸び率95%未満（病気・休職等による著しい落ち込みとみなす）の${data.excludedCount}名を集計対象から除外しています。</div>`;
+    }
+    const honbunList = data.employees
+      .filter(e => e.achievementCategory === 'met' || e.achievementCategory === 'below')
+      .slice()
+      .sort((a, b) => {
+        // 帰る時間が早くなった人を上に、次いで売上の伸びが低い順
+        const da = returnTimeDiffMin(a);
+        const db = returnTimeDiffMin(b);
+        const ea = da !== null && da <= -5 ? da : Infinity;
+        const eb = db !== null && db <= -5 ? db : Infinity;
+        if (ea !== eb) return ea - eb;
+        return (a.salesGrowthPct ?? -Infinity) - (b.salesGrowthPct ?? -Infinity);
+      });
+    body += `<div class="fp-section-title">目標未達の社員一覧（帰る時間が早くなった人を上に表示）</div>`;
+    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>${escHtml(data.periods.before.label)}の帰る時刻</th><th>${escHtml(data.periods.after.label)}の帰る時刻</th></tr></thead><tbody>${
+      honbunList.length
+        ? honbunList.map(e => {
+            const d = returnTimeDiffMin(e);
+            const early = d !== null && d <= -5;
+            const afterTd = early
+              ? `<td class="fp-early">${e.after.avgReturnTime ?? '—'}（${Math.abs(d)}分早い）</td>`
+              : `<td>${e.after.avgReturnTime ?? '—'}</td>`;
+            const growthTd = e.achievementCategory === 'below'
+              ? `<td class="fp-down">${pct(e.salesGrowthPct)} 減少</td>`
+              : `<td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td>`;
+            return `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.wageCategoryLabel ? escHtml(e.wageCategoryLabel) : '—'}</td>${growthTd}<td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${e.before.avgReturnTime ?? '—'}</td>${afterTd}</tr>`;
+          }).join('')
+        : `<tr><td colspan="8" style="color:#9ca3af;">該当する人はいません。</td></tr>`
+    }</tbody></table>`;
   } else if (section === 'breakdown') {
     sectionLabel = '課・班・勤務別';
     body += `<div class="fp-section-title">課ごとの1日あたり売上の伸び（平均）</div>`;

@@ -41,6 +41,9 @@ export type ForecastDay = {
   isBeforeLongWeekend: boolean;
   isAfterLongWeekend: boolean;
   appliedFactors: Array<{ label: string; diffPct: number }>;
+  actual: number | null;       // 実績の平均日商（実績データがある日のみ）
+  diffAmount: number | null;   // 実績 - 予想（円）
+  diffPct: number | null;      // 実績 - 予想（%）
 };
 
 export type ForecastCalendarResult = {
@@ -109,6 +112,9 @@ export function buildForecastCalendar(historical: DailyAggregate[], targetYear: 
   }
   const factorEffectByKey = new Map(factorEffects.map(f => [f.key, f]));
 
+  // 実績（日別平均日商）。同じ集計データを予想日の実績表示にも流用する
+  const actualByDate = new Map(historical.map(h => [h.date, h.avgAmount]));
+
   // 予想日の組み立て
   const days: ForecastDay[] = daysInYear(targetYear).map(date => {
     const f = getDayFactors(date);
@@ -130,12 +136,17 @@ export function buildForecastCalendar(historical: DailyAggregate[], targetYear: 
     const rawScore = overallMean && overallMean > 0 ? (predicted - overallMean) / overallMean : 0;
     const colorScore = Math.max(-1, Math.min(1, rawScore / 0.3)); // ±30%を色の振り切り幅とする
 
+    const rawActual = actualByDate.get(date);
+    const actual = rawActual !== undefined ? Math.round(rawActual) : null;
+    const diffAmount = actual !== null ? actual - predicted : null;
+    const diffPct = actual !== null && predicted > 0 ? Math.round(((actual - predicted) / predicted) * 1000) / 10 : null;
+
     return {
       date, weekday: f.weekday, weekdayLabel: f.weekdayLabel,
       predicted, baseWeekdayAvg: Math.round(base), colorScore,
       holidayName: f.holidayName, longHolidayName: f.longHolidayName,
       isBeforeLongWeekend: f.isBeforeLongWeekend, isAfterLongWeekend: f.isAfterLongWeekend,
-      appliedFactors,
+      appliedFactors, actual, diffAmount, diffPct,
     };
   });
 

@@ -9,6 +9,11 @@ import { newcomerMonitorPage } from '../html/newcomer_monitor';
 
 const app = new Hono<{ Bindings: Env }>();
 
+// /api/public/newcomer-intros・/api/public/newcomer-photo は完全公開のためパスさえ知れば誰でも叩けてしまう。
+// モニターページの秘密パス自体をトークンとして要求することで、モニターURLを知らない第三者からのアクセスを防ぐ
+// （モニターページ本体はこのモジュールの外に秘密パスを漏らさないので、URL方式と同じ強度を維持できる）
+const MONITOR_TOKEN = MONITOR_NEWCOMERS_PATH.replace(/^\//, '');
+
 // 新人紹介カードを何秒ごとに次のカードへ自動送りするか（新人紹介専用モニター・事故モニターの新人紹介表示 共通）
 export const CARD_INTERVAL_KEY = 'newcomer_card_interval_seconds';
 export const DEFAULT_CARD_INTERVAL_SECONDS = 8;
@@ -57,7 +62,7 @@ async function getForceRefreshUpdatedAt(db: D1Database): Promise<string> {
   }
 }
 
-app.get(MONITOR_NEWCOMERS_PATH, (c) => c.html(newcomerMonitorPage()));
+app.get(MONITOR_NEWCOMERS_PATH, (c) => c.html(newcomerMonitorPage(MONITOR_TOKEN)));
 
 app.get('/api/public/newcomer-monitor-refresh-flag', async (c) => {
   return c.json({ updatedAt: await getForceRefreshUpdatedAt(c.env.DB) });
@@ -83,11 +88,12 @@ export async function fetchPublicNewcomerIntros(db: D1Database): Promise<PublicN
     division: r.team != null ? Math.ceil(r.team / 2) : null,
     team: r.team,
     comment: r.comment,
-    photoUrl: r.photo_r2_key ? `/api/public/newcomer-photo/${r.id}` : null,
+    photoUrl: r.photo_r2_key ? `/api/public/newcomer-photo/${r.id}?t=${encodeURIComponent(MONITOR_TOKEN)}` : null,
   }));
 }
 
 app.get('/api/public/newcomer-intros', async (c) => {
+  if (c.req.query('t') !== MONITOR_TOKEN) return c.json({ error: 'Not found' }, 404);
   const [intros, cardIntervalSeconds] = await Promise.all([
     fetchPublicNewcomerIntros(c.env.DB),
     getNewcomerCardIntervalSeconds(c.env.DB),
@@ -96,6 +102,7 @@ app.get('/api/public/newcomer-intros', async (c) => {
 });
 
 app.get('/api/public/newcomer-photo/:id', async (c) => {
+  if (c.req.query('t') !== MONITOR_TOKEN) return c.json({ error: 'Not found' }, 404);
   const id = parseInt(c.req.param('id'), 10);
   const row = await c.env.DB.prepare('SELECT photo_r2_key, photo_mime_type FROM newcomer_intros WHERE id = ?')
     .bind(id).first<{ photo_r2_key: string | null; photo_mime_type: string | null }>();

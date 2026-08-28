@@ -1,7 +1,7 @@
 // AI売上分析（全社員横断）— 左サイドバー独立タブ。旧 社員管理→売上分析(全社) サブタブを統合・置き換え。
 // 「AI」は表示名のみで、外部AI/LLM APIへの通信は一切行わない（utils/sales_trend_analysis.ts 参照）。
 import { Hono } from 'hono';
-import { layout, escHtml } from '../html/layout';
+import { layout } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 import { computeEmployeeAnalytics, loadDrivingRiskSettings, type EmployeeAnalytics } from './api/sales_ai';
@@ -436,7 +436,7 @@ function renderTable() {
     return '<tr style="border-bottom:1px solid #f3f4f6;">' +
       '<td style="padding:7px 8px;"><input type="checkbox" class="emp-check" data-id="' + e.empId + '" ' + (selectedIds.has(e.empId) ? 'checked' : '') + ' onchange="toggleOne(' + e.empId + ', this.checked)"></td>' +
       '<td style="padding:7px 8px;color:#9ca3af;">' + (i + 1) + '</td>' +
-      '<td style="padding:7px 8px;"><a href="' + ADMIN_PATH + '/sales-ai/employee/' + e.empId + '" style="color:#2563eb;text-decoration:none;font-weight:600;">' + escHtmlJs(e.name) + '</a></td>' +
+      '<td style="padding:7px 8px;"><a href="' + ADMIN_PATH + '/crew-portal/employee/' + e.empId + '?tab=insights" style="color:#2563eb;text-decoration:none;font-weight:600;">' + escHtmlJs(e.name) + '</a></td>' +
       '<td style="padding:7px 8px;color:#6b7280;">' + (e.division ?? '—') + '課' + (e.team ? e.team + '班' : '') + '</td>' +
       '<td style="padding:7px 8px;font-weight:600;">' + e.curTotal.toLocaleString('ja-JP') + '円</td>' +
       '<td style="padding:7px 8px;">' + (e.curAvgPerDuty !== null ? e.curAvgPerDuty.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
@@ -527,10 +527,14 @@ app.get('/sales-ai/forecast-calendar', async (c) => {
   <div id="fc-loading" style="color:#9ca3af;font-size:13px;margin-top:16px;">読み込み中…</div>
   <div id="fc-content" style="display:none;">
     <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <span style="font-size:11.5px;color:#6b7280;">平均より低い</span>
         <div style="width:180px;height:12px;border-radius:6px;background:linear-gradient(90deg,#9ec5f4,#f0efec,#f3b2a0);"></div>
         <span style="font-size:11.5px;color:#6b7280;">平均より高い</span>
+        <span style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:#6b7280;margin-left:8px;">
+          <span style="width:6px;height:6px;border-radius:50%;background:#059669;display:inline-block;"></span>実績が予想以上
+          <span style="width:6px;height:6px;border-radius:50%;background:#dc2626;display:inline-block;margin-left:6px;"></span>実績が予想未満
+        </span>
       </div>
       <div id="fc-overall-mean" style="font-size:11.5px;color:#6b7280;"></div>
     </div>
@@ -619,9 +623,12 @@ function renderMonths() {
       const dateStr = fcYear + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
       const info = byDate.get(dateStr);
       const bg = info ? fcColor(info.colorScore) : '#f3f4f6';
+      const diffDot = info && info.actual !== null
+        ? '<span style="position:absolute;top:2px;right:2px;width:6px;height:6px;border-radius:50%;background:' + (info.diffAmount >= 0 ? '#059669' : '#dc2626') + ';"></span>'
+        : '';
       cells += '<div class="fc-cell" style="background:' + bg + ';" data-date="' + dateStr + '" ' +
         'onmouseenter="fcShowTooltip(event,\\'' + dateStr + '\\')" onmousemove="fcMoveTooltip(event)" onmouseleave="fcHideTooltip()" ' +
-        'onclick="fcSelectDay(\\'' + dateStr + '\\')">' + d + '</div>';
+        'onclick="fcSelectDay(\\'' + dateStr + '\\')">' + d + diffDot + '</div>';
     }
     html.push(
       '<div class="fc-month"><div class="fc-month-title">' + MONTH_LABELS[m] + '</div>' +
@@ -636,9 +643,14 @@ function fcDetailHtml(info) {
     ? info.appliedFactors.map(f => '<span style="display:inline-block;background:#f1f5f9;border-radius:10px;padding:2px 9px;margin:0 6px 6px 0;font-size:11.5px;">' + f.label + ' <b style="color:' + (f.diffPct >= 0 ? '#059669' : '#dc2626') + ';">' + (f.diffPct >= 0 ? '+' : '') + f.diffPct + '%</b></span>').join('')
     : '<span style="color:#9ca3af;">該当する暦要因はありません</span>';
   const holidayLine = info.holidayName ? '祝日: ' + info.holidayName + '　' : (info.longHolidayName ? info.longHolidayName + '　' : '');
+  const actualHtml = info.actual !== null
+    ? '<div class="fc-detail-sub" style="margin-bottom:8px;">実績平均日商: ' + info.actual.toLocaleString('ja-JP') + '円　' +
+      '<b style="color:' + (info.diffAmount >= 0 ? '#059669' : '#dc2626') + ';">差異 ' + (info.diffAmount >= 0 ? '+' : '') + info.diffAmount.toLocaleString('ja-JP') + '円（' + (info.diffPct >= 0 ? '+' : '') + info.diffPct + '%）</b></div>'
+    : '';
   return '<div class="fc-detail-title" style="font-weight:700;font-size:13px;margin-bottom:4px;">' + info.date + '（' + info.weekdayLabel + '曜）</div>' +
     '<div class="fc-detail-sub" style="margin-bottom:6px;">' + holidayLine + '曜日ベース平均: ' + info.baseWeekdayAvg.toLocaleString('ja-JP') + '円</div>' +
     '<div class="fc-detail-headline" style="font-size:15px;font-weight:700;margin-bottom:8px;">予想平均日商: ' + info.predicted.toLocaleString('ja-JP') + '円</div>' +
+    actualHtml +
     '<div>' + factorsHtml + '</div>';
 }
 
@@ -682,273 +694,10 @@ loadForecast();
 
 // ===================================================
 // 個人詳細（トレンド・相対評価・AI分析）
+// 社員カルテ（/crew-portal/employee/:id）の「売上インサイト」タブに統合したため、そちらへリダイレクトする
 // ===================================================
-app.get('/sales-ai/employee/:id', async (c) => {
-  const id = parseInt(c.req.param('id'));
-  if (isNaN(id)) return c.notFound();
-
-  const emp = await c.env.DB.prepare('SELECT id, name, emp_no, division, team FROM employees WHERE id = ?')
-    .bind(id).first<{ id: number; name: string; emp_no: string; division: number | null; team: number | null }>();
-  if (!emp) return c.text('社員が見つかりません', 404);
-
-  const content = `
-<div style="max-width:1000px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-    <a href="${ADMIN_PATH}/sales-ai" style="color:#2563eb;font-size:13px;text-decoration:none;">← AI売上分析（全社）に戻る</a>
-    <a href="${ADMIN_PATH}/sales-ai/employee/${emp.id}/report/print" target="_blank" style="padding:7px 16px;background:#1a3a5c;color:white;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">🖨️ AI分析レポートを印刷</a>
-  </div>
-
-  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0;">${escHtml(emp.name)}（${emp.division ?? '—'}課${emp.team ? emp.team + '班' : ''} ／ ${escHtml(emp.emp_no)}）— AI売上分析</h3>
-      <select id="sales-months" onchange="loadAll()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
-        <option value="3">直近3ヶ月</option>
-        <option value="6" selected>直近6ヶ月</option>
-        <option value="12">直近12ヶ月</option>
-        <option value="24">直近24ヶ月</option>
-      </select>
-    </div>
-    <div id="loading" style="color:#9ca3af;font-size:13px;">読み込み中…</div>
-    <div id="content" style="display:none;">
-
-      <div id="headline-box" style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;font-size:13px;font-weight:700;color:#78350f;margin-bottom:18px;line-height:1.7;"></div>
-
-      <div style="position:relative;height:220px;margin-bottom:24px;"><canvas id="monthly-chart"></canvas></div>
-      <div style="position:relative;height:220px;margin-bottom:24px;"><canvas id="weekday-chart"></canvas></div>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">時間帯別の売上の強さ（1乗務日あたり平均）</h4>
-      <div style="font-size:10.5px;color:#9ca3af;margin-bottom:6px;">乗車ごとの時刻データはないため、出庫〜帰庫時間に売上（税込収入）を均等按分し、乗務日数で割った「1日あたり平均」の推定値です。乗務のない時間帯は表示していません。棒の上の「k」は千円単位です（例：12.3k＝12,300円）。</div>
-      <div id="hourly-sales-peak" style="margin-bottom:8px;"></div>
-      <div id="hourly-sales-bars" style="display:flex;align-items:flex-end;gap:4px;height:130px;padding-top:4px;"></div>
-      <div id="hourly-sales-note" style="font-size:10.5px;color:#9ca3af;margin-top:8px;margin-bottom:24px;"></div>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">暦要因別の営収差</h4>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:24px;">
-        <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
-          <th style="padding:6px 8px;">要因</th><th style="padding:6px 8px;">該当日平均</th><th style="padding:6px 8px;">非該当日平均</th><th style="padding:6px 8px;">差分</th><th style="padding:6px 8px;">件数</th>
-        </tr></thead>
-        <tbody id="factor-tbody"></tbody>
-      </table>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">同条件比較（相対評価）</h4>
-      <div id="relative-box" style="margin-bottom:10px;font-size:12px;color:#374151;"></div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:24px;">
-        <thead><tr style="border-bottom:1px solid #e5e7eb;text-align:left;color:#6b7280;">
-          <th style="padding:6px 8px;">勤務区分</th><th style="padding:6px 8px;">本人平均</th><th style="padding:6px 8px;">他の乗務員平均</th><th style="padding:6px 8px;">差分</th>
-        </tr></thead>
-        <tbody id="duty-tbody"></tbody>
-      </table>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">帰庫時間</h4>
-      <div id="return-time-box" style="margin-bottom:24px;font-size:12px;color:#374151;background:#f9fafb;border-radius:8px;padding:10px 14px;"></div>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">賃金インパクト試算（概算）</h4>
-      <div id="wage-box" style="margin-bottom:8px;font-size:12px;color:#374151;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;line-height:1.7;"></div>
-      <div style="font-size:10.5px;color:#9ca3af;margin-bottom:24px;">※本人の勤務区分に応じた成果手当（歩合部分・公出含む）と、深夜/残業手当の概算です。深夜/残業手当は服務手当・能率手当・段階分け・法定内外区分を省略した簡易計算のため、実際の給与とは異なります。設定値は<a href="${ADMIN_PATH}/settings/wage-estimate" style="color:#2563eb;">賃金試算設定</a>で確認・修正できます。</div>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">最低賃金判定（概算）</h4>
-      <div id="min-wage-box" style="margin-bottom:24px;font-size:12px;color:#374151;"></div>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">労働需要の背景</h4>
-      <div id="labor-demand-box" style="margin-bottom:24px;font-size:12px;color:#374151;background:#f9fafb;border-radius:8px;padding:10px 14px;line-height:1.7;"></div>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">安全運転リスク（参考指標・事故記録ではありません）</h4>
-      <div id="risk-box" style="margin-bottom:24px;font-size:12px;color:#374151;"></div>
-
-      <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">AI分析 — 弱点・改善提案</h4>
-      <div style="display:flex;gap:16px;margin-bottom:16px;">
-        <div style="flex:1;">
-          <div style="font-size:12px;font-weight:700;color:#b91c1c;margin-bottom:6px;">弱点・改善余地</div>
-          <ul id="weak-list" style="margin:0;padding-left:18px;font-size:12px;line-height:1.8;color:#374151;"></ul>
-        </div>
-        <div style="flex:1;">
-          <div style="font-size:12px;font-weight:700;color:#166534;margin-bottom:6px;">強み</div>
-          <ul id="strong-list" style="margin:0;padding-left:18px;font-size:12px;line-height:1.8;color:#374151;"></ul>
-        </div>
-      </div>
-      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">改善提案</div>
-      <ul id="rec-list" style="margin:0;padding-left:18px;font-size:12px;line-height:1.8;color:#374151;"></ul>
-    </div>
-  </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
-<script>
-const EMP_ID = ${emp.id};
-let monthlyChart = null, weekdayChart = null;
-
-async function loadAll() {
-  const months = document.getElementById('sales-months').value;
-  document.getElementById('loading').style.display = '';
-  document.getElementById('content').style.display = 'none';
-  try {
-    const [res1, res2] = await Promise.all([
-      fetch('/api/sales-ai/employee/' + EMP_ID + '?months=' + months),
-      fetch('/api/sales-ai/employee/' + EMP_ID + '/report?months=' + months),
-    ]);
-    const data = await res1.json();
-    const report = await res2.json();
-    if (!res1.ok) { document.getElementById('loading').textContent = data.error || '読み込みに失敗しました'; return; }
-    if (!data.monthly.length) { document.getElementById('loading').textContent = 'この期間の売上データがありません'; return; }
-
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('content').style.display = '';
-
-    document.getElementById('headline-box').textContent = report.content.headline;
-
-    const monthLabels = data.monthly.map(m => m.year + '年' + m.month + '月度');
-    const monthTotals = data.monthly.map(m => m.avgPerDuty);
-    if (monthlyChart) monthlyChart.destroy();
-    monthlyChart = new Chart(document.getElementById('monthly-chart').getContext('2d'), {
-      type: 'bar',
-      data: { labels: monthLabels, datasets: [{ label: '月度平均日商(円)', data: monthTotals, backgroundColor: 'rgba(37,99,235,0.7)', borderRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: '月度平均日商の推移' } }, scales: { y: { beginAtZero: true } } }
-    });
-
-    const wdLabels = data.weekdayBreakdown.map(w => w.label);
-    const wdAvgs = data.weekdayBreakdown.map(w => w.avg || 0);
-    if (weekdayChart) weekdayChart.destroy();
-    weekdayChart = new Chart(document.getElementById('weekday-chart').getContext('2d'), {
-      type: 'bar',
-      data: { labels: wdLabels, datasets: [{ label: '曜日別平均売上(円)', data: wdAvgs, backgroundColor: 'rgba(5,150,105,0.7)', borderRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: '曜日別 平均売上' } }, scales: { y: { beginAtZero: true } } }
-    });
-
-    const worked = data.hourlySales.hourly.filter(h => h.sampleCount > 0);
-    if (!worked.length) {
-      document.getElementById('hourly-sales-peak').innerHTML = '';
-      document.getElementById('hourly-sales-bars').innerHTML = '<div style="color:#9ca3af;font-size:12px;">出庫・帰庫時刻のデータが不足しています</div>';
-      document.getElementById('hourly-sales-note').textContent = '';
-    } else {
-      const hourlyMax = Math.max(...worked.map(h => h.avgAmount), 1);
-      const ranked = worked.slice().sort((a, b) => b.avgAmount - a.avgAmount);
-      const top3 = ranked.slice(0, 3).filter(h => h.avgAmount > 0);
-      const peakHours = new Set(top3.map(h => h.hour));
-      const showAllLabels = worked.length <= 14;
-      document.getElementById('hourly-sales-peak').innerHTML = top3.length
-        ? '<span style="font-size:11px;color:#6b7280;margin-right:6px;">強い時間帯：</span>' + top3.map((h, i) =>
-            '<span style="display:inline-flex;align-items:center;gap:4px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:3px 10px;margin:0 6px 6px 0;font-weight:700;color:#1a3a5c;">' +
-            (i + 1) + '位　' + h.hour + '時台　' + h.avgAmount.toLocaleString('ja-JP') + '円/日</span>'
-          ).join('')
-        : '';
-      document.getElementById('hourly-sales-bars').innerHTML = worked.map(h => {
-        const ratio = h.avgAmount / hourlyMax;
-        const isPeak = peakHours.has(h.hour);
-        const lightness = Math.round(86 - Math.max(0, Math.min(1, ratio)) * 53);
-        return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;min-width:0;">' +
-          '<div style="font-size:10px;font-weight:700;color:' + (isPeak ? '#1a3a5c' : '#475569') + ';line-height:1;height:11px;white-space:nowrap;">' + (h.avgAmount > 0 ? (Math.round(h.avgAmount / 100) / 10) + 'k' : '') + '</div>' +
-          '<div style="width:100%;max-width:22px;border-radius:3px 3px 1px 1px;background:hsl(208,62%,' + lightness + '%);' + (isPeak ? 'box-shadow:0 0 0 2px #1a3a5c inset;' : '') + 'height:' + (h.avgAmount > 0 ? Math.max(Math.round(ratio * 100), 4) : 2) + 'px;"></div>' +
-          '<div style="font-size:9px;color:#94a3b8;">' + (showAllLabels || h.hour % 2 === 0 ? h.hour : '') + '</div>' +
-        '</div>';
-      }).join('');
-      document.getElementById('hourly-sales-note').textContent =
-        '出庫・帰庫時刻データ ' + data.hourlySales.totalCount + '件中 ' + data.hourlySales.coverageCount + '件から算出（乗務のあった' + worked.length + '時間帯のみ表示）';
-    }
-
-    document.getElementById('factor-tbody').innerHTML = data.factorBreakdown.map(f => {
-      if (f.countTrue === 0) return '';
-      const diffColor = f.diffPct === null ? '#9ca3af' : (f.diffPct >= 0 ? '#059669' : '#dc2626');
-      const diffText = f.diffPct === null ? '—' : (f.diffPct >= 0 ? '+' : '') + f.diffPct + '%';
-      return '<tr style="border-bottom:1px solid #f3f4f6;">' +
-        '<td style="padding:7px 8px;font-weight:600;">' + f.label + '</td>' +
-        '<td style="padding:7px 8px;">' + (f.avgTrue !== null ? f.avgTrue.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
-        '<td style="padding:7px 8px;">' + (f.avgFalse !== null ? f.avgFalse.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
-        '<td style="padding:7px 8px;font-weight:700;color:' + diffColor + ';">' + diffText + '</td>' +
-        '<td style="padding:7px 8px;color:#9ca3af;">' + f.countTrue + '件</td>' +
-        '</tr>';
-    }).join('');
-
-    if (data.relative) {
-      const dDiff = data.relative.divisionDiffPct;
-      const dColor = dDiff === null ? '#6b7280' : (dDiff >= 0 ? '#059669' : '#dc2626');
-      const dText = dDiff === null ? '比較対象データがありません' : ((dDiff >= 0 ? '+' : '') + dDiff + '%');
-      document.getElementById('relative-box').innerHTML =
-        data.relative.periodLabel + '： 本人平均日商 ' + data.relative.selfAvg.toLocaleString('ja-JP') + '円 ／ 同じ課の他の乗務員平均（' + data.relative.peerCount + '名） ' +
-        (data.relative.peerAvg !== null ? data.relative.peerAvg.toLocaleString('ja-JP') + '円' : '—') +
-        ' ／ 差分 <span style="font-weight:700;color:' + dColor + ';">' + dText + '</span>';
-
-      document.getElementById('duty-tbody').innerHTML = data.relative.dutyComparison.map(d => {
-        const diffColor = d.diffPct === null ? '#9ca3af' : (d.diffPct >= 0 ? '#059669' : '#dc2626');
-        const diffText = d.diffPct === null ? '—' : (d.diffPct >= 0 ? '+' : '') + d.diffPct + '%';
-        return '<tr style="border-bottom:1px solid #f3f4f6;">' +
-          '<td style="padding:7px 8px;font-weight:600;">' + d.dutyCode + '（' + d.selfCount + '日）</td>' +
-          '<td style="padding:7px 8px;">' + d.selfAvg.toLocaleString('ja-JP') + '円</td>' +
-          '<td style="padding:7px 8px;">' + (d.peerAvg !== null ? d.peerAvg.toLocaleString('ja-JP') + '円' : '—') + '</td>' +
-          '<td style="padding:7px 8px;font-weight:700;color:' + diffColor + ';">' + diffText + '</td>' +
-          '</tr>';
-      }).join('') || '<tr><td colspan="4" style="padding:10px 8px;color:#9ca3af;">当月度のデータがありません</td></tr>';
-    } else {
-      document.getElementById('relative-box').textContent = '比較対象データがありません';
-      document.getElementById('duty-tbody').innerHTML = '';
-    }
-
-    if (data.returnTime.sufficientData) {
-      document.getElementById('return-time-box').textContent = '平均帰庫時刻: ' + data.returnTime.avg + '（' + data.returnTime.count + '件のデータより算出）';
-    } else {
-      document.getElementById('return-time-box').textContent = '帰庫時刻のデータを蓄積中です（現在' + data.returnTime.count + '件。10件以上で傾向を表示します）';
-    }
-
-    document.getElementById('wage-box').textContent = report.content.wage_summary || 'データが不足しているため試算できません（当月度の実績が必要です）';
-    document.getElementById('labor-demand-box').textContent = report.content.labor_demand_note;
-
-    const mw = data.minimumWage;
-    if (mw && mw.sufficientData) {
-      const box = document.getElementById('min-wage-box');
-      if (mw.isMinimumWageEarner) {
-        box.innerHTML =
-          '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;line-height:1.8;">' +
-          '<span style="background:#dc2626;color:white;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700;">最賃者（概算）</span><br>' +
-          '概算給与 ' + mw.estimatedPay.toLocaleString('ja-JP') + '円 ／ 最低賃金保障額 ' + mw.guaranteedPay.toLocaleString('ja-JP') + '円' +
-          '（実労働時間 ' + mw.laborHoursTotal + '時間）<br>' +
-          '<strong style="color:#dc2626;">補填額(概算): ' + mw.shortfall.toLocaleString('ja-JP') + '円</strong>' +
-          '</div>';
-      } else {
-        box.innerHTML =
-          '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;line-height:1.8;">' +
-          '概算給与 ' + mw.estimatedPay.toLocaleString('ja-JP') + '円 ／ 最低賃金保障額 ' + mw.guaranteedPay.toLocaleString('ja-JP') + '円' +
-          '（実労働時間 ' + mw.laborHoursTotal + '時間）— 最低賃金を上回っています' +
-          '</div>';
-      }
-    } else {
-      document.getElementById('min-wage-box').innerHTML = '<div style="color:#9ca3af;background:#f9fafb;border-radius:8px;padding:10px 14px;">実労働時間データが不足しているため判定できません（ホシコン形式CSVの取込で蓄積されます）</div>';
-    }
-
-    const risk = data.drivingRisk;
-    if (risk) {
-      const RISK_COLORS = { low: '#166534', medium: '#d97706', high: '#dc2626' };
-      const RISK_BG = { low: '#f0fdf4', medium: '#fffbeb', high: '#fef2f2' };
-      const RISK_LABELS = { low: '低', medium: '中', high: '高' };
-      document.getElementById('risk-box').innerHTML =
-        '<span style="display:inline-block;background:' + RISK_BG[risk.riskLevel] + ';color:' + RISK_COLORS[risk.riskLevel] + ';border-radius:12px;padding:3px 12px;font-size:12px;font-weight:700;margin-bottom:8px;">総合判定: リスク' + RISK_LABELS[risk.riskLevel] + '</span>' +
-        '<div style="display:flex;gap:16px;background:#f9fafb;border-radius:8px;padding:10px 14px;margin-bottom:8px;">' +
-        '<div>急挙動合計: <strong>' + risk.totalHarshEvents + '件</strong></div>' +
-        '<div>乗務日あたり: <strong>' + risk.harshEventsPerDuty + '件</strong></div>' +
-        '<div>最高速度(高速/一般): <strong>' + (risk.maxSpeedHighway ?? '—') + '/' + (risk.maxSpeedLocal ?? '—') + 'km/h</strong></div>' +
-        '<div>速度超過日数: <strong>' + risk.speedingDays + '日</strong></div>' +
-        '</div>' +
-        '<a href="${ADMIN_PATH}/sales-ai/employee/' + EMP_ID + '/safety-guidance/print?months=' + months + '" target="_blank" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">🚨 安全運転指導書を印刷</a>';
-    } else {
-      document.getElementById('risk-box').innerHTML = '<div style="color:#9ca3af;background:#f9fafb;border-radius:8px;padding:10px 14px;">安全運転データがまだありません（ホシコン形式CSVの取込で蓄積されます）</div>';
-    }
-
-    document.getElementById('weak-list').innerHTML = report.content.weak_points.map(t => '<li>' + escHtmlJs(t) + '</li>').join('') || '<li style="color:#9ca3af;">特筆すべき弱点は見られません</li>';
-    document.getElementById('strong-list').innerHTML = report.content.strong_points.map(t => '<li>' + escHtmlJs(t) + '</li>').join('') || '<li style="color:#9ca3af;">特筆すべき強みは見られません</li>';
-    document.getElementById('rec-list').innerHTML = report.content.recommendations.map(t => '<li>' + escHtmlJs(t) + '</li>').join('');
-  } catch (err) {
-    document.getElementById('loading').textContent = '通信エラーが発生しました';
-  }
-}
-
-function escHtmlJs(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-loadAll();
-</script>`;
-
-  return c.html(layout(`${emp.name} — AI売上分析`, content, 'sales-ai'));
+app.get('/sales-ai/employee/:id', (c) => {
+  return c.redirect(`${ADMIN_PATH}/crew-portal/employee/${c.req.param('id')}?tab=insights`);
 });
 
 // ===================================================
@@ -963,7 +712,7 @@ app.get('/sales-ai/employee/:id/report/print', async (c) => {
   if (!data) return c.text('社員が見つかりません', 404);
 
   const sheet = buildSheetOptions(data, months);
-  return c.html(renderSalesAiReportPrintPage(sheet, `${ADMIN_PATH}/sales-ai/employee/${id}`));
+  return c.html(renderSalesAiReportPrintPage(sheet, `${ADMIN_PATH}/crew-portal/employee/${id}?tab=insights`));
 });
 
 // ===================================================
@@ -1047,7 +796,7 @@ app.get('/sales-ai/employee/:id/safety-guidance/print', async (c) => {
     dutyDays, breakdown, riskSummary, content, accidentCount, monthsSinceLastAccident,
   };
 
-  return c.html(renderSafetyGuidancePrintPage(sheet, `${ADMIN_PATH}/sales-ai/employee/${id}`));
+  return c.html(renderSafetyGuidancePrintPage(sheet, `${ADMIN_PATH}/crew-portal/employee/${id}?tab=safety`));
 });
 
 export default app;

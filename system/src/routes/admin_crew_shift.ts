@@ -10,7 +10,6 @@ import { summerReportPage, type SummerReportPeriod, type SummerReportDailyRow, t
 import { crewPortalSubNav } from '../html/crew_portal_nav';
 import { getAdminPermissions } from '../permissions';
 import { renderUtilizationReportPage, type UtilizationCapacityRow, type UtilizationReportRow, type UtilizationAutoRow } from '../html/vehicle_utilization_report';
-import { PDF_PARSERS_CLIENT_JS_BASE64 } from '../assets/pdf_parsers_client_bundle';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -187,7 +186,9 @@ app.post('/api/crew-shift/shifts/batch', async (c) => {
 // 1リクエストで完結させると確実に超過してしまうため。
 // 配車PDF・乗務員シフトPDF・退職者名簿PDFの3機能で共通バンドルを配信する（unpdfの重複を避けるため）。
 // src/utils/crew_shift_pdf.ts を編集したら `npm run build:pdf-parsers-bundle` で再生成すること。
-app.get('/api/crew-shift/pdf-parser.js', (c) => {
+app.get('/api/crew-shift/pdf-parser.js', async (c) => {
+  // 2.1MBのbase64定数。コールドスタートのCPU予算を圧迫するため、この配信時のみ動的import。
+  const { PDF_PARSERS_CLIENT_JS_BASE64 } = await import('../assets/pdf_parsers_client_bundle');
   const bytes = Uint8Array.from(atob(PDF_PARSERS_CLIENT_JS_BASE64), (ch) => ch.charCodeAt(0));
   return new Response(bytes, {
     headers: {
