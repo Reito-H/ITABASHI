@@ -640,7 +640,7 @@ function renderMonths() {
 
 function fcDetailHtml(info) {
   const factorsHtml = info.appliedFactors.length
-    ? info.appliedFactors.map(f => '<span style="display:inline-block;background:#f1f5f9;border-radius:10px;padding:2px 9px;margin:0 6px 6px 0;font-size:11.5px;">' + f.label + ' <b style="color:' + (f.diffPct >= 0 ? '#059669' : '#dc2626') + ';">' + (f.diffPct >= 0 ? '+' : '') + f.diffPct + '%</b></span>').join('')
+    ? info.appliedFactors.map(f => '<span style="display:inline-block;background:#f1f5f9;color:#334155;border-radius:10px;padding:2px 9px;margin:0 6px 6px 0;font-size:11.5px;">' + f.label + ' <b style="color:' + (f.diffPct >= 0 ? '#047857' : '#b91c1c') + ';">' + (f.diffPct >= 0 ? '+' : '') + f.diffPct + '%</b></span>').join('')
     : '<span style="color:#9ca3af;">該当する暦要因はありません</span>';
   const holidayLine = info.holidayName ? '祝日: ' + info.holidayName + '　' : (info.longHolidayName ? info.longHolidayName + '　' : '');
   const actualHtml = info.actual !== null

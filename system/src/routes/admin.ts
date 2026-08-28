@@ -1073,7 +1073,7 @@ app.get('/settings', async (c) => {
         <button type="button" id="monitor-mode-save-btn" onclick="saveMonitorMode()" style="margin-top:12px;padding:7px 20px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">表示モードを保存</button>
       </div>` },
     { heading: 'ガイド・システム', cards: [
-      { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: '資料センター',       desc: 'マニュアルPDF・就業規則などの資料を保存・共有' },
+      { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: 'データセンター',     desc: '資料保存に加え、社員CSV・点検写真AI取込・乗務員シフトPDFのアップロード窓口を集約' },
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
       { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド',     desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
       { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・通信状態・利用統計・DB統計・アクセスQRコード' },
