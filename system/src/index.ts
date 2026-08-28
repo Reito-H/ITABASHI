@@ -46,6 +46,8 @@ import adminVehicleDeadlinesRoutes from './routes/admin_vehicle_deadlines';
 import inspectionApi from './routes/api/inspection';
 import adminDocumentsRoutes from './routes/admin_documents';
 import documentsApi from './routes/api/documents';
+import adminKachoMissionRoutes from './routes/admin_kacho_mission';
+import kachoMissionApi from './routes/api/kacho_mission';
 import adminKanchoRoutes from './routes/admin_kancho';
 import adminKanchoWishRoutes from './routes/admin_kancho_wish';
 import adminKanchoRosterRoutes from './routes/admin_kancho_roster';
@@ -67,6 +69,7 @@ import adminCcListRoutes from './routes/admin_cc_list';
 import adminBenriRoutes from './routes/admin_benri';
 import adminNojicoRoutes from './routes/admin_nojico';
 import adminGarageRoutes from './routes/admin_garage';
+import adminShuttleRoutes from './routes/admin_shuttle';
 import adminDriverReportsRoutes from './routes/admin_driver_reports';
 import adminAccidentsRoutes from './routes/admin_accidents';
 import adminAccidentsAnalysisRoutes from './routes/admin_accidents_analysis';
@@ -237,7 +240,10 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // nojico: 外部サイトをアプリ内ブラウザで開くだけのページ。ページ権限は使わず全アカウント共通でアクセス可
   const isNojico = subPath.startsWith('/nojico');
 
-  if (!isCcList && !isBenri && !isNojico && !isPathAllowed(perms, subPath, c.req.method)) {
+  // シャトルバス: 閲覧はページ権限を使わず全アカウント共通。編集（非GET）はルート側でフル権限アカウントか別途チェックする
+  const isShuttle = subPath.startsWith('/shuttle') || subPath.startsWith('/api/shuttle');
+
+  if (!isCcList && !isBenri && !isNojico && !isShuttle && !isPathAllowed(perms, subPath, c.req.method)) {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
@@ -271,6 +277,7 @@ app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminVehicleDeadlinesRoutes);
 app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
+app.route(`/${SECRET}/admin`, adminKachoMissionRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoWishRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRosterRoutes);
@@ -291,6 +298,7 @@ app.route(`/${SECRET}/admin`, adminCcListRoutes);
 app.route(`/${SECRET}/admin`, adminBenriRoutes);
 app.route(`/${SECRET}/admin`, adminNojicoRoutes);
 app.route(`/${SECRET}/admin`, adminGarageRoutes);
+app.route(`/${SECRET}/admin`, adminShuttleRoutes);
 app.route(`/${SECRET}/admin`, adminDriverReportsRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsAnalysisRoutes);
@@ -362,6 +370,7 @@ app.route('/api/line-reg', lineRegApi);
 app.route('/api/inspection', inspectionApi);
 app.route('/api/dia', diaApi);
 app.route('/api/documents', documentsApi);
+app.route('/api/kacho-mission', kachoMissionApi);
 app.route('/api/requests', requestsApi);
 
 // =====================

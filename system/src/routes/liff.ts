@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { logLineActivity } from '../utils/activity_log';
 import { issueCaseNoIfEmpty } from '../utils/report_case_no';
+import { normalizeKana } from '../utils/kana';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -184,6 +185,8 @@ app.get('/api/liff/employees', async (c) => {
   await logLineActivity(c.env.DB, uid, 'liff', 'api', '社員照会', `検索: ${q}`);
 
   const like = `%${q}%`;
+  // ふりがなは DB 上カタカナ管理。ひらがな・半角カナで打ってもヒットするよう正規化した別パラメータで照合する
+  const kanaLike = `%${normalizeKana(q) ?? q}%`;
   const rows = await c.env.DB.prepare(`
     SELECT id, emp_no, name, division, team, car_no, used_cars
     FROM employees
@@ -191,7 +194,7 @@ app.get('/api/liff/employees', async (c) => {
       AND (name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)
     ORDER BY division, team, seq_no, id
     LIMIT 20
-  `).bind(like, like, like).all<{
+  `).bind(like, kanaLike, like).all<{
     id: number; emp_no: string; name: string; division: number | null; team: number | null;
     car_no: string | null; used_cars: string | null;
   }>();
@@ -310,7 +313,9 @@ app.get('/api/liff/staff-lookup', async (c) => {
     // 名前側の途中一致を拾って絞り込みにくくなるのを防ぐ）
     conditions.push('(name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)');
     const like = `${q}%`;
-    params.push(like, like, like);
+    // ふりがなは全角カタカナ管理。ひらがな・半角カナ入力を正規化して前方一致させる
+    const kanaLike = `${normalizeKana(q) ?? q}%`;
+    params.push(like, kanaLike, like);
   }
   // 課指定の一覧表示は全員を返す（1課あたり230名前後のため上限500で実質無制限）。キーワード検索は従来通り30件
   const limit = division && q.length < 1 ? 500 : 30;
@@ -371,6 +376,8 @@ app.post('/api/liff/staff-edit', async (c) => {
 
   if (!body.id || !body.name) return c.json({ error: 'id と name は必須です' }, 400);
 
+  const nameKana = normalizeKana(body.name_kana);
+
   await c.env.DB.prepare(`
     UPDATE employees SET
       name=?, name_kana=?, division=?, team=?,
@@ -378,7 +385,7 @@ app.post('/api/liff/staff-edit', async (c) => {
     WHERE id=?
   `).bind(
     body.name,
-    body.name_kana ?? null,
+    nameKana,
     body.division ?? null,
     body.team ?? null,
     body.work_schedule ?? null,
@@ -394,7 +401,7 @@ app.post('/api/liff/staff-edit', async (c) => {
 
   return c.json({ ok: true, updated: {
     name: body.name,
-    name_kana: body.name_kana ?? null,
+    name_kana: nameKana,
     division: body.division ?? null,
     team: body.team ?? null,
     work_schedule: body.work_schedule ?? null,
@@ -475,7 +482,7 @@ app.post('/api/liff/staff-add', async (c) => {
     VALUES (?,?,?,?,?,?,?,?,?,?,1,'completed','在籍')
   `).bind(
     body.name,
-    body.name_kana ?? null,
+    normalizeKana(body.name_kana),
     body.emp_no,
     body.division,
     body.team,

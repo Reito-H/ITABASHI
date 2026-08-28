@@ -65,18 +65,21 @@ export function layout(title: string, content: string, activePage: string = '', 
   // permKey省略時は id をそのまま権限キーとして使う（filterHtmlByPermissionsのdata-nav-id判定用）。
   // 報告センターは専用の権限キーを持たず、既存の5つの報告権限のいずれかで表示する（スペース区切り＝OR）
   const REPORT_CENTER_PERM = 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos';
-  const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean }> = [
+  // public:true の項目は data-nav-id を出さず、全アカウントで常に表示する（権限フィルタの対象外）
+  const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean; public?: boolean }> = [
     { href: `${ADMIN_PATH}`,               label: 'ホーム',          id: 'home' },
     { href: `${ADMIN_PATH}/settings/reports`, label: '報告センター', id: 'report-center', permKey: REPORT_CENTER_PERM, highlight: true },
     { href: `${ADMIN_PATH}/kancho-shift`,  label: '班長シフト',      id: 'kancho-shift' },
     { href: `${ADMIN_PATH}/handover`,      label: '引き継ぎシート',  id: 'handover' },
     { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
+    { href: `${ADMIN_PATH}/kacho-mission`, label: '課長ミッション',  id: 'kacho-mission', permKey: 'staff' },
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
     { href: `${ADMIN_PATH}/driver-reports`, label: 'ドライバー報告', id: 'driver-reports' },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
     { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
     { href: `${ADMIN_PATH}/garage`,        label: '車庫',            id: 'garage' },
+    { href: `${ADMIN_PATH}/shuttle`,       label: 'シャトルバス',    id: 'shuttle', public: true },
     { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
@@ -277,14 +280,11 @@ export function layout(title: string, content: string, activePage: string = '', 
     </div>
     <nav style="flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 0;">
       ${navItems.map(item => `
-        <a href="${item.href}" data-nav-id="${item.permKey ?? item.id}" class="nav-item${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
+        <a href="${item.href}"${item.public ? '' : ` data-nav-id="${item.permKey ?? item.id}"`} class="nav-item${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
           ${escHtml(item.label)}
         </a>
       `).join('')}
-      <!-- nojico: 権限フィルタ対象外（data-nav-id無し）で全アカウント共通表示。外部サイトをアプリ内ブラウザ（iframe）で表示するだけ -->
-      <a href="${ADMIN_PATH}/nojico" class="nav-item${activePage === 'nojico' ? ' active' : ''}" onclick="closeSidebar()">
-        nojico
-      </a>
+      <!-- nojico は「課長ミッション」内へ移設したためサイドバー直下のリンクは廃止（ルート自体は残存） -->
     </nav>
     <div style="padding:12px 0;border-top:1px solid rgba(255,255,255,0.1);">
       <form method="POST" action="${ADMIN_PATH}/logout" style="margin:0;">

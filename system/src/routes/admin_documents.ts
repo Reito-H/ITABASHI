@@ -48,6 +48,7 @@ app.get('/settings/documents', async (c) => {
         <button type="button" class="dc-tab-btn" data-tab="staff-csv" data-perm-key="staff" onclick="dcShowTab('staff-csv')">👥 社員CSV</button>
         <button type="button" class="dc-tab-btn" data-tab="inspection-photo" data-perm-key="inspection" onclick="dcShowTab('inspection-photo')">📷 点検写真AI取込</button>
         <button type="button" class="dc-tab-btn" data-tab="crew-shift-pdf" data-perm-key="crew-shift" onclick="dcShowTab('crew-shift-pdf')">📄 乗務員シフトPDF</button>
+        <button type="button" class="dc-tab-btn" data-tab="dotai" data-perm-key="staff" onclick="dcShowTab('dotai')">🧭 動態表</button>
       </div>
 
       <!-- ===== 資料 ===== -->
@@ -215,6 +216,43 @@ app.get('/settings/documents', async (c) => {
           <div style="display:flex;justify-content:flex-end;">
             <button onclick="csDoImport()" id="cs-import-btn" style="padding:9px 20px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">取込実行</button>
           </div>
+        </div>
+      </div>
+
+      <!-- ===== 動態表（人事システム出力 xlsx） ===== -->
+      <div class="dc-tab-panel" data-tab="dotai" data-perm-key="staff" style="display:none;">
+        <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;">
+          <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">社員動態表の取込</h2>
+          <p style="font-size:12px;color:#6b7280;margin:0 0 14px;line-height:1.7;">
+            人事システムから出力した「動態表（.xlsx）」を選択してください。ブラウザ内で解析し、内容を確認してから反映します。<br>
+            ・<strong>在籍者一覧</strong>… 社員コードで突合し、生年月日・氏名・カナ・入社日・初乗務日・課・採用区分を更新。未登録者は新規追加<br>
+            ・<strong>退職一覧</strong>… 「退職」は退職処理、「退職予定」は予定日のみ設定、「退職取下」は在籍へ復帰<br>
+            ・<strong>グループ内／社内異動一覧</strong>… 在籍者一覧に無く現営業所が板橋以外の人を在籍から除外<br>
+            ・<strong>配属一覧</strong>… 「入社」区分の入社予定者を新規追加<br>
+            <span style="color:#9ca3af;">※ 生年月日は労共契約アラートの基礎データになります。氏名は空白を除いて一致する場合は書き換えません。</span>
+          </p>
+
+          <input type="file" id="dt-file" accept=".xlsx,.xlsm" style="display:none;" onchange="dtHandleFile(this.files[0])">
+          <label id="dt-drop" for="dt-file"
+            style="display:block;border:2px dashed #d1d5db;border-radius:8px;padding:26px;text-align:center;cursor:pointer;margin-bottom:14px;">
+            <div style="font-size:13px;color:#6b7280;">クリックまたはドラッグで動態表(.xlsx)を選択</div>
+          </label>
+
+          <div id="dt-status" style="font-size:12px;color:#374151;margin-bottom:10px;"></div>
+
+          <div id="dt-preview" style="display:none;">
+            <div id="dt-summary" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;"></div>
+            <div id="dt-sections"></div>
+            <div style="display:flex;gap:10px;margin-top:16px;justify-content:flex-end;align-items:center;">
+              <label style="font-size:12px;color:#374151;display:flex;align-items:center;gap:5px;">
+                <input type="checkbox" id="dt-confirm"> 内容を確認しました
+              </label>
+              <button onclick="dtClear()" style="padding:8px 16px;background:#f3f4f6;color:#374151;border:none;border-radius:6px;font-size:13px;cursor:pointer;">キャンセル</button>
+              <button id="dt-exec" onclick="dtExecute()" disabled
+                style="padding:8px 20px;background:#166534;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;opacity:.5;">反映を実行</button>
+            </div>
+          </div>
+          <div id="dt-result" style="display:none;margin-top:12px;"></div>
         </div>
       </div>
     </div>
@@ -1089,6 +1127,439 @@ app.get('/settings/documents', async (c) => {
         btn.disabled = false; btn.textContent = '取込実行';
       }
     }
+
+    // ===== 動態表（人事システム xlsx） =====
+    var DT_XLSX_SRC = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    var _dtXlsxPromise = null;
+    function dtLoadXlsx() {
+      if (window.XLSX) return Promise.resolve();
+      if (_dtXlsxPromise) return _dtXlsxPromise;
+      _dtXlsxPromise = new Promise(function(resolve, reject) {
+        var s = document.createElement('script');
+        s.src = DT_XLSX_SRC;
+        s.onload = function() { resolve(); };
+        s.onerror = function() { reject(new Error('解析ライブラリの読み込みに失敗しました')); };
+        document.head.appendChild(s);
+      });
+      return _dtXlsxPromise;
+    }
+
+    var dtPlan = null;
+    var DT_KINDS = ['updates', 'inserts', 'retire', 'reactivate', 'deactivateMoved'];
+
+    function dtSetStatus(t, color) {
+      var el = document.getElementById('dt-status');
+      el.textContent = t || '';
+      el.style.color = color || '#374151';
+    }
+    function dtNorm(s) { return String(s == null ? '' : s).replace(/[\\s\\u3000]+/g, ''); }
+    function dtTrim(s) { return String(s == null ? '' : s).trim(); }
+
+    function dtNormDate(v) {
+      if (v == null || v === '') return '';
+      if (v instanceof Date && !isNaN(v.getTime())) {
+        return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+      }
+      if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 90000) {
+        var d = new Date(Math.round((v - 25569) * 86400000));
+        return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+      }
+      var m = /^(\\d{4})[-/.](\\d{1,2})[-/.](\\d{1,2})/.exec(String(v).trim());
+      if (m) return m[1] + '-' + String(+m[2]).padStart(2, '0') + '-' + String(+m[3]).padStart(2, '0');
+      return '';
+    }
+    function dtEmpNo(v) {
+      var s = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+      return /^\\d{8}$/.test(s) ? s : '';
+    }
+    function dtDivNum(v) {
+      var s = String(v == null ? '' : v).replace(/[^0-9]/g, '');
+      var n = parseInt(s, 10);
+      return (n >= 1 && n <= 4) ? n : null;
+    }
+    var DT_ENTRY = { '新卒': 1, 'キャリア': 1, '縁故': 1 };
+    function dtEntry(v) { var s = dtTrim(v); return DT_ENTRY[s] ? s : ''; }
+
+    function dtContractType(birthIso) {
+      if (!birthIso) return '';
+      var p = /^(\\d{4})-(\\d{2})-(\\d{2})/.exec(birthIso);
+      if (!p) return '';
+      var now = new Date(Date.now() + 9 * 3600 * 1000);
+      var age = now.getUTCFullYear() - (+p[1]);
+      var mo = now.getUTCMonth() + 1, da = now.getUTCDate();
+      if (mo < (+p[2]) || (mo === (+p[2]) && da < (+p[3]))) age--;
+      if (age >= 65 && age <= 75) return '労共';
+      return '一般';
+    }
+
+    function dtHeaderRow(rows) {
+      for (var i = 0; i < Math.min(rows.length, 10); i++) {
+        var r = rows[i] || [];
+        for (var j = 0; j < r.length; j++) {
+          if (dtTrim(r[j]) === '社員コード') return i;
+        }
+      }
+      return -1;
+    }
+    function dtHeaderMap(headerRow) {
+      var mp = {};
+      for (var j = 0; j < headerRow.length; j++) {
+        var k = dtTrim(headerRow[j]);
+        if (k && !(k in mp)) mp[k] = j;
+      }
+      return mp;
+    }
+
+    // 一部の出力ツールは xlsx の dimension(!ref) を実データより狭く書く（例: A1:AH47 なのに実際は917行）。
+    // 全セルを走査して !ref を張り直してから読む。
+    function dtFixRef(ws) {
+      var r = { s: { r: 1e7, c: 1e7 }, e: { r: 0, c: 0 } };
+      Object.keys(ws).forEach(function(k) {
+        if (k[0] === '!') return;
+        var c = XLSX.utils.decode_cell(k);
+        if (c.r < r.s.r) r.s.r = c.r;
+        if (c.c < r.s.c) r.s.c = c.c;
+        if (c.r > r.e.r) r.e.r = c.r;
+        if (c.c > r.e.c) r.e.c = c.c;
+      });
+      if (r.e.r >= r.s.r && r.e.c >= r.s.c) ws['!ref'] = XLSX.utils.encode_range(r);
+    }
+
+    function dtParseWorkbook(wb) {
+      var out = { roster: [], haizoku: [], taishoku: [], idou: [] };
+      var wanted = {
+        '在籍者一覧': 'roster', '配属一覧': 'haizoku', '退職一覧': 'taishoku',
+        'グループ内異動一覧': 'idou', '社内異動一覧': 'idou'
+      };
+      wb.SheetNames.forEach(function(sn) {
+        var key = wanted[dtTrim(sn)];
+        if (!key) return;
+        dtFixRef(wb.Sheets[sn]);
+        var rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: false, defval: '' });
+        var hr = dtHeaderRow(rows);
+        if (hr < 0) return;
+        var hm = dtHeaderMap(rows[hr]);
+        var body = rows.slice(hr + 1);
+
+        if (key === 'roster') {
+          body.forEach(function(r) {
+            var emp = dtEmpNo(r[hm['社員コード']]);
+            var nm = dtTrim(r[hm['社員名（漢字）']]);
+            if (!emp || !nm) return;
+            out.roster.push({
+              emp_no: emp, name: nm,
+              name_kana: dtTrim(r[hm['社員名（カナ）']]),
+              birth_date: dtNormDate(r[hm['生年月日']]),
+              hire_date: dtNormDate(r[hm['入社日']]),
+              first_duty_date: dtNormDate(r[hm['初乗務日']]),
+              division: dtDivNum(r[hm['課']]),
+              entry_type: dtEntry(r[hm['採用区分']])
+            });
+          });
+        } else if (key === 'haizoku') {
+          body.forEach(function(r) {
+            var emp = dtEmpNo(r[hm['社員コード']]);
+            var nm = dtTrim(r[hm['社員名（漢字）']]);
+            if (!emp || !nm) return;
+            out.haizoku.push({
+              kubun: dtTrim(r[0]),
+              emp_no: emp, name: nm,
+              name_kana: dtTrim(r[hm['社員名（カナ）']]),
+              birth_date: dtNormDate(r[hm['生年月日']]),
+              hire_date: dtNormDate(r[hm['入社日']]),
+              division: dtDivNum(r[hm['課']]),
+              entry_type: dtEntry(r[hm['採用区分']]),
+              taishoku_date: dtNormDate(r[hm['退職日']])
+            });
+          });
+        } else if (key === 'taishoku') {
+          body.forEach(function(r) {
+            var emp = dtEmpNo(r[hm['社員コード']]);
+            var nm = dtTrim(r[hm['社員名（漢字）']]);
+            if (!emp || !nm) return;
+            out.taishoku.push({
+              kubun: dtTrim(r[0]),
+              emp_no: emp, name: nm,
+              yotei: dtNormDate(r[hm['退職予定日']]),
+              taishoku_date: dtNormDate(r[hm['退職日']]),
+              torisage: dtNormDate(r[hm['退職取下日']]),
+              reason: dtTrim(r[hm['退職理由区分']])
+            });
+          });
+        } else if (key === 'idou') {
+          body.forEach(function(r) {
+            var emp = dtEmpNo(r[hm['社員コード']]);
+            var nm = dtTrim(r[hm['社員名（漢字）']]);
+            if (!emp || !nm) return;
+            out.idou.push({
+              emp_no: emp, name: nm,
+              cur_office: dtTrim(r[hm['営業所']]),
+              idou_date: dtNormDate(r[hm['異動日']]),
+              sheet: dtTrim(sn)
+            });
+          });
+        }
+      });
+      return out;
+    }
+
+    function dtBuildPlan(parsed, snapArr) {
+      var snap = {};
+      snapArr.forEach(function(s) { snap[s.emp_no] = s; });
+      var rosterSet = {};
+      parsed.roster.forEach(function(r) { rosterSet[r.emp_no] = 1; });
+
+      var updates = [], inserts = [], reactivate = [], retire = [], moved = [];
+      var insSeen = {};
+
+      parsed.roster.forEach(function(r) {
+        var s = snap[r.emp_no];
+        var ct = dtContractType(r.birth_date);
+        if (!s) {
+          inserts.push({
+            emp_no: r.emp_no, name: r.name, name_kana: r.name_kana,
+            birth_date: r.birth_date, hire_date: r.hire_date, first_duty_date: r.first_duty_date,
+            division: r.division, entry_type: r.entry_type, contract_type: ct || '',
+            _src: '在籍者一覧'
+          });
+          insSeen[r.emp_no] = 1;
+          return;
+        }
+        if (String(s.is_active) === '0') {
+          reactivate.push({ emp_no: r.emp_no, name: r.name, _src: '在籍者一覧に在籍・DBは退職' });
+        }
+        var u = { emp_no: r.emp_no, _name: r.name, _changes: [] };
+        if (r.name && dtNorm(r.name) !== dtNorm(s.name)) { u.name = r.name; u._changes.push('氏名: ' + dtTrim(s.name) + ' → ' + r.name); }
+        if (r.name_kana && r.name_kana !== dtTrim(s.name_kana)) { u.name_kana = r.name_kana; u._changes.push('カナ'); }
+        if (r.birth_date && r.birth_date !== dtNormDate(s.birth_date)) { u.birth_date = r.birth_date; u._changes.push('生年月日: ' + (dtNormDate(s.birth_date) || '空') + ' → ' + r.birth_date); }
+        if (r.hire_date && r.hire_date !== dtNormDate(s.hire_date)) { u.hire_date = r.hire_date; u._changes.push('入社日'); }
+        if (r.first_duty_date && r.first_duty_date !== dtNormDate(s.first_duty_date)) { u.first_duty_date = r.first_duty_date; u._changes.push('初乗務日'); }
+        if (r.division && r.division !== s.division) { u.division = r.division; u._changes.push('課: ' + (s.division || '空') + ' → ' + r.division); }
+        if (r.entry_type && r.entry_type !== dtTrim(s.entry_type)) { u.entry_type = r.entry_type; u._changes.push('採用区分: ' + (dtTrim(s.entry_type) || '空') + ' → ' + r.entry_type); }
+        if (ct && ct !== (dtTrim(s.contract_type) || '一般')) { u.contract_type = ct; u._changes.push('契約形態: ' + (dtTrim(s.contract_type) || '一般') + ' → ' + ct); }
+        if (u._changes.length) updates.push(u);
+      });
+
+      // 配属一覧: 入社区分の入社予定者を新規追加
+      parsed.haizoku.forEach(function(h) {
+        if (h.kubun !== '入社') return;
+        if (snap[h.emp_no] || rosterSet[h.emp_no] || insSeen[h.emp_no]) return;
+        if (h.taishoku_date) return;
+        inserts.push({
+          emp_no: h.emp_no, name: h.name, name_kana: h.name_kana,
+          birth_date: h.birth_date, hire_date: h.hire_date, first_duty_date: '',
+          division: h.division, entry_type: h.entry_type,
+          contract_type: dtContractType(h.birth_date) || '',
+          _src: '配属一覧（入社）'
+        });
+        insSeen[h.emp_no] = 1;
+      });
+
+      // 退職一覧
+      var reacSeen = {};
+      reactivate.forEach(function(x) { reacSeen[x.emp_no] = 1; });
+      parsed.taishoku.forEach(function(t) {
+        if (t.kubun === '退職取下' || t.torisage) {
+          if (!reacSeen[t.emp_no]) { reactivate.push({ emp_no: t.emp_no, name: t.name, _src: '退職取下' }); reacSeen[t.emp_no] = 1; }
+          return;
+        }
+        if (t.kubun === '退職予定') {
+          retire.push({ emp_no: t.emp_no, name: t.name, retirement_date: t.yotei, retirement_reason: t.reason, deactivate: false, _src: '退職予定' });
+        } else {
+          retire.push({ emp_no: t.emp_no, name: t.name, retirement_date: t.taishoku_date || t.yotei, retirement_reason: t.reason, deactivate: true, _src: '退職' });
+        }
+      });
+
+      // 異動: 在籍者一覧に無く現営業所が板橋以外
+      var movedSeen = {};
+      parsed.idou.forEach(function(x) {
+        if (rosterSet[x.emp_no]) return;
+        if (!x.cur_office || x.cur_office.indexOf('板橋') >= 0) return;
+        var prev = movedSeen[x.emp_no];
+        if (prev && prev.idou_date >= x.idou_date) return;
+        movedSeen[x.emp_no] = x;
+      });
+      Object.keys(movedSeen).forEach(function(k) {
+        var x = movedSeen[k];
+        moved.push({ emp_no: x.emp_no, name: x.name, moved_date: x.idou_date, _to: x.cur_office, _src: x.sheet });
+      });
+
+      return { updates: updates, inserts: inserts, reactivate: reactivate, retire: retire, deactivateMoved: moved };
+    }
+
+    function dtSection(kind, title, items, renderRow) {
+      if (!items.length) return '';
+      var rows = items.map(function(it, i) {
+        return '<tr>' +
+          '<td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;"><input type="checkbox" class="dt-cb" data-kind="' + kind + '" data-idx="' + i + '" checked></td>' +
+          renderRow(it) + '</tr>';
+      }).join('');
+      return '<details style="margin-bottom:10px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;" open>' +
+        '<summary style="padding:8px 12px;background:#f9fafb;font-size:13px;font-weight:700;color:#1e3a5f;cursor:pointer;">' +
+        escHtmlJs(title) + ' … ' + items.length + '件 ' +
+        '<label style="font-weight:400;font-size:11px;color:#6b7280;margin-left:8px;"><input type="checkbox" class="dt-kind-toggle" data-kind="' + kind + '" checked> 全選択</label>' +
+        '</summary>' +
+        '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><tbody>' + rows + '</tbody></table></div>' +
+        '</details>';
+    }
+
+    function dtRenderPreview() {
+      var p = dtPlan;
+      var td = 'padding:4px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;';
+      function chip(label, n, color) {
+        return '<div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;">' +
+          '<div style="font-size:10px;color:#6b7280;">' + label + '</div>' +
+          '<div style="font-size:18px;font-weight:800;color:' + color + ';">' + n + '</div></div>';
+      }
+      document.getElementById('dt-summary').innerHTML =
+        chip('更新', p.updates.length, '#1d4ed8') +
+        chip('新規追加', p.inserts.length, '#166534') +
+        chip('退職', p.retire.filter(function(x){return x.deactivate;}).length, '#b91c1c') +
+        chip('退職予定', p.retire.filter(function(x){return !x.deactivate;}).length, '#a16207') +
+        chip('在籍へ戻す', p.reactivate.length, '#0e7490') +
+        chip('異動で除外', p.deactivateMoved.length, '#7c3aed');
+
+      var html = '';
+      html += dtSection('updates', '更新（既存社員）', p.updates, function(it) {
+        return '<td style="' + td + '">' + escHtmlJs(it._name || '') + ' <span style="color:#9ca3af;">' + it.emp_no + '</span></td>' +
+          '<td style="padding:4px 8px;border-bottom:1px solid #f3f4f6;color:#374151;">' + escHtmlJs((it._changes || []).join(' / ')) + '</td>';
+      });
+      html += dtSection('inserts', '新規追加', p.inserts, function(it) {
+        return '<td style="' + td + '">' + escHtmlJs(it.name) + ' <span style="color:#9ca3af;">' + it.emp_no + '</span></td>' +
+          '<td style="' + td + '">' + (it.division ? it.division + '課' : '-') + '</td>' +
+          '<td style="' + td + '">生 ' + escHtmlJs(it.birth_date || '-') + '</td>' +
+          '<td style="' + td + '">' + escHtmlJs(it._src) + '</td>';
+      });
+      html += dtSection('retire', '退職 / 退職予定', p.retire, function(it) {
+        return '<td style="' + td + '">' + escHtmlJs(it.name) + ' <span style="color:#9ca3af;">' + it.emp_no + '</span></td>' +
+          '<td style="' + td + '">' + (it.deactivate ? '<span style="color:#b91c1c;font-weight:700;">退職</span>' : '<span style="color:#a16207;font-weight:700;">予定</span>') + '</td>' +
+          '<td style="' + td + '">' + escHtmlJs(it.retirement_date || '-') + '</td>' +
+          '<td style="' + td + '">' + escHtmlJs(it.retirement_reason || '') + '</td>';
+      });
+      html += dtSection('reactivate', '在籍へ戻す', p.reactivate, function(it) {
+        return '<td style="' + td + '">' + escHtmlJs(it.name) + ' <span style="color:#9ca3af;">' + it.emp_no + '</span></td>' +
+          '<td style="' + td + '">' + escHtmlJs(it._src) + '</td>';
+      });
+      html += dtSection('deactivateMoved', '異動で在籍から除外', p.deactivateMoved, function(it) {
+        return '<td style="' + td + '">' + escHtmlJs(it.name) + ' <span style="color:#9ca3af;">' + it.emp_no + '</span></td>' +
+          '<td style="' + td + '">→ ' + escHtmlJs(it._to || '') + '</td>' +
+          '<td style="' + td + '">' + escHtmlJs(it.moved_date || '') + '</td>';
+      });
+
+      var sec = document.getElementById('dt-sections');
+      sec.innerHTML = html || '<p style="color:#9ca3af;font-size:13px;">反映が必要な差分はありませんでした。</p>';
+      sec.querySelectorAll('.dt-kind-toggle').forEach(function(tog) {
+        tog.addEventListener('change', function() {
+          sec.querySelectorAll('.dt-cb[data-kind="' + tog.dataset.kind + '"]').forEach(function(cb) { cb.checked = tog.checked; });
+        });
+      });
+      document.getElementById('dt-preview').style.display = 'block';
+      document.getElementById('dt-result').style.display = 'none';
+    }
+
+    function dtCollect() {
+      var keep = { updates: [], inserts: [], retire: [], reactivate: [], deactivateMoved: [] };
+      DT_KINDS.forEach(function(kind) {
+        document.querySelectorAll('.dt-cb[data-kind="' + kind + '"]').forEach(function(cb) {
+          if (cb.checked) keep[kind].push(dtPlan[kind][+cb.dataset.idx]);
+        });
+      });
+      function strip(o, fields) { var r = {}; fields.forEach(function(f) { if (o[f] !== undefined) r[f] = o[f]; }); return r; }
+      var upFields = ['emp_no', 'name', 'name_kana', 'birth_date', 'hire_date', 'first_duty_date', 'division', 'entry_type', 'contract_type'];
+      return {
+        updates: keep.updates.map(function(o) { return strip(o, upFields); }),
+        inserts: keep.inserts.map(function(o) { return strip(o, upFields); }),
+        retire: keep.retire.map(function(o) { return strip(o, ['emp_no', 'retirement_date', 'retirement_reason', 'deactivate']); }),
+        reactivate: keep.reactivate.map(function(o) { return strip(o, ['emp_no']); }),
+        deactivateMoved: keep.deactivateMoved.map(function(o) { return strip(o, ['emp_no', 'moved_date', 'note']); })
+      };
+    }
+
+    async function dtHandleFile(file) {
+      if (!file) return;
+      document.getElementById('dt-preview').style.display = 'none';
+      document.getElementById('dt-result').style.display = 'none';
+      dtSetStatus('解析ライブラリを読み込み中…');
+      try {
+        await dtLoadXlsx();
+        dtSetStatus('ファイルを解析中…');
+        var buf = await file.arrayBuffer();
+        var wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+        var parsed = dtParseWorkbook(wb);
+        if (!parsed.roster.length && !parsed.taishoku.length && !parsed.haizoku.length && !parsed.idou.length) {
+          dtSetStatus('対象シート（在籍者一覧など）が見つかりませんでした。動態表の形式をご確認ください。', '#dc2626');
+          return;
+        }
+        dtSetStatus('既存社員データを取得中…');
+        var res = await fetch('/api/employees/dotai-snapshot');
+        if (!res.ok) { dtSetStatus('既存社員データの取得に失敗しました', '#dc2626'); return; }
+        var snap = (await res.json()).employees || [];
+        dtPlan = dtBuildPlan(parsed, snap);
+        dtSetStatus('解析完了: 在籍 ' + parsed.roster.length + '名 / 退職 ' + parsed.taishoku.length + '件 / 配属 ' + parsed.haizoku.length + '件 / 異動 ' + parsed.idou.length + '件', '#166534');
+        dtRenderPreview();
+      } catch (e) {
+        dtSetStatus(e && e.message ? e.message : '解析に失敗しました', '#dc2626');
+      }
+    }
+
+    async function dtExecute() {
+      if (!dtPlan) return;
+      if (!document.getElementById('dt-confirm').checked) { alert('内容を確認のうえチェックを入れてください'); return; }
+      var payload = dtCollect();
+      var total = payload.updates.length + payload.inserts.length + payload.retire.length + payload.reactivate.length + payload.deactivateMoved.length;
+      if (!total) { alert('反映対象がありません'); return; }
+      if (!confirm('選択した ' + total + ' 件を社員情報に反映します。よろしいですか？')) return;
+      var btn = document.getElementById('dt-exec');
+      btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '反映中…';
+      try {
+        var res = await fetch('/api/employees/dotai-import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        var j = await res.json().catch(function() { return {}; });
+        var box = document.getElementById('dt-result');
+        box.style.display = 'block';
+        if (res.ok && j.ok) {
+          box.innerHTML = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:12px 14px;font-size:13px;">' +
+            '反映しました — 更新 ' + j.updated + ' / 新規 ' + j.inserted + ' / 退職 ' + j.retired + ' / 退職予定 ' + j.retirePlanned + ' / 復帰 ' + j.reactivated + ' / 異動除外 ' + j.deactivatedMoved +
+            (j.skipped && j.skipped.length ? '<br><span style="color:#a16207;">スキップ: ' + escHtmlJs(j.skipped.join(', ')) + '</span>' : '') +
+            '<div style="margin-top:8px;"><a href="' + ADMIN_PATH + '/staff" style="color:#1d4ed8;">→ 社員一覧を確認</a>　<a href="' + ADMIN_PATH + '/staff/contracts" style="color:#1d4ed8;">→ 労共契約アラートを確認</a></div></div>';
+          document.getElementById('dt-preview').style.display = 'none';
+        } else {
+          box.innerHTML = '<div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:12px 14px;font-size:13px;">反映に失敗しました: ' + escHtmlJs(j.error || (j.errors && j.errors.join('; ')) || '不明なエラー') + '</div>';
+        }
+      } catch (e) {
+        alert('通信エラーが発生しました');
+      } finally {
+        btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '反映を実行';
+      }
+    }
+
+    function dtClear() {
+      dtPlan = null;
+      document.getElementById('dt-file').value = '';
+      document.getElementById('dt-preview').style.display = 'none';
+      document.getElementById('dt-result').style.display = 'none';
+      document.getElementById('dt-confirm').checked = false;
+      dtSetStatus('');
+    }
+
+    (function dtInit() {
+      var drop = document.getElementById('dt-drop');
+      if (!drop) return;
+      drop.addEventListener('dragover', function(e) { e.preventDefault(); drop.style.borderColor = '#1a3a5c'; });
+      drop.addEventListener('dragleave', function() { drop.style.borderColor = '#d1d5db'; });
+      drop.addEventListener('drop', function(e) {
+        e.preventDefault(); drop.style.borderColor = '#d1d5db';
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) dtHandleFile(e.dataTransfer.files[0]);
+      });
+      var cf = document.getElementById('dt-confirm');
+      cf.addEventListener('change', function() {
+        var b = document.getElementById('dt-exec');
+        b.disabled = !cf.checked;
+        b.style.opacity = cf.checked ? '1' : '.5';
+      });
+    })();
     </script>`;
 
   return c.html(layout('データセンター', html, 'settings'));

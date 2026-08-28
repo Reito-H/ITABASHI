@@ -5,6 +5,7 @@ import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 import { staffRetireesPage, type RetireeRow } from '../html/staff_retirees';
 import { getAdminPermissions } from '../permissions';
+import { normalizeKana } from '../utils/kana';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -50,8 +51,9 @@ const START_TIMES: Record<string, string[]> = {
 };
 const ALL_TIMES = ['6:00', '6:50', '8:00', '9:30', '15:00', '16:00', '18:00', '19:00'];
 
+// 検索クエリのカナ正規化。ひらがな・半角カナで打っても全角カナの name_kana に一致させる。
 function toKatakana(str: string): string {
-  return str.replace(/[ぁ-ゖ]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60));
+  return normalizeKana(str) ?? str;
 }
 
 function calcAge(birthDate: string | null): number | null {
@@ -255,16 +257,14 @@ app.get('/staff', async (c) => {
   ).join('');
   const headerExtra = `
     <div class="hdr-dept-tabs">${headerDivTabs}</div>
-    <div class="hdr-report-menu">
-      <button type="button" class="hdr-report-btn" id="hdr-report-btn" onclick="toggleReportMenu()">
-        関連ページ <span style="font-size:9px;">▼</span>
-      </button>
-      <div class="hdr-report-list" id="hdr-report-list">
-        <a href="${ADMIN_PATH}/crew-shift">乗務員シフト</a>
-        <a href="${ADMIN_PATH}/sales-ai">AI売上分析（全社）</a>
-        <a href="${ADMIN_PATH}/tantosha">担当車表</a>
-        <a href="${ADMIN_PATH}/staff/retirees">退職者リスト</a>
-      </div>
+    <div class="hdr-quick-links" aria-label="関連ページ">
+      <span class="hdr-quick-label">関連ページ</span>
+      <a href="${ADMIN_PATH}/crew-shift" class="hdr-quick-link">乗務員シフト</a>
+      <a href="${ADMIN_PATH}/sales-ai" class="hdr-quick-link">AI売上分析（全社）</a>
+      <a href="${ADMIN_PATH}/tantosha" class="hdr-quick-link">担当車表</a>
+      <a href="${ADMIN_PATH}/staff/retirees" class="hdr-quick-link">退職者リスト</a>
+      <a href="${ADMIN_PATH}/kacho-mission" class="hdr-quick-link">課長ミッション</a>
+      <a href="${ADMIN_PATH}/settings/documents?tab=dotai" class="hdr-quick-link">動態表取込</a>
     </div>`;
 
   // 絞り込みボタン群（セグメントコントロール風、ヘッダーの課タブと同じ視覚言語で統一）
@@ -589,13 +589,11 @@ app.get('/staff', async (c) => {
 .hdr-dept-tab:hover{background:rgba(255,255,255,.75);color:#1a3a5c;}
 .hdr-dept-tab.active{background:linear-gradient(135deg,#1e4a73,#1a3a5c);color:#fff;font-weight:700;letter-spacing:.02em;box-shadow:0 2px 6px rgba(26,58,92,.32);}
 .hdr-dept-tab.active:hover{background:linear-gradient(135deg,#1e4a73,#1a3a5c);color:#fff;}
-/* ヘッダーの関連ページメニュー */
-.hdr-report-menu{position:relative;margin-left:2px;}
-.hdr-report-btn{display:flex;align-items:center;gap:5px;padding:7px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#475569;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:background .15s ease,border-color .15s ease;}
-.hdr-report-btn:hover{background:#f8fafc;border-color:#cbd5e1;}
-.hdr-report-list{display:none;position:absolute;top:calc(100% + 6px);right:0;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12);z-index:200;min-width:190px;overflow:hidden;padding:5px;}
-.hdr-report-list a{display:block;padding:8px 11px;border-radius:6px;font-size:12.5px;font-weight:600;color:#374151;text-decoration:none;transition:background .12s ease;}
-.hdr-report-list a:hover{background:#f1f5f9;color:#1a3a5c;}
+/* ヘッダーの関連ページ: 折りたたまず常時ボタン一覧表示 */
+.hdr-quick-links{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-left:2px;}
+.hdr-quick-label{font-size:10.5px;font-weight:700;color:#94a3b8;letter-spacing:.03em;white-space:nowrap;}
+.hdr-quick-link{padding:7px 12px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#475569;font-size:12.5px;font-weight:600;text-decoration:none;white-space:nowrap;transition:background .15s ease,border-color .15s ease,color .15s ease;}
+.hdr-quick-link:hover{background:#f8fafc;border-color:#cbd5e1;color:#1a3a5c;}
 /* 絞り込みツールバー（セグメントコントロール） */
 .flt-toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;}
 .flt-group{display:flex;align-items:center;gap:8px;}
@@ -726,19 +724,6 @@ function toggleSelMenu() {
 document.addEventListener('click', function(e) {
   const btn = document.getElementById('sel-menu-btn');
   const menu = document.getElementById('sel-menu');
-  if (menu && btn && !btn.contains(e.target) && !menu.contains(e.target)) {
-    menu.style.display = 'none';
-  }
-});
-
-// ===== ヘッダー: 関連ページメニュー =====
-function toggleReportMenu() {
-  const menu = document.getElementById('hdr-report-list');
-  menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
-}
-document.addEventListener('click', function(e) {
-  const btn = document.getElementById('hdr-report-btn');
-  const menu = document.getElementById('hdr-report-list');
   if (menu && btn && !btn.contains(e.target) && !menu.contains(e.target)) {
     menu.style.display = 'none';
   }
@@ -894,6 +879,12 @@ app.get('/staff/retirees', async (c) => {
     pageSize: PAGE_SIZE,
   });
   return c.html(layout('退職者リスト', content, 'staff'));
+});
+
+// 労共契約・契約更新アラートは「課長ミッション」へ移設（/kacho-mission/contracts）。旧URLはリダイレクト。
+app.get('/staff/contracts', (c) => {
+  const qs = new URL(c.req.url).search;
+  return c.redirect(`${ADMIN_PATH}/kacho-mission/contracts${qs}`, 302);
 });
 
 // ===== 社員絞り込み検索（詳細検索として /staff に統合済み） =====

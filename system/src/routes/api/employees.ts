@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../../auth';
 import { getPeriod } from '../../auth';
+import { normalizeKana } from '../../utils/kana';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -69,7 +70,7 @@ app.post('/', async (c) => {
     `).bind(
       data.emp_no,
       data.name,
-      data.name_kana ?? null,
+      normalizeKana(data.name_kana),
       data.division ?? null,
       data.team ?? null,
       data.locker_no ?? null,
@@ -138,7 +139,7 @@ app.put('/:id', async (c) => {
 
   // フォームフィールド: undefined でない場合のみ更新（null も許可してクリア可能にする）
   if (data.name !== undefined)           { sets.push('name = COALESCE(?, name)'); vals.push(data.name); }
-  if (data.name_kana !== undefined)      { sets.push('name_kana = ?');            vals.push(data.name_kana ?? null); }
+  if (data.name_kana !== undefined)      { sets.push('name_kana = ?');            vals.push(normalizeKana(data.name_kana)); }
   if (data.division !== undefined)       { sets.push('division = ?');             vals.push(data.division ?? null); }
   if (data.team !== undefined)           { sets.push('team = ?');                 vals.push(data.team ?? null); }
   if (data.locker_no !== undefined)      { sets.push('locker_no = ?');            vals.push(data.locker_no ?? null); }
@@ -291,7 +292,7 @@ app.post('/csv-import', async (c) => {
             avg_return_time, used_cars, status, enrollment_status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`
       ).bind(
-        emp.emp_no, emp.name, emp.name_kana ?? null,
+        emp.emp_no, emp.name, normalizeKana(emp.name_kana),
         emp.division ?? null, emp.team ?? null,
         emp.work_schedule ?? null, emp.start_time ?? null,
         emp.avg_return_time ?? null, emp.used_cars ?? null,
@@ -315,7 +316,7 @@ app.post('/csv-import', async (c) => {
            updated_at      = datetime('now', 'localtime')
          WHERE emp_no = ?`
       ).bind(
-        emp.name_kana ?? null,
+        normalizeKana(emp.name_kana),
         emp.division ?? null, emp.team ?? null,
         emp.work_schedule ?? null, emp.start_time ?? null,
         emp.avg_return_time ?? null,
@@ -615,6 +616,219 @@ app.delete('/:id/purge', async (c) => {
     ...tables.map(t => c.env.DB.prepare(`DELETE FROM ${t} WHERE emp_id = ?`).bind(id)),
     c.env.DB.prepare('DELETE FROM employees WHERE id = ?').bind(id),
   ]);
+  return c.json({ ok: true });
+});
+
+// ============================================================================
+// 社員動態表（人事システム出力の xlsx）取込
+//   ブラウザ側で SheetJS 解析 → 差分を JSON でこのAPIに渡す。
+//   在籍者一覧=upsert / 退職一覧=退職 or 退職予定 or 取下 / 異動一覧=在籍除外 / 配属一覧=新規追加
+// ============================================================================
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const EMPNO_RE = /^\d{8}$/;
+const ENTRY_TYPES = new Set(['新卒', 'キャリア', '縁故']);
+
+// 差分計算用の軽量スナップショット（在籍・退職とも全件）
+app.get('/dotai-snapshot', async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT id, emp_no, name, name_kana, division, team, birth_date, hire_date,
+            first_duty_date, entry_type, status, is_active, retirement_date, contract_type
+       FROM employees`
+  ).all();
+  return c.json({ employees: rows.results ?? [] });
+});
+
+type DotaiUpsert = {
+  emp_no: string;
+  name?: string;
+  name_kana?: string | null;
+  birth_date?: string | null;
+  hire_date?: string | null;
+  first_duty_date?: string | null;
+  division?: number | null;
+  entry_type?: string | null;
+  contract_type?: string | null;
+};
+
+app.post('/dotai-import', async (c) => {
+  let data: {
+    updates?: DotaiUpsert[];
+    inserts?: DotaiUpsert[];
+    retire?: Array<{ emp_no: string; retirement_date?: string | null; retirement_reason?: string | null; deactivate?: boolean }>;
+    reactivate?: Array<{ emp_no: string }>;
+    deactivateMoved?: Array<{ emp_no: string; moved_date?: string | null; note?: string | null }>;
+  };
+  try {
+    data = await c.req.json();
+  } catch {
+    return c.json({ error: 'データがありません' }, 400);
+  }
+
+  type D1Stmt = ReturnType<typeof c.env.DB.prepare>;
+  const statements: D1Stmt[] = [];
+  const skipped: string[] = [];
+
+  const cleanDate = (v: unknown): string | null =>
+    typeof v === 'string' && DATE_RE.test(v.trim()) ? v.trim() : null;
+  const cleanDiv = (v: unknown): number | null =>
+    typeof v === 'number' && v >= 1 && v <= 4 ? v : null;
+  const cleanEntry = (v: unknown): string | null =>
+    typeof v === 'string' && ENTRY_TYPES.has(v) ? v : null;
+  const cleanContract = (v: unknown): string | null =>
+    v === '一般' || v === '労共' ? v : null;
+
+  // --- 既存社員の更新（項目が来ているものだけ SET）---
+  for (const u of data.updates ?? []) {
+    if (!EMPNO_RE.test(u.emp_no ?? '')) { skipped.push(`update:${u.emp_no}`); continue; }
+    const sets: string[] = [];
+    const vals: (string | number | null)[] = [];
+    if (typeof u.name === 'string' && u.name.trim()) { sets.push('name = ?'); vals.push(u.name.trim()); }
+    if (u.name_kana !== undefined) { sets.push('name_kana = ?'); vals.push(normalizeKana(u.name_kana)); }
+    if (u.birth_date !== undefined) { const d = cleanDate(u.birth_date); if (d) { sets.push('birth_date = ?'); vals.push(d); } }
+    if (u.hire_date !== undefined) { const d = cleanDate(u.hire_date); if (d) { sets.push('hire_date = ?'); vals.push(d); } }
+    if (u.first_duty_date !== undefined) { const d = cleanDate(u.first_duty_date); if (d) { sets.push('first_duty_date = ?'); vals.push(d); } }
+    if (u.division !== undefined) { const d = cleanDiv(u.division); if (d) { sets.push('division = ?'); vals.push(d); } }
+    if (u.entry_type !== undefined) { const e = cleanEntry(u.entry_type); if (e) { sets.push('entry_type = ?'); vals.push(e); } }
+    if (u.contract_type !== undefined) { const t = cleanContract(u.contract_type); if (t) { sets.push('contract_type = ?'); vals.push(t); } }
+    if (sets.length === 0) continue;
+    sets.push("updated_at = datetime('now', 'localtime')");
+    vals.push(u.emp_no);
+    statements.push(c.env.DB.prepare(`UPDATE employees SET ${sets.join(', ')} WHERE emp_no = ?`).bind(...vals));
+  }
+
+  // --- 新規追加（DB未登録の在籍者・入社予定者）---
+  for (const ins of data.inserts ?? []) {
+    if (!EMPNO_RE.test(ins.emp_no ?? '') || !(typeof ins.name === 'string' && ins.name.trim())) {
+      skipped.push(`insert:${ins.emp_no}`); continue;
+    }
+    statements.push(c.env.DB.prepare(
+      `INSERT OR IGNORE INTO employees
+         (emp_no, name, name_kana, division, birth_date, hire_date, first_duty_date,
+          entry_type, contract_type, status, enrollment_status, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', '通常', 1)`
+    ).bind(
+      ins.emp_no, ins.name.trim(),
+      normalizeKana(ins.name_kana),
+      cleanDiv(ins.division), cleanDate(ins.birth_date),
+      cleanDate(ins.hire_date), cleanDate(ins.first_duty_date),
+      cleanEntry(ins.entry_type) ?? 'キャリア',
+      cleanContract(ins.contract_type),
+    ));
+  }
+
+  // --- 退職一覧 ---
+  for (const r of data.retire ?? []) {
+    if (!EMPNO_RE.test(r.emp_no ?? '')) { skipped.push(`retire:${r.emp_no}`); continue; }
+    const rd = cleanDate(r.retirement_date);
+    const reason = typeof r.retirement_reason === 'string' && r.retirement_reason.trim()
+      ? r.retirement_reason.trim() : null;
+    if (r.deactivate) {
+      statements.push(c.env.DB.prepare(
+        `UPDATE employees SET is_active = 0,
+           retirement_date = COALESCE(?, NULLIF(retirement_date,''), date('now','localtime')),
+           retirement_reason = COALESCE(?, retirement_reason),
+           updated_at = datetime('now','localtime')
+         WHERE emp_no = ?`
+      ).bind(rd, reason, r.emp_no));
+    } else {
+      // 退職予定：在籍のまま予定日だけ入れる
+      statements.push(c.env.DB.prepare(
+        `UPDATE employees SET
+           retirement_date = COALESCE(?, retirement_date),
+           retirement_reason = COALESCE(?, retirement_reason),
+           updated_at = datetime('now','localtime')
+         WHERE emp_no = ?`
+      ).bind(rd, reason, r.emp_no));
+    }
+  }
+
+  // --- 退職取下 ---
+  for (const r of data.reactivate ?? []) {
+    if (!EMPNO_RE.test(r.emp_no ?? '')) { skipped.push(`reactivate:${r.emp_no}`); continue; }
+    statements.push(c.env.DB.prepare(
+      `UPDATE employees SET is_active = 1, retirement_date = NULL,
+         updated_at = datetime('now','localtime')
+       WHERE emp_no = ?`
+    ).bind(r.emp_no));
+  }
+
+  // --- 異動で板橋営業所外へ（在籍除外）---
+  for (const m of data.deactivateMoved ?? []) {
+    if (!EMPNO_RE.test(m.emp_no ?? '')) { skipped.push(`moved:${m.emp_no}`); continue; }
+    const md = cleanDate(m.moved_date);
+    statements.push(c.env.DB.prepare(
+      `UPDATE employees SET is_active = 0,
+         retirement_date = COALESCE(?, NULLIF(retirement_date,''), date('now','localtime')),
+         retirement_reason = COALESCE(retirement_reason, '他営業所へ異動'),
+         updated_at = datetime('now','localtime')
+       WHERE emp_no = ?`
+    ).bind(md, m.emp_no));
+  }
+
+  if (statements.length === 0) return c.json({ error: '反映対象がありません', skipped }, 400);
+
+  const CHUNK = 100;
+  const errors: string[] = [];
+  for (let i = 0; i < statements.length; i += CHUNK) {
+    try {
+      await c.env.DB.batch(statements.slice(i, i + CHUNK));
+    } catch (e) {
+      errors.push(`batch[${i}]: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return c.json({
+    ok: errors.length === 0,
+    updated: (data.updates ?? []).length,
+    inserted: (data.inserts ?? []).length,
+    retired: (data.retire ?? []).filter(r => r.deactivate).length,
+    retirePlanned: (data.retire ?? []).filter(r => !r.deactivate).length,
+    reactivated: (data.reactivate ?? []).length,
+    deactivatedMoved: (data.deactivateMoved ?? []).length,
+    skipped,
+    errors,
+  });
+});
+
+// 労共契約の更新アラート「対応済み」記録の登録／取消
+app.post('/contract-ack', async (c) => {
+  let data: {
+    emp_id?: number;
+    contract_date?: string;
+    renewal_type?: string;
+    birthday_date?: string | null;
+    note?: string | null;
+    undo?: boolean;
+  };
+  try {
+    data = await c.req.json();
+  } catch {
+    return c.json({ error: 'データがありません' }, 400);
+  }
+  const empId = Number(data.emp_id);
+  const cd = typeof data.contract_date === 'string' && DATE_RE.test(data.contract_date) ? data.contract_date : null;
+  if (!Number.isInteger(empId) || empId <= 0 || !cd) {
+    return c.json({ error: 'emp_id / contract_date が不正です' }, 400);
+  }
+  if (data.undo) {
+    await c.env.DB.prepare('DELETE FROM contract_renewal_acks WHERE emp_id = ? AND contract_date = ?')
+      .bind(empId, cd).run();
+    return c.json({ ok: true, undone: true });
+  }
+  const renewalType = data.renewal_type === 'transition65' || data.renewal_type === 'annual'
+    ? data.renewal_type : 'annual';
+  const bd = typeof data.birthday_date === 'string' && DATE_RE.test(data.birthday_date) ? data.birthday_date : null;
+  const note = typeof data.note === 'string' && data.note.trim() ? data.note.trim() : null;
+  await c.env.DB.prepare(
+    `INSERT INTO contract_renewal_acks (emp_id, renewal_type, contract_date, birthday_date, note)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(emp_id, contract_date) DO UPDATE SET
+       renewal_type = excluded.renewal_type,
+       birthday_date = COALESCE(excluded.birthday_date, contract_renewal_acks.birthday_date),
+       note = COALESCE(excluded.note, contract_renewal_acks.note),
+       acked_at = datetime('now','localtime')`
+  ).bind(empId, renewalType, cd, bd, note).run();
   return c.json({ ok: true });
 });
 
