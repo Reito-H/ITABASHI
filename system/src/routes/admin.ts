@@ -1577,7 +1577,7 @@ app.get('/settings/notifications', async (c) => {
   const TYPE_LABELS: Record<string, { label: string; desc: string; dest: string }> = {
     morning_report:     { label: '朝の出勤レポート',       desc: '当直・出勤担当者一覧 / 今月度平均売上', dest: 'LINE連携済みの班長・指導者' },
     benten_shift_daily: { label: 'ベンテンシフト通知',     desc: '当日のベンテンクラブシフトをLINEグループへ自動送信（設定 → ベンテンクラブ シフト でも管理可）', dest: 'ベンテンクラブのLINEグループ' },
-    kancho_attendance:  { label: '班長出勤通知',           desc: '本日の班長シフト出勤者一覧を送信（班長シフト画面でもON/OFF可）', dest: '班長シフトの通知先グループ' },
+    kancho_attendance:  { label: '班長出勤通知【停止中】',   desc: 'LINE無料枠(月200通)対策で毎日0時の一斉送信は停止。出勤班長はLINE「その他機能」ページ→出勤班長（今日・明日）で確認する運用に移行。※ONにすると再び通数を消費します', dest: 'オプトイン済みの統括・運行管理者（個人宛）' },
   };
 
   const rows = (settingsRes.results ?? []).map((s: any) => {

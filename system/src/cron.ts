@@ -70,28 +70,20 @@ async function sendMorningReport(env: Env, todayStr: string): Promise<void> {
   await pushToInstructors(env, [{ type: 'text', text: msg.trim() }]);
 }
 
-// 班長シフト: 本日の出勤者通知（深夜0時 / 統括・運行管理者のうちオプトイン済みのみ）
-// 表示: 日勤(昼日勤班長の空白=出勤)・当直・斜め直・遅番・終業班長(空白=出勤)。明け・非番・休みは非表示
-export async function sendKanchoAttendance(env: Env, todayStr: string): Promise<void> {
-  const at = env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!at) return;
-
-  // 送信先: オプトイン済み かつ 現在も統括/運行管理者ロールの人だけ（送信時に再チェック）
-  const recipients = await env.DB.prepare(`
-    SELECT o.line_uid FROM kancho_notify_optin o
-    JOIN line_liff_users u ON u.line_uid = o.line_uid
-    WHERE u.role IN ('general_manager', 'operations_manager')
-  `).all<{ line_uid: string }>();
-  const uids = (recipients.results ?? []).map(r => r.line_uid);
-  if (uids.length === 0) return;
-
-  const { year, month } = getPeriod(todayStr);
+// 班長シフト: 指定日の出勤者を区分ごとに算出（LINE通知・LIFFページ共用）
+// 区分: 日勤(昼日勤班長の空白=出勤)・当直・斜め直・遅番・終業班長(空白=出勤)。明け・非番・休みは非対象
+export interface KanchoAttendance {
+  nikkin: string[]; choku: string[]; naname: string[]; oso: string[]; shugyo: string[];
+  hasAnyShift: boolean;
+}
+export async function computeKanchoAttendance(env: Env, dateStr: string): Promise<KanchoAttendance> {
+  const { year, month } = getPeriod(dateStr);
   const members = await env.DB.prepare(
     "SELECT id, name, role FROM kancho_members WHERE section = 'main' AND is_active = 1 AND is_indoor = 1 AND year = ? AND month = ? ORDER BY sort_order, id"
   ).bind(year, month).all<{ id: number; name: string; role: string | null }>();
   const shifts = await env.DB.prepare(
     'SELECT member_id, code, is_diagonal, cell_color FROM kancho_shifts WHERE date = ?'
-  ).bind(todayStr).all<{ member_id: number; code: string; is_diagonal: number; cell_color: string | null }>();
+  ).bind(dateStr).all<{ member_id: number; code: string; is_diagonal: number; cell_color: string | null }>();
 
   const shiftMap = new Map((shifts.results ?? []).map(s => [s.member_id, s]));
 
@@ -114,6 +106,26 @@ export async function sendKanchoAttendance(env: Env, todayStr: string): Promise<
       else if (m.role === '終業班長') shugyo.push(m.name);
     }
   }
+
+  return { nikkin, choku, naname, oso, shugyo, hasAnyShift };
+}
+
+// 班長シフト: 本日の出勤者通知（深夜0時 / 統括・運行管理者のうちオプトイン済みのみ）
+// ※ migration_121 で既定 OFF。LINE無料枠対策で「その他機能」LIFFの出勤班長ビューへ移行済み
+export async function sendKanchoAttendance(env: Env, todayStr: string): Promise<void> {
+  const at = env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!at) return;
+
+  // 送信先: オプトイン済み かつ 現在も統括/運行管理者ロールの人だけ（送信時に再チェック）
+  const recipients = await env.DB.prepare(`
+    SELECT o.line_uid FROM kancho_notify_optin o
+    JOIN line_liff_users u ON u.line_uid = o.line_uid
+    WHERE u.role IN ('general_manager', 'operations_manager')
+  `).all<{ line_uid: string }>();
+  const uids = (recipients.results ?? []).map(r => r.line_uid);
+  if (uids.length === 0) return;
+
+  const { nikkin, choku, naname, oso, shugyo, hasAnyShift } = await computeKanchoAttendance(env, todayStr);
 
   const d = new Date(todayStr);
   const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getUTCDay()];

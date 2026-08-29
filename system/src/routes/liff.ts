@@ -7,6 +7,7 @@ import type { Env } from '../auth';
 import { logLineActivity } from '../utils/activity_log';
 import { issueCaseNoIfEmpty } from '../utils/report_case_no';
 import { normalizeKana } from '../utils/kana';
+import { computeKanchoAttendance } from '../cron';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -26,18 +27,6 @@ async function uidFromRequest(req: Request): Promise<string | null> {
   const auth = req.headers.get('Authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   return verifyLiffToken(token);
-}
-
-// LINE push メッセージ送信
-async function pushMessage(to: string, accessToken: string, text: string): Promise<void> {
-  const res = await fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-    body: JSON.stringify({ to, messages: [{ type: 'text', text }] }),
-  });
-  if (!res.ok) {
-    console.error('[liff pushMessage] LINE push failed', res.status, await res.text());
-  }
 }
 
 // 車番入力→課・班の断定表示＋担当乗務員候補（各報告フォーム共通）。
@@ -109,6 +98,98 @@ const VEHICLE_LOOKUP_JS = `
   }
 `;
 
+// 送信完了画面の「内容をコピー」ボタン用（報告フォーム各ページ共通で <script> 冒頭に注入）
+const COPY_SUMMARY_JS = `
+  function copySummary() {
+    var el = document.getElementById('summary-text');
+    var text = el ? (el.textContent || '') : '';
+    var btn = document.getElementById('btn-copy-summary');
+    var done = function() { if (btn) { btn.textContent = 'コピーしました'; setTimeout(function() { btn.textContent = '内容をコピー'; }, 1500); } };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function() { copySummaryFallback(text, done); });
+    } else { copySummaryFallback(text, done); }
+  }
+  function copySummaryFallback(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { alert('コピーできませんでした。内容を長押しで選択してコピーしてください。'); }
+    document.body.removeChild(ta);
+  }
+
+  // 送信成功 → 報告まとめを「自分の発言」としてこのトークへ送り、すぐにチャットへ戻る。
+  // 送れない場合（アプリ外／未許可）だけ完了画面を表示してコピーで代替できるようにする。
+  function talkNote(msg, ok) {
+    var note = document.getElementById('talk-send-note');
+    if (!note) return;
+    note.textContent = msg;
+    note.style.color = ok ? '#166534' : '#9ca3af';
+  }
+  function talkShowGrant(show) {
+    var b = document.getElementById('btn-grant-talk');
+    if (b) b.style.display = show ? 'block' : 'none';
+  }
+  function liffSendAvail() {
+    try { return !!liff.isApiAvailable('sendMessages'); } catch (e) { return false; }
+  }
+  function showSuccessPage() {
+    var fp = document.getElementById('form-page'); if (fp) fp.style.display = 'none';
+    var sp = document.getElementById('success-page'); if (sp) sp.style.display = 'block';
+  }
+  function finishReportSubmit(text) {
+    window.__talkSummary = text || '';
+    talkShowGrant(false);
+    if (typeof liff === 'undefined' || !liff.isInClient()) {
+      showSuccessPage();
+      talkNote('※LINEアプリ外のため自動送信できません。「内容をコピー」をご利用ください。', false);
+      return;
+    }
+    var sendThenClose = function() {
+      var closed = false;
+      var close = function() {
+        if (closed) return; closed = true;
+        try { liff.closeWindow(); } catch (e) { showSuccessPage(); talkNote('この内容をトークに送信しました。', true); }
+      };
+      try {
+        liff.sendMessages([{ type: 'text', text: window.__talkSummary }])
+          .then(close)
+          .catch(function(err) {
+            var m = (err && (err.message || err.code)) ? (err.message || err.code) : '不明';
+            showSuccessPage();
+            talkNote('自動送信に失敗（' + m + '）。「内容をコピー」をご利用ください。', false);
+          });
+      } catch (e) {
+        showSuccessPage();
+        talkNote('自動送信に失敗（' + (e && e.message ? e.message : String(e)) + '）。「内容をコピー」をご利用ください。', false);
+      }
+    };
+
+    if (!(liff.permission && liff.permission.query)) { sendThenClose(); return; }
+    liff.permission.query('chat_message.write').then(function(p) {
+      var st = (p && p.state) || '不明';
+      if (st === 'granted') { sendThenClose(); return; }
+      showSuccessPage();
+      if (st === 'prompt') {
+        talkNote('トークへの自動送信には、一度だけ許可が必要です。下のボタンを押してください。', false);
+        talkShowGrant(true);
+      } else {
+        talkNote('この設定では自動送信できません（許可状態: ' + st + '）。「内容をコピー」をご利用ください。', false);
+      }
+    }).catch(function() { sendThenClose(); });
+  }
+  function grantTalkPermission() {
+    if (!(liff.permission && liff.permission.requestAll)) {
+      talkNote('この端末では許可の要求ができません。「内容をコピー」をご利用ください。', false); return;
+    }
+    talkNote('許可画面を表示します...', false);
+    liff.permission.requestAll().then(function() {
+      finishReportSubmit(window.__talkSummary || '');
+    }).catch(function() {
+      talkNote('許可が得られませんでした。「内容をコピー」をご利用ください。', false);
+    });
+  }
+`;
+
 // ===== LIFF: 忘れ物対応フォーム =====
 app.get('/liff/lost-item', (c) => {
   const liffId = c.env.LIFF_ID_LOST_ITEM ?? '';
@@ -165,6 +246,49 @@ app.get('/liff/other-features', (c) => {
   const salesLiffId = c.env.LIFF_ID_SALES ?? '';
   const html = liffOtherFeaturesPage(liffId, salesLiffId);
   return c.html(html);
+});
+
+// ===== LIFF API: 出勤班長（今日・明日）=====
+// 旧・毎日0時のLINE通知(kancho_attendance)を廃止し、その他機能ページで見に行く方式へ移行
+app.get('/api/liff/kancho-attendance', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const liffUser = await c.env.DB.prepare(
+    'SELECT role FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string }>();
+  if (!liffUser || !['general_manager', 'operations_manager'].includes(liffUser.role)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const todayStr = jstNow.toISOString().split('T')[0];
+  const tomorrowStr = new Date(jstNow.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  const [today, tomorrow] = await Promise.all([
+    computeKanchoAttendance(c.env, todayStr),
+    computeKanchoAttendance(c.env, tomorrowStr),
+  ]);
+
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', 'その他機能', '出勤班長表示');
+  return c.json({ today: { date: todayStr, ...today }, tomorrow: { date: tomorrowStr, ...tomorrow } });
+});
+
+// ===== LIFF API: 連絡事項（クイック報告で自分が宛先に選ばれた項目のみ・直近7日）=====
+app.get('/api/liff/report-notices', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const rows = await c.env.DB.prepare(`
+    SELECT id, report_type, summary, created_by, created_at
+    FROM report_notices
+    WHERE created_at >= datetime('now', 'localtime', '-7 days')
+      AND target_uids LIKE ?
+    ORDER BY created_at DESC
+    LIMIT 50
+  `).bind(`%"${uid}"%`).all<{ id: number; report_type: string | null; summary: string; created_by: string | null; created_at: string }>();
+
+  return c.json({ notices: rows.results ?? [] });
 });
 
 // ===== LIFF API: 社員検索 =====
@@ -582,9 +706,7 @@ app.post('/api/liff/lost-item', async (c) => {
 
   // 報告まとめテキストを生成してLINEに送信
   const summary = buildLostItemSummary(body);
-  const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
-  if (at) await pushMessage(uid, at, summary);
-
+  // 本人への確認は LIFF フロントの liff.sendMessages でトークに残す（LINE無料枠を消費しない）
   return c.json({ ok: true, summary });
 });
 
@@ -657,9 +779,7 @@ app.post('/api/liff/accident', async (c) => {
   await logLineActivity(c.env.DB, uid, 'liff', 'api', '事故報告送信',
     `${body.vehicle_no ?? ''} ${body.accident_type ?? ''}`.trim());
 
-  const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
-  if (at) await pushMessage(uid, at, summary);
-
+  // 本人への確認は LIFF フロントの liff.sendMessages でトークに残す（LINE無料枠を消費しない）
   return c.json({ ok: true, summary });
 });
 
@@ -777,9 +897,7 @@ app.post('/api/liff/violation', async (c) => {
     car_status: carStatus,
     substitute_needed: substituteNeeded,
   });
-  const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
-  if (at) await pushMessage(uid, at, summary);
-
+  // 本人への確認は LIFF フロントの liff.sendMessages でトークに残す（LINE無料枠を消費しない）
   return c.json({ ok: true, summary });
 });
 
@@ -840,9 +958,7 @@ app.post('/api/liff/general-report', async (c) => {
     `${body.title ?? ''} ${body.vehicle_no ?? ''} ${(body.content ?? '').slice(0, 30)}`.trim());
 
   const summary = buildGeneralReportSummary(body);
-  const at = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
-  if (at) await pushMessage(uid, at, summary);
-
+  // 本人への確認は LIFF フロントの liff.sendMessages でトークに残す（LINE無料枠を消費しない）
   return c.json({ ok: true, summary });
 });
 
@@ -1116,14 +1232,18 @@ function liffLostItemPage(liffId: string): string {
     <div class="page success" id="success-page" style="display:none;">
       <div class="success-icon">✅</div>
       <div class="success-title">送信しました</div>
-      <p style="color:#6b7280;font-size:14px;">LINEにも同じ内容を送信しました。<br>コピーして転送にご利用ください。</p>
+      <p style="color:#6b7280;font-size:14px;">下の内容をコピーして、トークに貼り付け・転送できます。</p>
       <div class="success-summary" id="summary-text"></div>
+      <div id="talk-send-note" style="font-size:12px;line-height:1.6;margin:4px 0 10px;color:#9ca3af;"></div>
+      <button class="btn-submit" id="btn-grant-talk" style="display:none;background:#0f766e;margin-bottom:8px;" onclick="grantTalkPermission()">トークへの自動送信を許可</button>
+      <button class="btn-submit" id="btn-copy-summary" onclick="copySummary()">内容をコピー</button>
       <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();">閉じる</button>
     </div>
   </div>
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
+${COPY_SUMMARY_JS}
   var selectedEmp = null;
   var currentType = 'staff';
   var empSearchTimer = null;
@@ -1237,9 +1357,9 @@ function liffLostItemPage(liffId: string): string {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) {
-        document.getElementById('form-page').style.display = 'none';
-        document.getElementById('success-page').style.display = 'block';
         document.getElementById('summary-text').textContent = data.summary;
+        // 送信成功 → まとめをトークへ自動送信し、すぐにチャットへ戻る（送れない時だけ完了画面を表示）
+        finishReportSubmit(data.summary);
       } else {
         btn.disabled = false;
         btn.textContent = '送信する';
@@ -1425,9 +1545,11 @@ function liffAccidentPage(liffId: string): string {
       <div class="success">
         <div class="success-icon">🚨</div>
         <div class="success-title">報告書を作成しました</div>
-        <p style="color:#6b7280;font-size:14px;">LINEに報告書を送信しました。<br>管理LINEへは手動で転送してください。</p>
+        <p style="color:#6b7280;font-size:14px;">下の内容をコピーして、トークに貼り付け・転送できます。</p>
         <div class="success-summary" id="summary-text"></div>
-        <div class="forward-note">⚠️ 管理LINEへの転送は各自で行ってください</div>
+        <div id="talk-send-note" style="font-size:12px;line-height:1.6;margin:4px 0 10px;color:#9ca3af;"></div>
+        <button class="btn-submit" id="btn-grant-talk" style="display:none;background:#0f766e;margin-bottom:8px;" onclick="grantTalkPermission()">トークへの自動送信を許可</button>
+        <button class="btn-submit" id="btn-copy-summary" onclick="copySummary()">内容をコピー</button>
         <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();" style="margin-top:16px;">閉じる</button>
       </div>
     </div>
@@ -1435,6 +1557,7 @@ function liffAccidentPage(liffId: string): string {
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
+${COPY_SUMMARY_JS}
   var selectedEmp = null;
   var currentCarStatus = '';
   var empSearchTimer = null;
@@ -1743,14 +1866,18 @@ function liffViolationPage(liffId: string): string {
     <div class="page success" id="success-page" style="display:none;">
       <div class="success-icon">✅</div>
       <div class="success-title">送信しました</div>
-      <p style="color:#6b7280;font-size:14px;">LINEにも同じ内容を送信しました。<br>コピーして転送にご利用ください。</p>
+      <p style="color:#6b7280;font-size:14px;">下の内容をコピーして、トークに貼り付け・転送できます。</p>
       <div class="success-summary" id="summary-text"></div>
+      <div id="talk-send-note" style="font-size:12px;line-height:1.6;margin:4px 0 10px;color:#9ca3af;"></div>
+      <button class="btn-submit" id="btn-grant-talk" style="display:none;background:#0f766e;margin-bottom:8px;" onclick="grantTalkPermission()">トークへの自動送信を許可</button>
+      <button class="btn-submit" id="btn-copy-summary" onclick="copySummary()">内容をコピー</button>
       <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();">閉じる</button>
     </div>
   </div>
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
+${COPY_SUMMARY_JS}
   var selectedEmp = null;
   var empSearchTimer = null;
   var violationTypes = [];
@@ -1903,9 +2030,9 @@ function liffViolationPage(liffId: string): string {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) {
-        document.getElementById('form-page').style.display = 'none';
-        document.getElementById('success-page').style.display = 'block';
         document.getElementById('summary-text').textContent = data.summary;
+        // 送信成功 → まとめをトークへ自動送信し、すぐにチャットへ戻る（送れない時だけ完了画面を表示）
+        finishReportSubmit(data.summary);
       } else {
         btn.disabled = false;
         btn.textContent = '送信する';
@@ -2076,14 +2203,18 @@ function liffGeneralReportPage(liffId: string): string {
     <div class="page success" id="success-page" style="display:none;">
       <div class="success-icon">✅</div>
       <div class="success-title">送信しました</div>
-      <p style="color:#6b7280;font-size:14px;">LINEにも同じ内容を送信しました。<br>コピーして転送にご利用ください。</p>
+      <p style="color:#6b7280;font-size:14px;">下の内容をコピーして、トークに貼り付け・転送できます。</p>
       <div class="success-summary" id="summary-text"></div>
+      <div id="talk-send-note" style="font-size:12px;line-height:1.6;margin:4px 0 10px;color:#9ca3af;"></div>
+      <button class="btn-submit" id="btn-grant-talk" style="display:none;background:#0f766e;margin-bottom:8px;" onclick="grantTalkPermission()">トークへの自動送信を許可</button>
+      <button class="btn-submit" id="btn-copy-summary" onclick="copySummary()">内容をコピー</button>
       <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();">閉じる</button>
     </div>
   </div>
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
+${COPY_SUMMARY_JS}
   var selectedEmp = null;
   var empSearchTimer = null;
 
@@ -2183,9 +2314,9 @@ function liffGeneralReportPage(liffId: string): string {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) {
-        document.getElementById('form-page').style.display = 'none';
-        document.getElementById('success-page').style.display = 'block';
         document.getElementById('summary-text').textContent = data.summary;
+        // 送信成功 → まとめをトークへ自動送信し、すぐにチャットへ戻る（送れない時だけ完了画面を表示）
+        finishReportSubmit(data.summary);
       } else {
         btn.disabled = false;
         btn.textContent = '送信する';
@@ -2459,14 +2590,18 @@ function liffReport2Page(liffId: string): string {
     <div class="page success" id="success-page" style="display:none;">
       <div class="success-icon">✅</div>
       <div class="success-title">送信しました</div>
-      <p style="color:#6b7280;font-size:14px;">LINEにも同じ内容を送信しました。<br>コピーして転送にご利用ください。</p>
+      <p style="color:#6b7280;font-size:14px;">下の内容をコピーして、トークに貼り付け・転送できます。</p>
       <div class="success-summary" id="summary-text"></div>
+      <div id="talk-send-note" style="font-size:12px;line-height:1.6;margin:4px 0 10px;color:#9ca3af;"></div>
+      <button class="btn-submit" id="btn-grant-talk" style="display:none;background:#0f766e;margin-bottom:8px;" onclick="grantTalkPermission()">トークへの自動送信を許可</button>
+      <button class="btn-submit" id="btn-copy-summary" onclick="copySummary()">内容をコピー</button>
       <button class="btn-close" onclick="if(liff.isInClient())liff.closeWindow();">閉じる</button>
     </div>
   </div>
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
+${COPY_SUMMARY_JS}
   var currentType = 'lost';
   var PREFIX = { lost: 'li', accident: 'ac', violation: 'vi', general: 'gr' };
   var selectedEmp = { lost: null, accident: null, violation: null, general: null };
@@ -2742,9 +2877,9 @@ function liffReport2Page(liffId: string): string {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.ok) {
-        document.getElementById('form-page').style.display = 'none';
-        document.getElementById('success-page').style.display = 'block';
         document.getElementById('summary-text').textContent = data.summary;
+        // 送信成功 → まとめをトークへ自動送信し、すぐにチャットへ戻る（送れない時だけ完了画面を表示）
+        finishReportSubmit(data.summary);
       } else {
         btn.disabled = false;
         btn.textContent = '送信する';
@@ -3874,6 +4009,16 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
     .notice-day { display: inline-block; font-size: 15px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 6px; padding: 3px 12px; margin-bottom: 10px; }
     .notice-item { font-size: 17px; color: #111827; line-height: 1.75; margin-bottom: 6px; }
     .notice-item:last-child { margin-bottom: 0; }
+    .relay-item { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+    .relay-item:last-child { margin-bottom: 0; }
+    .relay-meta { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+    .relay-badge { display: inline-block; font-size: 11px; font-weight: 700; color: #b45309; background: #fef3c7; border-radius: 5px; padding: 2px 8px; margin-right: 6px; }
+    .relay-text { font-size: 15px; color: #111827; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+    .relay-copy { margin-top: 8px; width: 100%; background: #0f766e; color: white; border: none; border-radius: 8px; padding: 9px; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .kancho-body { font-size: 16px; color: #111827; line-height: 1.9; }
+    .kancho-row { display: flex; gap: 8px; padding: 4px 0; }
+    .kancho-row .k-label { flex: 0 0 84px; font-weight: 700; color: #0f766e; }
+    .kancho-row .k-names { flex: 1; }
     .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .feature-btn { background: white; border: none; border-radius: 12px; padding: 26px 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08); cursor: pointer; }
     .feature-btn .icon { font-size: 32px; margin-bottom: 10px; }
@@ -3927,7 +4072,17 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
         <div id="notice-items"></div>
       </div>
 
+      <!-- 連絡事項（クイック報告で自分が宛先に選ばれた項目のみ／直近7日） -->
+      <div class="card" id="relay-card" style="display:none;">
+        <div class="card-title">連絡事項</div>
+        <div id="relay-items"></div>
+      </div>
+
       <div class="btn-grid">
+        <button class="feature-btn wide" onclick="showKancho()">
+          <span class="icon">👥</span>
+          <span class="label">出勤班長（今日・明日）</span>
+        </button>
         <button class="feature-btn" onclick="showOffices()">
           <div class="icon">📞</div>
           <div class="label">電話番号一覧</div>
@@ -3951,6 +4106,22 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
       <div class="card">
         <div class="card-title">電話番号一覧</div>
         <div id="office-list"></div>
+      </div>
+    </div>
+
+    <!-- 出勤班長（今日・明日） -->
+    <div class="page" id="view-kancho" style="display:none;">
+      <div class="sub-header">
+        <button class="btn-back" onclick="showMain()">← 戻る</button>
+        <button class="btn-icon" onclick="loadKancho()" title="再読み込み">↻</button>
+      </div>
+      <div class="card">
+        <div class="card-title">本日の出勤班長</div>
+        <div id="kancho-today" class="kancho-body">読み込み中...</div>
+      </div>
+      <div class="card">
+        <div class="card-title">明日の出勤班長</div>
+        <div id="kancho-tomorrow" class="kancho-body">読み込み中...</div>
       </div>
     </div>
 
@@ -3996,6 +4167,7 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
 
   <script>
   var LIFF_ACCESS_TOKEN = '';
+${COPY_SUMMARY_JS}
   var SALES_LIFF_ID = ${JSON.stringify(salesLiffId)};
   var WEEKLY_NOTICES = ${JSON.stringify(WEEKLY_NOTICES)};
   var TC_ITEM_H = 36;
@@ -4010,12 +4182,94 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
       document.getElementById('loading').style.display = 'none';
       document.getElementById('app').style.display = 'block';
       renderNotice();
+      loadReportNotices();
     })
     .catch(function(err) {
       document.getElementById('loading').textContent = 'エラー: ' + err.message;
     });
 
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  var AUTH_HEADERS = function() { return { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN }; };
+
+  /* 連絡事項（クイック報告で自分が宛先に選ばれた項目のみ） */
+  function loadReportNotices() {
+    fetch('/api/liff/report-notices', { headers: AUTH_HEADERS() })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var items = (data && data.notices) || [];
+        if (!items.length) { document.getElementById('relay-card').style.display = 'none'; return; }
+        document.getElementById('relay-card').style.display = 'block';
+        document.getElementById('relay-items').innerHTML = items.map(function(n) {
+          var when = String(n.created_at || '').slice(0, 16).replace('T', ' ');
+          var by = n.created_by ? '・' + esc(n.created_by) : '';
+          return '<div class="relay-item">'
+            + '<div class="relay-meta"><span class="relay-badge">' + esc(n.report_type || '連絡') + '</span>' + esc(when) + by + '</div>'
+            + '<div class="relay-text" id="relay-t-' + n.id + '">' + esc(n.summary || '') + '</div>'
+            + '<button class="relay-copy" onclick="copyNotice(' + n.id + ')">コピー</button>'
+            + '</div>';
+        }).join('');
+      })
+      .catch(function() { document.getElementById('relay-card').style.display = 'none'; });
+  }
+  function copyNotice(id) {
+    var el = document.getElementById('relay-t-' + id);
+    if (!el) return;
+    var text = el.textContent || '';
+    var done = function() {
+      var btn = el.parentNode.querySelector('.relay-copy');
+      if (btn) { var o = btn.textContent; btn.textContent = 'コピーしました'; setTimeout(function() { btn.textContent = o; }, 1500); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function() { fallbackCopy(text, done); });
+    } else { fallbackCopy(text, done); }
+  }
+  function fallbackCopy(text, done) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { alert('コピーできませんでした'); }
+    document.body.removeChild(ta);
+  }
+
+  /* 出勤班長（今日・明日） */
+  var kanchoLoaded = false;
+  function showKancho() {
+    document.getElementById('view-main').style.display = 'none';
+    document.getElementById('view-kancho').style.display = 'block';
+    if (!kanchoLoaded) { kanchoLoaded = true; loadKancho(); }
+  }
+  function loadKancho() {
+    document.getElementById('kancho-today').textContent = '読み込み中...';
+    document.getElementById('kancho-tomorrow').textContent = '読み込み中...';
+    fetch('/api/liff/kancho-attendance', { headers: AUTH_HEADERS() })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || data.error) {
+          var msg = (data && data.error === 'forbidden') ? '閲覧権限がありません' : '読み込みに失敗しました';
+          document.getElementById('kancho-today').textContent = msg;
+          document.getElementById('kancho-tomorrow').textContent = '';
+          return;
+        }
+        renderKancho('kancho-today', data.today);
+        renderKancho('kancho-tomorrow', data.tomorrow);
+      })
+      .catch(function() {
+        document.getElementById('kancho-today').textContent = '読み込みに失敗しました';
+        document.getElementById('kancho-tomorrow').textContent = '';
+      });
+  }
+  function renderKancho(elId, d) {
+    var el = document.getElementById(elId);
+    if (!d || !d.hasAnyShift) { el.textContent = 'シフト未入力です'; return; }
+    var rows = [
+      ['日勤', d.nikkin], ['当直', d.choku], ['斜め直', d.naname], ['遅番', d.oso], ['終業班長', d.shugyo]
+    ].filter(function(x) { return x[1] && x[1].length; });
+    if (!rows.length) { el.textContent = '対象の出勤者はいません'; return; }
+    el.innerHTML = rows.map(function(x) {
+      return '<div class="kancho-row"><span class="k-label">' + x[0] + '</span><span class="k-names">' + esc(x[1].join('、')) + '</span></div>';
+    }).join('');
+  }
 
   function renderNotice() {
     var notice = WEEKLY_NOTICES[new Date().getDay()];
@@ -4029,6 +4283,7 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
     document.getElementById('view-main').style.display = 'block';
     document.getElementById('view-offices').style.display = 'none';
     document.getElementById('view-timecalc').style.display = 'none';
+    document.getElementById('view-kancho').style.display = 'none';
   }
 
   function showTimeCalc() {

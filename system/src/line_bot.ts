@@ -300,6 +300,14 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
     return;
   }
 
+  // ===== 定型ブロックの自動返信抑止 =====
+  // 報告フォーム(LIFF)の liff.sendMessages で本人がトークに流した報告まとめや、
+  // 各種通知（いずれも「【…】」で始まる）を転送する際、「リッチメニューからご利用ください」等の
+  // 自動返信が付くとノイズになるため、何も返さずに終了する。
+  if (event.type === 'message' && inputText.startsWith('【')) {
+    return;
+  }
+
   // ===== 会話ステート取得 =====
   const { state, data } = await getState(env.DB, lineUid);
 

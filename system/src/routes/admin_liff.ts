@@ -2728,30 +2728,35 @@ app.get('/api/liff/accident-reports/line-recipients',  nrLineRecipientsHandler);
 app.get('/api/liff/violation-reports/line-recipients', nrLineRecipientsHandler);
 app.get('/api/liff/general-reports/line-recipients',   nrLineRecipientsHandler);
 
-async function lineMulticastSimple(token: string, uids: string[], messages: object[]): Promise<void> {
-  const batches: string[][] = [];
-  for (let i = 0; i < uids.length; i += 500) batches.push(uids.slice(i, i + 500));
-  await Promise.allSettled(batches.map(batch =>
-    fetch('https://api.line.me/v2/bot/message/multicast', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to: batch, messages }),
-    })
-  ));
-}
+// クイック報告の「連絡事項に反映」: LINE一斉送信(multicast)を廃止し、report_notices に保存。
+// 選ばれた宛先(line_uid)の人だけが「その他機能」LIFFページで内容を見られる（LINE無料枠を消費しない）。
+const NR_TYPE_LABEL: Record<string, string> = {
+  'lost-items': '忘れ物', 'accident-reports': '事故', 'violation-reports': '違反', 'general-reports': '一般',
+};
 async function nrSendLineSummaryHandler(c: Context<{ Bindings: Env }>) {
   const b = await c.req.json<{ recipient_ids?: number[]; summary?: string }>().catch(() => ({}) as { recipient_ids?: number[]; summary?: string });
   const ids = Array.isArray(b.recipient_ids) ? b.recipient_ids.filter(n => Number.isInteger(n)) : [];
   const summary = (b.summary ?? '').trim();
-  if (!ids.length || !summary) return c.json({ error: '送信先と内容が必要です' }, 400);
-  if (!c.env.LINE_CHANNEL_ACCESS_TOKEN) return c.json({ error: 'LINE未設定' }, 500);
+  if (!ids.length || !summary) return c.json({ error: '宛先と内容が必要です' }, 400);
+
   const placeholders = ids.map(() => '?').join(',');
   const rows = await c.env.DB.prepare(
-    `SELECT line_uid FROM line_liff_users WHERE id IN (${placeholders}) AND role != 'unknown'`
-  ).bind(...ids).all<{ line_uid: string }>();
-  const uids = [...new Set((rows.results ?? []).map(r => r.line_uid))];
-  if (!uids.length) return c.json({ error: '送信先が見つかりません' }, 400);
-  await lineMulticastSimple(c.env.LINE_CHANNEL_ACCESS_TOKEN, uids, [{ type: 'text', text: summary }]);
+    `SELECT line_uid, name FROM line_liff_users WHERE id IN (${placeholders}) AND role != 'unknown'`
+  ).bind(...ids).all<{ line_uid: string; name: string | null }>();
+  const recips = (rows.results ?? []).filter(r => !!r.line_uid);
+  if (!recips.length) return c.json({ error: '宛先が見つかりません' }, 400);
+
+  const uids = [...new Set(recips.map(r => r.line_uid))];
+  const names = recips.map(r => r.name || '（名前未設定）');
+
+  const pathKey = Object.keys(NR_TYPE_LABEL).find(k => c.req.path.includes(k)) ?? '';
+  const reportType = NR_TYPE_LABEL[pathKey] ?? '連絡';
+  const createdBy = await getAdminName(c);
+
+  await c.env.DB.prepare(
+    `INSERT INTO report_notices (report_type, summary, target_uids, target_names, created_by) VALUES (?, ?, ?, ?, ?)`
+  ).bind(reportType, summary, JSON.stringify(uids), JSON.stringify(names), createdBy || null).run();
+
   return c.json({ ok: true, sent: uids.length });
 }
 app.post('/api/liff/lost-items/send-line-summary',        nrSendLineSummaryHandler);

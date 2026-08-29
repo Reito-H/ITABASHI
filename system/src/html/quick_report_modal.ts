@@ -174,12 +174,13 @@ export function quickReportModalHtml(): string {
         <button type="button" id="qr-submit-btn" onclick="qrSubmit()" style="width:100%;margin-top:16px;padding:12px;background:#1e3a5f;color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">登録する</button>
       </form>
 
-      <!-- 登録完了パネル（LINE連携者への送信はここから行う。閉じるまでモーダルは開いたまま） -->
+      <!-- 登録完了パネル（宛先を選ぶとその人の「その他機能」ページに連絡事項として表示される。閉じるまでモーダルは開いたまま） -->
       <div id="qr-success-panel" style="display:none;">
         <div style="background:#dcfce7;color:#166534;border-radius:6px;padding:8px 10px;font-size:12px;margin-bottom:14px;font-weight:600;">登録しました</div>
-        <div style="font-size:12px;color:#374151;font-weight:700;margin-bottom:6px;">LINE連携者へ送信（任意）</div>
+        <div style="font-size:12px;color:#374151;font-weight:700;margin-bottom:6px;">連絡事項に反映（任意）</div>
+        <div style="font-size:11px;color:#6b7280;margin-bottom:6px;">選んだ人のLINE「その他機能」ページに、この内容がコピー可能な連絡事項として表示されます（直近7日）。</div>
         <div id="qr-line-recipients" style="border:1px solid #e5e7eb;border-radius:8px;max-height:160px;overflow-y:auto;margin-bottom:8px;"></div>
-        <button type="button" id="qr-line-send-btn" onclick="qrSendLineSummary()" style="width:100%;padding:9px;background:#16a34a;color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:10px;">選択した人に送信する</button>
+        <button type="button" id="qr-line-send-btn" onclick="qrSendLineSummary()" style="width:100%;padding:9px;background:#16a34a;color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:10px;">選択した人の連絡事項に反映</button>
         <button type="button" onclick="qrFinishClose()" style="width:100%;padding:10px;background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">閉じる</button>
       </div>
     </div>
@@ -683,7 +684,7 @@ export function quickReportModalScript(): string {
   }
   function qrSendLineSummary() {
     var ids = Array.prototype.slice.call(document.querySelectorAll('.qr-line-recip-cb:checked')).map(function(cb) { return parseInt(cb.value, 10); });
-    if (!ids.length) { qrShowToast('送信先を選択してください'); return; }
+    if (!ids.length) { qrShowToast('宛先を選択してください'); return; }
     var btn = document.getElementById('qr-line-send-btn');
     btn.disabled = true;
     fetch(QR_ADMIN_PATH + QR_CONFIG[qrActiveType].sendLine, {
@@ -693,8 +694,8 @@ export function quickReportModalScript(): string {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       btn.disabled = false;
-      if (data.ok) { qrShowToast(data.sent + '件、LINEに送信しました'); }
-      else { qrShowToast(data.error || '送信に失敗しました'); }
+      if (data.ok) { qrShowToast(data.sent + '件の連絡事項に反映しました'); }
+      else { qrShowToast(data.error || '反映に失敗しました'); }
     })
     .catch(function() { btn.disabled = false; qrShowToast('通信エラーが発生しました'); });
   }
