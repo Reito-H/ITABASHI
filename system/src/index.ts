@@ -67,6 +67,7 @@ import adminBirthdayRoutes, { birthdayPublicApi } from './routes/admin_birthday'
 import adminRequestsRoutes from './routes/admin_requests';
 import adminCcListRoutes from './routes/admin_cc_list';
 import adminBenriRoutes from './routes/admin_benri';
+import adminAirportRoutes from './routes/admin_airport';
 import adminNojicoRoutes from './routes/admin_nojico';
 import adminGarageRoutes from './routes/admin_garage';
 import adminShuttleRoutes from './routes/admin_shuttle';
@@ -237,13 +238,17 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // 編集（非GET）はルート側でフル権限アカウント（permissions IS NULL）かどうかを別途チェックする
   const isBenri = subPath.startsWith('/benri') || subPath.startsWith('/api/benri');
 
+  // 車庫見取り図: 便利ハブ配下に移動。閲覧はページ権限を使わず全アカウント共通。
+  // 編集（非GET）は admin_garage.ts の requireEdit でフル権限アカウントか別途チェックする
+  const isGarage = subPath.startsWith('/garage') || subPath.startsWith('/api/garage');
+
   // nojico: 外部サイトをアプリ内ブラウザで開くだけのページ。ページ権限は使わず全アカウント共通でアクセス可
   const isNojico = subPath.startsWith('/nojico');
 
   // シャトルバス: 閲覧はページ権限を使わず全アカウント共通。編集（非GET）はルート側でフル権限アカウントか別途チェックする
   const isShuttle = subPath.startsWith('/shuttle') || subPath.startsWith('/api/shuttle');
 
-  if (!isCcList && !isBenri && !isNojico && !isShuttle && !isPathAllowed(perms, subPath, c.req.method)) {
+  if (!isCcList && !isBenri && !isGarage && !isNojico && !isShuttle && !isPathAllowed(perms, subPath, c.req.method)) {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
@@ -296,6 +301,7 @@ app.route(`/${SECRET}/admin`, adminBirthdayRoutes);
 app.route(`/${SECRET}/admin`, adminRequestsRoutes);
 app.route(`/${SECRET}/admin`, adminCcListRoutes);
 app.route(`/${SECRET}/admin`, adminBenriRoutes);
+app.route(`/${SECRET}/admin`, adminAirportRoutes);
 app.route(`/${SECRET}/admin`, adminNojicoRoutes);
 app.route(`/${SECRET}/admin`, adminGarageRoutes);
 app.route(`/${SECRET}/admin`, adminShuttleRoutes);

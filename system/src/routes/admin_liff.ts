@@ -147,7 +147,7 @@ app.get('/settings/reports', async (c) => {
   const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
   const allowed = perms === null ? REPORT_LIST_KINDS : REPORT_LIST_KINDS.filter(k => perms.includes(k.permKey));
   if (allowed.length === 0) {
-    return c.html(layout('報告センター', `${reportSubHeader('報告センター')}<p style="color:#6b7280;">表示できる報告がありません。</p>`, 'report-center'));
+    return c.html(layout('報告センター', `<p style="color:#6b7280;">表示できる報告がありません。</p>`, 'report-center'));
   }
 
   const typeFilterRaw = c.req.query('type') ?? '';
@@ -212,7 +212,6 @@ app.get('/settings/reports', async (c) => {
   </div>` : '';
 
   const content = `
-    ${reportSubHeader('報告センター')}
     ${reportCenterNav('reports')}
 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">

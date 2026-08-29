@@ -1009,9 +1009,8 @@ app.get('/settings', async (c) => {
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[]; extraHtml?: string }> = [
     { heading: '日々の運用', cards: [
-      // 報告センターは左サイドバーに独立項目として配置したため、ここには表示しない
+      // 報告センター・便利（車庫を含む）は左サイドバーに独立項目として配置したため、ここには表示しない
       { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄',       desc: 'ホシコンについての要望・意見・欲しい機能などを自由に投稿' },
-      { href: `${ADMIN}/benri`,            perm: '',               title: '便利',         desc: '距離控除表・高速料金表・会社負担マップなど（どのアカウントでも閲覧可能）' },
     ]},
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },

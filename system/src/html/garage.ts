@@ -288,6 +288,10 @@ export function garagePage(slots: GarageSlotRow[], markers: GarageMarkerRow[], e
 
   return `
   <div class="garage-wrap">
+    <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <a href="${ADMIN_PATH}/benri" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 便利トップに戻る</a>
+      <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">車庫見取り図</h2>
+    </div>
     <div class="garage-tabs">${tabsHtml}</div>
     ${panelsHtml}
   </div>

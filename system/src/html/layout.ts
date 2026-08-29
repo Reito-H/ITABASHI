@@ -27,8 +27,8 @@ function showToast(msg) {
 }`;
 }
 
-// フローティング新規報告ボタンを表示しないページ（設定・点検管理・班長シフト）
-const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'garage']);
+// フローティング新規報告ボタンを表示しないページ（設定・点検管理・班長シフト・便利＝車庫を含む）
+const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'benri']);
 
 // embed=true: サイドバー・ヘッダー・お知らせ・リミットポーリング等を全て省いた最小限のHTML文書を返す。
 // 引き継ぎシートのフローティングパネル（やることリスト）のようにiframeへ埋め込む用途専用。
@@ -77,7 +77,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
     { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
-    { href: `${ADMIN_PATH}/garage`,        label: '車庫',            id: 'garage' },
+    { href: `${ADMIN_PATH}/benri`,         label: '便利',            id: 'benri', public: true },
     { href: `${ADMIN_PATH}/shuttle`,       label: 'シャトルバス',    id: 'shuttle', public: true },
     { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },

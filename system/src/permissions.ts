@@ -109,8 +109,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/sales-ai/,     'sales-ai'],
   [/^\/sales/,        'staff'],
   [/^\/vehicles/,     'vehicles'],
-  [/^\/garage/,       'garage'],
-  [/^\/api\/garage/,  'garage'],
+  // 車庫見取り図（/garage・/api/garage）は「便利」ハブ配下に移動し、index.ts で
+  // ページ権限チェックを免除（閲覧は全アカウント共通・編集はルート側でフル権限判定）
   [/^\/accidents/,       'accidents'],
   [/^\/api\/accidents/,  'accidents'],
   [/^\/inspection/,   'inspection'],
@@ -217,7 +217,6 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'staff',         label: '社員管理（詳細検索含む）' },
     { key: 'sales-ai',      label: 'AI売上分析' },
     { key: 'vehicles',      label: '車両検索' },
-    { key: 'garage',        label: '車庫見取り図' },
     { key: 'accidents',     label: '事故分析' },
     { key: 'inspection',    label: '点検管理（メーター検査・車検管理を含む）' },
     { key: 'announcements', label: 'お知らせ配信' },

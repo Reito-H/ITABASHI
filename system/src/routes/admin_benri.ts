@@ -8,7 +8,6 @@ import { Hono } from 'hono';
 import { layout, escHtml, safeJson, saveToastHtml, saveToastScript } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { getAdminPermissions } from '../permissions';
-import { settingsSubHeader } from './admin';
 import type { Env } from '../auth';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -51,8 +50,13 @@ app.get('/benri', (c) => {
   type Card = { href: string; title: string; desc: string };
   const cards: Card[] = [
     { href: `${ADMIN_PATH}/benri/highway`, title: '高速料金・距離控除表', desc: '距離控除一覧（IC間距離）と高速道路帰路会社負担路線一覧' },
+    { href: `${ADMIN_PATH}/benri/airport`, title: '空港・ディズニー定額', desc: 'エリア別の定額運賃を地図で表示。羽田／成田／ディズニーと時間帯（昼／深夜）・障がい者割引で切替' },
+    { href: `${ADMIN_PATH}/garage`, title: '車庫見取り図', desc: '駐車マスへの車番の割り当て・自由配置マーカー（編集はフル権限アカウントのみ）' },
   ];
-  const html = settingsSubHeader('便利') + `
+  const html = `
+    <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">便利</h2>
+    </div>
     <div style="max-width:560px;">
       <p style="font-size:12px;color:#6b7280;margin-bottom:20px;">よく使う資料・ツールをここにまとめていきます。閲覧はどのアカウントでも可能です。</p>
       <div style="display:flex;flex-direction:column;gap:12px;">
@@ -67,7 +71,7 @@ app.get('/benri', (c) => {
           </a>`).join('')}
       </div>
     </div>`;
-  return c.html(layout('便利', html, 'settings'));
+  return c.html(layout('便利', html, 'benri'));
 });
 
 // ===== 距離控除表・高速料金表（タブ） =====
@@ -608,7 +612,7 @@ app.get('/benri/highway', async (c) => {
       else alert('保存に失敗しました');
     }
     </script>`;
-  return c.html(layout('高速料金・距離控除表', html, 'settings'));
+  return c.html(layout('高速料金・距離控除表', html, 'benri'));
 });
 
 // ===== API: 距離控除表 =====

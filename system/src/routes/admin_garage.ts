@@ -1,6 +1,7 @@
 // 車庫見取り図（駐車場所の記録）
-// ページ: /garage
-// API   : /api/garage/*（管理パス配下。編集系は権限ミドルウェアで <garage.edit> 必須）
+// ページ: /garage（左サイドバー「便利」ハブ配下）
+// 閲覧: 管理画面アカウントなら誰でも可（index.ts でページ権限チェックを免除・便利/CC名簿と同じ扱い）
+// 編集: フル権限アカウント（admins.permissions IS NULL）のみ。各書き込みAPIで requireEdit により二重に防御する
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { layout } from '../html/layout';
@@ -17,7 +18,12 @@ async function adminName(c: { env: Env; get: (k: 'adminId') => number }): Promis
 
 async function canEdit(c: { env: Env; get: (k: 'adminId') => number }): Promise<boolean> {
   const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
-  return perms === null || perms.includes('garage.edit');
+  return perms === null;
+}
+
+function requireEdit(c: { json: (body: unknown, status: 403) => Response }, editable: boolean): Response | null {
+  if (!editable) return c.json({ error: 'この操作はフル権限アカウントのみ行えます' }, 403);
+  return null;
 }
 
 const S = (v: unknown, max = 20): string => String(v ?? '').slice(0, max);
@@ -29,13 +35,14 @@ app.get('/garage', async (c) => {
     c.env.DB.prepare('SELECT section, slot_key, car_no FROM garage_slots').all<GarageSlotRow>(),
     c.env.DB.prepare('SELECT id, section, x, y, w, h, car_no FROM garage_markers').all<GarageMarkerRow>(),
   ]);
-  return c.html(layout('車庫', garagePage(slots.results ?? [], markers.results ?? [], editable), 'garage'));
+  return c.html(layout('車庫', garagePage(slots.results ?? [], markers.results ?? [], editable), 'benri'));
 });
 
 // ===== API =====
 
 // 固定マスの車番を保存（空文字なら削除）
 app.post('/api/garage/slot', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
   const b = await c.req.json<{ section?: string; slot_key?: string; car_no?: string }>();
   const section = S(b.section, 20);
   const slotKey = S(b.slot_key, 20);
@@ -60,6 +67,7 @@ app.post('/api/garage/slot', async (c) => {
 
 // 自由マーカーの作成
 app.post('/api/garage/markers', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
   const b = await c.req.json<{ section?: string; x?: number; y?: number; w?: number; h?: number; car_no?: string }>();
   const section = S(b.section, 20);
   if (!section) return c.json({ error: '不正なリクエストです' }, 400);
@@ -82,6 +90,7 @@ app.post('/api/garage/markers', async (c) => {
 
 // 自由マーカーの位置・車番を更新
 app.put('/api/garage/markers/:id', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
   const id = parseInt(c.req.param('id'));
   const marker = await c.env.DB.prepare('SELECT section FROM garage_markers WHERE id = ?').bind(id).first<{ section: string }>();
   if (!marker) return c.json({ error: 'マーカーが見つかりません' }, 404);
@@ -111,6 +120,7 @@ app.put('/api/garage/markers/:id', async (c) => {
 
 // 自由マーカーの削除
 app.delete('/api/garage/markers/:id', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
   const id = parseInt(c.req.param('id'));
   const marker = await c.env.DB.prepare('SELECT section FROM garage_markers WHERE id = ?').bind(id).first<{ section: string }>();
   if (!marker) return c.json({ error: 'マーカーが見つかりません' }, 404);

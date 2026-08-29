@@ -4,10 +4,17 @@
 import { safeJson } from './layout';
 import { ADMIN_PATH } from '../config';
 
-// タイトル行右側（layout()のheaderExtra）に置く課切り替えタブの入れ物。
-// 実際の描画・クリック処理はhandoverPage()側のrenderTabs()がこの#ho-tabsに対して行う。
+// タイトル行右側（layout()のheaderExtra）に課切り替えタブ＋各種操作ボタンを横並びで置く。
+// 課タブの描画・クリック処理はhandoverPage()側のrenderTabs()が#ho-tabsに対して行い、
+// 操作ボタンのクリック処理は同ページ内スクリプトがid指定でバインドする（headerExtraは
+// 同一ドキュメント内なのでgetElementByIdで到達できる）。
 export function handoverHeaderTabs(): string {
-  return `<div class="ho-tabs-h" id="ho-tabs"></div>`;
+  return `<div class="ho-hdr-tools">`
+    + `<div class="ho-tabs-h" id="ho-tabs"></div>`
+    + `<button type="button" id="ho-accident-ai-btn" class="ho-tokasum-btn">事故防止AI</button>`
+    + `<button type="button" id="ho-meter-btn" class="ho-tokasum-btn">メーター検査</button>`
+    + `<button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button>`
+    + `</div>`;
 }
 
 export function handoverPage(editable: boolean, myDivision: string | null = null): string {
@@ -37,6 +44,9 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-tab-menu.open{display:block;}
 .ho-tab-opt{padding:7px 14px;font-size:12px;font-weight:700;color:#374151;cursor:pointer;white-space:nowrap;}
 .ho-tab-opt:hover{background:#f3f4f6;}
+/* タイトル行右側：課タブ＋操作ボタンの横並び */
+.ho-hdr-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+/* 本文側の課タブはheaderExtraが出ない狭幅画面のフォールバック */
 #ho-tabs-m{display:none;}
 @media (max-width:768px){
   #ho-tabs-m{display:flex;margin-bottom:8px;}
@@ -238,13 +248,9 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-sec-add-btn{border:1px solid var(--navy);background:var(--navy);color:#fff;border-radius:6px;padding:6px 12px;
                 font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
 
-.ho-toolrow{display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:8px;}
-.ho-tokasum-btn{border:1px solid #ccc;background:#fff;color:#374151;border-radius:16px;padding:5px 12px;
-                font-size:12px;font-weight:700;cursor:pointer;}
-.ho-copy-btn,.ho-print-btn{border:1px solid #ccc;background:#fff;color:#374151;border-radius:14px;padding:3px 10px;
-             font-size:11px;font-weight:700;cursor:pointer;}
-.ho-copy-btn:hover,.ho-print-btn:hover{border-color:#999;}
-.ho-copy-btn:disabled,.ho-print-btn:disabled{color:#999;cursor:default;}
+.ho-tokasum-btn{border:1px solid #ccc;background:#fff;color:#374151;border-radius:16px;padding:4px 11px;
+                font-size:12px;font-weight:700;cursor:pointer;line-height:1;white-space:nowrap;}
+.ho-tokasum-btn:hover{border-color:#999;}
 #ho-tokasum-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                     align-items:center;justify-content:center;}
 #ho-tokasum-overlay.show{display:flex;}
@@ -354,13 +360,6 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 
 <div id="ho-root">
   <div class="ho-tabs-h" id="ho-tabs-m"></div>
-  <div class="ho-toolrow">
-    <button type="button" id="ho-accident-ai-btn" class="ho-tokasum-btn">事故防止AI</button>
-    <button type="button" id="ho-meter-btn" class="ho-tokasum-btn">メーター検査</button>
-    <button type="button" id="ho-copy-btn" class="ho-copy-btn">コピー</button>
-    <button type="button" id="ho-print-btn" class="ho-print-btn">印刷</button>
-    <button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button>
-  </div>
   <div class="ho-date-bar" id="ho-date-bar"></div>
   <div id="ho-sheet-wrap"></div>
 </div>
@@ -469,7 +468,6 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
 <script>
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
@@ -769,7 +767,7 @@ function convertEl(el){
 
 // ===== 課タブ =====
 // タイトル行右側（headerExtra側の#ho-tabs）とモバイル用フォールバック（本文側の#ho-tabs-m）の
-// 両方に同じ内容を描画する。
+// 両方に同じ内容を描画する。押している課のボタン1つだけ出し、押すと他の課がドロップダウンで出る。
 function closeTabMenus(){
   document.querySelectorAll('.ho-tab-menu.open').forEach(m => m.classList.remove('open'));
 }
@@ -1284,65 +1282,6 @@ document.getElementById('ho-mtr-body').addEventListener('focusout', function(ev)
   }, 150);
 });
 
-function copySheetImage(){
-  if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
-  const el = document.querySelector('#ho-sheet-wrap .ho-doc');
-  if (!el) { alert('シートが読み込まれていません'); return; }
-  const btn = document.getElementById('ho-copy-btn');
-  const orig = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '生成中…';
-  html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then((canvas) => {
-    canvas.toBlob((blob) => {
-      if (!blob) { btn.disabled = false; btn.textContent = orig; alert('画像の生成に失敗しました'); return; }
-      if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
-        navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]).then(() => {
-          btn.textContent = 'コピーしました';
-          setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1500);
-        }).catch(() => {
-          btn.disabled = false; btn.textContent = orig;
-          alert('コピーに失敗しました（ブラウザの設定をご確認ください）');
-        });
-      } else {
-        btn.disabled = false; btn.textContent = orig;
-        alert('このブラウザは画像コピーに対応していません');
-      }
-    }, 'image/png');
-  }).catch(() => {
-    btn.disabled = false; btn.textContent = orig;
-    alert('画像の生成に失敗しました');
-  });
-}
-function printSheetImage(){
-  if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
-  const el = document.querySelector('#ho-sheet-wrap .ho-doc');
-  if (!el) { alert('シートが読み込まれていません'); return; }
-  const btn = document.getElementById('ho-print-btn');
-  const orig = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '生成中…';
-  const reset = () => { btn.disabled = false; btn.textContent = orig; };
-  html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then((canvas) => {
-    const dataUrl = canvas.toDataURL('image/png');
-    document.getElementById('ho-print-frame')?.remove();
-    const f = document.createElement('iframe');
-    f.id = 'ho-print-frame';
-    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
-    document.body.appendChild(f);
-    const doc = f.contentDocument;
-    doc.open();
-    doc.write('<!DOCTYPE html><html><head><title>引き継ぎシート</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:100%;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
-    doc.close();
-    const img = doc.querySelector('img');
-    const doPrint = () => { f.contentWindow.focus(); f.contentWindow.print(); reset(); };
-    if (img.complete) doPrint(); else img.onload = doPrint;
-  }).catch(() => {
-    reset();
-    alert('画像の生成に失敗しました');
-  });
-}
-document.getElementById('ho-copy-btn').addEventListener('click', copySheetImage);
-document.getElementById('ho-print-btn').addEventListener('click', printSheetImage);
 document.getElementById('ho-tokasum-btn').addEventListener('click', openTokaSummary);
 document.getElementById('ho-tokasum-close').addEventListener('click', closeTokaSummary);
 document.getElementById('ho-tokasum-overlay').addEventListener('click', (e) => {
