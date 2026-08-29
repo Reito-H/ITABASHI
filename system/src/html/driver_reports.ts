@@ -49,6 +49,7 @@ export function driverReportsListPage(employees: DriverReportEmployeeSummary[]):
 
   return `
     <div style="max-width:840px;">
+      <a href="${ADMIN_PATH}/kacho-mission" style="color:#2563eb;font-size:13px;display:inline-block;margin-bottom:12px;">← 課長ミッション</a>
       <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:20px;margin-bottom:16px;">
         <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:8px;">乗務員を検索して記録を追加</div>
         <div style="position:relative;">

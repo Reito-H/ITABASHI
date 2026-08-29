@@ -7,12 +7,15 @@ import { ADMIN_PATH } from '../config';
 import { getSessionFromCookie, validateSession } from '../auth';
 import type { Env } from '../auth';
 import { getAdminPermissions } from '../permissions';
-import { renderReportPrintPage, type ReportPrintField } from '../html/report_print';
+import { renderReportPrintPage, type ReportPrintField, type ReportPrintOptions } from '../html/report_print';
+import { renderReportDetailPage } from '../html/report_detail';
 import { renderReportPrintBulkPage, type ReportPrintBulkItem } from '../html/report_print_bulk';
 import { saveToastHtml, saveToastScript } from '../html/layout';
 import { issueCaseNoIfEmpty } from '../utils/report_case_no';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
+
+type LiffCtx = Context<{ Bindings: Env; Variables: { adminId: number } }>;
 
 export const ROLE_LABELS: Record<string, string> = {
   general_manager:     '統括管理者',
@@ -174,16 +177,18 @@ app.get('/settings/reports', async (c) => {
     const info = kindBySlugMap.get(r.kind)!;
     const year = r.created_at.slice(0, 4);
     const yearSep = year !== lastYear
-      ? `<tr><td colspan="5" style="padding:14px 12px 4px;font-size:12px;font-weight:700;color:#6b7280;border-top:1px solid #e5e7eb;">${escHtml(year)}年</td></tr>`
+      ? `<tr><td colspan="6" style="padding:14px 12px 4px;font-size:12px;font-weight:700;color:#6b7280;border-top:1px solid #e5e7eb;">${escHtml(year)}年</td></tr>`
       : '';
     lastYear = year;
-    const href = `${ADMIN_PATH}${info.printPath}/${r.id}`;
-    return `${yearSep}<tr onclick="location.href='${href}'" style="cursor:pointer;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+    const viewHref = `${ADMIN_PATH}/settings/${info.slug}/view/${r.id}`;
+    const printHref = `${ADMIN_PATH}${info.printPath}/${r.id}`;
+    return `${yearSep}<tr onclick="location.href='${viewHref}'" style="cursor:pointer;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap;">${escHtml(formatDateNoYear(r.created_at))}</td>
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;white-space:nowrap;">${caseIdDisplay(r.vehicle_no, r.case_no)}</td>
       <td style="padding:12px 16px;border-bottom:1px solid #f3f4f6;font-size:15px;font-weight:700;color:#111827;line-height:1.5;">${unifiedCustomerCellHtml(r)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:320px;">${contentCellHtml(r.content_text)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">${statusCellHtml(r.status === 'resolved', info.resolvedLabel)}</td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;"><a href="${printHref}" onclick="event.stopPropagation()" style="font-size:11px;color:#6b7280;text-decoration:none;border:1px solid #d1d5db;border-radius:6px;padding:4px 9px;background:#fff;">印刷</a></td>
     </tr>`;
   }).join('');
 
@@ -231,10 +236,11 @@ app.get('/settings/reports', async (c) => {
               <th style="padding:8px 16px;text-align:left;font-size:13px;color:#4b5563;font-weight:700;">お客様TEL・お客様名</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">内容</th>
               <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
+              <th style="padding:8px 8px;"></th>
             </tr>
           </thead>
           <tbody>
-            ${rowsHtml || '<tr><td colspan="5" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+            ${rowsHtml || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -280,7 +286,7 @@ app.get('/settings/reports/search-by-phone', async (c) => {
   const results = rows.map(r => {
     const info = kindBySlugMap.get(r.kind)!;
     return {
-      href: `${ADMIN_PATH}${info.printPath}/${r.id}`,
+      href: `${ADMIN_PATH}/settings/${info.slug}/view/${r.id}`,
       kindLabel: info.label,
       caseId: r.vehicle_no || (r.case_no ? `No.${r.case_no}` : ''),
       name: r.customer_name || r.secondary_name || '',
@@ -1756,13 +1762,15 @@ app.get('/api/handover-memos/employee-by-car', async (c) => {
 });
 
 // ===================================================
-// 帳票印刷ページ（忘れ物/事故/違反/一般報告 共通・A4横1枚）
+// 報告の個別ページ（忘れ物/事故/違反/一般報告 共通）
+//   /settings/{種別}/view/:id  … 画面で読むための詳細ビュー（一覧の行クリックの遷移先）
+//   /settings/{種別}/print/:id … A4横1枚の帳票（印刷/PNG保存用）
+//   両ページは同じ options を共有し、編集は同じ [data-field] + autosave APIで保存する。
 //   宛先はページ側で自由入力するのみでDBには保存しない。追加備考(print_notes)は他の項目と同じく自動保存する
 // ===================================================
 
-app.get('/settings/lost-items/print/:id', async (c) => {
-  const id = parseInt(c.req.param('id') ?? '');
-  if (!Number.isInteger(id)) return c.text('invalid id', 400);
+// 各種報告の options を組み立てる。見つからなければ null。print/view 両ルートで共有する。
+async function lostItemReportOptions(c: LiffCtx, id: number): Promise<ReportPrintOptions | null> {
   const r = await c.env.DB.prepare(`
     SELECT r.*, u.name AS reporter_name
     FROM lost_item_reports r
@@ -1777,7 +1785,7 @@ app.get('/settings/lost-items/print/:id', async (c) => {
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
   }>();
-  if (!r) return c.text('報告が見つかりません', 404);
+  if (!r) return null;
 
   // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、表示する課は班から都度算出する
   const derivedDivision = r.employee_team != null ? Math.ceil(r.employee_team / 2) : r.employee_division;
@@ -1798,7 +1806,7 @@ app.get('/settings/lost-items/print/:id', async (c) => {
     { label: '備考', value: r.notes ?? '', width: 'full', field: 'notes', input: 'textarea' },
   ];
 
-  return c.html(renderReportPrintPage({
+  return {
     kindLabel: '忘れ物報告', kindColor: '#1d4ed8',
     pageTitle: `忘れ物報告 帳票 #${r.id}`,
     headingTitle: `${r.vehicle_no ?? '車番不明'} の忘れ物報告`,
@@ -1811,12 +1819,10 @@ app.get('/settings/lost-items/print/:id', async (c) => {
     apiPath: `${ADMIN_PATH}/api/liff/lost-items`,
     deleteLabel: '忘れ物報告',
     listHref: `${ADMIN_PATH}/settings/reports`,
-  }));
-});
+  };
+}
 
-app.get('/settings/accidents/print/:id', async (c) => {
-  const id = parseInt(c.req.param('id') ?? '');
-  if (!Number.isInteger(id)) return c.text('invalid id', 400);
+async function accidentReportOptions(c: LiffCtx, id: number): Promise<ReportPrintOptions | null> {
   const r = await c.env.DB.prepare(`
     SELECT r.*, u.name AS reporter_name
     FROM accident_reports r
@@ -1835,7 +1841,7 @@ app.get('/settings/accidents/print/:id', async (c) => {
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
   }>();
-  if (!r) return c.text('報告が見つかりません', 404);
+  if (!r) return null;
 
   // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、
   // 表示する課は保存済みの値をそのまま信じず、班から都度算出する（社員マスタ側の不整合を帳票上で自動補正する）
@@ -1861,7 +1867,7 @@ app.get('/settings/accidents/print/:id', async (c) => {
     { label: '報告書まとめ', value: r.summary_text ?? '', width: 'full', field: 'summary_text', input: 'textarea', compact: true },
   ];
 
-  return c.html(renderReportPrintPage({
+  return {
     kindLabel: '事故報告', kindColor: '#dc2626',
     pageTitle: `事故報告 帳票 #${r.id}`,
     headingTitle: `${r.vehicle_no ?? '車番不明'} の事故報告`,
@@ -1876,12 +1882,10 @@ app.get('/settings/accidents/print/:id', async (c) => {
     listHref: `${ADMIN_PATH}/settings/reports`,
     signConfirmField: 'confirm_name', signConfirmValue: r.confirm_name ?? '',
     signDateField: 'confirm_date', signDateValue: r.confirm_date ?? '',
-  }));
-});
+  };
+}
 
-app.get('/settings/violations/print/:id', async (c) => {
-  const id = parseInt(c.req.param('id') ?? '');
-  if (!Number.isInteger(id)) return c.text('invalid id', 400);
+async function violationReportOptions(c: LiffCtx, id: number): Promise<ReportPrintOptions | null> {
   const r = await c.env.DB.prepare(`
     SELECT r.*, u.name AS reporter_name
     FROM violation_reports r
@@ -1897,7 +1901,7 @@ app.get('/settings/violations/print/:id', async (c) => {
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
   }>();
-  if (!r) return c.text('報告が見つかりません', 404);
+  if (!r) return null;
 
   // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、表示する課は班から都度算出する
   const derivedDivision = r.employee_team != null ? Math.ceil(r.employee_team / 2) : r.employee_division;
@@ -1920,7 +1924,7 @@ app.get('/settings/violations/print/:id', async (c) => {
     { label: '備考', value: r.notes ?? '', width: 'full', field: 'notes', input: 'textarea' },
   ];
 
-  return c.html(renderReportPrintPage({
+  return {
     kindLabel: '違反報告', kindColor: '#b45309',
     pageTitle: `違反報告 帳票 #${r.id}`,
     headingTitle: `${r.vehicle_no ?? '車番不明'} の違反報告`,
@@ -1933,12 +1937,10 @@ app.get('/settings/violations/print/:id', async (c) => {
     apiPath: `${ADMIN_PATH}/api/liff/violation-reports`,
     deleteLabel: '違反報告',
     listHref: `${ADMIN_PATH}/settings/reports`,
-  }));
-});
+  };
+}
 
-app.get('/settings/general-reports/print/:id', async (c) => {
-  const id = parseInt(c.req.param('id') ?? '');
-  if (!Number.isInteger(id)) return c.text('invalid id', 400);
+async function generalReportOptions(c: LiffCtx, id: number): Promise<ReportPrintOptions | null> {
   const r = await c.env.DB.prepare(`
     SELECT r.*, u.name AS reporter_name
     FROM general_reports r
@@ -1953,7 +1955,7 @@ app.get('/settings/general-reports/print/:id', async (c) => {
     resolved_by_name: string | null; resolved_at: string | null;
     reporter_name: string | null; reported_by_admin: string | null;
   }>();
-  if (!r) return c.text('報告が見つかりません', 404);
+  if (!r) return null;
 
   // 班は課に対して固定(1課=1,2班/2課=3,4班/3課=5,6班/4課=7,8班)なので、表示する課は班から都度算出する
   const derivedDivision = r.employee_team != null ? Math.ceil(r.employee_team / 2) : r.employee_division;
@@ -1973,7 +1975,7 @@ app.get('/settings/general-reports/print/:id', async (c) => {
     { label: '報告内容', value: r.content ?? '', width: 'full', field: 'content', input: 'textarea' },
   ];
 
-  return c.html(renderReportPrintPage({
+  return {
     kindLabel: '一般報告', kindColor: '#0891b2',
     pageTitle: `一般報告 帳票 #${r.id}`,
     headingTitle: r.title ?? (r.vehicle_no ? `${r.vehicle_no} の一般報告` : '一般報告'),
@@ -1986,8 +1988,38 @@ app.get('/settings/general-reports/print/:id', async (c) => {
     apiPath: `${ADMIN_PATH}/api/liff/general-reports`,
     deleteLabel: '一般報告',
     listHref: `${ADMIN_PATH}/settings/reports`,
-  }));
-});
+  };
+}
+
+// slug → options ビルダー / 各ページのパス
+const REPORT_PAGE_BUILDERS: Record<string, {
+  build: (c: LiffCtx, id: number) => Promise<ReportPrintOptions | null>;
+  printPath: string;
+}> = {
+  'lost-items':      { build: lostItemReportOptions,  printPath: '/settings/lost-items/print' },
+  'accidents':       { build: accidentReportOptions,  printPath: '/settings/accidents/print' },
+  'violations':      { build: violationReportOptions, printPath: '/settings/violations/print' },
+  'general-reports': { build: generalReportOptions,   printPath: '/settings/general-reports/print' },
+};
+
+for (const [slug, def] of Object.entries(REPORT_PAGE_BUILDERS)) {
+  // 印刷用（A4横帳票）
+  app.get(`${def.printPath}/:id`, async (c) => {
+    const id = parseInt(c.req.param('id') ?? '');
+    if (!Number.isInteger(id)) return c.text('invalid id', 400);
+    const o = await def.build(c, id);
+    if (!o) return c.text('報告が見つかりません', 404);
+    return c.html(renderReportPrintPage(o));
+  });
+  // 詳細ビュー（画面で読む用・一覧の行クリックの遷移先）
+  app.get(`/settings/${slug}/view/:id`, async (c) => {
+    const id = parseInt(c.req.param('id') ?? '');
+    if (!Number.isInteger(id)) return c.text('invalid id', 400);
+    const o = await def.build(c, id);
+    if (!o) return c.text('報告が見つかりません', 404);
+    return c.html(renderReportDetailPage({ ...o, printHref: `${ADMIN_PATH}${def.printPath}/${id}` }));
+  });
+}
 
 // ===================================================
 // まとめ帳票印刷ページ（忘れ物/事故/違反/一般報告 共通・複数件をA4横1枚に一覧表でまとめる）

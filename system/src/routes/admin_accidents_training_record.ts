@@ -10,6 +10,19 @@ import { renderAccidentsTrainingRecordPrintPage } from '../html/accidents_traini
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
+interface TrainingRecordInput {
+  employee_id?: number; employee_name?: string; emp_no?: string | null;
+  division?: number | null; team?: string | null; conducted_date?: string;
+  location?: string; trainer_name?: string; content?: string; reason?: string;
+  method?: string; comment?: string;
+}
+
+function validateTrainingRecord(data: TrainingRecordInput): string | null {
+  if (!data.employee_id || !data.employee_name) return '対象者を選択してください';
+  if (!data.conducted_date || !/^\d{4}-\d{2}-\d{2}$/.test(data.conducted_date)) return '実施日を入力してください';
+  return null;
+}
+
 app.get('/accidents/training-record', async (c) => {
   const res = await c.env.DB.prepare(
     `SELECT * FROM accident_training_records ORDER BY conducted_date DESC, id DESC`
@@ -48,20 +61,15 @@ app.get('/accidents/training-record/:id/print', async (c) => {
 });
 
 app.post('/api/accidents/training-record', async (c) => {
-  let data: {
-    employee_id?: number; employee_name?: string; emp_no?: string | null;
-    division?: number | null; team?: string | null; conducted_date?: string;
-    location?: string; trainer_name?: string; content?: string; reason?: string;
-    method?: string; comment?: string;
-  };
+  let data: TrainingRecordInput;
   try {
     data = await c.req.json();
   } catch {
     return c.json({ error: 'データがありません' }, 400);
   }
 
-  if (!data.employee_id || !data.employee_name) return c.json({ error: '対象者を選択してください' }, 400);
-  if (!data.conducted_date || !/^\d{4}-\d{2}-\d{2}$/.test(data.conducted_date)) return c.json({ error: '実施日を入力してください' }, 400);
+  const err = validateTrainingRecord(data);
+  if (err) return c.json({ error: err }, 400);
 
   const adminId = c.get('adminId');
   await c.env.DB.prepare(
@@ -73,6 +81,39 @@ app.post('/api/accidents/training-record', async (c) => {
     data.team != null ? String(data.team) : null,
     data.conducted_date, data.location || null, data.trainer_name || null, data.content || null,
     data.reason || null, data.method || null, data.comment || null, adminId ?? null
+  ).run();
+
+  return c.json({ ok: true });
+});
+
+app.put('/api/accidents/training-record/:id', async (c) => {
+  const id = parseInt(c.req.param('id'), 10);
+  if (!id) return c.json({ error: 'IDが不正です' }, 400);
+
+  let data: TrainingRecordInput;
+  try {
+    data = await c.req.json();
+  } catch {
+    return c.json({ error: 'データがありません' }, 400);
+  }
+
+  const err = validateTrainingRecord(data);
+  if (err) return c.json({ error: err }, 400);
+
+  const existing = await c.env.DB.prepare('SELECT id FROM accident_training_records WHERE id = ?').bind(id).first();
+  if (!existing) return c.json({ error: '研修記録が見つかりません' }, 404);
+
+  await c.env.DB.prepare(
+    `UPDATE accident_training_records SET
+       employee_id = ?1, employee_name = ?2, emp_no = ?3, division = ?4, team = ?5,
+       conducted_date = ?6, location = ?7, trainer_name = ?8, content = ?9,
+       reason = ?10, method = ?11, comment = ?12
+     WHERE id = ?13`
+  ).bind(
+    data.employee_id, data.employee_name, data.emp_no ?? null, data.division ?? null,
+    data.team != null ? String(data.team) : null,
+    data.conducted_date, data.location || null, data.trainer_name || null, data.content || null,
+    data.reason || null, data.method || null, data.comment || null, id
   ).run();
 
   return c.json({ ok: true });

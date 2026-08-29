@@ -248,6 +248,13 @@ app.get('/liff/other-features', (c) => {
   return c.html(html);
 });
 
+// ===== LIFF: 電話検索（電話番号で忘れ物/事故/一般報告/CC名簿を横断検索）=====
+// リッチメニュー「電話検索」ボタンから起動。受電時に相手の番号を入れると案件が分かる。
+app.get('/liff/case-search', (c) => {
+  const liffId = c.env.LIFF_ID_CASE_SEARCH ?? '';
+  return c.html(liffCaseSearchPage(liffId));
+});
+
 // ===== LIFF API: 出勤班長（今日・明日）=====
 // 旧・毎日0時のLINE通知(kancho_attendance)を廃止し、その他機能ページで見に行く方式へ移行
 app.get('/api/liff/kancho-attendance', async (c) => {
@@ -289,6 +296,103 @@ app.get('/api/liff/report-notices', async (c) => {
   `).bind(`%"${uid}"%`).all<{ id: number; report_type: string | null; summary: string; created_by: string | null; created_at: string }>();
 
   return c.json({ notices: rows.results ?? [] });
+});
+
+// ===== LIFF API: 電話番号で案件を横断検索 =====
+// 忘れ物 / 事故（お客様・事故相手）/ 一般報告 / CC名簿（客電話・CC電話）を、
+// ハイフン等を除去した数字だけで突き合わせる。まず正規化完全一致、無ければ下4桁の部分一致。
+// 統括管理者・運行管理者のみ。Bot返信を使わずこの画面で結果を見る（無料枠を消費しない）。
+app.get('/api/liff/case-search', async (c) => {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+
+  const liffUser = await c.env.DB.prepare(
+    'SELECT role FROM line_liff_users WHERE line_uid = ?'
+  ).bind(uid).first<{ role: string }>();
+  if (!liffUser || !['general_manager', 'operations_manager'].includes(liffUser.role)) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const digits = (c.req.query('phone') ?? '').replace(/[^0-9]/g, '');
+  if (digits.length < 4) return c.json({ results: [], reason: 'too_short' });
+  const like = `%${digits.slice(-4)}%`;
+
+  // カラム値からハイフン・空白・括弧を除去して数字だけにする（管理画面 search-by-phone と同方式）
+  const norm = (col: string) =>
+    `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(${col}, ''), '-', ''), ' ', ''), '(', ''), ')', '')`;
+
+  // D1(SQLite)は compound SELECT の項数上限が小さい(5)ため、テーブルごとに1ブランチへまとめる。
+  // 各ブランチは「お客様側(c_*)」と「二人目(s_*: 事故相手 / CC連絡先)」の2組を持ち、
+  // 外側で一致した側の氏名・電話を採用する。
+  const branches = [
+    `SELECT '忘れ物' AS kind, id, case_no, vehicle_no, COALESCE(created_at,'') AS occurred_at, COALESCE(status,'') AS status,
+       COALESCE(customer_name,'') AS c_name, COALESCE(customer_phone,'') AS c_phone, 'お客様' AS c_label,
+       '' AS s_name, '' AS s_phone, '' AS s_label,
+       COALESCE(item_description,'') AS detail, COALESCE(employee_name,'') AS driver_name,
+       ${norm('customer_phone')} AS cd, '' AS sd
+     FROM lost_item_reports`,
+    `SELECT '事故', id, case_no, vehicle_no, COALESCE(created_at,''), COALESCE(status,''),
+       COALESCE(customer_name,''), COALESCE(customer_phone,''), 'お客様',
+       COALESCE(other_party_name,''), COALESCE(other_party_phone,''), '事故相手',
+       COALESCE(accident_type,''), COALESCE(employee_name,''),
+       ${norm('customer_phone')}, ${norm('other_party_phone')}
+     FROM accident_reports`,
+    `SELECT '一般報告', id, case_no, vehicle_no, COALESCE(created_at,''), COALESCE(status,''),
+       COALESCE(customer_name,''), COALESCE(customer_phone,''), 'お客様',
+       '', '', '',
+       COALESCE(NULLIF(title,''), substr(COALESCE(content,''), 1, 60)), COALESCE(employee_name,''),
+       ${norm('customer_phone')}, ''
+     FROM general_reports`,
+    `SELECT 'CC名簿', id, NULL, vehicle_no, COALESCE(NULLIF(occurred_at,''), created_at), '',
+       COALESCE(NULLIF(cc_name,''), case_name), COALESCE(phone,''), 'お客様',
+       COALESCE(NULLIF(cc_name,''), case_name), COALESCE(cc_phone,''), 'CC連絡先',
+       COALESCE(case_name,''), COALESCE(driver_name,''),
+       ${norm('phone')}, ${norm('cc_phone')}
+     FROM cc_list`,
+  ];
+
+  const sql = `
+    SELECT v.kind, v.id, v.case_no, v.vehicle_no, v.occurred_at, v.status, v.detail, v.driver_name,
+      CASE WHEN v.cmatch = 1 THEN v.c_label ELSE v.s_label END AS party_label,
+      CASE WHEN v.cmatch = 1 THEN v.c_name  ELSE v.s_name  END AS party_name,
+      CASE WHEN v.cmatch = 1 THEN v.c_phone ELSE v.s_phone END AS phone_disp,
+      CASE WHEN v.cmatch = 1 THEN v.cd      ELSE v.sd      END AS dphone
+    FROM (
+      SELECT u.*,
+        (CASE WHEN u.cd != '' AND (u.cd = ? OR u.cd LIKE ?) THEN 1 ELSE 0 END) AS cmatch
+      FROM (${branches.join(' UNION ALL ')}) u
+    ) v
+    WHERE v.cmatch = 1 OR (v.sd != '' AND (v.sd = ? OR v.sd LIKE ?))
+    ORDER BY v.occurred_at DESC
+    LIMIT 60`;
+  const res = await c.env.DB.prepare(sql).bind(digits, like, digits, like).all<{
+    kind: string; id: number; case_no: string | null; vehicle_no: string | null;
+    occurred_at: string; status: string; detail: string; driver_name: string;
+    party_label: string; party_name: string; phone_disp: string; dphone: string;
+  }>();
+
+  const rows = res.results ?? [];
+  const results = rows
+    .map(r => ({
+      kind: r.kind,
+      caseId: r.vehicle_no || (r.case_no ? `No.${r.case_no}` : ''),
+      party: r.party_name ? `${r.party_label}：${r.party_name}` : r.party_label,
+      phone: r.phone_disp,
+      driver: r.driver_name,
+      detail: r.detail,
+      date: r.occurred_at,
+      status: r.status, // 'open' / 'resolved' / '' (CC名簿は状態なし)
+      match: r.dphone === digits ? 'exact' : 'partial',
+    }))
+    .sort((a, b) => {
+      if (a.match !== b.match) return a.match === 'exact' ? -1 : 1;
+      return a.date < b.date ? 1 : -1;
+    })
+    .slice(0, 30);
+
+  const hasExact = results.some(r => r.match === 'exact');
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', '電話検索', `${digits}（${results.length}件）`);
+  return c.json({ results, query: digits, matchMode: hasExact ? 'exact' : 'partial' });
 });
 
 // ===== LIFF API: 社員検索 =====
@@ -3365,6 +3469,203 @@ function liffStaffLookupPage(liffId: string): string {
 
   function ini(n){ return n?n.charAt(0):'?'; }
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  </script>
+</body>
+</html>`;
+}
+
+// 電話検索ページ（リッチメニュー「電話検索」ボタン → このLIFF）。
+// 電話番号を1つ入力すると /api/liff/case-search が忘れ物/事故/一般報告/CC名簿を横断照合し、
+// 「何の案件か」を画面に一覧表示する。Bot返信を使わないのでLINE無料枠を消費しない。
+function liffCaseSearchPage(liffId: string): string {
+  return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>電話検索</title>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    body { background: #f0f4f8; font-family: 'Hiragino Sans','Meiryo',sans-serif; font-size: 15px; min-height: 100dvh; }
+    #loading { display: flex; align-items: center; justify-content: center; height: 100dvh; color: #6b7280; font-size: 14px; }
+    #app { display: none; flex-direction: column; min-height: 100dvh; }
+    .header { background: #1e1b4b; color: #fff; padding: 14px 16px; flex-shrink: 0; }
+    .header h1 { font-size: 17px; font-weight: 700; }
+    .header p { font-size: 11px; opacity: 0.65; margin-top: 3px; line-height: 1.6; }
+    .search-area { padding: 12px 16px; background: #1e1b4b; }
+    .search-box { display: flex; align-items: center; background: #fff; border-radius: 10px; padding: 0 12px; gap: 8px; }
+    .search-box input { border: none; outline: none; font-size: 16px; padding: 12px 0; flex: 1; background: transparent; color: #111827; letter-spacing: 0.04em; }
+    .search-box input::placeholder { color: #9ca3af; letter-spacing: normal; }
+    .btn-clear { background: none; border: none; color: #9ca3af; font-size: 18px; cursor: pointer; padding: 4px; display: none; }
+    .norm-hint { color: #c7d2fe; font-size: 11px; margin-top: 6px; min-height: 14px; }
+    #results { flex: 1; padding: 12px 12px 60px; }
+    .state { text-align: center; color: #9ca3af; font-size: 13px; padding: 48px 20px; line-height: 1.9; }
+    .mode-bar { font-size: 12px; color: #6b7280; padding: 2px 4px 10px; }
+    .mode-bar b { color: #b45309; }
+    .card { background: #fff; border-radius: 12px; padding: 13px 14px; margin-bottom: 9px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .kind { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; }
+    .k-lost { background: #dbeafe; color: #1e40af; }
+    .k-acc { background: #fee2e2; color: #b91c1c; }
+    .k-gen { background: #dcfce7; color: #15803d; }
+    .k-cc { background: #ede9fe; color: #6d28d9; }
+    .case-id { font-size: 14px; font-weight: 800; color: #111827; }
+    .badge { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px; }
+    .b-open { background: #fef3c7; color: #92400e; }
+    .b-done { background: #d1fae5; color: #065f46; }
+    .b-partial { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+    .row { display: flex; gap: 8px; font-size: 13px; padding: 3px 0; }
+    .row .l { color: #9ca3af; min-width: 62px; flex-shrink: 0; }
+    .row .v { color: #111827; font-weight: 500; flex: 1; word-break: break-all; }
+    .date { font-size: 11px; color: #9ca3af; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div id="loading">読み込み中...</div>
+  <div id="app">
+    <div class="header">
+      <h1>電話検索</h1>
+      <p>受電した電話番号を入力すると、忘れ物・事故・一般報告・CC名簿から該当案件を探します。</p>
+    </div>
+    <div class="search-area">
+      <div class="search-box">
+        <span style="color:#9ca3af;font-size:15px;flex-shrink:0;">TEL</span>
+        <input type="tel" id="q" inputmode="tel" autocomplete="off" placeholder="03-1234-5678 / 09012345678">
+        <button class="btn-clear" id="clr" onclick="clr()">×</button>
+      </div>
+      <div class="norm-hint" id="hint"></div>
+    </div>
+    <div id="results">
+      <div class="state" id="state">電話番号を入力してください<br>（数字4桁以上でヒットを表示）</div>
+      <div id="list"></div>
+    </div>
+  </div>
+  <script>
+  var AT = '';
+  var timer = null;
+  var lastReq = 0;
+
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function(){ window.scrollTo(0, 0); });
+  }
+
+  liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
+    .then(function(){
+      AT = liff.getAccessToken() || '';
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      document.getElementById('q').addEventListener('input', onInput);
+      document.getElementById('q').focus();
+    })
+    .catch(function(e){
+      document.getElementById('loading').textContent = '起動に失敗しました: ' + e;
+    });
+
+  function digitsOf(s){ return String(s || '').replace(/[^0-9]/g, ''); }
+
+  function onInput(){
+    var raw = document.getElementById('q').value;
+    var d = digitsOf(raw);
+    document.getElementById('clr').style.display = raw ? 'block' : 'none';
+    document.getElementById('hint').textContent = d ? ('照合する数字: ' + d) : '';
+    clearTimeout(timer);
+    if (d.length < 4){
+      setState('電話番号を入力してください<br>（数字4桁以上でヒットを表示）');
+      return;
+    }
+    timer = setTimeout(function(){ run(d); }, 350);
+  }
+
+  function clr(){
+    document.getElementById('q').value = '';
+    document.getElementById('clr').style.display = 'none';
+    document.getElementById('hint').textContent = '';
+    setState('電話番号を入力してください<br>（数字4桁以上でヒットを表示）');
+    document.getElementById('q').focus();
+  }
+
+  function setState(html){
+    document.getElementById('list').innerHTML = '';
+    var s = document.getElementById('state');
+    s.style.display = 'block';
+    s.innerHTML = html;
+  }
+
+  function run(d){
+    var my = ++lastReq;
+    setState('検索中...');
+    fetch('/api/liff/case-search?phone=' + encodeURIComponent(d), {
+      headers: { 'Authorization': 'Bearer ' + AT }
+    })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, j: j }; }); })
+    .then(function(res){
+      if (my !== lastReq) return;
+      if (!res.ok){
+        setState(res.j && res.j.error === 'forbidden'
+          ? 'この機能は運行管理者・統括管理者のみ利用できます。'
+          : '検索に失敗しました。時間をおいて再度お試しください。');
+        return;
+      }
+      render(res.j);
+    })
+    .catch(function(){
+      if (my !== lastReq) return;
+      setState('通信エラーが発生しました。');
+    });
+  }
+
+  function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function fmtDate(s){
+    if (!s) return '';
+    return String(s).slice(0, 16).replace('T', ' ').replace(/-/g, '/');
+  }
+
+  function kindClass(k){
+    if (k === '忘れ物') return 'k-lost';
+    if (k === '事故') return 'k-acc';
+    if (k === '一般報告') return 'k-gen';
+    return 'k-cc';
+  }
+
+  function render(data){
+    var list = (data && data.results) || [];
+    if (!list.length){
+      setState('該当する案件は見つかりませんでした。<br>番号の桁を変えて試してください。');
+      return;
+    }
+    document.getElementById('state').style.display = 'none';
+    var html = '';
+    if (data.matchMode === 'partial'){
+      html += '<div class="mode-bar">完全一致なし。<b>下4桁の部分一致</b>で表示しています。</div>';
+    }
+    for (var i = 0; i < list.length; i++){
+      var r = list[i];
+      var st = '';
+      if (r.status === 'resolved') st = '<span class="badge b-done">解決済</span>';
+      else if (r.status === 'open') st = '<span class="badge b-open">対応中</span>';
+      var pm = r.match === 'partial' ? '<span class="badge b-partial">下4桁一致</span>' : '';
+      html += '<div class="card">'
+        + '<div class="card-top">'
+        +   '<span class="kind ' + kindClass(r.kind) + '">' + esc(r.kind) + '</span>'
+        +   (r.caseId ? '<span class="case-id">' + esc(r.caseId) + '</span>' : '')
+        +   st + pm
+        + '</div>'
+        + row('相手', r.party)
+        + row('電話', r.phone)
+        + row('乗務員', r.driver)
+        + row('内容', r.detail)
+        + (r.date ? '<div class="date">' + esc(fmtDate(r.date)) + '</div>' : '')
+        + '</div>';
+    }
+    document.getElementById('list').innerHTML = html;
+  }
+
+  function row(label, val){
+    if (!val) return '';
+    return '<div class="row"><span class="l">' + label + '</span><span class="v">' + esc(val) + '</span></div>';
+  }
   </script>
 </body>
 </html>`;

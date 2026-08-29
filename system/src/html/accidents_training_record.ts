@@ -6,6 +6,7 @@ import { accidentsTabNav } from './accidents';
 
 export interface TrainingRecordRow {
   id: number;
+  employee_id: number | null;
   employee_name: string;
   emp_no: string | null;
   division: number | null;
@@ -17,6 +18,7 @@ export interface TrainingRecordRow {
   reason: string | null;
   method: string | null;
   comment: string | null;
+  created_at?: string | null;
 }
 
 export interface AccidentsTrainingRecordOpts {
@@ -30,6 +32,10 @@ export interface AccidentsTrainingRecordOpts {
 export function accidentsTrainingRecordPage(opts: AccidentsTrainingRecordOpts): string {
   const { records, searchEmployeesHref, createHref, printHrefBase, deleteHrefBase } = opts;
 
+  const recordsJson = JSON.stringify(
+    Object.fromEntries(records.map(r => [r.id, r]))
+  ).replace(/</g, '\\u003c');
+
   const rowsHtml = records.length === 0
     ? `<tr><td colspan="7" style="padding:24px;text-align:center;color:#9ca3af;">研修記録はまだありません</td></tr>`
     : records.map(r => `
@@ -39,7 +45,8 @@ export function accidentsTrainingRecordPage(opts: AccidentsTrainingRecordOpts): 
         <td>${escHtml(r.trainer_name || '—')}</td>
         <td>${escHtml(r.location || '—')}</td>
         <td class="tr-content-cell">${escHtml(r.content || '—')}</td>
-        <td>
+        <td class="tr-actions">
+          <button class="tr-link tr-edit-btn" data-id="${r.id}">詳細・編集</button>
           <a class="tr-link" href="${printHrefBase}/${r.id}/print" target="_blank" rel="noopener">印刷</a>
         </td>
         <td><button class="tr-del-btn" data-id="${r.id}">削除</button></td>
@@ -64,6 +71,8 @@ export function accidentsTrainingRecordPage(opts: AccidentsTrainingRecordOpts): 
   .tr-sub { display:block; font-size:11px; color:#94a3b8; margin-top:2px; }
   .tr-link { color:#1a3a5c; font-weight:700; text-decoration:none; }
   .tr-link:hover { text-decoration:underline; }
+  .tr-actions { white-space:nowrap; }
+  .tr-edit-btn { border:none; background:none; font:inherit; cursor:pointer; padding:0; margin-right:14px; }
   .tr-del-btn { border:none; background:#fee2e2; color:#991b1b; padding:5px 10px; border-radius:6px; font-size:12px; cursor:pointer; white-space:nowrap; }
 
   .tr-modal-bg { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:60; overflow-y:auto; }
@@ -107,7 +116,8 @@ export function accidentsTrainingRecordPage(opts: AccidentsTrainingRecordOpts): 
 <!-- 新規登録モーダル -->
 <div class="tr-modal-bg" id="tr-modal-bg" onclick="if(event.target===this)trCloseModal()">
   <div class="tr-modal">
-    <h2>事故研修記録の新規登録</h2>
+    <h2 id="tr-modal-title">事故研修記録の新規登録</h2>
+    <div class="tr-meta" id="tr-meta" style="font-size:11px;color:#94a3b8;margin:-8px 0 14px;display:none;"></div>
     <div class="tr-row2">
       <div class="tr-field">
         <label><span class="tr-w1h">When</span>実施日</label>
@@ -154,7 +164,9 @@ export function accidentsTrainingRecordPage(opts: AccidentsTrainingRecordOpts): 
 
 <script>
 var TR_ALL_ROWS = Array.prototype.slice.call(document.querySelectorAll('#tr-tbody tr[data-search]'));
+var TR_RECORDS = ${recordsJson};
 var trSelectedEmployee = null;
+var trEditId = null;
 
 function trFilterList() {
   var q = document.getElementById('tr-list-search').value.trim();
@@ -163,11 +175,7 @@ function trFilterList() {
   });
 }
 
-function trOpenModal() {
-  document.getElementById('tr-modal-bg').style.display = 'block';
-}
-function trCloseModal() {
-  document.getElementById('tr-modal-bg').style.display = 'none';
+function trClearFields() {
   document.getElementById('tr-date').value = '';
   document.getElementById('tr-location').value = '';
   document.getElementById('tr-emp-search').value = '';
@@ -178,7 +186,47 @@ function trCloseModal() {
   document.getElementById('tr-comment').value = '';
   document.getElementById('tr-error').style.display = 'none';
   document.getElementById('tr-selected-emp').style.display = 'none';
+  document.getElementById('tr-meta').style.display = 'none';
   trSelectedEmployee = null;
+}
+
+function trOpenModal() {
+  trEditId = null;
+  document.getElementById('tr-modal-title').textContent = '事故研修記録の新規登録';
+  trClearFields();
+  document.getElementById('tr-modal-bg').style.display = 'block';
+}
+
+function trOpenModalEdit(id) {
+  var r = TR_RECORDS[id];
+  if (!r) return;
+  trEditId = id;
+  trClearFields();
+  document.getElementById('tr-modal-title').textContent = '事故研修記録の編集';
+  document.getElementById('tr-date').value = (r.conducted_date || '').slice(0, 10);
+  document.getElementById('tr-location').value = r.location || '';
+  document.getElementById('tr-trainer').value = r.trainer_name || '';
+  document.getElementById('tr-content').value = r.content || '';
+  document.getElementById('tr-reason').value = r.reason || '';
+  document.getElementById('tr-method').value = r.method || '';
+  document.getElementById('tr-comment').value = r.comment || '';
+  trSelectedEmployee = { id: r.employee_id, name: r.employee_name, emp_no: r.emp_no, division: r.division, team: r.team };
+  var selEl = document.getElementById('tr-selected-emp');
+  selEl.style.display = 'block';
+  selEl.textContent = '選択中： ' + r.employee_name + (r.emp_no ? '（' + r.emp_no + '）' : '');
+  if (r.created_at) {
+    var metaEl = document.getElementById('tr-meta');
+    metaEl.style.display = 'block';
+    metaEl.textContent = '登録日時： ' + String(r.created_at).replace('T', ' ').slice(0, 16);
+  }
+  document.getElementById('tr-modal-bg').style.display = 'block';
+}
+
+function trCloseModal() {
+  document.getElementById('tr-modal-bg').style.display = 'none';
+  trEditId = null;
+  document.getElementById('tr-modal-title').textContent = '事故研修記録の新規登録';
+  trClearFields();
 }
 
 function escapeHtmlClient(s) {
@@ -224,6 +272,12 @@ document.addEventListener('click', function (e) {
   if (!e.target.closest('.tr-search-box')) trEmpDropdown.classList.remove('open');
 });
 
+document.querySelectorAll('.tr-edit-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    trOpenModalEdit(parseInt(btn.getAttribute('data-id'), 10));
+  });
+});
+
 document.querySelectorAll('.tr-del-btn').forEach(function(btn) {
   btn.addEventListener('click', async function() {
     if (!confirm('この研修記録を削除しますか？この操作は取り消せません。')) return;
@@ -256,9 +310,12 @@ async function trSave() {
     comment: document.getElementById('tr-comment').value.trim(),
   };
 
+  var url = trEditId ? (${JSON.stringify(deleteHrefBase)} + '/' + trEditId) : ${JSON.stringify(createHref)};
+  var method = trEditId ? 'PUT' : 'POST';
+
   try {
-    var res = await fetch(${JSON.stringify(createHref)}, {
-      method: 'POST',
+    var res = await fetch(url, {
+      method: method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });

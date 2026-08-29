@@ -1,8 +1,9 @@
 // ドライバー報告
-// ページ: /driver-reports, /driver-reports/:empId
+// ページ: /driver-reports, /driver-reports/:empId （サイドバーからは外し「課長ミッション」のカード経由で開く）
 // API   : /api/driver-reports/*
 // 全権限アカウント（admins.permissions IS NULL）のみ使用可。permissions.ts のPATH_PERMISSIONS/
 // PERMISSION_CATALOGに意図的に登録していないため、制限付きアカウントは自動的にアクセス不可になる。
+// （課長ミッションのランディングでも全権限アカウントのときだけカードを表示している）
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { layout } from '../html/layout';
@@ -34,7 +35,7 @@ app.get('/driver-reports', async (c) => {
     ORDER BY last_report_date DESC
   `).all<DriverReportEmployeeSummary>();
 
-  return c.html(layout('ドライバー報告', driverReportsListPage(rows.results ?? []), 'driver-reports'));
+  return c.html(layout('ドライバー報告', driverReportsListPage(rows.results ?? []), 'kacho-mission'));
 });
 
 app.get('/driver-reports/:empId', async (c) => {
@@ -47,7 +48,7 @@ app.get('/driver-reports/:empId', async (c) => {
     'SELECT id, report_date, category, content, created_by_name, created_at FROM driver_reports WHERE emp_id = ? ORDER BY report_date DESC, id DESC'
   ).bind(empId).all<DriverReportEntry>();
 
-  return c.html(layout(`ドライバー報告 — ${emp.name}`, driverReportDetailPage(emp, entries.results ?? []), 'driver-reports'));
+  return c.html(layout(`ドライバー報告 — ${emp.name}`, driverReportDetailPage(emp, entries.results ?? []), 'kacho-mission'));
 });
 
 // ===== API =====

@@ -16,8 +16,8 @@ bucket_name = "benten-documents"
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
 RICHMENU_ID_PATTERN1 = "richmenu-7ddc3e80e06b72a49103d5237a89a4ee"
-RICHMENU_ID_PATTERN2 = "richmenu-a0d86ecebbaea07d6127552e5528c115"
-RICHMENU_ID_PATTERN3 = "richmenu-a0d86ecebbaea07d6127552e5528c115"
+RICHMENU_ID_PATTERN2 = "richmenu-ff06b9f597db71b89ddac53ad16e48c4"
+RICHMENU_ID_PATTERN3 = "richmenu-ff06b9f597db71b89ddac53ad16e48c4"
 # LIFFアプリID（LINE Developers で作成後に設定）
 LIFF_ID_LOST_ITEM = "2010598812-y7oZBhGe"
 LIFF_ID_ACCIDENT = "2010598812-PaLPe9HP"
@@ -30,6 +30,8 @@ LIFF_ID_VIOLATION = "2010598812-GNdHG7J6"
 LIFF_ID_GENERAL_REPORT = "2010598812-HftZFUKb"
 # 報告2 LIFF（忘れ物・事故・違反・一般報告を1本に統合、試験運用。エンドポイントURL: https://bentenclub.com/liff/report2）
 LIFF_ID_REPORT2 = "2010598812-TkOArc17"
+# 電話検索 LIFF（電話番号で忘れ物/事故/一般報告/CC名簿を横断検索。LINE Developers で LIFF作成後に設定。エンドポイントURL: https://bentenclub.com/liff/case-search）
+LIFF_ID_CASE_SEARCH = "2010598812-fcbO9x7e"
 # ベンテンクラブ シフト（LINE Developers で LIFF作成後に設定）
 LIFF_ID_BENTEN_SHIFT = "2010598812-yt0r1ZAW"
 # ベンテン会員・シフトマスター用リッチメニュー（未作成なら空のまま=メニューなし）

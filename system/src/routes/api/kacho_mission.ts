@@ -72,6 +72,22 @@ function nextContractPeriod(birthIso: string, todayIso: string) {
   return { start, end, age };
 }
 
+// ============ 乗務員検索（帳票の氏名→課/班/コード 自動入力用） ============
+// 社員が多いので全件返さず q（氏名・フリガナ・社員番号の部分一致）で絞る。
+app.get('/employees', async (c) => {
+  const q = (c.req.query('q') ?? '').trim().slice(0, 40);
+  if (!q) return c.json({ employees: [] });
+  const like = `%${q}%`;
+  const rows = await c.env.DB.prepare(
+    `SELECT id, emp_no, name, name_kana, division, team
+       FROM employees
+      WHERE is_active = 1 AND (name LIKE ? OR name_kana LIKE ? OR emp_no LIKE ?)
+      ORDER BY division, team, name
+      LIMIT 30`
+  ).bind(like, like, like).all<{ id: number; emp_no: string; name: string; name_kana: string | null; division: number | null; team: number | null }>();
+  return c.json({ employees: rows.results ?? [] });
+});
+
 // ============ 課長マスタ ============
 app.get('/kacho-masters', async (c) => {
   const rows = await c.env.DB.prepare(

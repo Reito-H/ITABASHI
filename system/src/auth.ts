@@ -19,6 +19,8 @@ export type Env = {
   LIFF_ID_GENERAL_REPORT?: string;
   // 報告2（忘れ物・事故・違反・一般報告を1本のLIFFに統合し、最上部の種類選択で切り替えるUI・試験運用）
   LIFF_ID_REPORT2?: string;
+  // 電話番号で案件を横断検索するLIFF（忘れ物/事故/一般報告/CC名簿。リッチメニュー「電話検索」ボタンから起動）
+  LIFF_ID_CASE_SEARCH?: string;
   // 登録パスワード（wrangler secret put で設定）
   LINE_REG_PWD_VEHICLE?: string;    // 車番管理者
   LINE_REG_PWD_OPERATIONS?: string; // 運行管理者
