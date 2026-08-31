@@ -47,12 +47,14 @@ import inspectionApi from './routes/api/inspection';
 import adminDocumentsRoutes from './routes/admin_documents';
 import documentsApi from './routes/api/documents';
 import adminKachoMissionRoutes from './routes/admin_kacho_mission';
+import adminKachoHiyariRoutes from './routes/admin_kacho_hiyari';
 import kachoMissionApi from './routes/api/kacho_mission';
 import adminKanchoRoutes from './routes/admin_kancho';
 import adminKanchoWishRoutes from './routes/admin_kancho_wish';
 import adminKanchoRosterRoutes from './routes/admin_kancho_roster';
 import adminKanchoPersonalRoutes from './routes/admin_kancho_personal';
 import adminKanchoLogicRoutes from './routes/admin_kancho_logic';
+import adminKanriKoboRoutes from './routes/admin_kanri_kobo';
 import adminAccountsRoutes from './routes/admin_accounts';
 import adminDiaRoutes from './routes/admin_dia';
 import diaApi from './routes/api/dia';
@@ -84,6 +86,8 @@ import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import adminNewcomerIntrosRoutes from './routes/admin_newcomer_intros';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
+import adminChoseiRoutes from './routes/admin_chosei';
+import adminManualModeRoutes, { manualModePublicApi } from './routes/admin_manual_mode';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -91,6 +95,8 @@ import publicAccidentsMonitorRoutes from './routes/public_accidents_monitor';
 import publicAccidentsUploadRoutes from './routes/public_accidents_upload';
 import publicNewcomerMonitorRoutes from './routes/public_newcomer_monitor';
 import publicStudySessionsRoutes from './routes/public_study_sessions';
+import publicChoseiRoutes from './routes/public_chosei';
+import publicHiyariRoutes from './routes/public_hiyari';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
@@ -225,6 +231,9 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // 班長個人別確認: 書き込み(その他メモ保存)も含めて閲覧権限(kancho-shift)だけで利用可能にする
   // （<key>.edit を要求する既定ルールを外し、ルート側で kancho-shift の有無だけをチェックする）
   if (subPath.startsWith('/api/kancho-personal/')) return next();
+  // マニュアルモード設定API: 設定ページを開ける人（settings 権限）なら閲覧・編集とも可。
+  // .edit を要求する既定ルールを外し、ルート側(admin_manual_mode.ts canUse)で settings の有無だけを見る
+  if (subPath.startsWith('/api/manual-mode/')) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -283,11 +292,13 @@ app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminVehicleDeadlinesRoutes);
 app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
 app.route(`/${SECRET}/admin`, adminKachoMissionRoutes);
+app.route(`/${SECRET}/admin`, adminKachoHiyariRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoWishRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRosterRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoPersonalRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoLogicRoutes);
+app.route(`/${SECRET}/admin`, adminKanriKoboRoutes);
 app.route(`/${SECRET}/admin`, adminAccountsRoutes);
 app.route(`/${SECRET}/admin`, adminDiaRoutes);
 app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
@@ -318,6 +329,8 @@ app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 app.route(`/${SECRET}/admin`, adminNewcomerIntrosRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
+app.route(`/${SECRET}/admin`, adminChoseiRoutes);
+app.route(`/${SECRET}/admin`, adminManualModeRoutes);
 
 // =====================
 // API（認証必須）
@@ -341,6 +354,8 @@ app.use('/api/*', async (c, next) => {
   if (path.startsWith('/api/announcements/web/')) return next();
   // アナウンスバーの表示・一時非表示も同様に、管理側の権限(settings.announcement-bar)に関わらず全アカウントが利用できる
   if (path.startsWith('/api/announcement-bar/')) return next();
+  // マニュアルモードのバー描画データ取得も、全アカウントが利用できる（設定側は settings 権限で別途ガード）
+  if (path.startsWith('/api/manual-mode/bar/')) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -362,6 +377,7 @@ app.route('/api/info', infoApi);
 app.route('/api/line', lineApiRoutes);
 app.route('/api/announcements/web', announcementsWebApi);
 app.route('/api/announcement-bar', announcementBarPublicApi);
+app.route('/api/manual-mode', manualModePublicApi);
 app.route('/api/birthday', birthdayPublicApi);
 app.route('/api/schedule-types', scheduleTypesApi);
 app.route('/api/interviews', interviewsApi);
@@ -431,6 +447,8 @@ app.route('', publicAccidentsMonitorRoutes);
 app.route('', publicAccidentsUploadRoutes);
 app.route('', publicNewcomerMonitorRoutes);
 app.route('', publicStudySessionsRoutes);
+app.route('', publicChoseiRoutes);
+app.route('', publicHiyariRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

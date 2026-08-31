@@ -1020,6 +1020,9 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー', desc: '管理画面全ページ最上部に表示する常時テロップの投稿・期限設定' },
       { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード', desc: '対象者の誕生日当日、設定時刻に全ページへお祝いポップアップを表示' },
     ]},
+    { heading: '画面カスタマイズ', cards: [
+      { href: `${ADMIN}/settings/manual-mode`, perm: 'settings', title: 'マニュアルモード', desc: '管理画面の下・中央に、よく使うページへのショートカットを並べた小さなバーを常時表示。中身は「登録者」ごとに設定し、どの登録者のバーを出すかは各ブラウザで選択（同じアカウントを複数人で使う場合向け）' },
+    ]},
     { heading: 'シフト関連の設定', cards: [
       { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', desc: 'シフト区分・勤務ダイヤ・研修担当・班長指導者・月度設定・ベンテンクラブ・班長関連 の一覧', highlight: true },
     ]},
@@ -1034,8 +1037,8 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
       { href: `${ADMIN}/cc-list`,                  perm: '',                         title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
     ]},
-    { heading: '研修・勉強会', cards: [
-      { href: `${ADMIN}/settings/study-sessions`, perm: 'settings.study-sessions', title: '勉強会募集', desc: '勉強会の作成・参加者確認・A3ポスター印刷。社員は共通QR/URLから社員番号を入力して参加登録', highlight: true },
+    { heading: '調整', cards: [
+      { href: `${ADMIN}/settings/chosei`, perm: 'settings.chosei', title: '調整', desc: '日程調整（調整さん形式）。調整を作ると推測されない共有URLが1本発行され、回答者はURLから社員番号を入力して各候補に ○/△/× とコメントを登録。集計表で最有力の候補が分かる' },
     ]},
     { heading: 'AI売上分析の設定', cards: [
       { href: `${ADMIN}/settings/wage-estimate`, perm: 'settings.wage-estimate', title: '賃金試算設定', desc: 'AI売上分析「賃金インパクト試算」で使う成果手当の概算計算パラメータ（曜日別基準額・歩合率）' },

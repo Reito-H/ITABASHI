@@ -8,7 +8,20 @@ import { Hono } from 'hono';
 import { layout, escHtml, safeJson, saveToastHtml, saveToastScript } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { getAdminPermissions } from '../permissions';
+import {
+  HIGHWAY_MAP_VIEWBOX, HIGHWAY_MAP_W, HIGHWAY_MAP_BASE, HIGHWAY_MAP_ROUTES, HIGHWAY_MAP_TOKYO,
+  HIGHWAY_MAP_SHUTOKO, HIGHWAY_MAP_SHUTOKO_BBOX, HIGHWAY_MAP_SHUTOKO_LABEL,
+} from '../html/highway_map_paths';
 import type { Env } from '../auth';
+
+// 地図の路線キー → 会社負担表(benri_toll_rows)の route_name に含まれる語
+const HIGHWAY_TOLL_MATCH: Record<string, string[]> = {
+  tomei: ['東名'], chuo: ['中央'], kanetsu: ['関越'], tohoku: ['東北'], joban: ['常磐'],
+  higashikanto: ['東関東'], aqualine: ['アクアライン'], daisan: ['第三京浜'],
+  yokohama_shindo: ['横浜新道'], yokoyoko: ['横須賀'], odawara_atsugi: ['小田原・厚木', '小田原厚木'],
+  keiyo: ['京葉道路'], tateyama: ['館山'], keno: ['圏央'],
+  shutoko: ['首都高速'], // 首都高速神奈川線 / 首都高速埼玉新都心線・埼玉大宮線 / 首都高速道路
+};
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -93,7 +106,6 @@ app.get('/benri/highway', async (c) => {
       <button id="tab-distance" onclick="showHwTab('distance')" style="padding:8px 20px;border-radius:8px 8px 0 0;border:1px solid #d1d5db;border-bottom:none;background:white;font-size:13px;font-weight:700;cursor:pointer;color:#1d4ed8;">距離控除表</button>
       <button id="tab-toll" onclick="showHwTab('toll')" style="padding:8px 20px;border-radius:8px 8px 0 0;border:1px solid #d1d5db;border-bottom:none;background:#f3f4f6;font-size:13px;font-weight:600;cursor:pointer;color:#6b7280;">高速料金 会社負担表</button>
       <button id="tab-map" onclick="showHwTab('map')" style="padding:8px 20px;border-radius:8px 8px 0 0;border:1px solid #d1d5db;border-bottom:none;background:#f3f4f6;font-size:13px;font-weight:600;cursor:pointer;color:#6b7280;">会社負担マップ</button>
-      <button id="tab-map2" onclick="showHwTab('map2')" style="padding:8px 20px;border-radius:8px 8px 0 0;border:1px solid #d1d5db;border-bottom:none;background:#f3f4f6;font-size:13px;font-weight:600;cursor:pointer;color:#6b7280;">会社負担マップ（地図風）</button>
     </div>
 
     <div id="pane-distance">
@@ -128,16 +140,10 @@ app.get('/benri/highway', async (c) => {
     </div>
 
     <div id="pane-map" style="display:none;">
-      <p style="font-size:12px;color:#6b7280;margin-bottom:4px;">中心が「会社（都内）」です。<span style="color:#16a34a;font-weight:700;">緑の実線</span>が会社負担区間、<span style="color:#9ca3af;">灰色の点線</span>がその先の自己負担区間を表します。路線・地点をクリックすると詳細が表示されます。検索すると該当する路線が強調されます。</p>
-      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:10px;overflow-x:auto;">
-        <div id="map-svg-wrap" style="min-width:640px;"></div>
-      </div>
-    </div>
-
-    <div id="pane-map2" style="display:none;">
-      <p style="font-size:12px;color:#6b7280;margin-bottom:4px;">各路線を実際のおおよその方角（東京から見た方向）に配置した地図風の路線図です。<span style="color:#16a34a;font-weight:700;">緑の太線</span>が会社負担区間、<span style="color:#9ca3af;">灰色の点線</span>がその先の自己負担区間を表します。路線・地点をクリックすると詳細が表示されます。</p>
-      <div style="background:#f0f9f4;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:10px;overflow-x:auto;">
-        <div id="map2-svg-wrap" style="min-width:640px;"></div>
+      <p style="font-size:12px;color:#6b7280;margin-bottom:6px;">関東の高速道路網の地図です。<span style="color:#15a34a;font-weight:700;">緑の太線</span>が会社負担区間（都心側の本線料金所まで）、<span style="color:#8592a0;">灰色の線</span>がその先の自己負担区間です。路線をクリックすると区間・負担額が表示されます。検索すると該当路線が強調されます。<br><span style="color:#9ca3af;">地図の線形は OpenStreetMap。会社負担区間の端はデータ上のおおよその位置で、実際の料金所位置とは多少ずれます。</span></p>
+      <div style="position:relative;background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:10px;overflow-x:auto;">
+        <button id="geo-reset" onclick="geoResetZoom()" style="display:none;position:absolute;top:16px;left:16px;z-index:2;padding:6px 14px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.2);">← 全体表示</button>
+        <div id="geomap-wrap" style="min-width:680px;max-width:1000px;margin:0 auto;"></div>
       </div>
     </div>
 
@@ -186,20 +192,31 @@ app.get('/benri/highway', async (c) => {
     var GROUPS = ${safeJson(groups)};
     var TOLLS = ${safeJson(tollRows)};
     var API = '${ADMIN_PATH}/api/benri';
+    var GEO_VIEWBOX = ${safeJson(HIGHWAY_MAP_VIEWBOX)};
+    var GEO_MAP_W = ${HIGHWAY_MAP_W};
+    var GEO_BASE = ${safeJson(HIGHWAY_MAP_BASE)};
+    var GEO_ROUTES = ${safeJson(HIGHWAY_MAP_ROUTES)};
+    var GEO_TOKYO = ${safeJson(HIGHWAY_MAP_TOKYO)};
+    var GEO_TOLL_MATCH = ${safeJson(HIGHWAY_TOLL_MATCH)};
+    var GEO_SHUTOKO = ${safeJson(HIGHWAY_MAP_SHUTOKO)};
+    var GEO_SHUTOKO_BBOX = ${safeJson(HIGHWAY_MAP_SHUTOKO_BBOX)};
+    var GEO_SHUTOKO_LABEL = ${safeJson(HIGHWAY_MAP_SHUTOKO_LABEL)};
+    var GEO_FOOTER = ${safeJson(footer)};
 
     function escJs(s) {
       return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     function showHwTab(name) {
-      ['distance', 'toll', 'map', 'map2'].forEach(function (n) {
+      ['distance', 'toll', 'map'].forEach(function (n) {
         document.getElementById('pane-' + n).style.display = n === name ? '' : 'none';
         var btn = document.getElementById('tab-' + n);
         btn.style.background = n === name ? 'white' : '#f3f4f6';
         btn.style.color = n === name ? '#1d4ed8' : '#6b7280';
         btn.style.fontWeight = n === name ? '700' : '600';
       });
-      var isMapTab = name === 'map' || name === 'map2';
+      var isMapTab = name === 'map';
+      if (!isMapTab && typeof geoZoomKey !== 'undefined' && geoZoomKey) geoResetZoom();
       document.getElementById('map-detail').style.display = 'none';
       var footerNote = document.getElementById('map-footer-note');
       if (footerNote) footerNote.style.display = isMapTab ? '' : 'none';
@@ -207,7 +224,7 @@ app.get('/benri/highway', async (c) => {
     }
     try {
       var savedTab = localStorage.getItem('benri-hw-tab');
-      if (savedTab === 'toll' || savedTab === 'map' || savedTab === 'map2') showHwTab(savedTab);
+      if (savedTab === 'toll' || savedTab === 'map') showHwTab(savedTab);
     } catch (e) {}
 
     // ===== 検索 =====
@@ -295,197 +312,167 @@ app.get('/benri/highway', async (c) => {
       }).join('');
     }
 
-    // ===== 会社負担マップ =====
-    function groupTollsByRoute() {
-      var order = [], map = {};
-      TOLLS.forEach(function (r) {
-        if (!map[r.route_name]) { map[r.route_name] = []; order.push(r.route_name); }
-        map[r.route_name].push(r);
+    // ===== 会社負担マップ（関東の高速道路網・地理地図） =====
+    function tollRowsForRoute(key) {
+      var pats = GEO_TOLL_MATCH[key] || [];
+      if (!pats.length) return [];
+      return TOLLS.filter(function (r) {
+        return pats.some(function (p) { return (r.route_name || '').indexOf(p) >= 0; });
       });
-      return order.map(function (name) { return { name: name, rows: map[name] }; });
     }
-    function buildMap() {
-      var groups = groupTollsByRoute();
-      var n = groups.length || 1;
-      var cx = 500, cy = 500, r0 = 62, rBoundary = 220, rOuter = 300, rLabel = 300;
+    function geoRouteMatches(rt, q) {
+      if (!q) return true;
+      if ((rt.label || '').toLowerCase().indexOf(q) >= 0) return true;
+      return tollRowsForRoute(rt.key).some(function (r) { return matchToll(r, q); });
+    }
+
+    var geoZoomKey = null;
+    var SHUTOKO_META = { key: 'shutoko', label: '首都高', bbox: GEO_SHUTOKO_BBOX };
+    function geoRouteByKey(k) {
+      if (k === 'shutoko') return SHUTOKO_META;
+      for (var i = 0; i < GEO_ROUTES.length; i++) if (GEO_ROUTES[i].key === k) return GEO_ROUTES[i];
+      return null;
+    }
+    function geoViewBox() {
+      var rt = geoZoomKey && geoRouteByKey(geoZoomKey);
+      if (!rt || !rt.bbox) return GEO_VIEWBOX;
+      var b = rt.bbox;
+      var padX = Math.max(b.w * 0.14, 46), padY = Math.max(b.h * 0.14, 46);
+      return (b.x - padX).toFixed(1) + ' ' + (b.y - padY).toFixed(1) + ' ' + (b.w + padX * 2).toFixed(1) + ' ' + (b.h + padY * 2).toFixed(1);
+    }
+
+    function renderGeoMap() {
+      var vb = geoViewBox();
+      var kk = parseFloat(vb.split(' ')[2]) / GEO_MAP_W;   // 拡大率（1=全体, <1=拡大）
+      // 拡大しても画面上の見かけサイズが一定になるよう、user単位のサイズを縮小率で割る
+      var fs = function (base) { return +(base * kk).toFixed(2); };
+      var sw = function (base) { return +(base * kk).toFixed(2); };
+      var zk = geoZoomKey;
       var parts = [];
 
-      groups.forEach(function (group, gi) {
-        var baseAngle = (gi * 360 / n) - 90;
-        var rows = group.rows;
-        var fanStep = rows.length > 1 ? Math.min(9, (360 / n - 6) / (rows.length - 1)) : 0;
+      GEO_BASE.forEach(function (d) {
+        parts.push('<path d="' + d + '" fill="none" stroke="#d9dfe6" stroke-width="' + sw(1.2) + '"' + (zk ? ' opacity="0.55"' : '') + ' />');
+      });
+      GEO_ROUTES.forEach(function (rt) {
+        var hasToll = tollRowsForRoute(rt.key).length > 0;
+        var dim = zk && rt.key !== zk;
+        parts.push('<g class="geo-route" data-key="' + rt.key + '"' + (dim ? ' opacity="0.12"' : '') + ' style="cursor:' + (hasToll ? 'pointer' : 'default') + ';">');
+        parts.push('<path d="' + rt.d + '" fill="none" stroke="transparent" stroke-width="' + sw(16) + '" pointer-events="stroke" />');
+        parts.push('<path d="' + rt.d + '" fill="none" stroke="#8592a0" stroke-width="' + sw(rt.key === zk ? 2.8 : 2.2) + '" stroke-linecap="round" stroke-linejoin="round" />');
+        if (rt.green) parts.push('<path class="geo-green" d="' + rt.green + '" fill="none" stroke="#15a34a" stroke-width="' + sw(rt.key === zk ? 7.5 : 6) + '" stroke-linecap="round" stroke-linejoin="round" />');
+        parts.push('</g>');
+      });
 
-        rows.forEach(function (row, ri) {
-          var idx = TOLLS.indexOf(row);
-          var offset = rows.length > 1 ? (ri - (rows.length - 1) / 2) * fanStep : 0;
-          var angle = baseAngle + offset;
-          var rad = angle * Math.PI / 180;
-          var dx = Math.cos(rad), dy = Math.sin(rad);
-          var section = (row.section || '').trim();
-          var coveredAll = section === '全線';
-          var boundR = coveredAll ? rOuter : rBoundary;
-          var x0 = cx + dx * r0, y0 = cy + dy * r0;
-          var xB = cx + dx * boundR, yB = cy + dy * boundR;
-          var xO = cx + dx * rOuter, yO = cy + dy * rOuter;
+      // 首都高（全線 会社負担）: 1グループ。緑系で描画
+      var shDim = zk && zk !== 'shutoko';
+      var shFocus = zk === 'shutoko';
+      parts.push('<g class="geo-route" data-key="shutoko"' + (shDim ? ' opacity="0.12"' : '') + ' style="cursor:pointer;">');
+      GEO_SHUTOKO.forEach(function (d) {
+        parts.push('<path d="' + d + '" fill="none" stroke="transparent" stroke-width="' + sw(9) + '" pointer-events="stroke" />');
+        parts.push('<path d="' + d + '" fill="none" stroke="' + (shFocus ? '#15a34a' : '#57c98a') + '" stroke-width="' + sw(shFocus ? 3.2 : 1.8) + '" stroke-linecap="round" stroke-linejoin="round" />');
+      });
+      parts.push('</g>');
 
-          parts.push('<g class="benri-spoke" data-idx="' + idx + '" style="cursor:pointer;">');
-          parts.push('<title>' + escJs(group.name) + '\\n区間: ' + escJs(row.section) + '\\n会社負担: ' + escJs(row.fee) + '円' + (row.note ? '\\n備考: ' + escJs(row.note) : '') + '</title>');
-          parts.push('<line x1="' + x0 + '" y1="' + y0 + '" x2="' + xO + '" y2="' + yO + '" stroke="transparent" stroke-width="22" pointer-events="stroke" />');
-          parts.push('<line x1="' + x0 + '" y1="' + y0 + '" x2="' + xB + '" y2="' + yB + '" stroke="#16a34a" stroke-width="5" stroke-linecap="round" />');
-          if (!coveredAll) {
-            parts.push('<line x1="' + xB + '" y1="' + yB + '" x2="' + xO + '" y2="' + yO + '" stroke="#cbd5e1" stroke-width="2.5" stroke-dasharray="1.5 5" stroke-linecap="round" />');
+      if (!zk) {
+        // 全体表示: 境界IC・都心マーカー・路線名ラベル
+        GEO_ROUTES.forEach(function (rt) {
+          if (rt.fromXY) {
+            parts.push('<circle cx="' + rt.fromXY.x + '" cy="' + rt.fromXY.y + '" r="4.5" fill="#b91c1c" />');
+            parts.push('<text x="' + (rt.fromXY.x + 7) + '" y="' + (rt.fromXY.y + 4) + '" font-size="11" fill="#b91c1c" stroke="#fff" stroke-width="2.5" paint-order="stroke">' + escJs(rt.fromName || '') + '</text>');
           }
-          parts.push('<circle cx="' + xB + '" cy="' + yB + '" r="5" fill="' + (coveredAll ? '#16a34a' : '#ffffff') + '" stroke="#16a34a" stroke-width="2" />');
-          parts.push('</g>');
+          parts.push('<text class="geo-label" data-key="' + rt.key + '" x="' + rt.labelXY.x + '" y="' + rt.labelXY.y + '" text-anchor="middle" font-size="13.5" font-weight="700" fill="#0f172a" stroke="#fff" stroke-width="3.5" paint-order="stroke" style="cursor:pointer;">' + escJs(rt.label) + '</text>');
         });
-
-        // 路線名ラベルは1グループにつき1つだけ、外周に放射状に配置（重なり防止のため地点・料金は表示しない＝ホバー/クリックで確認）
-        var labelDeg = ((baseAngle % 360) + 360) % 360;
-        var flip = labelDeg > 90 && labelDeg < 270;
-        var lx = cx + Math.cos(baseAngle * Math.PI / 180) * rLabel;
-        var ly = cy + Math.sin(baseAngle * Math.PI / 180) * rLabel;
-        parts.push('<g class="benri-route-label" data-route-idx="' + gi + '"><text x="' + lx + '" y="' + ly + '" text-anchor="' + (flip ? 'end' : 'start') + '" transform="rotate(' + (flip ? baseAngle + 180 : baseAngle) + ' ' + lx + ' ' + ly + ')" font-size="11" font-weight="700" fill="#374151">' + escJs(group.name) + '</text></g>');
-      });
-      window.__benriMapGroups = groups;
-
-      var svgHead = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r0 + '" fill="#1e3a5f" />'
-        + '<text x="' + cx + '" y="' + (cy - 3) + '" text-anchor="middle" fill="white" font-size="14" font-weight="700">会社</text>'
-        + '<text x="' + cx + '" y="' + (cy + 15) + '" text-anchor="middle" fill="#93c5fd" font-size="11">（都内）</text>';
-
-      var wrap = document.getElementById('map-svg-wrap');
-      wrap.innerHTML = '<svg viewBox="0 0 1000 1000" width="1000" height="1000" style="max-width:100%;height:auto;">'
-        + '<style>.benri-spoke{transition:opacity .15s}.benri-spoke:hover line{stroke-width:7}.benri-spoke:hover circle{r:7}</style>'
-        + svgHead + parts.join('') + '</svg>';
-      wrap.querySelector('svg').addEventListener('click', function (e) {
-        var g = e.target.closest('[data-idx]');
-        if (!g) return;
-        var row = TOLLS[parseInt(g.getAttribute('data-idx'))];
-        showMapDetail(row);
-      });
-    }
-    // ===== 会社負担マップ（地図風・実方角配置） =====
-    // 東京から見たおおよその方角（0=北、時計回り）。未登録の路線名はハッシュ値で仮配置する
-    var ROUTE_BEARINGS = {
-      '東名高速道路': 245, '小田原・厚木道路': 233, '第三京浜国道': 207, '横浜新道': 199,
-      '首都高速神奈川線': 192, '横浜・横須賀道路': 184, '東京湾アクアライン': 152,
-      '中央自動車道': 262, '関越自動車道': 302, '東北自動車道': 353,
-      '首都高速埼玉新都心線・埼玉大宮線': 338, '常磐自動車道': 33,
-      '京葉道路経由': 102, '東関東自動車道経由': 88, '東関東自動車道': 73,
-      '首都高速道路': 15
-    };
-    function hashBearing(name) {
-      var h = 0;
-      for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-      return h;
-    }
-    function bearingForRow(row) {
-      if (row.route_name === '首都高速道路') {
-        if (row.section.indexOf('川口') !== -1) return 353;
-        if (row.section.indexOf('八潮') !== -1) return 18;
-        if (row.section.indexOf('三郷') !== -1) return 40;
+        parts.push('<circle cx="' + GEO_TOKYO.x + '" cy="' + GEO_TOKYO.y + '" r="6" fill="#1e3a5f" />');
+        parts.push('<text x="' + (GEO_TOKYO.x + 9) + '" y="' + (GEO_TOKYO.y + 4) + '" font-size="12" font-weight="700" fill="#1e3a5f" stroke="#fff" stroke-width="3" paint-order="stroke">都心</text>');
+        parts.push('<text class="geo-label" data-key="shutoko" x="' + GEO_SHUTOKO_LABEL.x + '" y="' + GEO_SHUTOKO_LABEL.y + '" text-anchor="middle" font-size="12.5" font-weight="700" fill="#0f7a43" stroke="#fff" stroke-width="3.5" paint-order="stroke" style="cursor:pointer;">首都高</text>');
+      } else {
+        // 拡大表示: 選択路線の IC/JCT 名を順路に沿って表示
+        var rt = geoRouteByKey(zk);
+        var ics = (rt && rt.ics) || [];
+        var fromKey = (rt && rt.fromName || '').replace(/(本線料金所|スマートIC|IC|JCT|PA|SA)$/, '');
+        ics.forEach(function (ic, i) {
+          if (fromKey && ic.name.replace(/(本線料金所|スマートIC|IC|JCT|PA|SA)$/, '') === fromKey) return; // 境界ICは別途大きく描く
+          var side = (i % 2 === 0) ? -1 : 1;
+          var off = fs(13) + fs(4) * (i % 4 >= 2 ? 1.4 : 0); // 4個ごとに段差
+          parts.push('<circle cx="' + ic.x + '" cy="' + ic.y + '" r="' + sw(2.4) + '" fill="#1e3a5f" />');
+          parts.push('<line x1="' + ic.x + '" y1="' + ic.y + '" x2="' + ic.x + '" y2="' + (ic.y + side * off * 0.7) + '" stroke="#94a3b8" stroke-width="' + sw(0.8) + '" />');
+          parts.push('<text x="' + ic.x + '" y="' + (ic.y + side * off + fs(3.5)) + '" text-anchor="middle" font-size="' + fs(10.5) + '" font-weight="600" fill="#0f172a" stroke="#fff" stroke-width="' + fs(3) + '" paint-order="stroke">' + escJs(ic.name) + '</text>');
+        });
+        if (rt && rt.fromXY) {
+          parts.push('<circle cx="' + rt.fromXY.x + '" cy="' + rt.fromXY.y + '" r="' + sw(4.5) + '" fill="#b91c1c" />');
+          parts.push('<text x="' + rt.fromXY.x + '" y="' + (rt.fromXY.y - fs(13)) + '" text-anchor="middle" font-size="' + fs(11) + '" font-weight="700" fill="#b91c1c" stroke="#fff" stroke-width="' + fs(3.2) + '" paint-order="stroke">' + escJs((rt.fromName || '') + ' から会社負担') + '</text>');
+        }
       }
-      return Object.prototype.hasOwnProperty.call(ROUTE_BEARINGS, row.route_name) ? ROUTE_BEARINGS[row.route_name] : hashBearing(row.route_name);
-    }
-    function buildMap2() {
-      var cx = 500, cy = 500, r0 = 58, rBend = 170, rBoundary = 260, rOuter = 350, rLabel = 372;
-      var groupsMap = {}, order = [];
-      TOLLS.forEach(function (row) {
-        var bearing = bearingForRow(row);
-        var key = row.route_name + '|' + bearing;
-        if (!groupsMap[key]) { groupsMap[key] = { name: row.route_name, bearing: bearing, rows: [] }; order.push(key); }
-        groupsMap[key].rows.push(row);
-      });
-      var groups = order.map(function (k) { return groupsMap[k]; });
-      window.__benriMap2Groups = groups;
 
-      var parts = [];
-      groups.forEach(function (group, gi) {
-        var baseAngle = group.bearing - 90;
-        var rows = group.rows;
-        var fanStep = rows.length > 1 ? 6 : 0;
-
-        rows.forEach(function (row, ri) {
-          var idx = TOLLS.indexOf(row);
-          var offset = rows.length > 1 ? (ri - (rows.length - 1) / 2) * fanStep : 0;
-          var angle = baseAngle + offset;
-          var rad = angle * Math.PI / 180;
-          var dx = Math.cos(rad), dy = Math.sin(rad);
-          var bendSign = (idx % 2 === 0) ? 1 : -1;
-          var bendRad = (angle + bendSign * 5) * Math.PI / 180;
-          var bdx = Math.cos(bendRad), bdy = Math.sin(bendRad);
-          var section = (row.section || '').trim();
-          var coveredAll = section === '全線';
-          var boundR = coveredAll ? rOuter : rBoundary;
-          var x0 = cx + dx * r0, y0 = cy + dy * r0;
-          var xBend = cx + bdx * rBend, yBend = cy + bdy * rBend;
-          var xB = cx + dx * boundR, yB = cy + dy * boundR;
-          var xO = cx + dx * rOuter, yO = cy + dy * rOuter;
-
-          parts.push('<g class="benri-spoke" data-idx="' + idx + '" style="cursor:pointer;">');
-          parts.push('<title>' + escJs(group.name) + '\\n区間: ' + escJs(row.section) + '\\n会社負担: ' + escJs(row.fee) + '円' + (row.note ? '\\n備考: ' + escJs(row.note) : '') + '</title>');
-          parts.push('<path d="M ' + x0 + ' ' + y0 + ' Q ' + xBend + ' ' + yBend + ' ' + xO + ' ' + yO + '" fill="none" stroke="transparent" stroke-width="26" pointer-events="stroke" />');
-          parts.push('<path d="M ' + x0 + ' ' + y0 + ' Q ' + xBend + ' ' + yBend + ' ' + xB + ' ' + yB + '" fill="none" stroke="#16a34a" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />');
-          if (!coveredAll) {
-            parts.push('<line x1="' + xB + '" y1="' + yB + '" x2="' + xO + '" y2="' + yO + '" stroke="#9ca3af" stroke-width="3" stroke-dasharray="1.5 6" stroke-linecap="round" />');
-          }
-          parts.push('<circle cx="' + xB + '" cy="' + yB + '" r="5.5" fill="' + (coveredAll ? '#16a34a' : '#ffffff') + '" stroke="#16a34a" stroke-width="2.2" />');
-          parts.push('</g>');
-        });
-
-        var labelDeg = ((baseAngle % 360) + 360) % 360;
-        var flip = labelDeg > 90 && labelDeg < 270;
-        var lx = cx + Math.cos(baseAngle * Math.PI / 180) * rLabel;
-        var ly = cy + Math.sin(baseAngle * Math.PI / 180) * rLabel;
-        parts.push('<g class="benri-route-label2" data-route2-idx="' + gi + '"><text x="' + lx + '" y="' + ly + '" text-anchor="' + (flip ? 'end' : 'start') + '" transform="rotate(' + (flip ? baseAngle + 180 : baseAngle) + ' ' + lx + ' ' + ly + ')" font-size="12" font-weight="700" fill="#1e3a5f">' + escJs(group.name) + '</text></g>');
-      });
-
-      var svgHead = '<rect x="' + (cx - 36) + '" y="' + (cy - 25) + '" width="72" height="50" rx="10" fill="#1e3a5f" />'
-        + '<text x="' + cx + '" y="' + (cy - 3) + '" text-anchor="middle" fill="white" font-size="13" font-weight="700">会社</text>'
-        + '<text x="' + cx + '" y="' + (cy + 15) + '" text-anchor="middle" fill="#93c5fd" font-size="10">（都内）</text>';
-
-      var wrap = document.getElementById('map2-svg-wrap');
-      wrap.innerHTML = '<svg viewBox="0 0 1000 1000" width="1000" height="1000" style="max-width:100%;height:auto;">'
-        + '<style>.benri-spoke{transition:opacity .15s}.benri-spoke:hover path{stroke-width:9}.benri-spoke:hover circle{r:7.5}</style>'
-        + svgHead + parts.join('') + '</svg>';
+      var wrap = document.getElementById('geomap-wrap');
+      wrap.innerHTML = '<svg viewBox="' + vb + '" style="width:100%;height:auto;display:block;font-family:inherit;background:#f7f9fb;border-radius:8px;transition:none;">'
+        + '<style>.geo-route:hover .geo-green{stroke-width:' + sw(zk ? 9 : 8) + '}</style>'
+        + parts.join('') + '</svg>';
       wrap.querySelector('svg').addEventListener('click', function (e) {
-        var g = e.target.closest('[data-idx]');
-        if (!g) return;
-        var row = TOLLS[parseInt(g.getAttribute('data-idx'))];
-        showMapDetail(row);
+        var g = e.target.closest('[data-key]');
+        if (g) { zoomToRoute(g.getAttribute('data-key')); }
+        else if (geoZoomKey) { geoResetZoom(); }
       });
+      var rb = document.getElementById('geo-reset');
+      if (rb) rb.style.display = geoZoomKey ? 'block' : 'none';
     }
-    function showMapDetail(row) {
+
+    function zoomToRoute(key) {
+      var rt = geoRouteByKey(key);
+      if (!rt) return;
+      geoZoomKey = key;
+      renderGeoMap();
+      showRouteDetail(key);
+    }
+    function geoResetZoom() {
+      geoZoomKey = null;
+      renderGeoMap();
+      document.getElementById('map-detail').style.display = 'none';
+    }
+
+    function showRouteDetail(key) {
+      var rt = geoRouteByKey(key);
+      var rows = tollRowsForRoute(key);
       var el = document.getElementById('map-detail');
+      if (!rows.length) { el.style.display = 'none'; return; }
+      var conditional = false;
+      var body = rows.map(function (r) {
+        var cond = (r.note || '').trim();
+        var feeCapped = (r.fee || '').indexOf('～') >= 0 || (r.fee || '').indexOf('〜') >= 0;
+        if (cond || feeCapped) conditional = true;
+        var noteHtml = cond
+          ? '<div style="margin-top:4px;padding:6px 9px;background:' + (feeCapped ? '#fffbeb' : '#f8fafc') + ';border-left:3px solid ' + (feeCapped ? '#d97706' : '#cbd5e1') + ';border-radius:4px;font-size:11.5px;color:#334155;line-height:1.6;">'
+              + (feeCapped ? '<span style="font-weight:700;color:#b45309;">会社負担の条件: </span>' : '')
+              + escJs(cond) + '</div>'
+          : '';
+        return '<div style="padding:7px 0;border-top:1px solid #f1f5f9;">'
+          + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">'
+          + '<span style="font-size:12.5px;color:#1e293b;">' + escJs(r.section) + '</span>'
+          + '<span style="font-size:12.5px;font-weight:700;color:#059669;white-space:nowrap;">' + escJs(r.fee) + ' 円</span></div>'
+          + noteHtml + '</div>';
+      }).join('');
+      var footNote = '';
+      if (GEO_FOOTER && (conditional || key === 'shutoko') && rows.some(function (r) { return /[①②参照]/.test(r.note || ''); })) {
+        footNote = '<div style="margin-top:10px;padding:9px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11px;color:#334155;line-height:1.7;white-space:pre-wrap;">'
+          + '<span style="font-weight:700;color:#b45309;">帰路利用方法の注記</span>\\n' + escJs(GEO_FOOTER) + '</div>';
+      }
+      el.innerHTML = '<div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">' + escJs(rt ? rt.label : key) + '　会社負担</div>'
+        + body + footNote;
       el.style.display = 'block';
-      el.innerHTML = '<div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">' + escJs(row.route_name) + '</div>'
-        + '<div style="font-size:12px;color:#374151;margin-bottom:2px;">区間: ' + escJs(row.section) + '</div>'
-        + '<div style="font-size:12px;color:#059669;font-weight:700;margin-bottom:2px;">会社負担額: ' + escJs(row.fee) + '円</div>'
-        + (row.note ? '<div style="font-size:12px;color:#6b7280;margin-top:4px;">備考: ' + escJs(row.note) + '</div>' : '');
     }
+
     function applyMapFilter() {
-      var q = document.getElementById('benri-search').value.trim().toLowerCase();
-      document.querySelectorAll('.benri-spoke').forEach(function (g) {
-        var row = TOLLS[parseInt(g.getAttribute('data-idx'))];
-        g.style.opacity = matchToll(row, q) ? '1' : '0.12';
-      });
-      var groups = window.__benriMapGroups || [];
-      document.querySelectorAll('.benri-route-label').forEach(function (g) {
-        var group = groups[parseInt(g.getAttribute('data-route-idx'))];
-        var hit = !group || group.rows.some(function (r) { return matchToll(r, q); });
-        g.style.opacity = hit ? '1' : '0.25';
-      });
-      var groups2 = window.__benriMap2Groups || [];
-      document.querySelectorAll('.benri-route-label2').forEach(function (g) {
-        var group = groups2[parseInt(g.getAttribute('data-route2-idx'))];
-        var hit = !group || group.rows.some(function (r) { return matchToll(r, q); });
-        g.style.opacity = hit ? '1' : '0.25';
+      var q = (document.getElementById('benri-search').value || '').trim().toLowerCase();
+      document.querySelectorAll('.geo-route, .geo-label').forEach(function (g) {
+        var rt = geoRouteByKey(g.getAttribute('data-key'));
+        g.style.opacity = (rt && geoRouteMatches(rt, q)) ? '1' : '0.2';
       });
     }
+
 
     renderDistanceList();
     renderTollList();
-    buildMap();
-    buildMap2();
+    renderGeoMap();
 
     // ===== 距離控除表 =====
     var editingDistId = 0;

@@ -1,0 +1,14 @@
+[
+  { "key": "tomei",           "from": "秦野中井", "to": "東京料金所",   "fee": "1,710", "note": "秦野中井以西は自己負担" },
+  { "key": "chuo",            "from": "八王子",   "to": "高井戸",       "fee": "630", "note": "八王子〜三鷹本線料金所" },
+  { "key": "kanetsu",         "from": "東松山",   "to": "新座料金所",   "fee": "1,440" },
+  { "key": "tohoku",          "from": "加須",     "to": "浦和本線料金所", "fee": "1,090" },
+  { "key": "joban",           "from": "桜土浦",   "to": "三郷料金所",   "fee": "1,240" },
+  { "key": "higashikanto",    "from": "新空港",   "to": "湾岸市川",     "fee": "1,750", "note": "新空港(成田)〜湾岸市川料金所" },
+  { "key": "aqualine",        "whole": true,                          "fee": "800",   "note": "全線が会社負担" },
+  { "key": "daisan",          "whole": true,                          "fee": "390",   "note": "全線が会社負担" },
+  { "key": "yokohama_shindo", "whole": true,                          "fee": "320",   "note": "全線が会社負担" },
+  { "key": "yokoyoko",        "whole": true,                          "fee": "970",   "note": "馬堀海岸〜狩場（ほぼ全線）" },
+  { "key": "odawara_atsugi",  "from": "大磯",     "to": "厚木",         "fee": "370" },
+  { "key": "keiyo",           "whole": true,                          "fee": "760",   "note": "蘇我〜篠崎（ほぼ全線）" }
+]

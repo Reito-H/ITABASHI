@@ -22,7 +22,8 @@
 //               settings.offices / settings.vehicle-search-guide / settings.documents /
 //               settings.tutorial / settings.status / settings.kancho-logic /
 //               settings.wage-estimate / settings.driving-risk /
-//               settings.announcement-bar / settings.birthday / settings.study-sessions
+//               settings.announcement-bar / settings.birthday / settings.study-sessions /
+//               settings.chosei
 
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
 // キーは '|' 区切りで複数指定可（いずれか1つでも権限があればOK）。例: 'a|b|c'
@@ -56,6 +57,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
   [/^\/settings\/study-sessions/,       'settings.study-sessions'],
+  [/^\/settings\/chosei/,               'settings.chosei'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
   [/^\/settings\/kancho-logic/,         'settings.kancho-logic'],
@@ -73,6 +75,11 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/handover-memos/,            'settings.handover-memos'],
   [/^\/api\/violation-types/,           'settings.violation-types'],
   [/^\/api\/study-sessions/,            'settings.study-sessions'],
+  [/^\/api\/office-opinions/,           'settings.study-sessions'],
+  [/^\/api\/hiyari-reports/,            'settings.study-sessions'],
+  [/^\/api\/hiyari-poster/,             'settings.study-sessions'],
+  [/^\/api\/surveys/,                   'settings.study-sessions'],
+  [/^\/api\/chosei/,                    'settings.chosei'],
   [/^\/api\/kancho-wish-settings/,      'settings.kancho-wish'],
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
@@ -80,6 +87,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // 各ページ
   [/^\/kancho-shift/, 'kancho-shift'],
   [/^\/api\/kancho/,  'kancho-shift'],
+  [/^\/kanri-kobo/,     'kanri-kobo'],
+  [/^\/api\/kanri-kobo/, 'kanri-kobo'],
   [/^\/handover/,     'handover'],
   [/^\/api\/handover/, 'handover'],
   [/^\/tantosha/,     'tantosha'],
@@ -207,6 +216,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'home',          label: 'ホーム' },
     { key: 'shift',         label: '新人シフト管理' },
     { key: 'kancho-shift',  label: '班長シフト' },
+    { key: 'kanri-kobo',    label: '管理者公休表' },
     { key: 'handover',      label: '引き継ぎシート' },
     { key: 'crew-portal',   label: '個人データ参照（日別明細・売上）' },
     { key: 'tantosha',      label: '担当車表' },
@@ -254,7 +264,8 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'settings.kancho-roster',        label: '班長リスト（班長登録の解除のみ編集可）' },
     { key: 'settings.kancho-wish',          label: '希望休フォーム' },
     { key: 'settings.kancho-logic',         label: '班長シフト ロジック仕様（閲覧のみ）' },
-    { key: 'settings.study-sessions',       label: '勉強会募集' },
+    { key: 'settings.study-sessions',       label: '営業所ページ（イベント・ご意見版）' },
+    { key: 'settings.chosei',               label: '調整（日程調整）' },
   ]},
 ];
 

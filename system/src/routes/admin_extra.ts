@@ -1472,6 +1472,15 @@ app.get('/settings/offices', async (c) => {
   ).all<OfficeRow>();
   const offices = res.results ?? [];
 
+  // 担当営業所（この環境が代表する営業所）。乗務員ページ（イベント・ご意見版）の既定営業所になる
+  const homeRow = await c.env.DB.prepare(
+    "SELECT value FROM system_settings WHERE key = 'home_office_id'"
+  ).first<{ value: string }>();
+  const homeOfficeId = parseInt(homeRow?.value ?? '1', 10) || 1;
+  const homeOptions = offices.map(o =>
+    `<option value="${o.id}"${o.id === homeOfficeId ? ' selected' : ''}>${escHtml(o.short_name)}</option>`
+  ).join('');
+
   const rows = offices.map(o => `
     <tr id="row-${o.id}">
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;color:#374151;">${escHtml(o.short_name)}</td>
@@ -1495,6 +1504,15 @@ app.get('/settings/offices', async (c) => {
     <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
       <a href="${ADMIN_PATH}/settings" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 設定に戻る</a>
       <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">営業所管理</h2>
+    </div>
+    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:20px;max-width:800px;margin-bottom:16px;">
+      <h3 style="font-size:14px;font-weight:700;color:#1e3a5f;margin:0 0 8px;">担当営業所</h3>
+      <p style="font-size:12px;color:#6b7280;margin:0 0 12px;">この環境（ホシコン）が代表する営業所です。設定「${escHtml((offices.find(o => o.id === homeOfficeId)?.short_name ?? '板橋営業所'))}」の乗務員ページ（イベントの参加募集・ご意見版）の既定営業所になります。全営業所対応までは変更不要です。</p>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <select id="home-office" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">${homeOptions}</select>
+        <button onclick="saveHomeOffice()" id="home-save-btn" style="padding:8px 20px;background:#2563eb;color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">保存</button>
+        <span id="home-save-msg" style="font-size:13px;color:#16a34a;display:none;">保存しました</span>
+      </div>
     </div>
     <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:20px;max-width:800px;">
       <p style="font-size:13px;color:#6b7280;margin:0 0 16px;">各営業所の電話番号・住所を設定します。車両検索の結果に反映されます。</p>
@@ -1541,6 +1559,23 @@ app.get('/settings/offices', async (c) => {
 
     <script>
       var IDS = ${JSON.stringify(ids)};
+      async function saveHomeOffice() {
+        var btn = document.getElementById('home-save-btn');
+        btn.disabled = true; btn.textContent = '保存中...';
+        var res = await fetch('${ADMIN_PATH}/api/offices/home', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: parseInt(document.getElementById('home-office').value, 10) })
+        });
+        btn.disabled = false; btn.textContent = '保存';
+        if (res.ok) {
+          var msg = document.getElementById('home-save-msg');
+          msg.style.display = 'inline';
+          setTimeout(function() { msg.style.display = 'none'; }, 2500);
+        } else {
+          alert('保存に失敗しました');
+        }
+      }
       async function addOffice() {
         var name = document.getElementById('new-name').value.trim();
         var phone = document.getElementById('new-phone').value.trim();
@@ -1618,6 +1653,20 @@ app.post('/api/offices/add', async (c) => {
     'INSERT INTO offices (name, short_name, phone, sort_order) VALUES (?, ?, ?, ?)'
   ).bind(name, name, (body.phone ?? '').trim() || null, nextSort).run();
 
+  return c.json({ ok: true });
+});
+
+// 担当営業所（この環境が代表する営業所）の切替
+app.post('/api/offices/home', async (c) => {
+  const body = await c.req.json<{ id?: number }>();
+  const id = Number(body.id);
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'IDが不正です' }, 400);
+  const office = await c.env.DB.prepare('SELECT id FROM offices WHERE id = ?').bind(id).first();
+  if (!office) return c.json({ error: '営業所が見つかりません' }, 404);
+  await c.env.DB.prepare(
+    `INSERT INTO system_settings (key, value, updated_at) VALUES ('home_office_id', ?, datetime('now','localtime'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now','localtime')`
+  ).bind(String(id)).run();
   return c.json({ ok: true });
 });
 

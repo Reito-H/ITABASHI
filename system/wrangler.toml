@@ -100,6 +100,14 @@ pattern = "bentenclub.com/study-45b471c74a7d9e9b5c99540302df04f0*"
 zone_name = "bentenclub.com"
 
 [[routes]]
+pattern = "bentenclub.com/cs-4e9b1d7a6c0f42e8b3a95172d84c0f6e*"
+zone_name = "bentenclub.com"
+
+[[routes]]
+pattern = "bentenclub.com/hh-2738ceac08eac11269d76dc733598ba6*"
+zone_name = "bentenclub.com"
+
+[[routes]]
 pattern = "bentenclub.com/robots.txt"
 zone_name = "bentenclub.com"
 

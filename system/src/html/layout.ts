@@ -3,6 +3,7 @@ import { ADMIN_PATH, APP_VERSION } from '../config';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
 import { announcementBarHtml, announcementBarScript } from './announcement_bar';
 import { birthdayPopupHtml, birthdayPopupScript } from './birthday_popup';
+import { manualModeBarHtml, manualModeBarScript } from './manual_mode_bar';
 
 export function safeJson(value: unknown): string {
   return JSON.stringify(value)
@@ -28,7 +29,7 @@ function showToast(msg) {
 }
 
 // フローティング新規報告ボタンを表示しないページ（設定・点検管理・班長シフト・便利＝車庫を含む）
-const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'benri']);
+const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift', 'kanri-kobo', 'benri']);
 
 // embed=true: サイドバー・ヘッダー・お知らせ・リミットポーリング等を全て省いた最小限のHTML文書を返す。
 // 引き継ぎシートのフローティングパネル（やることリスト）のようにiframeへ埋め込む用途専用。
@@ -70,10 +71,12 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}`,               label: 'ホーム',          id: 'home' },
     { href: `${ADMIN_PATH}/settings/reports`, label: '報告センター', id: 'report-center', permKey: REPORT_CENTER_PERM, highlight: true },
     { href: `${ADMIN_PATH}/kancho-shift`,  label: '班長シフト',      id: 'kancho-shift' },
+    { href: `${ADMIN_PATH}/kanri-kobo`,    label: '管理者公休表',    id: 'kanri-kobo' },
     { href: `${ADMIN_PATH}/handover`,      label: '引き継ぎシート',  id: 'handover' },
     { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
     { href: `${ADMIN_PATH}/kacho-mission`, label: '課長ミッション',  id: 'kacho-mission', permKey: 'staff' },
+    { href: `${ADMIN_PATH}/settings/study-sessions`, label: '板橋ページ', id: 'office-page', permKey: 'settings.study-sessions' },
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
     { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
@@ -247,6 +250,7 @@ export function layout(title: string, content: string, activePage: string = '', 
 <body>
   ${announcementBarHtml()}
   ${birthdayPopupHtml()}
+  ${manualModeBarHtml()}
   <script>
     try { if (localStorage.getItem('ho_sidebar_collapsed') === '1') document.body.classList.add('sidebar-collapsed'); } catch {}
   </script>
@@ -566,6 +570,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     loadBellUnreadCount();
     ${announcementBarScript()}
     ${birthdayPopupScript()}
+    ${manualModeBarScript()}
 
     function createHandoverMemoFromFab() {
       fetch('${ADMIN_PATH}/api/handover-memos', {

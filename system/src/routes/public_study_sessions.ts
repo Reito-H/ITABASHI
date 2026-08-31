@@ -1,12 +1,16 @@
-// 勉強会募集フォーム（ログイン不要・完全公開・複雑なURLでのみアクセス可能）
-// フロー: 社員番号入力 → 開催中の勉強会一覧（掲示板） → 参加登録 → 参加詳細の確認（保存用）
+// イベント募集フォーム（ログイン不要・完全公開・複雑なURLでのみアクセス可能）
+// フロー: 社員番号入力 → 開催中のイベント一覧（掲示板） → 参加登録 → 参加詳細の確認（保存用）
 // ページ: {STUDY_SESSION_PATH}   API: /api/public/study-sessions/*
 // 認証は一切行わない。書き込み範囲は study_session_participants への
-// upsert（同一勉強会×社員番号の再登録は上書き更新のみ）に厳しく限定する。
-// QR/URLは勉強会ごとに個別発行せず、この1ページ（掲示板）を全ポスターで共通利用する。
+// upsert（同一イベント×社員番号の再登録は上書き更新のみ）に厳しく限定する。
+// QR/URLはイベントごとに個別発行せず、この1ページ（掲示板）を全ポスターで共通利用する。
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { STUDY_SESSION_PATH } from '../config';
+import {
+  normalizeSettings, validateAnswer, isQType, answerForClient,
+  type SurveyQType, type QSettings,
+} from '../data/surveys';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -38,6 +42,19 @@ function addMonths(dateStr: string, delta: number): string {
 async function findActiveEmployee(db: D1Database, empNo: string): Promise<{ emp_no: string } | null> {
   if (!empNo) return null;
   return db.prepare('SELECT emp_no FROM employees WHERE emp_no = ? AND is_active = 1').bind(empNo).first<{ emp_no: string }>();
+}
+async function getHomeOfficeId(db: D1Database): Promise<number> {
+  const row = await db.prepare("SELECT value FROM system_settings WHERE key = 'home_office_id'").first<{ value: string }>();
+  const n = parseInt(row?.value ?? '1', 10);
+  return Number.isInteger(n) && n > 0 ? n : 1;
+}
+async function getHomeOfficeName(db: D1Database): Promise<string> {
+  const row = await db.prepare(
+    `SELECT o.short_name FROM offices o
+      WHERE o.id = (SELECT CAST(value AS INTEGER) FROM system_settings WHERE key = 'home_office_id')`
+  ).first<{ short_name: string }>().catch(() => null);
+  const name = (row?.short_name ?? '板橋営業所').trim() || '板橋営業所';
+  return name.replace(/[<>&"]/g, s => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[s] as string));
 }
 async function getActivePenaltyUntil(db: D1Database, empNo: string): Promise<string | null> {
   const row = await db.prepare('SELECT penalty_until FROM study_session_penalties WHERE emp_no = ?').bind(empNo).first<{ penalty_until: string | null }>();
@@ -81,7 +98,7 @@ app.get('/api/public/study-sessions/mypage', async (c) => {
   return c.json({ records: rows.results ?? [] });
 });
 
-// 勉強会への要望（受けたいテーマなどの自由記入アンケート）
+// イベントへの要望（受けたいテーマなどの自由記入アンケート）
 app.post('/api/public/study-sessions/requests', async (c) => {
   const b = await c.req.json<{ emp_no?: string; content?: string }>();
   const empNo = toHalfWidth((b.emp_no ?? '').trim());
@@ -92,6 +109,165 @@ app.post('/api/public/study-sessions/requests', async (c) => {
   if (!content) return c.json({ error: '内容を入力してください' }, 400);
   await c.env.DB.prepare('INSERT INTO study_session_requests (emp_no, content) VALUES (?, ?)').bind(empNo, content).run();
   return c.json({ ok: true });
+});
+
+// 営業所へのご意見（乗務員の日頃の意見・要望）。匿名希望でも emp_no は必ず保存する
+app.post('/api/public/study-sessions/opinions', async (c) => {
+  const b = await c.req.json<{ emp_no?: string; content?: string; category?: string; is_anonymous?: boolean | number }>();
+  const empNo = toHalfWidth((b.emp_no ?? '').trim());
+  if (!empNo) return c.json({ error: '社員番号を入力してください' }, 400);
+  const emp = await findActiveEmployee(c.env.DB, empNo);
+  if (!emp) return c.json({ error: '社員番号が確認できませんでした。ご確認のうえ再度お試しください' }, 404);
+  const content = (b.content ?? '').trim().slice(0, 1000);
+  if (!content) return c.json({ error: '内容を入力してください' }, 400);
+  const category = (b.category ?? '').trim().slice(0, 30) || null;
+  const isAnon = (b.is_anonymous === true || b.is_anonymous === 1) ? 1 : 0;
+  const officeId = await getHomeOfficeId(c.env.DB);
+  await c.env.DB.prepare(
+    'INSERT INTO office_opinions (office_id, emp_no, is_anonymous, category, content) VALUES (?, ?, ?, ?, ?)'
+  ).bind(officeId, empNo, isAnon, category, content).run();
+  return c.json({ ok: true });
+});
+
+// ===== アンケート（公開・回答は何回でも可） =====
+type SurveyQRow = {
+  id: number; qtype: string; label: string; help: string; required: number; settings_json: string;
+};
+
+// 対象者チェック: target_all=1 なら誰でも / target_all=0 なら survey_targets に emp_no があるか
+async function empCanSeeSurvey(db: D1Database, surveyId: number, empNo: string): Promise<boolean> {
+  const row = await db.prepare(
+    `SELECT s.target_all,
+       (SELECT COUNT(*) FROM survey_targets t WHERE t.survey_id = s.id AND t.emp_no = ?) AS hit
+     FROM surveys s WHERE s.id = ?`
+  ).bind(empNo, surveyId).first<{ target_all: number; hit: number }>();
+  if (!row) return false;
+  return row.target_all === 1 || row.hit > 0;
+}
+
+app.get('/api/public/surveys', async (c) => {
+  const officeId = await getHomeOfficeId(c.env.DB);
+  const empNo = toHalfWidth((c.req.query('emp_no') ?? '').trim()).slice(0, 12);
+  const emp = empNo
+    ? await c.env.DB.prepare('SELECT emp_no FROM employees WHERE emp_no = ? AND is_active = 1').bind(empNo).first<{ emp_no: string }>()
+    : null;
+  const en = emp ? empNo : '';
+  const rs = await c.env.DB.prepare(
+    `SELECT id, title, description,
+        (? != '' AND EXISTS (SELECT 1 FROM survey_responses r WHERE r.survey_id = surveys.id AND r.emp_no = ?)) AS answered
+      FROM surveys
+      WHERE office_id = ? AND is_closed = 0
+        AND (target_all = 1 OR (? != '' AND EXISTS (SELECT 1 FROM survey_targets t WHERE t.survey_id = surveys.id AND t.emp_no = ?)))
+      ORDER BY created_at DESC, id DESC`
+  ).bind(en, en, officeId, en, en).all<{ id: number; title: string; description: string; answered: number }>();
+  return c.json({ surveys: (rs.results ?? []).map(s => ({ ...s, answered: !!s.answered })) });
+});
+
+app.get('/api/public/surveys/:id', async (c) => {
+  const id = parseInt(c.req.param('id'), 10);
+  const officeId = await getHomeOfficeId(c.env.DB);
+  const survey = await c.env.DB.prepare(
+    'SELECT id, title, description FROM surveys WHERE id = ? AND office_id = ? AND is_closed = 0'
+  ).bind(id, officeId).first<{ id: number; title: string; description: string }>();
+  if (!survey) return c.json({ error: 'このアンケートは受付を終了しました' }, 404);
+  const empNo = toHalfWidth((c.req.query('emp_no') ?? '').trim()).slice(0, 12);
+  if (!(await empCanSeeSurvey(c.env.DB, id, empNo))) {
+    return c.json({ error: 'このアンケートの対象ではありません' }, 403);
+  }
+  const qs = await c.env.DB.prepare(
+    'SELECT id, qtype, label, help, required, settings_json FROM survey_questions WHERE survey_id = ? ORDER BY sort_order, id'
+  ).bind(id).all<SurveyQRow>();
+  const questions = (qs.results ?? []).map(q => {
+    const qtype = (isQType(q.qtype) ? q.qtype : 'text') as SurveyQType;
+    let raw: unknown = {};
+    try { raw = JSON.parse(q.settings_json || '{}'); } catch { /* {} */ }
+    return { id: q.id, qtype, label: q.label, help: q.help, required: !!q.required, settings: normalizeSettings(qtype, raw) };
+  });
+
+  // 前回の回答（あればフォームに復元する）
+  const myAnswers: Record<string, string | string[]> = {};
+  if (empNo) {
+    const prev = await c.env.DB.prepare(
+      'SELECT id FROM survey_responses WHERE survey_id = ? AND emp_no = ? ORDER BY id DESC LIMIT 1'
+    ).bind(id, empNo).first<{ id: number }>();
+    if (prev) {
+      const rows = await c.env.DB.prepare(
+        'SELECT question_id, value_text FROM survey_answers WHERE response_id = ?'
+      ).bind(prev.id).all<{ question_id: number; value_text: string }>();
+      const qtypeById = new Map(questions.map(q => [q.id, q.qtype]));
+      for (const r of rows.results ?? []) {
+        const qt = qtypeById.get(r.question_id);
+        if (qt) myAnswers[String(r.question_id)] = answerForClient(qt, r.value_text);
+      }
+    }
+  }
+  return c.json({ ...survey, questions, myAnswers });
+});
+
+app.post('/api/public/surveys/:id/respond', async (c) => {
+  const id = parseInt(c.req.param('id'), 10);
+  let b: { emp_no?: string; answers?: Record<string, unknown> };
+  try { b = await c.req.json(); } catch { return c.json({ error: '不正なリクエストです' }, 400); }
+  const empNo = toHalfWidth((b.emp_no ?? '').trim()).slice(0, 12);
+  if (!empNo) return c.json({ error: '社員番号を入力してください' }, 400);
+  const emp = await c.env.DB.prepare(
+    'SELECT emp_no, division, team FROM employees WHERE emp_no = ? AND is_active = 1'
+  ).bind(empNo).first<{ emp_no: string; division: number | null; team: number | null }>();
+  if (!emp) return c.json({ error: '社員番号が確認できませんでした。ご確認のうえ再度お試しください' }, 404);
+
+  const officeId = await getHomeOfficeId(c.env.DB);
+  const survey = await c.env.DB.prepare(
+    'SELECT id FROM surveys WHERE id = ? AND office_id = ? AND is_closed = 0'
+  ).bind(id, officeId).first<{ id: number }>();
+  if (!survey) return c.json({ error: 'このアンケートは受付を終了しました' }, 404);
+  if (!(await empCanSeeSurvey(c.env.DB, id, empNo))) {
+    return c.json({ error: 'このアンケートの対象ではありません' }, 403);
+  }
+
+  const qs = await c.env.DB.prepare(
+    'SELECT id, qtype, required, settings_json FROM survey_questions WHERE survey_id = ? ORDER BY sort_order, id'
+  ).bind(id).all<{ id: number; qtype: string; required: number; settings_json: string }>();
+  const questions = qs.results ?? [];
+  if (!questions.length) return c.json({ error: '設問がありません' }, 400);
+
+  const answers = (b.answers && typeof b.answers === 'object') ? b.answers : {};
+  const toStore: { qid: number; stored: string }[] = [];
+  for (const q of questions) {
+    const qtype = (isQType(q.qtype) ? q.qtype : 'text') as SurveyQType;
+    let raw: unknown = {};
+    try { raw = JSON.parse(q.settings_json || '{}'); } catch { /* {} */ }
+    const settings: QSettings = normalizeSettings(qtype, raw);
+    const v = validateAnswer({ qtype, required: !!q.required, settings }, answers[String(q.id)]);
+    if (!v.ok) return c.json({ error: `「設問${questions.indexOf(q) + 1}」${v.error}` }, 400);
+    if (v.stored !== '') toStore.push({ qid: q.id, stored: v.stored });
+  }
+
+  // 1社員1回答: 既存があれば上書き、なければ新規
+  const prev = await c.env.DB.prepare(
+    'SELECT id FROM survey_responses WHERE survey_id = ? AND emp_no = ? ORDER BY id DESC LIMIT 1'
+  ).bind(id, empNo).first<{ id: number }>();
+  let responseId: number;
+  let updated = false;
+  if (prev) {
+    responseId = prev.id;
+    updated = true;
+    await c.env.DB.prepare('DELETE FROM survey_answers WHERE response_id = ?').bind(responseId).run();
+    await c.env.DB.prepare(
+      "UPDATE survey_responses SET division = ?, team = ?, updated_at = datetime('now','localtime') WHERE id = ?"
+    ).bind(emp.division ?? null, emp.team ?? null, responseId).run();
+  } else {
+    const ins = await c.env.DB.prepare(
+      "INSERT INTO survey_responses (survey_id, emp_no, division, team, updated_at) VALUES (?, ?, ?, ?, datetime('now','localtime'))"
+    ).bind(id, empNo, emp.division ?? null, emp.team ?? null).run();
+    responseId = ins.meta.last_row_id as number;
+  }
+
+  for (const a of toStore) {
+    await c.env.DB.prepare(
+      'INSERT INTO survey_answers (response_id, question_id, value_text) VALUES (?, ?, ?)'
+    ).bind(responseId, a.qid, a.stored).run();
+  }
+  return c.json({ ok: true, updated });
 });
 
 app.post('/api/public/study-sessions/:id/register', async (c) => {
@@ -112,9 +288,9 @@ app.post('/api/public/study-sessions/:id/register', async (c) => {
   }
 
   const session = await c.env.DB.prepare('SELECT * FROM study_sessions WHERE id = ?').bind(id).first<StudySession>();
-  if (!session) return c.json({ error: '勉強会が見つかりません' }, 404);
-  if (session.is_closed) return c.json({ error: 'この勉強会は受付を終了しています' }, 400);
-  if (session.date < todayStr()) return c.json({ error: 'この勉強会は開催日を過ぎています' }, 400);
+  if (!session) return c.json({ error: 'イベントが見つかりません' }, 404);
+  if (session.is_closed) return c.json({ error: 'このイベントは受付を終了しています' }, 400);
+  if (session.date < todayStr()) return c.json({ error: 'このイベントは開催日を過ぎています' }, 400);
 
   if (!already && session.capacity > 0) {
     const cnt = await c.env.DB.prepare(
@@ -142,7 +318,7 @@ app.post('/api/public/study-sessions/:id/cancel', async (c) => {
   if (!emp) return c.json({ error: '社員番号が確認できませんでした。ご確認のうえ再度お試しください' }, 404);
 
   const session = await c.env.DB.prepare('SELECT * FROM study_sessions WHERE id = ?').bind(id).first<StudySession>();
-  if (!session) return c.json({ error: '勉強会が見つかりません' }, 404);
+  if (!session) return c.json({ error: 'イベントが見つかりません' }, 404);
 
   const existing = await c.env.DB.prepare(
     'SELECT id FROM study_session_participants WHERE session_id = ? AND emp_no = ?'
@@ -178,14 +354,15 @@ app.post('/api/public/study-sessions/:id/cancel', async (c) => {
 });
 
 // ===== ページ =====
-app.get(STUDY_SESSION_PATH, (c) => {
+app.get(STUDY_SESSION_PATH, async (c) => {
+  const officeName = await getHomeOfficeName(c.env.DB);
   return c.html(`<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
-  <title>勉強会 参加申し込み</title>
+  <title>${officeName}</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: 'Hiragino Sans','Meiryo',sans-serif; background:#f5f6f8; margin:0; padding:18px; color:#1f2937; font-size:16px; }
@@ -244,25 +421,48 @@ app.get(STUDY_SESSION_PATH, (c) => {
     .menu-item { padding:14px 20px; font-size:14px; color:#1f2937; cursor:pointer; border-bottom:1px solid #f3f4f6; }
     .menu-item:active { background:#f8fafc; }
     .menu-item.secondary { color:#9ca3af; margin-top:12px; border-top:1px solid #f3f4f6; }
+    .opinion-cta { margin-top:20px; background:#eff6ff; border:2px solid #bfdbfe; cursor:pointer; }
+    .opinion-cta-title { font-size:17px; font-weight:800; color:#1e3a5f; margin-bottom:6px; }
+    .opinion-cta-desc { font-size:13px; color:#4b5563; line-height:1.75; margin-bottom:14px; }
+    .sv-card { border:2px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:12px; }
+    .sv-card .sv-t { font-size:16px; font-weight:700; color:#1e3a5f; margin-bottom:6px; }
+    .sv-card .sv-d { font-size:13px; color:#6b7280; line-height:1.7; white-space:pre-wrap; margin-bottom:10px; }
+    .sv-open-btn { width:100%; padding:12px; font-size:14px; font-weight:700; border:none; border-radius:8px; background:#2563eb; color:white; cursor:pointer; }
+    .sv-q { padding:14px 0; border-bottom:1px solid #f0f0f2; }
+    .sv-q:last-of-type { border-bottom:none; }
+    .sv-q-label { font-size:14px; font-weight:700; color:#1f2937; margin-bottom:4px; }
+    .sv-q-label .rq { color:#dc2626; font-size:12px; margin-left:5px; }
+    .sv-q-help { font-size:12px; color:#9ca3af; margin-bottom:8px; line-height:1.6; white-space:pre-wrap; }
+    .sv-opt { display:flex; align-items:flex-start; gap:9px; padding:8px 0; font-size:14px; color:#374151; }
+    .sv-opt input { width:19px; height:19px; flex-shrink:0; margin-top:1px; }
+    .sv-in { width:100%; box-sizing:border-box; border:1px solid #d1d5db; border-radius:8px; padding:10px; font-size:14px; font-family:inherit; }
+    .sv-scale { display:flex; gap:6px; flex-wrap:wrap; }
+    .sv-scale label { flex:1; min-width:52px; text-align:center; border:1px solid #d1d5db; border-radius:8px; padding:9px 4px; font-size:14px; cursor:pointer; }
+    .sv-scale input { display:none; }
+    .sv-scale input:checked + span { font-weight:800; color:#2563eb; }
+    .sv-scale label:has(input:checked) { border-color:#2563eb; background:#eff6ff; }
+    .sv-scale-ends { display:flex; justify-content:space-between; font-size:11px; color:#9ca3af; margin-top:4px; }
+    .sv-other-in { margin-top:6px; margin-left:28px; }
   </style>
 </head>
 <body>
   <div class="topbar">
-    <h1>勉強会 参加申し込み</h1>
+    <h1>${officeName}</h1>
     <button id="menu-btn" class="menu-btn" onclick="openMenu()"><span></span><span></span><span></span></button>
   </div>
   <div id="menu-overlay" class="menu-overlay" onclick="closeMenu()"></div>
   <div id="menu-drawer" class="menu-drawer">
     <button class="menu-drawer-close" onclick="closeMenu()">×</button>
-    <div class="menu-item" onclick="closeMenu(); backToBoard();">勉強会一覧（掲示板）</div>
+    <div class="menu-item" onclick="closeMenu(); backToBoard();">イベント一覧（掲示板）</div>
     <div class="menu-item" onclick="closeMenu(); loadMypage();">マイページ（参加記録）</div>
-    <div class="menu-item" onclick="closeMenu(); showRequestForm();">勉強会への要望を送る</div>
+    <div class="menu-item" onclick="closeMenu(); showRequestForm();">イベントへの要望を送る</div>
+    <div class="menu-item" onclick="closeMenu(); showSurveyList();">アンケートに回答する</div>
     <div class="menu-item secondary" onclick="closeMenu(); backToStep1();">社員番号を入力し直す</div>
   </div>
   <div id="msg" style="display:none;">読み込み中...</div>
 
   <div id="step1" class="step">
-    <div class="sub">社員番号を入力してください</div>
+    <div class="sub" id="step1-sub">社員番号を入力してください</div>
     <div class="card">
       <input id="emp-no" class="big-input" type="tel" inputmode="numeric" placeholder="12345678" maxlength="12" oninput="this.value = toHalfWidth(this.value)">
       <button class="big-btn" onclick="loadBoard()">次へ</button>
@@ -271,8 +471,13 @@ app.get(STUDY_SESSION_PATH, (c) => {
   </div>
 
   <div id="step2" class="step">
-    <div class="sub">開催中の勉強会一覧です。参加したい回を選んでください。</div>
+    <div class="sub">現在受付中の一覧です。参加したいものを選んでください。</div>
     <div id="board"></div>
+    <div class="card opinion-cta" onclick="showOpinionForm()">
+      <div class="opinion-cta-title">営業所へのご意見・ご要望</div>
+      <div class="opinion-cta-desc">車両・設備・シフト・待遇など、日頃感じていることをお聞かせください。匿名でも送れます。</div>
+      <button class="big-btn" type="button" onclick="event.stopPropagation(); showOpinionForm();">営業所へご意見を送る</button>
+    </div>
   </div>
 
   <div id="step4" class="step">
@@ -283,18 +488,62 @@ app.get(STUDY_SESSION_PATH, (c) => {
     <div class="card">
       <div id="stamp-grid" class="stamp-grid"></div>
     </div>
-    <button class="big-btn secondary" onclick="backToBoard()">勉強会一覧に戻る</button>
+    <button class="big-btn secondary" onclick="backToBoard()">イベント一覧に戻る</button>
   </div>
 
   <div id="step5" class="step">
-    <div class="sub">受けたい勉強会のテーマや内容があれば教えてください（例: ○○エリアの流し方講座など）。いただいた要望は今後の勉強会の企画の参考にします。</div>
+    <div class="sub">受けたいイベントのテーマや内容があれば教えてください（例: ○○エリアの流し方講座など）。いただいた要望は今後のイベントの企画の参考にします。</div>
     <div class="card">
       <textarea id="request-content" rows="5" maxlength="500" placeholder="例: ○○エリアの流し方講座を開いてほしいです" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px;font-size:14px;font-family:inherit;"></textarea>
       <button class="big-btn" onclick="submitRequest()" id="request-submit-btn">送信する</button>
       <div id="request-err" class="err" style="display:none;"></div>
       <div id="request-ok" style="display:none;text-align:center;color:#16a34a;font-size:13px;margin-top:10px;font-weight:700;">送信しました。ありがとうございました。</div>
     </div>
-    <button class="big-btn secondary" onclick="backToBoard()">勉強会一覧に戻る</button>
+    <button class="big-btn secondary" onclick="backToBoard()">イベント一覧に戻る</button>
+  </div>
+
+  <div id="step6" class="step">
+    <div class="sub">営業所への日頃のご意見・ご要望をお聞かせください。車両・設備・シフト・待遇など何でも構いません。</div>
+    <div class="card">
+      <select id="opinion-category" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px;font-size:14px;margin-bottom:10px;">
+        <option value="">分類を選択（任意）</option>
+        <option value="車両">車両</option>
+        <option value="設備・営業所">設備・営業所</option>
+        <option value="シフト・勤務">シフト・勤務</option>
+        <option value="待遇・制度">待遇・制度</option>
+        <option value="安全">安全</option>
+        <option value="その他">その他</option>
+      </select>
+      <textarea id="opinion-content" rows="6" maxlength="1000" placeholder="ご意見・ご要望をご記入ください" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:8px;padding:10px;font-size:14px;font-family:inherit;"></textarea>
+      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#374151;margin-top:12px;">
+        <input type="checkbox" id="opinion-anon" style="width:18px;height:18px;flex-shrink:0;">匿名で送信する（氏名を伏せて扱います）
+      </label>
+      <button class="big-btn" onclick="submitOpinion()" id="opinion-submit-btn">送信する</button>
+      <div id="opinion-err" class="err" style="display:none;"></div>
+      <div id="opinion-ok" style="display:none;text-align:center;color:#16a34a;font-size:13px;margin-top:10px;font-weight:700;">送信しました。ご協力ありがとうございました。</div>
+    </div>
+    <button class="big-btn secondary" onclick="backToBoard()">イベント一覧に戻る</button>
+  </div>
+
+  <div id="step7" class="step">
+    <div class="sub">回答できるアンケートの一覧です。回答したいものを選んでください。</div>
+    <div id="survey-list"></div>
+    <button class="big-btn secondary" onclick="backToBoard()">イベント一覧に戻る</button>
+  </div>
+
+  <div id="step8" class="step">
+    <div class="card">
+      <div id="survey-head"></div>
+      <div id="survey-questions"></div>
+      <button class="big-btn" onclick="submitSurvey()" id="survey-submit-btn">回答を送信する</button>
+      <div id="survey-err" class="err" style="display:none;"></div>
+    </div>
+    <div id="survey-ok" class="card" style="display:none;text-align:center;">
+      <div style="font-size:16px;color:#16a34a;font-weight:800;margin-bottom:8px;" id="survey-ok-title">送信しました</div>
+      <div style="font-size:13px;color:#374151;line-height:1.8;">ご回答ありがとうございました。<br>同じアンケートをもう一度開くと、この内容を修正して再送信できます。</div>
+      <button class="big-btn secondary" style="margin-top:16px;" onclick="showSurveyList()">アンケート一覧に戻る</button>
+    </div>
+    <button class="big-btn secondary" id="survey-back-btn" onclick="showSurveyList()">アンケート一覧に戻る</button>
   </div>
 
   <div id="step3" class="step">
@@ -305,7 +554,7 @@ app.get(STUDY_SESSION_PATH, (c) => {
       <div class="save-hint">下のボタンでこの内容を画像として保存できます（保存後、写真アプリなどからいつでも確認できます）。</div>
       <div id="capture-area"></div>
       <button class="big-btn green" onclick="saveAsImage()" id="save-img-btn">この内容を画像で保存</button>
-      <button class="big-btn secondary" onclick="backToBoard()">他の勉強会も見る</button>
+      <button class="big-btn secondary" onclick="backToBoard()">他のイベントも見る</button>
     </div>
   </div>
 
@@ -315,11 +564,18 @@ var _empNo = '';
 var _sessions = [];
 var _lastRegistered = null;
 var _penalty = null;
+// 入口の切り替え: ?view=surveys でアンケート一覧から / ?survey=<id> で特定アンケートを直接開く
+var _startView = '', _startSurveyId = '';
+try {
+  var _qp = new URLSearchParams(location.search);
+  _startView = _qp.get('view') || '';
+  _startSurveyId = _qp.get('survey') || '';
+} catch (e) {}
 
 function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function toHalfWidth(s) { return s.replace(/[０-９]/g, function(ch) { return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0); }); }
 function showStep(id) {
-  ['step1','step2','step3','step4','step5'].forEach(function(s) { document.getElementById(s).style.display = (s === id) ? 'block' : 'none'; });
+  ['step1','step2','step3','step4','step5','step6','step7','step8'].forEach(function(s) { document.getElementById(s).style.display = (s === id) ? 'block' : 'none'; });
 }
 function openMenu() {
   document.getElementById('menu-overlay').classList.add('open');
@@ -370,7 +626,9 @@ async function loadBoard() {
     _penalty = d.penalty || null;
     renderBoard();
     document.getElementById('menu-btn').style.display = 'flex';
-    showStep('step2');
+    if (_startSurveyId) { openSurvey(_startSurveyId); }
+    else if (_startView === 'surveys' || _startView === 'survey') { showSurveyList(); }
+    else { showStep('step2'); }
   } catch (e) {
     errEl.textContent = '確認に失敗しました。もう一度お試しください'; errEl.style.display = 'block';
   }
@@ -386,7 +644,7 @@ function statusOf(s) {
 function renderBoard() {
   var board = document.getElementById('board');
   var banner = _penalty ? ('<div class="card penalty-banner">現在、新規のお申し込みができません（' + escH(_penalty.until) + ' まで）。既存の参加登録の確認・キャンセルは引き続き行えます。</div>') : '';
-  if (_sessions.length === 0) { board.innerHTML = banner + '<div class="card" style="text-align:center;color:#9ca3af;">現在、募集中の勉強会はありません</div>'; return; }
+  if (_sessions.length === 0) { board.innerHTML = banner + '<div class="card" style="text-align:center;color:#9ca3af;">現在、募集中のイベントはありません</div>'; return; }
   board.innerHTML = banner + _sessions.map(function(s) {
     var st = statusOf(s);
     var capLabel = s.capacity > 0 ? ('残り ' + Math.max(s.capacity - s.participant_count, 0) + ' 名') : '定員なし';
@@ -418,7 +676,7 @@ function showConfirmFor(id) {
 }
 
 async function cancelReg(id) {
-  if (!confirm('この勉強会の参加登録を取り消しますか？')) return;
+  if (!confirm('このイベントの参加登録を取り消しますか？')) return;
   try {
     var res = await fetch('/api/public/study-sessions/' + id + '/cancel', {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: _empNo })
@@ -518,6 +776,43 @@ async function submitRequest() {
   }
 }
 
+function showOpinionForm() {
+  document.getElementById('opinion-content').value = '';
+  document.getElementById('opinion-category').value = '';
+  document.getElementById('opinion-anon').checked = false;
+  document.getElementById('opinion-err').style.display = 'none';
+  document.getElementById('opinion-ok').style.display = 'none';
+  showStep('step6');
+}
+async function submitOpinion() {
+  var content = document.getElementById('opinion-content').value.trim();
+  var errEl = document.getElementById('opinion-err');
+  var okEl = document.getElementById('opinion-ok');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+  if (!content) { errEl.textContent = '内容を入力してください'; errEl.style.display = 'block'; return; }
+  var btn = document.getElementById('opinion-submit-btn');
+  btn.disabled = true;
+  try {
+    var res = await fetch('/api/public/study-sessions/opinions', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        emp_no: _empNo,
+        content: content,
+        category: document.getElementById('opinion-category').value,
+        is_anonymous: document.getElementById('opinion-anon').checked
+      })
+    });
+    var d = await res.json().catch(function() { return {}; });
+    if (!res.ok) { errEl.textContent = d.error || '送信に失敗しました'; errEl.style.display = 'block'; return; }
+    document.getElementById('opinion-content').value = '';
+    okEl.style.display = 'block';
+  } catch (e) {
+    errEl.textContent = '送信に失敗しました。もう一度お試しください'; errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function saveAsImage() {
   if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
   var el = document.querySelector('#step3 .confirm-box');
@@ -530,7 +825,7 @@ function saveAsImage() {
         if (!blob) { reject(new Error('画像データの生成に失敗しました')); return; }
         var url = URL.createObjectURL(blob);
         var link = document.createElement('a');
-        link.download = '勉強会_参加詳細_' + (_lastRegistered ? _lastRegistered.title : '') + '.png';
+        link.download = 'イベント_参加詳細_' + (_lastRegistered ? _lastRegistered.title : '') + '.png';
         link.href = url;
         link.style.display = 'none';
         document.body.appendChild(link);
@@ -547,6 +842,216 @@ function saveAsImage() {
   });
 }
 
+// ===== アンケート =====
+var _survey = null;
+
+function showSurveyList() {
+  showStep('step7');
+  var box = document.getElementById('survey-list');
+  box.innerHTML = '<div style="color:#6b7280;font-size:14px;padding:20px 0;text-align:center;">読み込み中...</div>';
+  fetch('/api/public/surveys?emp_no=' + encodeURIComponent(_empNo)).then(function(r){ return r.json(); }).then(function(d){
+    var list = d.surveys || [];
+    if (!list.length) { box.innerHTML = '<div class="card" style="text-align:center;color:#9ca3af;font-size:14px;">現在、回答できるアンケートはありません。</div>'; return; }
+    box.innerHTML = list.map(function(s){
+      var done = s.answered
+        ? '<span style="display:inline-block;font-size:11px;color:#166534;background:#f0fdf4;border:1px solid #86efac;border-radius:99px;padding:1px 8px;margin-left:8px;">回答済み</span>' : '';
+      return '<div class="sv-card"><div class="sv-t">' + escH(s.title) + done + '</div>'
+        + (s.description ? '<div class="sv-d">' + escH(s.description) + '</div>' : '')
+        + '<button class="sv-open-btn" onclick="openSurvey(' + s.id + ')">' + (s.answered ? '回答を確認・修正する' : '回答する') + '</button></div>';
+    }).join('');
+  }).catch(function(){ box.innerHTML = '<div class="card" style="text-align:center;color:#dc2626;">読み込みに失敗しました</div>'; });
+}
+
+function openSurvey(id) {
+  showStep('step8');
+  document.getElementById('survey-ok').style.display = 'none';
+  document.getElementById('survey-err').style.display = 'none';
+  document.getElementById('survey-questions').innerHTML = '<div style="color:#6b7280;font-size:14px;">読み込み中...</div>';
+  document.getElementById('survey-head').innerHTML = '';
+  document.getElementById('survey-submit-btn').style.display = '';
+  document.getElementById('survey-back-btn').style.display = '';
+  fetch('/api/public/surveys/' + id + '?emp_no=' + encodeURIComponent(_empNo)).then(function(r){ return r.json().then(function(d){ return { ok: r.ok, d: d }; }); }).then(function(x){
+    if (!x.ok) { showSurveyList(); alert(x.d.error || '開けませんでした'); return; }
+    _survey = x.d;
+    renderSurveyForm(x.d);
+  }).catch(function(){ showSurveyList(); alert('読み込みに失敗しました'); });
+}
+
+function svEsc(s) { return escH(s); }
+
+function renderSurveyForm(sv) {
+  var hasPrev = sv.myAnswers && Object.keys(sv.myAnswers).length > 0;
+  document.getElementById('survey-head').innerHTML =
+    '<div style="font-size:17px;font-weight:800;color:#1e3a5f;margin-bottom:6px;">' + svEsc(sv.title) + '</div>'
+    + (sv.description ? '<div style="font-size:13px;color:#6b7280;line-height:1.7;white-space:pre-wrap;margin-bottom:6px;">' + svEsc(sv.description) + '</div>' : '')
+    + '<div style="font-size:11px;color:#9ca3af;">社員番号：' + svEsc(_empNo) + '（氏名は保存されません）</div>'
+    + (hasPrev ? '<div style="font-size:12px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:8px;">前回の回答を表示しています。修正して送信すると上書きされます。</div>' : '');
+
+  var html = sv.questions.map(function(q, i){
+    var st = q.settings || {};
+    var head = '<div class="sv-q" data-qid="' + q.id + '" data-qtype="' + q.qtype + '">'
+      + '<div class="sv-q-label">' + (i+1) + '. ' + svEsc(q.label) + (q.required ? '<span class="rq">必須</span>' : '') + '</div>'
+      + (q.help ? '<div class="sv-q-help">' + svEsc(q.help) + '</div>' : '');
+    var body = '';
+    if (q.qtype === 'radio' || q.qtype === 'yesno') {
+      var opts = (q.qtype === 'yesno') ? [st.yesLabel || 'はい', st.noLabel || 'いいえ'] : (st.choices || []);
+      body = opts.map(function(c){
+        return '<label class="sv-opt"><input type="radio" name="q' + q.id + '" value="' + svEsc(c) + '">' + svEsc(c) + '</label>';
+      }).join('');
+      if (q.qtype === 'radio' && st.allowOther) {
+        body += '<label class="sv-opt"><input type="radio" name="q' + q.id + '" value="__other__" onchange="svToggleOther(' + q.id + ',true)">その他</label>'
+          + '<input class="sv-in sv-other-in" id="qo' + q.id + '" placeholder="自由記入" style="display:none;" maxlength="200">';
+      }
+    } else if (q.qtype === 'checkbox') {
+      body = (st.choices || []).map(function(c){
+        return '<label class="sv-opt"><input type="checkbox" data-cq="' + q.id + '" value="' + svEsc(c) + '">' + svEsc(c) + '</label>';
+      }).join('');
+      if (st.allowOther) {
+        body += '<label class="sv-opt"><input type="checkbox" data-cq="' + q.id + '" value="__other__" onchange="svToggleOther(' + q.id + ',false)">その他</label>'
+          + '<input class="sv-in sv-other-in" id="qco' + q.id + '" placeholder="自由記入" style="display:none;" maxlength="200">';
+      }
+      if (st.minSel || st.maxSel) {
+        body += '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">'
+          + (st.minSel ? st.minSel + '個以上' : '') + (st.minSel && st.maxSel ? '・' : '') + (st.maxSel ? st.maxSel + '個まで' : '') + '</div>';
+      }
+    } else if (q.qtype === 'text') {
+      body = '<input class="sv-in" id="q' + q.id + '" maxlength="300">';
+    } else if (q.qtype === 'textarea') {
+      body = '<textarea class="sv-in" id="q' + q.id + '" rows="4" maxlength="2000"></textarea>';
+    } else if (q.qtype === 'number') {
+      body = '<input class="sv-in" id="q' + q.id + '" type="number" inputmode="decimal">' + (st.unit ? ' <span style="font-size:13px;color:#6b7280;">' + svEsc(st.unit) + '</span>' : '');
+    } else if (q.qtype === 'date') {
+      body = '<input class="sv-in" id="q' + q.id + '" type="date">';
+    } else if (q.qtype === 'scale') {
+      var lo = st.scaleMin, hi = st.scaleMax, cells = '';
+      for (var n = lo; n <= hi; n++) {
+        cells += '<label><input type="radio" name="q' + q.id + '" value="' + n + '"><span>' + n + '</span></label>';
+      }
+      body = '<div class="sv-scale">' + cells + '</div>'
+        + ((st.minLabel || st.maxLabel) ? '<div class="sv-scale-ends"><span>' + svEsc(st.minLabel || '') + '</span><span>' + svEsc(st.maxLabel || '') + '</span></div>' : '');
+    }
+    return head + body + '</div>';
+  }).join('');
+  document.getElementById('survey-questions').innerHTML = html || '<div style="color:#9ca3af;">設問がありません</div>';
+  svPrefill(sv.myAnswers);
+}
+
+function svSetNamedRadio(name, val) {
+  var els = document.getElementsByName(name);
+  for (var i = 0; i < els.length; i++) { if (els[i].value === val) { els[i].checked = true; return true; } }
+  return false;
+}
+function svPrefill(map) {
+  if (!map || !_survey) return;
+  _survey.questions.forEach(function(q) {
+    var v = map[String(q.id)];
+    if (v == null) return;
+    var st = q.settings || {};
+    if (q.qtype === 'checkbox') {
+      if (!Array.isArray(v) || !v.length) return;
+      var boxes = document.querySelectorAll('input[data-cq="' + q.id + '"]');
+      var known = {};
+      for (var i = 0; i < boxes.length; i++) known[boxes[i].value] = boxes[i];
+      v.forEach(function(item) {
+        if (known[item]) { known[item].checked = true; }
+        else if (known['__other__']) {
+          known['__other__'].checked = true;
+          var oin = document.getElementById('qco' + q.id);
+          if (oin) { oin.value = item; oin.style.display = 'block'; }
+        }
+      });
+    } else if (q.qtype === 'radio' || q.qtype === 'yesno' || q.qtype === 'scale') {
+      var s = String(v);
+      if (s === '') return;
+      if (!svSetNamedRadio('q' + q.id, s) && q.qtype === 'radio' && st.allowOther) {
+        if (svSetNamedRadio('q' + q.id, '__other__')) {
+          var roin = document.getElementById('qo' + q.id);
+          if (roin) { roin.value = s; roin.style.display = 'block'; }
+        }
+      }
+    } else {
+      var inp = document.getElementById('q' + q.id);
+      if (inp) inp.value = String(v);
+    }
+  });
+}
+
+function svToggleOther(qid, isRadio) {
+  var box = document.getElementById((isRadio ? 'qo' : 'qco') + qid);
+  if (!box) return;
+  var on;
+  if (isRadio) {
+    var r = document.querySelector('input[name="q' + qid + '"]:checked');
+    on = r && r.value === '__other__';
+  } else {
+    var c = document.querySelector('input[data-cq="' + qid + '"][value="__other__"]');
+    on = c && c.checked;
+  }
+  box.style.display = on ? 'block' : 'none';
+}
+
+function collectSurveyAnswers() {
+  var out = {};
+  var qs = document.querySelectorAll('#survey-questions .sv-q');
+  for (var i = 0; i < qs.length; i++) {
+    var el = qs[i], qid = el.getAttribute('data-qid'), t = el.getAttribute('data-qtype');
+    if (t === 'checkbox') {
+      var vals = [];
+      var cbs = document.querySelectorAll('input[data-cq="' + qid + '"]:checked');
+      for (var j = 0; j < cbs.length; j++) {
+        var cv = cbs[j].value;
+        if (cv === '__other__') { var o = (document.getElementById('qco' + qid) || {}).value || ''; if (o.trim()) vals.push(o.trim()); }
+        else vals.push(cv);
+      }
+      out[qid] = vals;
+    } else if (t === 'radio' || t === 'yesno' || t === 'scale') {
+      var r = document.querySelector('input[name="q' + qid + '"]:checked');
+      var rv = r ? r.value : '';
+      if (rv === '__other__') { rv = ((document.getElementById('qo' + qid) || {}).value || '').trim(); }
+      out[qid] = rv;
+    } else {
+      out[qid] = (document.getElementById('q' + qid) || {}).value || '';
+    }
+  }
+  return out;
+}
+
+async function submitSurvey() {
+  if (!_survey) return;
+  var errEl = document.getElementById('survey-err');
+  errEl.style.display = 'none';
+  var answers = collectSurveyAnswers();
+  // クライアント側の簡易必須チェック
+  for (var i = 0; i < _survey.questions.length; i++) {
+    var q = _survey.questions[i];
+    if (!q.required) continue;
+    var a = answers[q.id];
+    var empty = (q.qtype === 'checkbox') ? (!a || !a.length) : (!a || !String(a).trim());
+    if (empty) { errEl.textContent = '「' + (i+1) + '. ' + q.label + '」は必須です'; errEl.style.display = 'block'; return; }
+  }
+  var btn = document.getElementById('survey-submit-btn');
+  btn.disabled = true;
+  try {
+    var res = await fetch('/api/public/surveys/' + _survey.id + '/respond', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ emp_no: _empNo, answers: answers })
+    });
+    var d = await res.json().catch(function(){ return {}; });
+    if (!res.ok || !d.ok) { errEl.textContent = d.error || '送信に失敗しました'; errEl.style.display = 'block'; btn.disabled = false; return; }
+    document.getElementById('survey-ok-title').textContent = d.updated ? '回答を更新しました' : '送信しました';
+    document.getElementById('survey-questions').innerHTML = '';
+    document.getElementById('survey-head').innerHTML = '';
+    document.getElementById('survey-submit-btn').style.display = 'none';
+    document.getElementById('survey-back-btn').style.display = 'none';
+    document.getElementById('survey-ok').style.display = 'block';
+  } catch (e) {
+    errEl.textContent = '送信に失敗しました。もう一度お試しください'; errEl.style.display = 'block'; btn.disabled = false;
+  }
+}
+
+if (_startSurveyId || _startView === 'surveys' || _startView === 'survey') {
+  document.getElementById('step1-sub').textContent = 'アンケートに回答します。社員番号を入力してください';
+}
 showStep('step1');
 </script>
 </body>

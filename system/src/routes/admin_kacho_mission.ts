@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { layout, escHtml, safeJson } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
+import { getPeriod, getPeriodRange, getPeriodSettings } from '../auth';
 import { staffContractsPage, type ContractTargetRow } from '../html/staff_contracts';
 import { todayIsoJST } from '../utils/accident_period';
 import { getAdminPermissions } from '../permissions';
@@ -102,6 +103,8 @@ app.get('/kacho-mission', async (c) => {
     ${card(`${ADMIN_PATH}/kacho-mission/keiyakusho`, '労供契約書作成依頼書 作成')}
     ${card(`${ADMIN_PATH}/kacho-mission/tenmatsusho`, '顛末書 作成')}
     ${card(`${ADMIN_PATH}/kacho-mission/haneda-riyusho`, '羽田定額適用外理由書 作成')}
+    ${card(`${ADMIN_PATH}/kacho-mission/nokinbo`, '納金簿 印刷')}
+    ${card(`${ADMIN_PATH}/kacho-mission/hiyari`, 'ヒヤリハット')}
     ${card(`${ADMIN_PATH}/kacho-mission/masters`, '課長マスタ')}
     ${isFullAccess ? card(`${ADMIN_PATH}/driver-reports`, 'ドライバー報告') : ''}
     ${card(`${ADMIN_PATH}/nojico`, 'nojico')}
@@ -1042,6 +1045,363 @@ app.get('/kacho-mission/haneda-riyusho', async (c) => {
     bodyHtml, scriptBody, kacho: kacho.results ?? [],
   });
   return c.html(layout('羽田定額適用外理由書 作成', content, 'kacho-mission'));
+});
+
+// ============ 納金簿 印刷 ============
+// 元帳票（板橋営業所の「納金簿」）を、スキャンの罫線位置を実測した寸法で **ベクター（HTML/CSS）で
+// 鮮明に再描画** し、window.print() で即印刷する。配置（列位置・行ピッチ・区画）は原本準拠、
+// 見た目はデジタルのクリーンな線。月分は月度ベース・曜日は実カレンダー。売上適応モードで sales_records を反映。
+// 座標系: A4 210x297mm。実測は回転スキャン 4964x7020 基準（縦罫線 x=[191,381,557,1063,1394,1866,
+// 2410,2882,3448,3990,4675] / 表本体 y 989..4942 / ヘッダー行 y 770..989）。
+
+const NOKINBO_WD = ['日', '月', '火', '水', '木', '金', '土'];
+function nkPad2(n: number): string { return String(n).padStart(2, '0'); }
+function nkGrp(n: number): string {
+  return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+interface NokinboDoc {
+  year: number; month: number; office: string; teamStr: string; nameStr: string; empNo: string;
+  start: string; end: string;
+  byDate: Map<string, { amount: number; jomu: number; vehicle: string }>;
+}
+
+function nokinboPrintDoc(o: NokinboDoc): string {
+  const startMs = Date.parse(o.start + 'T00:00:00Z');
+  const endMs = Date.parse(o.end + 'T00:00:00Z');
+  const periodDays = Math.round((endMs - startMs) / 86400000) + 1;
+
+  // 帳票に常時印字されている日付ラベル（18..31 → 1..17 の固定31行）
+  const dayLabels: number[] = [];
+  for (let k = 18; k <= 31; k++) dayLabels.push(k);
+  for (let k = 1; k <= 17; k++) dayLabels.push(k);
+
+  let cumAmt = 0, cumJomu = 0;
+  const rows: string[] = [];
+  for (let i = 0; i < 31; i++) {
+    const inPeriod = i < periodDays;
+    let wd = '', door = '', jomu = '', uri = '', cumC = '', avg = '';
+    if (inPeriod) {
+      const d = new Date(startMs + i * 86400000);
+      wd = NOKINBO_WD[d.getUTCDay()];
+      const iso = `${d.getUTCFullYear()}-${nkPad2(d.getUTCMonth() + 1)}-${nkPad2(d.getUTCDate())}`;
+      const rec = o.byDate.get(iso);
+      if (rec) {
+        cumAmt += rec.amount; cumJomu += rec.jomu;
+        door = escHtml(rec.vehicle);
+        jomu = String(rec.jomu);
+        uri = nkGrp(rec.amount);
+        cumC = nkGrp(cumAmt);
+        avg = cumJomu > 0 ? nkGrp(cumAmt / cumJomu) : '';
+      }
+    }
+    const cls = (i % 2 === 1 || i === 30) ? 'sol' : 'dot';
+    rows.push(
+      `<tr class="${cls}"><td class="dn">${dayLabels[i]}</td><td>${wd}</td>` +
+      `<td>${door}</td><td>${jomu}</td><td class="n">${uri}</td>` +
+      `<td class="n">${cumC}</td><td class="n">${avg}</td><td></td><td></td><td></td></tr>`
+    );
+  }
+
+  // 手書き区分用の破線ガイド（表本体のみ）: 数字が入らない無ラベル2列＋備考の中央。x% は実測列中心
+  const vdash = [63.76, 74.92, 87.27]
+    .map(x => `<div class="vdash" style="left:${x}%;"></div>`).join('');
+
+  const V = (s: string) => `<u class="v">${escHtml(s)}</u>`;
+  const back = `${ADMIN_PATH}/kacho-mission/nokinbo`;
+  return `<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>納金簿 ${o.year}年${nkPad2(o.month)}月分</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; margin: 0; padding: 14px; background: #6b7280; color: #000; }
+  .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .bar a { color: #374151; font-size: 13px; text-decoration: none; padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; }
+  .bar button { padding: 8px 20px; background: #166534; color: #fff; border: none; border-radius: 7px; font-size: 13px; font-weight: 700; cursor: pointer; }
+
+  .sheet { position: relative; width: 210mm; height: 297mm; margin: 0 auto; background: #fff; color: #000;
+    box-shadow: 0 2px 12px rgba(0,0,0,.35); font-family: 'Hiragino Sans','Meiryo',sans-serif; }
+  .sheet u.v { text-decoration: none; font-weight: 700; }
+
+  /* ---- ヘッダー ---- */
+  .h-title { position: absolute; top: 2.4%; left: 0; right: 0; text-align: center;
+    font-family: 'Hiragino Mincho ProN','YuMincho','MS Mincho',serif; font-size: 6mm; font-weight: 700; letter-spacing: 4mm; }
+  .h2 { position: absolute; top: 6.0%; left: 4%; font-size: 3.9mm; letter-spacing: .4mm; }
+  .h2 u.v { margin: 0 2mm; }
+  .h3 { position: absolute; top: 8.5%; left: 7%; right: 4%; font-size: 3.9mm; display: flex; align-items: baseline; gap: 4mm; white-space: nowrap; }
+  .h3 u.v { margin: 0 .8mm; }
+  .h3 .nm { font-size: 4.3mm; margin-left: 1mm; }
+  .h3 .noban { margin-left: auto; font-size: 3.4mm; }
+
+  /* ---- 明細表 ---- */
+  .grid { position: absolute; left: 3.85%; top: 10.97%; width: 90.33%;
+    border-collapse: collapse; table-layout: fixed; border: .32mm solid #000; font-size: 2.7mm; }
+  .grid th, .grid td { border-left: .18mm solid #000; border-right: .18mm solid #000;
+    text-align: center; padding: 0; overflow: hidden; white-space: nowrap; font-weight: 400; }
+  .grid thead th { height: 9.3mm; border-bottom: .32mm solid #000; font-size: 2.6mm; }
+  .grid tbody td { height: 5.39mm; }
+  .grid tbody tr.dot td { border-bottom: .18mm dotted #000; }
+  .grid tbody tr.sol td { border-bottom: .3mm solid #000; }
+  .grid td.dn { font-weight: 600; }
+  .grid td.n { text-align: right; padding-right: 1mm; font-variant-numeric: tabular-nums; }
+  .vdash { position: absolute; top: 14.10%; height: 56.30%; width: 0; border-left: .16mm dashed #000; }
+
+  /* ---- 中段バンド ---- */
+  .mid { position: absolute; top: 71.6%; left: 7%; font-size: 3mm; }
+  .mid .mrow { display: flex; align-items: center; gap: 2mm; margin-bottom: 1.6mm; }
+  .mid .mb { display: inline-block; width: 24mm; height: 5mm; border: .22mm solid #000; }
+  .mid .mb.w { width: 34mm; }
+  .mid .ind { padding-left: 9mm; }
+  .mid .arw { font-size: 3mm; }
+  .mid-r { position: absolute; top: 71.4%; right: 8%; display: flex; flex-direction: column; gap: 1.5mm; }
+  .mid-r .mb { display: block; width: 34mm; height: 5mm; border: .22mm solid #000; }
+
+  /* ---- 下段3区画 ---- */
+  .bx { position: absolute; top: 80.1%; height: 13.7%; border: .4mm solid #000; font-size: 3mm; }
+  .bx.b1 { left: 3.85%; width: 26%; }
+  .bx.b2 { left: 31%; width: 30.5%; padding: 0; }
+  .bx.b3 { left: 63%; width: 33%; }
+  .bx.b1, .bx.b3 { padding: 1.4mm 2.4mm; }
+  .bx .r { display: flex; align-items: center; gap: 2mm; padding: 2mm 0; }
+  .bx .r span { white-space: nowrap; letter-spacing: .8mm; }
+  .bx .r i { flex: 1; border-bottom: .2mm solid #000; height: 4mm; }
+  .bx .r em { font-style: normal; }
+  table.tei { width: 100%; height: 100%; border-collapse: collapse; font-size: 2.7mm; }
+  table.tei th, table.tei td { border: .18mm solid #000; height: 6.6mm; text-align: center; font-weight: 400; letter-spacing: .5mm; }
+  table.tei tr:first-child th { font-weight: 700; letter-spacing: 1.2mm; }
+
+  @media print {
+    body { background: #fff; padding: 0; }
+    .sheet { margin: 0; box-shadow: none; }
+    .bar { display: none; }
+    @page { size: A4 portrait; margin: 0; }
+  }
+</style>
+</head><body>
+  <div class="bar">
+    <a href="${back}">← 戻る</a>
+    <button onclick="window.print()">印刷 / PDF保存</button>
+  </div>
+  <div class="sheet">
+    <div class="h-title">【　納　金　簿　】</div>
+    <div class="h2">${V(String(o.year))}年　${V(nkPad2(o.month))}月分</div>
+    <div class="h3">
+      <span>${V(o.office)}　営業所</span>
+      <span>${V(o.teamStr)}　班</span>
+      <span>${V(o.empNo)}</span>
+      <span class="nm v">${escHtml(o.nameStr)}</span>
+      <span class="noban">No. 班　${V(o.teamStr)}</span>
+    </div>
+
+    ${vdash}
+    <table class="grid">
+      <colgroup>
+        <col style="width:4.24%"><col style="width:3.93%"><col style="width:11.28%"><col style="width:7.38%"><col style="width:10.53%">
+        <col style="width:12.13%"><col style="width:10.53%"><col style="width:12.62%"><col style="width:12.09%"><col style="width:15.28%">
+      </colgroup>
+      <thead><tr>
+        <th>日</th><th>曜日</th><th>ドアNo.</th><th>乗務数</th><th>税込売上</th><th>税込売上累計</th><th>累計平均</th><th></th><th></th><th>備　考</th>
+      </tr></thead>
+      <tbody>${rows.join('')}</tbody>
+    </table>
+
+    <div class="mid">
+      <div class="mrow"><span>月間乗務数</span><span class="arw">↑</span><span class="mb"></span><span>月間売上</span><span class="arw">↑</span><span class="mb w"></span></div>
+      <div class="mrow"><span class="ind">〃　（税抜）</span><span class="mb w"></span></div>
+    </div>
+    <div class="mid-r"><span class="mb"></span><span class="mb"></span><span class="mb"></span></div>
+
+    <div class="bx b1">
+      <div class="r"><span>責任日数</span><i></i></div>
+      <div class="r"><span>出勤日数</span><i></i></div>
+      <div class="r"><span>公出日数</span><i></i></div>
+      <div class="r"><span>通勤日数</span><i></i><em>回</em></div>
+    </div>
+    <div class="bx b2">
+      <table class="tei">
+        <tr><th colspan="3">乗　務　日　数　15.5H</th></tr>
+        <tr><th></th><th>所　定</th><th>公　出</th></tr>
+        <tr><th>平　日</th><td></td><td></td></tr>
+        <tr><th>土曜日</th><td></td><td></td></tr>
+        <tr><th>日祭日</th><td></td><td></td></tr>
+        <tr><th>Ａ乗務</th><td></td><td></td></tr>
+      </table>
+    </div>
+    <div class="bx b3">
+      <div class="r"><span>有給特休</span><i></i></div>
+      <div class="r"><span>欠勤公傷</span><i></i></div>
+      <div class="r"><span>服務・業務</span><i></i><em>H</em></div>
+      <div class="r"><span style="visibility:hidden;">服務・業務</span><i></i><em>円</em></div>
+    </div>
+  </div>
+  <script>
+    window.addEventListener('load', function(){
+      setTimeout(function(){ window.print(); }, 350);
+    });
+  </script>
+</body></html>`;
+}
+
+app.get('/kacho-mission/nokinbo/print', async (c) => {
+  const cur = getPeriod(todayIsoJST());
+  const year = Math.max(2000, Math.min(2100, parseInt(c.req.query('year') ?? '', 10) || cur.year));
+  const month = Math.max(1, Math.min(12, parseInt(c.req.query('month') ?? '', 10) || cur.month));
+  const office = (c.req.query('office') || '板橋').slice(0, 20);
+  const teamStr = (c.req.query('team') || '').slice(0, 10);
+  const nameStr = (c.req.query('name') || '').slice(0, 40);
+  const empId = parseInt(c.req.query('emp_id') ?? '', 10) || 0;
+  const useSales = c.req.query('sales') === '1' && empId > 0;
+
+  const settings = await getPeriodSettings(c.env.DB);
+  const { start, end } = getPeriodRange(year, month, settings);
+
+  let empNo = '';
+  if (empId > 0) {
+    const e = await c.env.DB.prepare('SELECT emp_no FROM employees WHERE id = ?').bind(empId)
+      .first<{ emp_no: string }>().catch(() => null);
+    empNo = e?.emp_no ?? '';
+  }
+
+  const byDate = new Map<string, { amount: number; jomu: number; vehicle: string }>();
+  if (useSales) {
+    const rs = await c.env.DB.prepare(
+      'SELECT date, amount, raw_csv_json FROM sales_records WHERE emp_id = ? AND date >= ? AND date <= ? ORDER BY date'
+    ).bind(empId, start, end).all<{ date: string; amount: number; raw_csv_json: string | null }>().catch(() => ({ results: [] as Array<{ date: string; amount: number; raw_csv_json: string | null }> }));
+    for (const r of rs.results ?? []) {
+      let vehicle = '', jomu = 1;
+      if (r.raw_csv_json) {
+        try {
+          const a = JSON.parse(r.raw_csv_json);
+          if (Array.isArray(a)) {
+            if (a[4] != null && String(a[4]).trim()) vehicle = String(a[4]).trim();
+            const j = Number(a[9]);
+            if (Number.isFinite(j) && j > 0) jomu = j;
+          }
+        } catch { /* 生CSV未保持の行は無視 */ }
+      }
+      byDate.set(r.date, { amount: Number(r.amount) || 0, jomu, vehicle });
+    }
+  }
+
+  return c.html(nokinboPrintDoc({ year, month, office, teamStr, nameStr, empNo, start, end, byDate }));
+});
+
+app.get('/kacho-mission/nokinbo', async (c) => {
+  const cur = getPeriod(todayIsoJST());
+  const yearOpts = [cur.year - 1, cur.year, cur.year + 1]
+    .map(y => `<option value="${y}"${y === cur.year ? ' selected' : ''}>${y}年</option>`).join('');
+  const monthOpts = Array.from({ length: 12 }, (_, i) => i + 1)
+    .map(m => `<option value="${m}"${m === cur.month ? ' selected' : ''}>${m}月度</option>`).join('');
+
+  const inp = 'border:1px solid #d1d5db;border-radius:6px;padding:7px 9px;font-size:13px;';
+  const content = subHeader('納金簿 印刷') + `
+  <div style="max-width:720px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;">
+    <div id="nk-wrap" style="position:relative;max-width:340px;">
+      <label style="font-size:12px;color:#374151;">乗務員を検索（氏名・フリガナ・社員番号）
+        <input id="nk-q" type="text" autocomplete="off" placeholder="例：山田 / ヤマダ / 2024549" style="display:block;margin-top:4px;width:100%;${inp}">
+      </label>
+      <div id="nk-dd" style="position:absolute;z-index:20;left:0;right:0;top:calc(100% + 2px);background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);max-height:260px;overflow-y:auto;display:none;"></div>
+    </div>
+    <div style="font-size:12px;color:#6b7280;margin-top:8px;">選択中：<b id="nk-sel" style="color:#1e3a5f;">未選択（＝空欄で印刷）</b>
+      <button type="button" id="nk-clear" style="margin-left:8px;padding:3px 8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:5px;font-size:11px;cursor:pointer;display:none;">クリア</button>
+    </div>
+
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;align-items:flex-end;">
+      <label style="font-size:12px;color:#374151;">年<br><select id="nk-year" style="margin-top:4px;${inp}">${yearOpts}</select></label>
+      <label style="font-size:12px;color:#374151;">月度<br><select id="nk-month" style="margin-top:4px;${inp}">${monthOpts}</select></label>
+      <label style="font-size:12px;color:#374151;">営業所<br><input id="nk-office" value="板橋" style="margin-top:4px;width:100px;${inp}"></label>
+      <label style="font-size:12px;color:#374151;">班<br><input id="nk-team" placeholder="空欄可" style="margin-top:4px;width:80px;${inp}"></label>
+      <label style="font-size:12px;color:#374151;">氏名<br><input id="nk-name" placeholder="空欄可" style="margin-top:4px;width:190px;${inp}"></label>
+    </div>
+
+    <label style="display:block;margin-top:16px;font-size:13px;color:#374151;">
+      <input type="checkbox" id="nk-sales" checked> 本人の売上を反映する（売上適応モード：税込売上・累計・累計平均・乗務数・ドアNo.）
+    </label>
+
+    <div style="margin-top:18px;">
+      <button id="nk-open" style="padding:10px 24px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;">印刷用ページを開く</button>
+    </div>
+    <p style="font-size:11px;color:#9ca3af;margin-top:10px;line-height:1.8;">
+      乗務員を選ぶと氏名・班・社員コードが自動で入ります（班は手直し可）。選ばなければ空欄の納金簿が印刷できます。<br>
+      月分は月度ベース、曜日は選んだ月度の実カレンダーで自動表示されます。下部の「月間乗務数」「月間売上」等の集計欄は空欄のまま出力します。
+    </p>
+  </div>
+
+  <script>
+  var ADMIN_PATH = '${ADMIN_PATH}';
+  var NK_SEL = null;
+  var _nkT = null;
+  function nkEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function nkFmtName(s){ return String(s||'').split('　').join(' ').trim(); }
+
+  var nkQ = document.getElementById('nk-q');
+  var nkDD = document.getElementById('nk-dd');
+
+  nkQ.addEventListener('input', function(){
+    var q = this.value.trim();
+    if (_nkT) clearTimeout(_nkT);
+    if (q.length < 1){ nkDD.style.display = 'none'; return; }
+    _nkT = setTimeout(function(){
+      fetch('/api/kacho-mission/employees?q=' + encodeURIComponent(q))
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          var list = j.employees || [];
+          if (!list.length){
+            nkDD.innerHTML = '<div style="padding:8px 12px;color:#9ca3af;font-size:13px;">該当なし</div>';
+            nkDD.style.display = 'block';
+            return;
+          }
+          nkDD.innerHTML = list.map(function(e){
+            return '<div class="nk-it" data-json="' + nkEsc(JSON.stringify(e)) + '" style="padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid #f3f4f6;">' +
+              nkEsc(e.name) + '<div style="font-size:11px;color:#6b7280;margin-top:1px;">' +
+              nkEsc(e.emp_no) + '　' + (e.division ? e.division + '課' : '-') + (e.team ? ' ' + e.team + '班' : '') +
+              (e.name_kana ? '　' + nkEsc(e.name_kana) : '') + '</div></div>';
+          }).join('');
+          nkDD.style.display = 'block';
+          nkDD.querySelectorAll('.nk-it').forEach(function(it){
+            it.addEventListener('click', function(){
+              var e = JSON.parse(it.getAttribute('data-json'));
+              NK_SEL = e;
+              document.getElementById('nk-sel').textContent = nkFmtName(e.name) + ' / コード ' + e.emp_no;
+              document.getElementById('nk-name').value = nkFmtName(e.name);
+              if (e.team != null && e.team !== '') document.getElementById('nk-team').value = e.team;
+              document.getElementById('nk-clear').style.display = '';
+              nkDD.style.display = 'none';
+              nkQ.value = nkFmtName(e.name);
+            });
+          });
+        })
+        .catch(function(){ nkDD.style.display = 'none'; });
+    }, 180);
+  });
+
+  document.getElementById('nk-clear').addEventListener('click', function(){
+    NK_SEL = null;
+    document.getElementById('nk-sel').textContent = '未選択（＝空欄で印刷）';
+    this.style.display = 'none';
+    nkQ.value = '';
+  });
+
+  document.addEventListener('click', function(ev){
+    if (!ev.target.closest('#nk-wrap')) nkDD.style.display = 'none';
+  });
+
+  document.getElementById('nk-open').addEventListener('click', function(){
+    var p = new URLSearchParams();
+    p.set('year', document.getElementById('nk-year').value);
+    p.set('month', document.getElementById('nk-month').value);
+    p.set('office', document.getElementById('nk-office').value.trim());
+    p.set('team', document.getElementById('nk-team').value.trim());
+    p.set('name', document.getElementById('nk-name').value.trim());
+    if (NK_SEL) p.set('emp_id', NK_SEL.id);
+    if (NK_SEL && document.getElementById('nk-sales').checked) p.set('sales', '1');
+    window.open(ADMIN_PATH + '/kacho-mission/nokinbo/print?' + p.toString(), '_blank');
+  });
+  </script>`;
+  return c.html(layout('納金簿 印刷', content, 'kacho-mission'));
 });
 
 export default app;
