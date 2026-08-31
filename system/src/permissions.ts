@@ -91,6 +91,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/kanri-kobo/, 'kanri-kobo'],
   [/^\/handover/,     'handover'],
   [/^\/api\/handover/, 'handover'],
+  [/^\/tenko/,        'tenko'],
+  [/^\/api\/tenko/,   'tenko'],
   [/^\/tantosha/,     'tantosha'],
   [/^\/api\/tantosha/, 'tantosha'],
   [/^\/todo/,         'todo'],
@@ -120,6 +122,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/vehicles/,     'vehicles'],
   // 車庫見取り図（/garage・/api/garage）は「便利」ハブ配下に移動し、index.ts で
   // ページ権限チェックを免除（閲覧は全アカウント共通・編集はルート側でフル権限判定）
+  // デジタルサイネージ（/signage・/api/signage）も同様に index.ts で免除（投影は全アカウント・編集はフル権限のみ）
   [/^\/accidents/,       'accidents'],
   [/^\/api\/accidents/,  'accidents'],
   [/^\/inspection/,   'inspection'],
@@ -218,6 +221,7 @@ export const PERMISSION_CATALOG: Array<{ group: string; items: Array<{ key: stri
     { key: 'kancho-shift',  label: '班長シフト' },
     { key: 'kanri-kobo',    label: '管理者公休表' },
     { key: 'handover',      label: '引き継ぎシート' },
+    { key: 'tenko',         label: '点呼（仮眠室集合パワポ）' },
     { key: 'crew-portal',   label: '個人データ参照（日別明細・売上）' },
     { key: 'tantosha',      label: '担当車表' },
     { key: 'todo',          label: 'やることリスト' },

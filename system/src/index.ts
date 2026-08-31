@@ -88,6 +88,8 @@ import adminNewcomerIntrosRoutes from './routes/admin_newcomer_intros';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import adminChoseiRoutes from './routes/admin_chosei';
 import adminManualModeRoutes, { manualModePublicApi } from './routes/admin_manual_mode';
+import adminTenkoRoutes from './routes/admin_tenko';
+import adminSignageRoutes from './routes/admin_signage';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -100,7 +102,7 @@ import publicHiyariRoutes from './routes/public_hiyari';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
-import { ADMIN_PATH, SECRET } from './config';
+import { ADMIN_PATH, SECRET, MONITOR_ACCIDENTS_PATH } from './config';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -146,6 +148,14 @@ app.use('*', async (c, next) => {
   // 事故防止AI: 引き継ぎシートのポップアップに課別傾向分析レポートをiframe埋め込みするため、
   // このレポートページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
   const isAccidentAiEmbed = pathname.startsWith(`/${SECRET}/admin/accidents/division/`) && pathname.endsWith('/report/print');
+  // 点呼のプレゼン投影で「事故件数レポート」スライドがホシコン事故モニターを同一オリジンでiframe表示するため、
+  // このモニターページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続きDENY）
+  const isAccidentsMonitorEmbed = pathname === MONITOR_ACCIDENTS_PATH;
+  // デジタルサイネージの編集ページが、投影プレビューを同一オリジンでiframe表示するため、
+  // present ページのみフレーム表示を許可する（他ページは引き続きDENY）
+  // デジタルサイネージの投影/印刷ページは Google Fonts（見出し用 Anton など）を読み込むため CSP を個別に緩める。
+  // present は編集ページから同一オリジンで iframe プレビュー表示する
+  const isSignageDeckPage = /^\/[^/]+\/admin\/signage\/\d+\/(present|print)$/.test(pathname);
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   c.res.headers.set('Cache-Control', 'no-store');
@@ -162,10 +172,18 @@ app.use('*', async (c, next) => {
     c.res.headers.set('Content-Security-Policy',
       "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
     );
+  } else if (isSignageDeckPage) {
+    // デジタルサイネージ投影/印刷: Google Fonts を許可。present は編集ページから同一オリジンで iframe 表示する
+    c.res.headers.set('X-Frame-Options', 'SAMEORIGIN');
+    c.res.headers.set('Referrer-Policy', 'no-referrer');
+    c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self';"
+    );
   } else {
     // やることリスト・事故防止AIレポートのembedページのみ、引き継ぎシートのフローティングパネル/ポップアップから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed;
+    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAccidentsMonitorEmbed;
     c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -257,7 +275,10 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // シャトルバス: 閲覧はページ権限を使わず全アカウント共通。編集（非GET）はルート側でフル権限アカウントか別途チェックする
   const isShuttle = subPath.startsWith('/shuttle') || subPath.startsWith('/api/shuttle');
 
-  if (!isCcList && !isBenri && !isGarage && !isNojico && !isShuttle && !isPathAllowed(perms, subPath, c.req.method)) {
+  // デジタルサイネージ: 投影/印刷/一覧の閲覧は全アカウント共通。編集（非GET・編集ページ）は admin_signage.ts の requireFull でフル権限アカウントか別途チェックする
+  const isSignage = subPath.startsWith('/signage') || subPath.startsWith('/api/signage');
+
+  if (!isCcList && !isBenri && !isGarage && !isNojico && !isShuttle && !isSignage && !isPathAllowed(perms, subPath, c.req.method)) {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
@@ -331,6 +352,8 @@ app.route(`/${SECRET}/admin`, adminNewcomerIntrosRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 app.route(`/${SECRET}/admin`, adminChoseiRoutes);
 app.route(`/${SECRET}/admin`, adminManualModeRoutes);
+app.route(`/${SECRET}/admin`, adminTenkoRoutes);
+app.route(`/${SECRET}/admin`, adminSignageRoutes);
 
 // =====================
 // API（認証必須）

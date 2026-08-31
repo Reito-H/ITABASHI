@@ -1052,6 +1052,7 @@ app.get('/settings', async (c) => {
       { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）。下の表示モード設定に従って表示内容が変わります', newTab: true },
       { href: MONITOR_NEWCOMERS_PATH, perm: 'newcomers', title: '新人紹介モニター表示', desc: '新人紹介カードだけを常時表示するページ（ログイン不要。別の物理サイネージに映す用途で、表示モード設定に関わらず常に新人紹介のみ表示）', newTab: true },
       { href: `${ADMIN}/newcomer-intros`, perm: 'settings.newcomer-intros', title: '新人紹介カード管理', desc: '事故モニターサイネージの「新人紹介」表示用カード（写真・名前・班・一言コメント）の登録' },
+      { href: `${ADMIN}/signage`, perm: 'settings', title: 'デジタルサイネージ', desc: '営業所モニター用の周知スライド（生活道路30km/h等）。横16:9で自動再生、Fキーで全画面、1周ぶんを動画(webm)で書き出し可。投影は全アカウントが開けて、編集はフル権限アカウントのみ。面の追加・文言編集ができます' },
     ], extraHtml: `
       <div data-perm-key="accidents" style="background:white;border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-top:12px;">
         <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">事故モニター表示の表示モード</div>
@@ -1103,11 +1104,17 @@ app.get('/settings', async (c) => {
           </div>`;
   };
   const html = `
-    <div style="max-width:560px;">
-      <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
-
+    <style>
+      /* PC版は設定カードを横3列（新聞レイアウト）で表示。狭い画面では1列に戻る */
+      .settings-cols { column-gap: 28px; }
+      @media (min-width: 1024px) { .settings-cols { column-count: 3; } }
+      @media (min-width: 700px) and (max-width: 1023px) { .settings-cols { column-count: 2; } }
+      .settings-group { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; }
+    </style>
+    <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
+    <div class="settings-cols" style="max-width:1160px;">
       ${groups.map(g => `
-      <div style="margin-bottom:24px;">
+      <div class="settings-group" style="margin-bottom:24px;">
         <div style="font-size:12px;font-weight:700;color:#9ca3af;letter-spacing:0.08em;margin-bottom:10px;">${g.heading}</div>
         <div style="display:flex;flex-direction:column;gap:12px;">
           ${g.cards.map(cardHtml).join('')}

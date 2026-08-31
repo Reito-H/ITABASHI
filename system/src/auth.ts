@@ -43,6 +43,8 @@ export type Env = {
   RICHMENU_ID_UNKNOWN?: string;
   // 資料センター（マニュアルPDF・就業規則等のファイル保管）
   DOCUMENTS_BUCKET: R2Bucket;
+  // 点呼（仮眠室集合パワポ）の画像/動画/PDF素材の保管
+  TENKO_BUCKET: R2Bucket;
   // LINE連携統合ページ: 氏名入力+QR読取での登録LIFF
   LIFF_ID_REGISTER?: string;
   // 事故データCSVの無人アップロード用（社内PCの監視スクリプトから使う専用キー）
