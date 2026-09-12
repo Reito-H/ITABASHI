@@ -920,9 +920,6 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー', desc: '管理画面全ページ最上部に表示する常時テロップの投稿・期限設定' },
       { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード', desc: '対象者の誕生日当日、設定時刻に全ページへお祝いポップアップを表示' },
     ]},
-    { heading: '画面カスタマイズ', cards: [
-      { href: `${ADMIN}/settings/manual-mode`, perm: 'settings.manual-mode settings', title: 'マニュアルモード', desc: '管理画面の下・中央に、よく使うページへのショートカットを並べた小さなバーを常時表示。中身は「登録者」ごとに設定し、どの登録者のバーを出すかは各ブラウザで選択（同じアカウントを複数人で使う場合向け）' },
-    ]},
     { heading: 'シフト関連の設定', cards: [
       { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', desc: 'シフト区分・勤務ダイヤ・研修担当・班長指導者・月度設定・ベンテンクラブ・班長関連 の一覧', highlight: true },
     ]},

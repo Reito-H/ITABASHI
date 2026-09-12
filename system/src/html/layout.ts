@@ -3,7 +3,6 @@ import { ADMIN_PATH, APP_VERSION } from '../config';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
 import { announcementBarHtml, announcementBarScript } from './announcement_bar';
 import { birthdayPopupHtml, birthdayPopupScript } from './birthday_popup';
-import { manualModeBarHtml, manualModeBarScript } from './manual_mode_bar';
 
 export function safeJson(value: unknown): string {
   return JSON.stringify(value)
@@ -264,7 +263,6 @@ export function layout(title: string, content: string, activePage: string = '', 
 <body>
   ${announcementBarHtml()}
   ${birthdayPopupHtml()}
-  ${manualModeBarHtml()}
   <script>
     try { if (localStorage.getItem('ho_sidebar_collapsed') === '1') document.body.classList.add('sidebar-collapsed'); } catch {}
   </script>
@@ -584,8 +582,6 @@ export function layout(title: string, content: string, activePage: string = '', 
     loadBellUnreadCount();
     ${announcementBarScript()}
     ${birthdayPopupScript()}
-    ${manualModeBarScript()}
-
     function createHandoverMemoFromFab() {
       fetch('${ADMIN_PATH}/api/handover-memos', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),

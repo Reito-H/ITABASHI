@@ -92,7 +92,6 @@ import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import adminChoseiRoutes from './routes/admin_chosei';
-import adminManualModeRoutes, { manualModePublicApi } from './routes/admin_manual_mode';
 import adminTenkoRoutes from './routes/admin_tenko';
 import adminSignageRoutes from './routes/admin_signage';
 import adminDaihonRoutes from './routes/admin_daihon';
@@ -313,9 +312,6 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // 班長個人別確認: 書き込み(その他メモ保存)も含めて閲覧権限(kancho-shift)だけで利用可能にする
   // （<key>.edit を要求する既定ルールを外し、ルート側で kancho-shift の有無だけをチェックする）
   if (subPath.startsWith('/api/kancho-personal/')) return next();
-  // マニュアルモード設定API: 設定ページを開ける人（settings 権限）なら閲覧・編集とも可。
-  // .edit を要求する既定ルールを外し、ルート側(admin_manual_mode.ts canUse)で settings の有無だけを見る
-  if (subPath.startsWith('/api/manual-mode/')) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -419,7 +415,6 @@ app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 app.route(`/${SECRET}/admin`, adminChoseiRoutes);
-app.route(`/${SECRET}/admin`, adminManualModeRoutes);
 app.route(`/${SECRET}/admin`, adminTenkoRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
@@ -446,8 +441,6 @@ app.use('/api/*', async (c, next) => {
   if (path.startsWith('/api/announcements/web/')) return next();
   // アナウンスバーの表示・一時非表示も同様に、管理側の権限(settings.announcement-bar)に関わらず全アカウントが利用できる
   if (path.startsWith('/api/announcement-bar/')) return next();
-  // マニュアルモードのバー描画データ取得も、全アカウントが利用できる（設定側は settings 権限で別途ガード）
-  if (path.startsWith('/api/manual-mode/bar/')) return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -469,7 +462,6 @@ app.route('/api/info', infoApi);
 app.route('/api/line', lineApiRoutes);
 app.route('/api/announcements/web', announcementsWebApi);
 app.route('/api/announcement-bar', announcementBarPublicApi);
-app.route('/api/manual-mode', manualModePublicApi);
 app.route('/api/birthday', birthdayPublicApi);
 app.route('/api/schedule-types', scheduleTypesApi);
 app.route('/api/interviews', interviewsApi);

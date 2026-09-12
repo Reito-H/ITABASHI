@@ -17,7 +17,7 @@
 //   板橋ページ: settings.study-sessions（全タブ）＋タブ別キー
 //              settings.office-opinions / settings.hiyari / settings.surveys / settings.daihon
 //              （親 settings.study-sessions を持てば全タブ利用可）
-//   設定サブページ: settings.accounts / settings.manual-mode / settings.liff / settings.line-usage /
+//   設定サブページ: settings.accounts / settings.liff / settings.line-usage /
 //              settings.notifications / settings.offices / settings.documents / settings.study-notes / settings.tutorial /
 //              settings.status / settings.chosei / settings.announcement-bar / settings.birthday /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
@@ -34,7 +34,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/reports/,              'settings.lost-items|settings.accidents|settings.violations|settings.general-reports|settings.handover-memos'],
   // 設定サブページ
   [/^\/settings\/accounts/,             'settings.accounts'],
-  [/^\/settings\/manual-mode/,          'settings.manual-mode|settings'],
   [/^\/settings\/liff/,                 'settings.liff'],
   [/^\/settings\/lost-items/,           'settings.lost-items'],
   [/^\/settings\/accidents/,            'settings.accidents'],
@@ -297,7 +296,6 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.accounts', label: 'アカウント権限管理', note: 'このページ。付与先に注意' },
     { key: 'settings.liff',     label: 'LINE連携（QR発行・連携ユーザー管理）' },
     { key: 'settings.line-usage', label: 'LINE利用状況（操作ログ）' },
-    { key: 'settings.manual-mode', label: 'マニュアルモード（ショートカットバー）', note: '設定(settings)の権限でも利用可' },
     { key: 'settings.notifications', label: 'LINE通知設定' },
     { key: 'settings.offices',       label: '営業所' },
     { key: 'settings.announcement-bar', label: 'アナウンスバー' },
