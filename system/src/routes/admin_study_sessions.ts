@@ -14,12 +14,20 @@ import {
   SURVEY_QTYPES, isQType, normalizeSettings, aggregateQuestion, answerToCsvCell,
   type SurveyQType,
 } from '../data/surveys';
+import {
+  ENTRY_TYPES, parseEligibility, serializeEligibility, describeEligibility,
+} from '../data/study_session_eligibility';
+import { renderGuideEditor } from '../html/study_session_guide';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
 async function canEdit(c: { env: Env; get: (k: 'adminId') => number }): Promise<boolean> {
   const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
-  return perms === null || perms.includes('settings.study-sessions.edit');
+  if (perms === null) return true;
+  // 板橋ページ全体、または各タブ個別の編集権限のいずれかがあれば編集UIを出す
+  // （タブをまたいだ書き込みは permissions.ts 側の per-API チェックで個別に弾かれる）
+  return ['settings.study-sessions.edit', 'settings.hiyari.edit', 'settings.surveys.edit',
+          'settings.daihon.edit', 'settings.office-opinions.edit'].some(k => perms.includes(k));
 }
 
 // 担当営業所の表示名（設定「営業所」で切替。末尾の「営業所」は落として「板橋」等にする）
@@ -34,8 +42,28 @@ async function getOfficeLabel(env: Env): Promise<string> {
 type StudySession = {
   id: number; title: string; date: string; start_time: string | null; end_time: string | null;
   location: string | null; contact_name: string | null; capacity: number; note: string | null; is_closed: number;
-  target_audience: string | null;
+  target_audience: string | null; category_id: number | null; eligibility_json: string | null;
 };
+
+// 回（公演回）。1イベントに複数。時刻・定員は回が持つ
+type SlotInput = { id?: number; label?: string; start_time?: string; end_time?: string; capacity?: number };
+
+// 送られてきた回の配列を検証して正規化する。最低1回は必須。
+function normalizeSlots(raw: unknown): { slots: { id: number | null; label: string | null; start_time: string | null; end_time: string | null; capacity: number }[]; error?: string } {
+  const arr = Array.isArray(raw) ? raw as SlotInput[] : [];
+  const out: { id: number | null; label: string | null; start_time: string | null; end_time: string | null; capacity: number }[] = [];
+  for (const item of arr) {
+    const s = (item && typeof item === 'object') ? item : {};
+    const startTime = S(s.start_time, 5);
+    const endTime = S(s.end_time, 5);
+    if (!isValidTime(startTime) || !isValidTime(endTime)) return { slots: [], error: '時刻の形式が正しくありません' };
+    const capacity = Number.isFinite(s.capacity) && (s.capacity as number) >= 0 ? Math.floor(s.capacity as number) : 0;
+    const id = Number.isFinite(s.id) && (s.id as number) > 0 ? Math.floor(s.id as number) : null;
+    out.push({ id, label: S(s.label, 40) || null, start_time: startTime || null, end_time: endTime || null, capacity });
+  }
+  if (out.length === 0) return { slots: [], error: '回を1つ以上入力してください' };
+  return { slots: out };
+}
 
 function shareUrl(): string {
   return `https://bentenclub.com${STUDY_SESSION_PATH}`;
@@ -100,10 +128,11 @@ app.get('/settings/study-sessions', async (c) => {
       <span style="font-size:12px;color:#9ca3af;">乗務員向けページ（イベントの参加募集・ご意見版・ヒヤリハット）</span>
     </div>
     <div class="ob-tabnav">
-      <button type="button" class="ob-tab-btn" data-tab="sessions" onclick="switchTab('sessions')">イベント 参加申し込み</button>
-      <button type="button" class="ob-tab-btn" data-tab="opinions" onclick="switchTab('opinions')">ご意見版</button>
-      <button type="button" class="ob-tab-btn" data-tab="hiyari" onclick="switchTab('hiyari')">ヒヤリハット</button>
-      <button type="button" class="ob-tab-btn" data-tab="surveys" onclick="switchTab('surveys')">アンケート</button>
+      <button type="button" class="ob-tab-btn" data-tab="sessions" data-perm-key="settings.study-sessions" onclick="switchTab('sessions')">イベント 参加申し込み</button>
+      <button type="button" class="ob-tab-btn" data-tab="opinions" data-perm-key="settings.office-opinions settings.study-sessions" onclick="switchTab('opinions')">ご意見版</button>
+      <button type="button" class="ob-tab-btn" data-tab="hiyari" data-perm-key="settings.hiyari settings.study-sessions" onclick="switchTab('hiyari')">ヒヤリハット</button>
+      <button type="button" class="ob-tab-btn" data-tab="surveys" data-perm-key="settings.surveys settings.study-sessions" onclick="switchTab('surveys')">アンケート</button>
+      <button type="button" class="ob-tab-btn" data-tab="script" data-perm-key="settings.daihon settings.study-sessions" onclick="switchTab('script')">台本</button>
     </div>
     <style>
       .ob-tabnav { display:flex; gap:6px; border-bottom:2px solid #e5e7eb; margin-bottom:18px; }
@@ -111,7 +140,7 @@ app.get('/settings/study-sessions', async (c) => {
       .ob-tab-btn.active { color:#1e3a5f; border-bottom-color:#2563eb; }
     </style>
 
-    <div id="tab-sessions">
+    <div id="tab-sessions" data-perm-key="settings.study-sessions">
     <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.7;">
       新人向けのイベントをここで作成すると、共通のQR/URLからアクセスできる掲示板に自動で表示されます。社員番号を入力した参加者は、開催中のイベント一覧から選んで参加登録できます。定員に達すると自動で「満席」表示になり、それ以上は登録できません。
     </div>
@@ -136,16 +165,16 @@ app.get('/settings/study-sessions', async (c) => {
       <input type="hidden" id="edit-id" value="">
       <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
         <label style="font-size:12px;color:#6b7280;flex:1;min-width:220px;">タイトル
-          <div><input id="f-title" type="text" maxlength="60" placeholder="例: 接客マナーイベント" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
+          <div><input id="f-title" type="text" maxlength="60" placeholder="例: 秋の交通安全公演" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
         </label>
         <label style="font-size:12px;color:#6b7280;">開催日
           <div><input id="f-date" type="date" style="border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
         </label>
-        <label style="font-size:12px;color:#6b7280;">開始
-          <div><input id="f-start" type="time" style="border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
-        </label>
-        <label style="font-size:12px;color:#6b7280;">終了
-          <div><input id="f-end" type="time" style="border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
+        <label style="font-size:12px;color:#6b7280;">カテゴリー
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select id="f-category" style="border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;min-width:120px;"><option value="">（未分類）</option></select>
+            <button type="button" onclick="toggleCatPanel()" title="カテゴリーを編集" style="padding:7px 10px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;white-space:nowrap;">編集</button>
+          </div>
         </label>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
@@ -155,19 +184,67 @@ app.get('/settings/study-sessions', async (c) => {
         <label style="font-size:12px;color:#6b7280;flex:1;min-width:160px;">担当
           <div><input id="f-contact" type="text" maxlength="30" placeholder="例: 総務部 山田" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
         </label>
-        <label style="font-size:12px;color:#6b7280;">最大参加人数
-          <div><input id="f-capacity" type="number" min="0" placeholder="0=無制限" style="width:110px;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
-        </label>
       </div>
-      <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:12px;">対象者（任意・ポスターに表示されます）
+
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:12px;background:#f8fafc;">
+        <div style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:2px;">開催回（公演回）</div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">1日に複数回ある場合は「＋ 回を追加」で回を分けます。時刻と定員は回ごとに設定します（定員 0 = 無制限）。乗務員は参加する回を選んで登録します。</div>
+        <div id="slots-box"></div>
+        <button type="button" onclick="addSlotRow()" style="margin-top:8px;padding:7px 14px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a5f;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">＋ 回を追加</button>
+      </div>
+
+      <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:12px;">対象者の表記（任意・ポスターに表示されます）
         <div><input id="f-target" type="text" maxlength="60" placeholder="例: 新入社員（2026年入社）" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;"></div>
       </label>
+
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:12px;background:#f8fafc;">
+        <div style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:2px;">対象者の絞り込み（申し込みできる人を限定）</div>
+        <div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">条件でしぼると、条件に合わない乗務員には掲示板にこのイベントが表示されず、申し込みもできません。複数の条件を指定した場合は、すべてを満たす人が対象です。</div>
+        <label style="font-size:12px;color:#374151;display:flex;align-items:center;gap:8px;margin-bottom:4px;"><input type="radio" name="f-elig-mode" value="all" checked onchange="eligToggleMode()">全員が申し込める</label>
+        <label style="font-size:12px;color:#374151;display:flex;align-items:center;gap:8px;"><input type="radio" name="f-elig-mode" value="conditions" onchange="eligToggleMode()">条件でしぼる</label>
+        <div id="elig-cond" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed #d1d5db;">
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;">入社からの経過期間</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+            <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px;">以内：
+              <input id="f-elig-max-y" type="number" min="0" max="50" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:5px;font-size:12px;">年
+              <input id="f-elig-max-m" type="number" min="0" max="11" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:5px;font-size:12px;">ヶ月
+            </label>
+            <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px;">以上：
+              <input id="f-elig-min-y" type="number" min="0" max="50" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:5px;font-size:12px;">年
+              <input id="f-elig-min-m" type="number" min="0" max="11" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:5px;font-size:12px;">ヶ月
+            </label>
+          </div>
+          <div style="font-size:11px;color:#9ca3af;margin:-4px 0 10px;">空欄なら在籍年数はしぼりません。社員名簿に入社日が登録されていない人は、年数の条件がある場合は対象外になります。</div>
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;">入社区分（チェックしたものが対象）</div>
+          <div id="f-elig-entry" style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:10px;font-size:12px;color:#374151;">
+            ${ENTRY_TYPES.map((t) => `<label style="display:flex;align-items:center;gap:5px;"><input type="checkbox" class="elig-entry" value="${escHtml(t)}">${escHtml(t)}</label>`).join('')}
+          </div>
+          <label style="font-size:12px;color:#374151;display:flex;align-items:center;gap:6px;margin-bottom:10px;"><input type="checkbox" id="f-elig-newcomer">新人登録中の人のみ</label>
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;">社員番号を指定（この番号の人のみ・任意）</div>
+          <textarea id="f-elig-empnos" rows="2" placeholder="社員番号を改行・カンマ・スペース区切りで入力" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:12px;font-family:inherit;"></textarea>
+          <div style="position:relative;margin-top:6px;">
+            <input id="f-elig-empsearch" type="text" placeholder="氏名で検索して社員番号を追加" autocomplete="off" oninput="eligSearchEmp(this.value)" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:7px 8px;font-size:12px;">
+            <div id="f-elig-empresults" style="display:none;position:absolute;left:0;right:0;top:36px;background:white;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);max-height:200px;overflow-y:auto;z-index:10;"></div>
+          </div>
+        </div>
+      </div>
+
       <label style="font-size:12px;color:#6b7280;display:block;margin-bottom:12px;">補足（任意・ポスターに表示されます）
         <div><textarea id="f-note" rows="2" maxlength="300" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;font-family:inherit;"></textarea></div>
       </label>
       <button onclick="saveSession()" id="save-btn" style="padding:9px 22px;background:#2563eb;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">作成する</button>
       <button onclick="resetForm()" id="cancel-edit-btn" style="display:none;padding:9px 18px;background:#f3f4f6;color:#374151;border:none;border-radius:7px;font-size:13px;cursor:pointer;margin-left:8px;">編集をキャンセル</button>
       <div id="form-err" style="color:#dc2626;font-size:12px;margin-top:10px;display:none;"></div>
+    </div>
+
+    <div id="cat-panel" style="display:none;background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px;max-width:560px;margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">カテゴリーの編集</div>
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">「公演」「勉強会」など、イベントの種類を自由に追加・改名・並べ替えできます。使用中のカテゴリーは削除できません。</div>
+      <div id="cat-list" style="font-size:13px;color:#6b7280;margin-bottom:10px;">読み込み中...</div>
+      <div style="display:flex;gap:6px;">
+        <input id="cat-new" type="text" maxlength="40" placeholder="新しいカテゴリー名" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;">
+        <button type="button" onclick="addCategory()" style="padding:8px 16px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">追加</button>
+      </div>
     </div>` : ''}
 
     <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px;max-width:1000px;">
@@ -183,8 +260,11 @@ app.get('/settings/study-sessions', async (c) => {
       ${editable ? `
       <div style="position:relative;margin-bottom:14px;padding:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;">
         <div style="font-size:12px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">突発的な参加者を追加（社員名簿から検索）</div>
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <select id="add-participant-slot" style="border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;min-width:140px;"></select>
+        </div>
         <input id="add-participant-q" type="text" placeholder="氏名または社員番号で検索" autocomplete="off" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;" oninput="searchEmployeesForAdd(this.value)">
-        <div id="add-participant-results" style="display:none;position:absolute;left:12px;right:12px;top:56px;background:white;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);max-height:240px;overflow-y:auto;z-index:10;"></div>
+        <div id="add-participant-results" style="display:none;position:absolute;left:12px;right:12px;top:96px;background:white;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);max-height:240px;overflow-y:auto;z-index:10;"></div>
       </div>` : ''}
       <div id="participants-body" style="font-size:13px;color:#6b7280;">読み込み中...</div>
     </div>
@@ -202,7 +282,7 @@ app.get('/settings/study-sessions', async (c) => {
     </div>
     </div><!-- /tab-sessions -->
 
-    <div id="tab-opinions" style="display:none;">
+    <div id="tab-opinions" data-perm-key="settings.office-opinions settings.study-sessions" style="display:none;">
       <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.7;">
         乗務員が共通QR/URLの「営業所へのご意見」から送った意見の一覧です。「匿名で送信」にチェックが付いた意見は、既定で社員番号・氏名を伏せて表示します${canReveal ? '（フル権限アカウントのため「送信者を表示」で開示できます）' : '（開示できるのはフル権限アカウントのみです）'}。
       </div>
@@ -219,7 +299,7 @@ app.get('/settings/study-sessions', async (c) => {
       </div>
     </div>
 
-    <div id="tab-hiyari" style="display:none;">
+    <div id="tab-hiyari" data-perm-key="settings.hiyari settings.study-sessions" style="display:none;">
       <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.7;">
         乗務員が専用URLの「ヒヤリハット報告」フォームから送った報告の一覧です。社員番号から課・班を控えていますが、氏名は保存していません${canReveal ? '（フル権限アカウントは「氏名を照会」で社員名簿と突き合わせできます）' : ''}。集計・分析は課長ミッションの「ヒヤリハット」で確認できます。
       </div>
@@ -289,7 +369,7 @@ app.get('/settings/study-sessions', async (c) => {
       </div>
     </div>
 
-    <div id="tab-surveys" style="display:none;">
+    <div id="tab-surveys" data-perm-key="settings.surveys settings.study-sessions" style="display:none;">
       <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.9;">
         タイトルと設問を自由に組み立ててアンケートを作成できます。回答は社員番号で本人確認（課・班のみ記録／氏名は保存しません／何回でも回答可）。
         <br>・通常：<code style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:5px;padding:2px 6px;">${escHtml(shareUrl())}</code>（イベント一覧の下＋メニューの「アンケートに回答する」から）
@@ -308,6 +388,23 @@ app.get('/settings/study-sessions', async (c) => {
       <div id="sv-results-view" style="display:none;"></div>
     </div>
 
+    <div id="tab-script" data-perm-key="settings.daihon settings.study-sessions" style="display:none;">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:16px;line-height:1.9;">
+        講座やイベントのスライド（見出し＋箇条書き）と台本（読み上げ用のナレーション）を、パワーポイントのように1枚ずつ編集できます。
+        <br>・<b>プレゼンを開く</b>：全画面のスライド投影（←→／スペースで送り・<b>F</b>で全画面・<b>N</b>で画面下に台本バー）。
+        <br>・<b>印刷（台本つき）</b>：スライドと台本を並べてA4に印刷。台本だけ配りたいときにも使えます。
+      </div>
+      ${editable ? `
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="dh-new-title" type="text" maxlength="120" placeholder="新しい台本のタイトル（例：秋の安全運転講座）" style="flex:1;min-width:240px;border:1px solid #d1d5db;border-radius:7px;padding:9px 10px;font-size:13px;">
+        <button onclick="dhNew()" style="padding:9px 20px;background:#2563eb;color:white;border:none;border-radius:7px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">＋ 新しい台本を作成</button>
+      </div>` : ''}
+      <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px;max-width:1000px;">
+        <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">台本一覧</div>
+        <div id="dh-list" style="font-size:13px;color:#6b7280;">読み込み中...</div>
+      </div>
+    </div>
+
     <script>
     var API = '${ADMIN_PATH}/api/study-sessions';
     var SV_API = '${ADMIN_PATH}/api/surveys';
@@ -319,17 +416,19 @@ app.get('/settings/study-sessions', async (c) => {
     var EDITABLE = ${editable ? 'true' : 'false'};
     var CAN_REVEAL = ${canReveal ? 'true' : 'false'};
     function switchTab(name) {
-      ['sessions','opinions','hiyari','surveys'].forEach(function(t) {
-        document.getElementById('tab-' + t).style.display = (t === name) ? 'block' : 'none';
+      ['sessions','opinions','hiyari','surveys','script'].forEach(function(t) {
+        var el = document.getElementById('tab-' + t);
+        if (el) el.style.display = (t === name) ? 'block' : 'none';
       });
       document.querySelectorAll('.ob-tab-btn').forEach(function(b) {
         b.classList.toggle('active', b.getAttribute('data-tab') === name);
       });
-      var q = (name === 'opinions' || name === 'hiyari' || name === 'surveys') ? ('?tab=' + name) : '';
+      var q = (name === 'opinions' || name === 'hiyari' || name === 'surveys' || name === 'script') ? ('?tab=' + name) : '';
       try { history.replaceState(null, '', location.pathname + q); } catch (e) {}
       if (name === 'opinions') loadOpinions();
       if (name === 'hiyari') loadHiyari();
       if (name === 'surveys') loadSurveys();
+      if (name === 'script') loadScripts();
     }
     function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function copyShareUrl() {
@@ -340,17 +439,215 @@ app.get('/settings/study-sessions', async (c) => {
       var t = new Date(d + 'T00:00:00');
       return (t.getMonth()+1) + '/' + t.getDate() + '(' + WD[t.getDay()] + ')';
     }
+    // 回(slot)の集計。全回が満席なら満席、1回でも空きがあれば募集中
+    function slotFull(sl) { return sl.capacity > 0 && (sl.participant_count || 0) >= sl.capacity; }
+    function eventFull(s) {
+      var slots = s.slots || [];
+      if (!slots.length) return false;
+      return slots.every(slotFull);
+    }
+    function eventTotalCount(s) {
+      return (s.slots || []).reduce(function(a, sl) { return a + (sl.participant_count || 0); }, 0);
+    }
+    function slotTimeLabel(sl) {
+      var t = (sl.start_time || '') + (sl.end_time ? '〜' + sl.end_time : '');
+      return t || '時刻未定';
+    }
+    function slotName(sl, idx) { return sl.label || ((idx + 1) + '回目'); }
     function statusOf(s) {
       var today = new Date(Date.now() + 9*3600*1000).toISOString().slice(0,10);
-      var full = s.capacity > 0 && s.participant_count >= s.capacity;
       if (s.is_closed) return { label: '受付終了(手動)', color: '#6b7280', bg: '#f3f4f6' };
-      if (full) return { label: '満席（自動締切）', color: '#b45309', bg: '#fef3c7' };
+      if (eventFull(s)) return { label: '満席（自動締切）', color: '#b45309', bg: '#fef3c7' };
       if (s.date < today) return { label: '開催済み', color: '#6b7280', bg: '#f3f4f6' };
       return { label: '募集中', color: '#166534', bg: '#f0fdf4' };
     }
+
+    // ===== カテゴリー編集 =====
+    var CATS = [];
+    function toggleCatPanel() {
+      var p = document.getElementById('cat-panel');
+      p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
+      if (p.style.display === 'block') { loadCategories(); p.scrollIntoView({ behavior:'smooth', block:'center' }); }
+    }
+    async function loadCategories() {
+      var d = await (await fetch(API + '/categories')).json();
+      CATS = d.categories || [];
+      fillCategorySelect();
+      renderCatList();
+    }
+    function fillCategorySelect() {
+      var sel = document.getElementById('f-category');
+      if (!sel) return;
+      var cur = sel.value;
+      sel.innerHTML = '<option value="">（未分類）</option>' + CATS.map(function(c) {
+        return '<option value="' + c.id + '">' + escH(c.name) + '</option>';
+      }).join('');
+      sel.value = cur;
+    }
+    function renderCatList() {
+      var box = document.getElementById('cat-list');
+      if (!box) return;
+      if (!CATS.length) { box.innerHTML = '<div style="color:#9ca3af;">カテゴリーはまだありません</div>'; return; }
+      box.innerHTML = CATS.map(function(c, i) {
+        return '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #f3f4f6;">'
+          + '<span style="display:flex;flex-direction:column;">'
+          +   '<button type="button" onclick="moveCat(' + c.id + ',-1)" ' + (i === 0 ? 'disabled' : '') + ' style="border:1px solid #d1d5db;background:#f9fafb;border-radius:4px 4px 0 0;font-size:10px;line-height:1;padding:2px 5px;cursor:pointer;">▲</button>'
+          +   '<button type="button" onclick="moveCat(' + c.id + ',1)" ' + (i === CATS.length - 1 ? 'disabled' : '') + ' style="border:1px solid #d1d5db;border-top:none;background:#f9fafb;border-radius:0 0 4px 4px;font-size:10px;line-height:1;padding:2px 5px;cursor:pointer;">▼</button>'
+          + '</span>'
+          + '<input value="' + escH(c.name) + '" onchange="renameCategory(' + c.id + ', this.value)" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;">'
+          + '<span style="font-size:11px;color:#9ca3af;white-space:nowrap;">' + (c.use_count || 0) + '件</span>'
+          + '<button type="button" onclick="deleteCategory(' + c.id + ')" ' + ((c.use_count || 0) > 0 ? 'disabled title="使用中"' : '') + ' style="padding:5px 10px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:11px;cursor:pointer;">削除</button>'
+          + '</div>';
+      }).join('');
+    }
+    async function addCategory() {
+      var el = document.getElementById('cat-new');
+      var name = el.value.trim();
+      if (!name) return;
+      var res = await fetch(API + '/categories', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: name }) });
+      if (res.ok) { el.value = ''; loadCategories(); } else { var d = await res.json().catch(function(){return {};}); alert(d.error || '追加に失敗しました'); }
+    }
+    async function renameCategory(id, name) {
+      name = (name || '').trim();
+      if (!name) { loadCategories(); return; }
+      var res = await fetch(API + '/categories/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: name }) });
+      if (res.ok) loadCategories(); else alert('変更に失敗しました');
+    }
+    async function moveCat(id, dir) {
+      var i = CATS.findIndex(function(c) { return c.id === id; });
+      var j = i + dir;
+      if (i < 0 || j < 0 || j >= CATS.length) return;
+      var order = CATS.map(function(c) { return c.id; });
+      order.splice(i, 1);
+      order.splice(j, 0, id);
+      var res = await fetch(API + '/categories/reorder', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ order: order }) });
+      if (res.ok) loadCategories(); else alert('並べ替えに失敗しました');
+    }
+    async function deleteCategory(id) {
+      if (!confirm('このカテゴリーを削除しますか？')) return;
+      var res = await fetch(API + '/categories/' + id, { method:'DELETE' });
+      if (res.ok) loadCategories(); else { var d = await res.json().catch(function(){return {};}); alert(d.error || '削除に失敗しました'); }
+    }
+
+    // ===== 回(slot)の入力行 =====
+    function slotRowHtml(sl) {
+      sl = sl || {};
+      return '<div class="slot-row" data-slot-id="' + (sl.id || '') + '" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:8px;">'
+        + '<input class="slot-label" type="text" maxlength="40" placeholder="呼称（任意）例:昼公演" value="' + escH(sl.label || '') + '" style="flex:1;min-width:120px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">'
+        + '<input class="slot-start" type="time" value="' + escH(sl.start_time || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:12px;">'
+        + '<span style="font-size:12px;color:#9ca3af;">〜</span>'
+        + '<input class="slot-end" type="time" value="' + escH(sl.end_time || '') + '" style="border:1px solid #d1d5db;border-radius:6px;padding:6px;font-size:12px;">'
+        + '<input class="slot-cap" type="number" min="0" placeholder="定員" value="' + (sl.capacity != null ? sl.capacity : '') + '" style="width:80px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:12px;">'
+        + '<button type="button" onclick="removeSlotRow(this)" style="padding:5px 10px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:11px;cursor:pointer;">削除</button>'
+        + '</div>';
+    }
+    function addSlotRow(sl) {
+      document.getElementById('slots-box').insertAdjacentHTML('beforeend', slotRowHtml(sl));
+    }
+    function removeSlotRow(btn) {
+      var box = document.getElementById('slots-box');
+      if (box.querySelectorAll('.slot-row').length <= 1) { alert('回は1つ以上必要です'); return; }
+      btn.closest('.slot-row').remove();
+    }
+    function renderSlots(slots) {
+      var box = document.getElementById('slots-box');
+      box.innerHTML = '';
+      var list = (slots && slots.length) ? slots : [{}];
+      list.forEach(function(sl) { addSlotRow(sl); });
+    }
+    function collectSlots() {
+      return Array.prototype.map.call(document.querySelectorAll('#slots-box .slot-row'), function(row) {
+        var idAttr = row.getAttribute('data-slot-id');
+        return {
+          id: idAttr ? parseInt(idAttr) : undefined,
+          label: row.querySelector('.slot-label').value.trim(),
+          start_time: row.querySelector('.slot-start').value,
+          end_time: row.querySelector('.slot-end').value,
+          capacity: parseInt(row.querySelector('.slot-cap').value) || 0
+        };
+      });
+    }
+
+    // ===== 対象者の絞り込み =====
+    function eligToggleMode() {
+      var sel = document.querySelector('input[name="f-elig-mode"]:checked');
+      document.getElementById('elig-cond').style.display = (sel && sel.value === 'conditions') ? 'block' : 'none';
+    }
+    function eligMonths(yEl, mEl) {
+      var y = parseInt(document.getElementById(yEl).value) || 0;
+      var m = parseInt(document.getElementById(mEl).value) || 0;
+      var t = y * 12 + m;
+      return t > 0 ? t : null;
+    }
+    function eligSetYm(yEl, mEl, total) {
+      var t = total && total > 0 ? total : 0;
+      document.getElementById(yEl).value = t ? Math.floor(t / 12) || '' : '';
+      document.getElementById(mEl).value = t ? (t % 12) || '' : '';
+      if (Math.floor(t / 12) === 0 && t > 0) document.getElementById(yEl).value = '';
+      if ((t % 12) === 0 && t > 0) document.getElementById(mEl).value = '';
+    }
+    function eligParseEmpNos(str) {
+      return (str || '').split(/[\\s,、，\\n]+/).map(function(x){ return x.trim(); }).filter(Boolean);
+    }
+    function eligCollect() {
+      var sel = document.querySelector('input[name="f-elig-mode"]:checked');
+      if (!sel || sel.value !== 'conditions') return { mode: 'all' };
+      var entry = Array.prototype.map.call(document.querySelectorAll('.elig-entry:checked'), function(c){ return c.value; });
+      return {
+        mode: 'conditions',
+        tenure_max_months: eligMonths('f-elig-max-y', 'f-elig-max-m'),
+        tenure_min_months: eligMonths('f-elig-min-y', 'f-elig-min-m'),
+        entry_types: entry,
+        newcomers_only: document.getElementById('f-elig-newcomer').checked,
+        emp_nos: eligParseEmpNos(document.getElementById('f-elig-empnos').value)
+      };
+    }
+    function eligPopulate(e) {
+      e = e || { mode: 'all' };
+      var isCond = e.mode === 'conditions';
+      document.querySelector('input[name="f-elig-mode"][value="' + (isCond ? 'conditions' : 'all') + '"]').checked = true;
+      eligSetYm('f-elig-max-y', 'f-elig-max-m', e.tenure_max_months);
+      eligSetYm('f-elig-min-y', 'f-elig-min-m', e.tenure_min_months);
+      var ets = e.entry_types || [];
+      Array.prototype.forEach.call(document.querySelectorAll('.elig-entry'), function(c){ c.checked = ets.indexOf(c.value) >= 0; });
+      document.getElementById('f-elig-newcomer').checked = !!e.newcomers_only;
+      document.getElementById('f-elig-empnos').value = (e.emp_nos || []).join('\\n');
+      document.getElementById('f-elig-empsearch').value = '';
+      document.getElementById('f-elig-empresults').style.display = 'none';
+      eligToggleMode();
+    }
+    var _eligSearchTimer = null;
+    function eligSearchEmp(q) {
+      clearTimeout(_eligSearchTimer);
+      var box = document.getElementById('f-elig-empresults');
+      q = q.trim();
+      if (!q) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      _eligSearchTimer = setTimeout(function() {
+        fetch(API + '/search-employees?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(list) {
+          if (!list.length) { box.innerHTML = '<div style="padding:9px;color:#9ca3af;font-size:12px;">該当なし</div>'; box.style.display = 'block'; return; }
+          box.innerHTML = list.map(function(e) {
+            var div = e.division ? (e.division + '課' + (e.team ? '/' + e.team + '班' : '')) : '';
+            return '<div onclick="eligAddEmpNo(\\'' + escH(e.emp_no) + '\\')" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #f3f4f6;font-size:12px;" onmouseover="this.style.background=\\'#eff6ff\\'" onmouseout="this.style.background=\\'white\\'"><b>' + escH(e.name) + '</b> <span style="color:#9ca3af;">' + escH(e.emp_no) + (div ? ' ・ ' + div : '') + '</span></div>';
+          }).join('');
+          box.style.display = 'block';
+        });
+      }, 250);
+    }
+    function eligAddEmpNo(empNo) {
+      var ta = document.getElementById('f-elig-empnos');
+      var list = eligParseEmpNos(ta.value);
+      if (list.indexOf(empNo) < 0) list.push(empNo);
+      ta.value = list.join('\\n');
+      document.getElementById('f-elig-empsearch').value = '';
+      document.getElementById('f-elig-empresults').style.display = 'none';
+    }
+
     function resetForm() {
       document.getElementById('edit-id').value = '';
-      ['f-title','f-date','f-start','f-end','f-location','f-contact','f-capacity','f-target','f-note'].forEach(function(id) { document.getElementById(id).value = ''; });
+      ['f-title','f-date','f-location','f-contact','f-target','f-note'].forEach(function(id) { document.getElementById(id).value = ''; });
+      document.getElementById('f-category').value = '';
+      renderSlots([{}]);
+      eligPopulate({ mode: 'all' });
       document.getElementById('form-heading').textContent = '新しいイベントを作成';
       document.getElementById('save-btn').textContent = '作成する';
       document.getElementById('cancel-edit-btn').style.display = 'none';
@@ -360,13 +657,13 @@ app.get('/settings/study-sessions', async (c) => {
       document.getElementById('edit-id').value = s.id;
       document.getElementById('f-title').value = s.title;
       document.getElementById('f-date').value = s.date;
-      document.getElementById('f-start').value = s.start_time || '';
-      document.getElementById('f-end').value = s.end_time || '';
+      document.getElementById('f-category').value = s.category_id || '';
       document.getElementById('f-location').value = s.location || '';
       document.getElementById('f-contact').value = s.contact_name || '';
-      document.getElementById('f-capacity').value = s.capacity || 0;
       document.getElementById('f-target').value = s.target_audience || '';
       document.getElementById('f-note').value = s.note || '';
+      renderSlots(s.slots || []);
+      eligPopulate(s.eligibility || { mode: 'all' });
       document.getElementById('form-heading').textContent = 'イベントを編集';
       document.getElementById('save-btn').textContent = '更新する';
       document.getElementById('cancel-edit-btn').style.display = 'inline-block';
@@ -376,18 +673,20 @@ app.get('/settings/study-sessions', async (c) => {
       var errEl = document.getElementById('form-err');
       errEl.style.display = 'none';
       var id = document.getElementById('edit-id').value;
+      var slots = collectSlots();
       var body = {
         title: document.getElementById('f-title').value.trim(),
         date: document.getElementById('f-date').value,
-        start_time: document.getElementById('f-start').value,
-        end_time: document.getElementById('f-end').value,
+        category_id: parseInt(document.getElementById('f-category').value) || null,
         location: document.getElementById('f-location').value.trim(),
         contact_name: document.getElementById('f-contact').value.trim(),
-        capacity: parseInt(document.getElementById('f-capacity').value) || 0,
         target_audience: document.getElementById('f-target').value.trim(),
-        note: document.getElementById('f-note').value.trim()
+        note: document.getElementById('f-note').value.trim(),
+        slots: slots,
+        eligibility: eligCollect()
       };
       if (!body.title || !body.date) { errEl.textContent = 'タイトルと開催日は必須です'; errEl.style.display = 'block'; return; }
+      if (!slots.length) { errEl.textContent = '回を1つ以上入力してください'; errEl.style.display = 'block'; return; }
       var btn = document.getElementById('save-btn');
       btn.disabled = true;
       try {
@@ -416,41 +715,65 @@ app.get('/settings/study-sessions', async (c) => {
       if (res.ok) loadList(); else alert('削除に失敗しました');
     }
     var _participantsSessionId = null;
+    var _participantsSlots = [];
     function openParticipants(s) {
       _participantsSessionId = s.id;
+      _participantsSlots = s.slots || [];
       document.getElementById('participants-panel').style.display = 'block';
       document.getElementById('participants-heading').textContent = '参加者 — ' + s.title;
       document.getElementById('participants-body').innerHTML = '読み込み中...';
+      var slotSel = document.getElementById('add-participant-slot');
+      if (slotSel) {
+        slotSel.innerHTML = _participantsSlots.map(function(sl, i) {
+          return '<option value="' + sl.id + '">' + escH(slotName(sl, i)) + '（' + escH(slotTimeLabel(sl)) + '）</option>';
+        }).join('');
+      }
       document.getElementById('participants-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
       loadParticipants();
     }
     function loadParticipants() {
       fetch(API + '/' + _participantsSessionId + '/participants').then(function(r) { return r.json(); }).then(function(d) {
         var rows = (d.participants || []);
+        var multi = _participantsSlots.length > 1;
         if (rows.length === 0) { document.getElementById('participants-body').innerHTML = '<div style="color:#9ca3af;">まだ参加登録がありません</div>'; return; }
         var attendedCount = rows.filter(function(p) { return p.attended; }).length;
-        var summary = '<div style="font-size:12px;color:#6b7280;margin-bottom:8px;">出席消し込み: ' + attendedCount + ' / ' + rows.length + ' 名</div>';
-        var html = summary + '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-          + '<thead><tr style="background:#f8fafc;"><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">出席</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">社員番号</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">氏名</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">課/班</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">登録日時</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;"></th></tr></thead><tbody>'
-          + rows.map(function(p) {
-              var cancelBtn = EDITABLE ? ('<button onclick="adminCancelParticipant(\\'' + escH(p.emp_no) + '\\')" style="padding:4px 10px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:11px;cursor:pointer;">キャンセル</button>') : '';
-              var attendBtn = EDITABLE
-                ? ('<button onclick="toggleAttend(\\'' + escH(p.emp_no) + '\\', ' + (p.attended ? 0 : 1) + ')" style="padding:5px 14px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid ' + (p.attended ? '#86efac' : '#d1d5db') + ';background:' + (p.attended ? '#f0fdf4' : '#f9fafb') + ';color:' + (p.attended ? '#166534' : '#9ca3af') + ';">' + (p.attended ? '出席済' : '未消込') + '</button>')
-                : ('<span style="color:' + (p.attended ? '#166534' : '#9ca3af') + ';font-weight:700;">' + (p.attended ? '出席済' : '未消込') + '</span>');
-              return '<tr><td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">' + attendBtn + '</td>'
-                + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + escH(p.emp_no) + '</td>'
-                + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-weight:600;">' + escH(p.name || '(該当社員なし)') + '</td>'
-                + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + (p.division ? (p.division + '課' + (p.team ? '/' + p.team + '班' : '')) : '') + '</td>'
-                + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;color:#9ca3af;">' + escH(p.updated_at || '') + '</td>'
-                + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + cancelBtn + '</td></tr>';
-            }).join('')
-          + '</tbody></table>';
+        var summary = '<div style="font-size:12px;color:#6b7280;margin-bottom:8px;">合計 ' + rows.length + ' 名 ・ 出席消し込み ' + attendedCount + ' 名</div>';
+
+        function tblFor(list) {
+          return '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">'
+            + '<thead><tr style="background:#f8fafc;"><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">出席</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">社員番号</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">氏名</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">課/班</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">登録日時</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;"></th></tr></thead><tbody>'
+            + list.map(function(p) {
+                var sid = p.slot_id || 0;
+                var cancelBtn = EDITABLE ? ('<button onclick="adminCancelParticipant(\\'' + escH(p.emp_no) + '\\', ' + sid + ')" style="padding:4px 10px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:11px;cursor:pointer;">キャンセル</button>') : '';
+                var attendBtn = EDITABLE
+                  ? ('<button onclick="toggleAttend(\\'' + escH(p.emp_no) + '\\', ' + (p.attended ? 0 : 1) + ', ' + sid + ')" style="padding:5px 14px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid ' + (p.attended ? '#86efac' : '#d1d5db') + ';background:' + (p.attended ? '#f0fdf4' : '#f9fafb') + ';color:' + (p.attended ? '#166534' : '#9ca3af') + ';">' + (p.attended ? '出席済' : '未消込') + '</button>')
+                  : ('<span style="color:' + (p.attended ? '#166534' : '#9ca3af') + ';font-weight:700;">' + (p.attended ? '出席済' : '未消込') + '</span>');
+                return '<tr><td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">' + attendBtn + '</td>'
+                  + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + escH(p.emp_no) + '</td>'
+                  + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-weight:600;">' + escH(p.name || '(該当社員なし)') + '</td>'
+                  + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + (p.division ? (p.division + '課' + (p.team ? '/' + p.team + '班' : '')) : '') + '</td>'
+                  + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;color:#9ca3af;">' + escH(p.updated_at || '') + '</td>'
+                  + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + cancelBtn + '</td></tr>';
+              }).join('')
+            + '</tbody></table>';
+        }
+
+        var html = summary;
+        if (!multi) {
+          html += tblFor(rows);
+        } else {
+          _participantsSlots.forEach(function(sl, i) {
+            var list = rows.filter(function(p) { return p.slot_id === sl.id; });
+            html += '<div style="font-size:12px;font-weight:700;color:#1e3a5f;margin:6px 0 4px;">' + escH(slotName(sl, i)) + '（' + escH(slotTimeLabel(sl)) + '）— ' + list.length + ' 名</div>';
+            html += list.length ? tblFor(list) : '<div style="color:#9ca3af;font-size:12px;margin-bottom:10px;">登録なし</div>';
+          });
+        }
         document.getElementById('participants-body').innerHTML = html;
       });
     }
-    async function toggleAttend(empNo, attended) {
+    async function toggleAttend(empNo, attended, slotId) {
       var res = await fetch(API + '/' + _participantsSessionId + '/participants/' + encodeURIComponent(empNo) + '/attend', {
-        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ attended: attended })
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ attended: attended, slot_id: slotId })
       });
       if (res.ok) loadParticipants(); else alert('更新に失敗しました');
     }
@@ -473,8 +796,11 @@ app.get('/settings/study-sessions', async (c) => {
       }, 250);
     }
     async function addParticipant(empNo, name) {
+      var slotSel = document.getElementById('add-participant-slot');
+      var slotId = slotSel ? parseInt(slotSel.value) : 0;
+      if (!slotId) { alert('回を選択してください'); return; }
       var res = await fetch(API + '/' + _participantsSessionId + '/participants', {
-        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: empNo })
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: empNo, slot_id: slotId })
       });
       var d = await res.json().catch(function() { return {}; });
       if (!res.ok) { alert(d.error || '追加に失敗しました'); return; }
@@ -483,9 +809,10 @@ app.get('/settings/study-sessions', async (c) => {
       loadParticipants();
       loadList();
     }
-    async function adminCancelParticipant(empNo) {
-      if (!confirm(empNo + ' さんの参加登録を管理者権限でキャンセルします（前日・当日でも取り消せます）。よろしいですか？')) return;
-      var res = await fetch(API + '/' + _participantsSessionId + '/participants/' + encodeURIComponent(empNo), { method: 'DELETE' });
+    async function adminCancelParticipant(empNo, slotId) {
+      if (!confirm(empNo + ' さんのこの回の参加登録を管理者権限でキャンセルします（前日・当日でも取り消せます）。よろしいですか？')) return;
+      var url = API + '/' + _participantsSessionId + '/participants/' + encodeURIComponent(empNo) + (slotId ? ('?slot_id=' + slotId) : '');
+      var res = await fetch(url, { method: 'DELETE' });
       if (res.ok) { loadParticipants(); loadList(); } else { var d = await res.json().catch(function(){return {};}); alert(d.error || 'キャンセルに失敗しました'); }
     }
     function closeParticipants() { document.getElementById('participants-panel').style.display = 'none'; }
@@ -497,14 +824,22 @@ app.get('/settings/study-sessions', async (c) => {
       window._sessions = {};
       sessions.forEach(function(s) { window._sessions[s.id] = s; });
       if (sessions.length === 0) { document.getElementById('list-body').innerHTML = '<div style="color:#9ca3af;">まだイベントが登録されていません</div>'; return; }
-      var html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:760px;">'
-        + '<thead><tr style="background:#f8fafc;"><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">状態</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">タイトル</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">開催日時</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">集合場所</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">参加者</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;"></th></tr></thead><tbody>'
+      var html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;min-width:820px;">'
+        + '<thead><tr style="background:#f8fafc;"><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">状態</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">カテゴリー</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">タイトル</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">開催日・回</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">集合場所</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">参加者</th><th style="padding:7px 8px;text-align:left;border-bottom:2px solid #e5e7eb;"></th></tr></thead><tbody>'
         + sessions.map(function(s) {
             var st = statusOf(s);
-            var timeLabel = (s.start_time || '') + (s.end_time ? '〜' + s.end_time : '');
-            var capLabel = s.capacity > 0 ? (s.participant_count + ' / ' + s.capacity + '名') : (s.participant_count + '名（無制限）');
+            var slots = s.slots || [];
+            var timeLabel = slots.length <= 1
+              ? (slots[0] ? slotTimeLabel(slots[0]) : '')
+              : (slots.length + '回：' + slots.map(function(sl, i) { return slotName(sl, i) + ' ' + slotTimeLabel(sl); }).join(' / '));
+            var total = eventTotalCount(s);
+            var capSum = slots.reduce(function(a, sl) { return a + (sl.capacity > 0 ? sl.capacity : 0); }, 0);
+            var anyUnlimited = slots.some(function(sl) { return !(sl.capacity > 0); });
+            var capLabel = (capSum > 0 && !anyUnlimited) ? (total + ' / ' + capSum + '名') : (total + '名');
+            var catLabel = s.category_name ? ('<span style="display:inline-block;padding:2px 8px;border-radius:6px;background:#eff6ff;color:#1e3a5f;font-size:11px;font-weight:700;">' + escH(s.category_name) + '</span>') : '<span style="color:#cbd5e1;">—</span>';
             var ops = '<button onclick="openParticipants(window._sessions[' + s.id + '])" style="padding:5px 10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a5f;border-radius:6px;font-size:11px;cursor:pointer;margin-right:4px;">参加者</button>'
               + '<a href="${ADMIN_PATH}/settings/study-sessions/' + s.id + '/poster" target="_blank" style="display:inline-block;padding:5px 10px;background:#f0fdf4;border:1px solid #86efac;color:#166534;border-radius:6px;font-size:11px;text-decoration:none;margin-right:4px;">ポスター</a>'
+              + '<a href="${ADMIN_PATH}/settings/study-sessions/' + s.id + '/guide" target="_blank" style="display:inline-block;padding:5px 10px;background:#eef4ff;border:1px solid #bfd4ff;color:#1e40af;border-radius:6px;font-size:11px;text-decoration:none;margin-right:4px;">当日のご案内</a>'
               + '<a href="${ADMIN_PATH}/settings/study-sessions/' + s.id + '/roster" target="_blank" style="display:inline-block;padding:5px 10px;background:#fefce8;border:1px solid #fde68a;color:#92400e;border-radius:6px;font-size:11px;text-decoration:none;margin-right:4px;">名簿印刷</a>';
             if (EDITABLE) {
               ops += '<button onclick="editSession(window._sessions[' + s.id + '])" style="padding:5px 10px;background:#f9fafb;border:1px solid #d1d5db;color:#374151;border-radius:6px;font-size:11px;cursor:pointer;margin-right:4px;">編集</button>'
@@ -512,8 +847,11 @@ app.get('/settings/study-sessions', async (c) => {
                 + '<button onclick="deleteSession(window._sessions[' + s.id + '])" style="padding:5px 10px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:11px;cursor:pointer;">削除</button>';
             }
             return '<tr><td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;"><span style="display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;color:' + st.color + ';background:' + st.bg + ';">' + st.label + '</span></td>'
-              + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;font-weight:600;color:#1e3a5f;">' + escH(s.title) + '</td>'
-              + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">' + fmtDate(s.date) + ' ' + escH(timeLabel) + '</td>'
+              + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">' + catLabel + '</td>'
+              + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;font-weight:600;color:#1e3a5f;">' + escH(s.title)
+                + ((s.eligibility_label && s.eligibility_label !== '全員') ? ('<div style="font-size:10px;font-weight:400;color:#b45309;margin-top:2px;">対象: ' + escH(s.eligibility_label) + '</div>') : '')
+                + '</td>'
+              + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;">' + fmtDate(s.date) + ' <span style="color:#6b7280;">' + escH(timeLabel) + '</span></td>'
               + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;">' + escH(s.location || '') + '</td>'
               + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">' + capLabel + '</td>'
               + '<td style="padding:7px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">' + ops + '</td></tr>';
@@ -1099,13 +1437,75 @@ app.get('/settings/study-sessions', async (c) => {
       svResults(sid, true);
     }
 
+    // ===== 台本 =====
+    var DH_API = '${ADMIN_PATH}/api/daihon';
+    var DH_BASE = '${ADMIN_PATH}/daihon';
+    var dhLoaded = false;
+    var dhDecks = [];
+    async function loadScripts(force) {
+      if (dhLoaded && !force) return;
+      dhLoaded = true;
+      var box = document.getElementById('dh-list');
+      try {
+        var res = await fetch(DH_API + '/decks');
+        var d = await res.json();
+        var list = d.decks || [];
+        dhDecks = list;
+        var canEd = !!d.editable;
+        if (!list.length) {
+          box.innerHTML = '<div style="color:#9ca3af;">まだ台本はありません。' + (canEd ? '上の「＋ 新しい台本を作成」から作成できます。' : '') + '</div>';
+          return;
+        }
+        box.innerHTML = '<div style="display:flex;flex-direction:column;gap:10px;">' + list.map(function(x) {
+          return '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;">'
+            + '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">'
+            + '<span style="font-size:14px;font-weight:700;color:#1e3a5f;">' + escH(x.title) + '</span>'
+            + (x.subtitle ? '<span style="font-size:12px;color:#6b7280;">' + escH(x.subtitle) + '</span>' : '')
+            + '<span style="font-size:11px;color:#9ca3af;">スライド ' + (x.slide_count || 0) + '枚' + (x.speaker ? '・講師 ' + escH(x.speaker) : '') + '</span>'
+            + '</div>'
+            + (x.intro ? '<div style="font-size:12px;color:#6b7280;margin-top:6px;line-height:1.7;">' + escH(x.intro) + '</div>' : '')
+            + '<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">'
+            + '<a href="' + DH_BASE + '/' + x.id + '/present" target="_blank" rel="noopener" style="padding:7px 14px;background:#2563eb;color:#fff;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">プレゼンを開く</a>'
+            + '<a href="' + DH_BASE + '/' + x.id + '" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">' + (canEd ? '編集' : '内容を見る') + '</a>'
+            + '<a href="' + DH_BASE + '/' + x.id + '/print" target="_blank" rel="noopener" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">印刷（台本つき）</a>'
+            + '<button type="button" onclick="dhCopyUrl(' + x.id + ')" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">投影URLをコピー</button>'
+            + (canEd ? '<button type="button" onclick="dhDelete(' + x.id + ')" style="padding:7px 12px;background:#fff;color:#b91c1c;border:1px solid #fecaca;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">削除</button>' : '')
+            + '</div></div>';
+        }).join('') + '</div>';
+      } catch (e) {
+        box.innerHTML = '<div style="color:#dc2626;">読み込みに失敗しました</div>';
+      }
+    }
+    async function dhNew() {
+      var t = (document.getElementById('dh-new-title').value || '').trim();
+      if (!t) { alert('タイトルを入力してください'); return; }
+      var res = await fetch(DH_API + '/decks', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title: t }) });
+      var j = await res.json().catch(function(){ return {}; });
+      if (j && j.id) { location.href = DH_BASE + '/' + j.id; }
+      else { alert((j && j.error) || '作成に失敗しました'); }
+    }
+    function dhCopyUrl(id) {
+      var url = location.origin + DH_BASE + '/' + id + '/present';
+      navigator.clipboard.writeText(url).then(function(){ alert('投影URLをコピーしました:\\n' + url); }, function(){ prompt('投影URL', url); });
+    }
+    async function dhDelete(id) {
+      var deck = dhDecks.filter(function(x){ return x.id === id; })[0] || {};
+      if (!confirm('台本「' + (deck.title || '') + '」をスライドごと削除します。よろしいですか？（この操作は取り消せません）')) return;
+      var res = await fetch(DH_API + '/decks/' + id, { method:'DELETE' });
+      if (res.ok) loadScripts(true); else alert('削除に失敗しました');
+    }
+
     loadList();
     loadPenalties();
     loadRequests();
+    if (EDITABLE) { loadCategories(); renderSlots([{}]); eligPopulate({ mode: 'all' }); }
     (function() {
       var t = null;
       try { t = new URLSearchParams(location.search).get('tab'); } catch (e) {}
-      switchTab((t === 'opinions' || t === 'hiyari' || t === 'surveys') ? t : 'sessions');
+      var avail = Array.prototype.map.call(document.querySelectorAll('.ob-tab-btn'), function(b) { return b.getAttribute('data-tab'); });
+      var want = (t === 'opinions' || t === 'hiyari' || t === 'surveys' || t === 'script') ? t : 'sessions';
+      if (avail.indexOf(want) === -1) want = avail[0] || 'sessions';
+      switchTab(want);
     })();
     </script>`;
   return c.html(layout(officeLabel, html, 'office-page'));
@@ -1247,11 +1647,23 @@ app.get('/settings/study-sessions/:id/poster', async (c) => {
   const session = await c.env.DB.prepare('SELECT * FROM study_sessions WHERE id = ?').bind(id).first<StudySession>();
   if (!session) return c.text('対象が見つかりません', 404);
 
+  const slots = (await c.env.DB.prepare(
+    'SELECT id, slot_order, label, start_time, end_time, capacity FROM study_session_slots WHERE session_id = ? ORDER BY slot_order, id'
+  ).bind(id).all<{ slot_order: number; label: string | null; start_time: string | null; end_time: string | null; capacity: number }>()).results ?? [];
+
   const WD = ['日', '月', '火', '水', '木', '金', '土'];
   const d = new Date(session.date + 'T00:00:00');
   const dateLabel = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${WD[d.getDay()]}）`;
-  const timeLabel = [session.start_time, session.end_time].filter(Boolean).join(' 〜 ') || '別途ご案内';
-  const capNote = session.capacity > 0 ? `【定員 ${session.capacity}名・先着順】定員に達し次第、受付を終了します` : '';
+  const slotTime = (sl: { start_time: string | null; end_time: string | null }) =>
+    [sl.start_time, sl.end_time].filter(Boolean).join(' 〜 ') || '別途ご案内';
+  const timeLabelHtml = slots.length <= 1
+    ? escHtml(slots[0] ? slotTime(slots[0]) : '別途ご案内')
+    : slots.map((sl, i) => `${escHtml(sl.label || `${i + 1}回目`)}　${escHtml(slotTime(sl))}`).join('<br>');
+  const capSum = slots.reduce((a, sl) => a + (sl.capacity > 0 ? sl.capacity : 0), 0);
+  const anyUnlimited = slots.some((sl) => !(sl.capacity > 0));
+  const capNote = (capSum > 0 && !anyUnlimited)
+    ? `【定員 各回あわせて ${capSum}名・先着順】定員に達し次第、受付を終了します`
+    : '';
 
   return c.html(`<!DOCTYPE html>
 <html lang="ja">
@@ -1363,7 +1775,7 @@ app.get('/settings/study-sessions/:id/poster', async (c) => {
         <div class="eyebrow">EVENT</div>
         <div class="title">${escHtml(session.title)}</div>
         <div class="info-table">
-          <div class="info-row"><div class="info-label">日　時</div><div class="info-value">${escHtml(dateLabel)}<br>${escHtml(timeLabel)}</div></div>
+          <div class="info-row"><div class="info-label">日　時</div><div class="info-value">${escHtml(dateLabel)}<br>${timeLabelHtml}</div></div>
           <div class="info-row"><div class="info-label">集合場所</div><div class="info-value">${escHtml(session.location || '別途ご案内')}</div></div>
           <div class="info-row"><div class="info-label">担　当</div><div class="info-value">${escHtml(session.contact_name || '別途ご案内')}</div></div>
           ${session.target_audience ? `<div class="info-row"><div class="info-label">対　象</div><div class="info-value">${escHtml(session.target_audience)}</div></div>` : ''}
@@ -1395,11 +1807,116 @@ app.get('/settings/study-sessions/:id/poster', async (c) => {
 </html>`);
 });
 
-// ===== ページ: 参加者名簿印刷（A4・タイトル編集可・課ごと/全員・全ページ右下に印鑑欄） =====
+// ===== ページ: 当日のご案内チラシ（パワポ風の自由配置エディタ） =====
+app.get('/settings/study-sessions/:id/guide', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  const session = await c.env.DB.prepare('SELECT id, title FROM study_sessions WHERE id = ?').bind(id).first<{ id: number; title: string }>();
+  if (!session) return c.text('イベントが見つかりません', 404);
+  return c.html(renderGuideEditor({
+    adminPath: ADMIN_PATH,
+    sessionId: id,
+    title: session.title,
+    editable: await canEdit(c),
+  }));
+});
+
+// ===== API: 当日のご案内チラシ =====
+// 編集ページ起動時の初期データ（保存済みレイアウト・イベント情報・参加者・他イベント・QR）
+app.get('/api/study-sessions/:id/guide-data', async (c) => {
+  const id = parseInt(c.req.param('id'));
+  const session = await c.env.DB.prepare(`
+    SELECT s.*, cat.name AS category_name
+    FROM study_sessions s LEFT JOIN study_session_categories cat ON cat.id = s.category_id
+    WHERE s.id = ?`).bind(id).first<StudySession & { category_name: string | null }>();
+  if (!session) return c.json({ error: 'イベントが見つかりません' }, 404);
+
+  const slots = (await c.env.DB.prepare(
+    'SELECT id, slot_order, label, start_time, end_time, capacity FROM study_session_slots WHERE session_id = ? ORDER BY slot_order, id'
+  ).bind(id).all<{ id: number; slot_order: number; label: string | null; start_time: string | null; end_time: string | null; capacity: number }>()).results ?? [];
+
+  const WD = ['日', '月', '火', '水', '木', '金', '土'];
+  const fmtDateLabel = (ymd: string): string => {
+    const d = new Date(ymd + 'T00:00:00');
+    if (isNaN(d.getTime())) return ymd;
+    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${WD[d.getDay()]}）`;
+  };
+  const slotTime = (sl: { start_time: string | null; end_time: string | null }) =>
+    [sl.start_time, sl.end_time].filter(Boolean).join(' 〜 ') || '別途ご案内';
+  const slotLine = slots.length <= 1
+    ? (slots[0] ? slotTime(slots[0]) : '別途ご案内')
+    : slots.map((sl, i) => `${sl.label || `${i + 1}回目`} ${slotTime(sl)}`).join(' / ');
+
+  const saved = await c.env.DB.prepare(
+    'SELECT paper, layout_json FROM study_session_guide_layouts WHERE session_id = ?'
+  ).bind(id).first<{ paper: string; layout_json: string }>();
+
+  // 参加者（同じ人が複数の回にいても1人にまとめ、回の名前を並べて添える）
+  const prows = (await c.env.DB.prepare(`
+    SELECT p.emp_no, e.name, e.division, e.team,
+      GROUP_CONCAT(COALESCE(sl.label, sl.slot_order || '回目'), ' / ') AS slot_labels,
+      MIN(sl.slot_order) AS ord
+    FROM study_session_participants p
+    LEFT JOIN study_session_slots sl ON sl.id = p.slot_id
+    LEFT JOIN employees e ON e.emp_no = p.emp_no
+    WHERE p.session_id = ?
+    GROUP BY p.emp_no
+    ORDER BY e.division, e.team, e.name
+  `).bind(id).all<{ emp_no: string; name: string | null; division: number | null; team: number | null; slot_labels: string | null }>()).results ?? [];
+
+  // 募集中の他イベント（開催日が今日以降・締切していないもの）
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const orows = (await c.env.DB.prepare(`
+    SELECT s.title, s.date, cat.name AS category_name
+    FROM study_sessions s LEFT JOIN study_session_categories cat ON cat.id = s.category_id
+    WHERE s.id != ? AND s.is_closed = 0 AND s.date >= ?
+    ORDER BY s.date, s.id LIMIT 6
+  `).bind(id, today).all<{ title: string; date: string; category_name: string | null }>()).results ?? [];
+
+  return c.json({
+    session: {
+      id: session.id, title: session.title, date: session.date, dateLabel: fmtDateLabel(session.date),
+      location: session.location, contact_name: session.contact_name,
+      target_audience: session.target_audience, note: session.note, category_name: session.category_name,
+    },
+    slotLine,
+    slots: slots.map((sl, i) => ({ label: sl.label || `${i + 1}回目`, time: slotTime(sl), capacity: sl.capacity })),
+    saved: saved ?? null,
+    participants: prows.map((p) => ({
+      emp_no: p.emp_no, name: p.name, division: p.division, team: p.team, slot_labels: p.slot_labels || '',
+    })),
+    otherEvents: orows.map((o) => ({ title: o.title, dateLabel: fmtDateLabel(o.date), category_name: o.category_name })),
+    qrSvg: tokenToQrSvg(shareUrl(), 6),
+    shareUrl: shareUrl(),
+  });
+});
+
+// レイアウトの保存（イベントごとに1レコード・upsert）
+app.put('/api/study-sessions/:id/guide-layout', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const id = parseInt(c.req.param('id'));
+  const session = await c.env.DB.prepare('SELECT id FROM study_sessions WHERE id = ?').bind(id).first();
+  if (!session) return c.json({ error: 'イベントが見つかりません' }, 404);
+  const b = await c.req.json<{ paper?: string; layout_json?: string }>();
+  const paper = ['a4p', 'a4l', 'a3p'].includes(String(b.paper)) ? String(b.paper) : 'a4p';
+  const layoutJson = typeof b.layout_json === 'string' ? b.layout_json : JSON.stringify(b.layout_json ?? {});
+  if (layoutJson.length > 1_800_000) return c.json({ error: 'データが大きすぎます（画像を減らしてください）' }, 413);
+  await c.env.DB.prepare(`
+    INSERT INTO study_session_guide_layouts (session_id, paper, layout_json, updated_at)
+    VALUES (?, ?, ?, datetime('now','localtime'))
+    ON CONFLICT(session_id) DO UPDATE SET paper = excluded.paper, layout_json = excluded.layout_json, updated_at = datetime('now','localtime')
+  `).bind(id, paper, layoutJson).run();
+  return c.json({ ok: true });
+});
+
+
 app.get('/settings/study-sessions/:id/roster', async (c) => {
   const id = parseInt(c.req.param('id'));
   const session = await c.env.DB.prepare('SELECT * FROM study_sessions WHERE id = ?').bind(id).first<StudySession>();
   if (!session) return c.text('イベントが見つかりません', 404);
+
+  const slots = (await c.env.DB.prepare(
+    'SELECT id, slot_order, label, start_time, end_time FROM study_session_slots WHERE session_id = ? ORDER BY slot_order, id'
+  ).bind(id).all<{ id: number; slot_order: number; label: string | null; start_time: string | null; end_time: string | null }>()).results ?? [];
 
   const WD = ['日', '月', '火', '水', '木', '金', '土'];
   const d = new Date(session.date + 'T00:00:00');
@@ -1468,6 +1985,7 @@ app.get('/settings/study-sessions/:id/roster', async (c) => {
       <option value="3">3課のみ</option>
       <option value="4">4課のみ</option>
     </select></label>
+    <label id="slot-filter-wrap" style="display:none;">回<select id="slot-select" onchange="renderPages()"><option value="0">すべての回</option></select></label>
     <button onclick="window.print()">印刷する</button>
     <span class="hint" id="page-count-hint"></span>
   </div>
@@ -1477,9 +1995,16 @@ function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').rep
 var _rows = [];
 var SESSION_TITLE = ${JSON.stringify(session.title)};
 var SESSION_META = ${JSON.stringify(`${dateLabel}　${session.location || ''}`)};
+var SLOTS = ${JSON.stringify(slots.map((sl, i) => ({ id: sl.id, name: sl.label || `${i + 1}回目`, time: [sl.start_time, sl.end_time].filter(Boolean).join('〜') })))};
 var ROWS_PER_PAGE = 28;
+function slotNameOf(id) { for (var i = 0; i < SLOTS.length; i++) if (SLOTS[i].id === id) return SLOTS[i].name; return ''; }
 
 async function load() {
+  if (SLOTS.length > 1) {
+    document.getElementById('slot-filter-wrap').style.display = 'flex';
+    document.getElementById('slot-select').innerHTML = '<option value="0">すべての回</option>'
+      + SLOTS.map(function(sl) { return '<option value="' + sl.id + '">' + escH(sl.name) + (sl.time ? '（' + escH(sl.time) + '）' : '') + '</option>'; }).join('');
+  }
   var res = await fetch('${ADMIN_PATH}/api/study-sessions/${id}/participants');
   var d = await res.json();
   _rows = d.participants || [];
@@ -1495,10 +2020,13 @@ function stampFooterHtml() {
     + '</div></div>';
 }
 
+var _showSlotCol = false;
 function tableHtml(rows) {
-  return '<table><thead><tr><th class="center" style="width:14mm;">課</th><th class="center" style="width:14mm;">班</th><th style="width:30mm;">社員番号</th><th>氏名</th><th class="center" style="width:18mm;">出席</th></tr></thead><tbody>'
+  var slotTh = _showSlotCol ? '<th style="width:24mm;">回</th>' : '';
+  return '<table><thead><tr>' + slotTh + '<th class="center" style="width:14mm;">課</th><th class="center" style="width:14mm;">班</th><th style="width:30mm;">社員番号</th><th>氏名</th><th class="center" style="width:18mm;">出席</th></tr></thead><tbody>'
     + rows.map(function(p) {
-        return '<tr><td class="center">' + (p.division || '') + '</td><td class="center">' + (p.team || '') + '</td><td>' + escH(p.emp_no) + '</td><td>' + escH(p.name || '(該当社員なし)') + '</td>'
+        var slotTd = _showSlotCol ? ('<td>' + escH(slotNameOf(p.slot_id)) + '</td>') : '';
+        return '<tr>' + slotTd + '<td class="center">' + (p.division || '') + '</td><td class="center">' + (p.team || '') + '</td><td>' + escH(p.emp_no) + '</td><td>' + escH(p.name || '(該当社員なし)') + '</td>'
           + '<td class="center">' + (p.attended ? '✓' : '<span class="stamp"></span>') + '</td></tr>';
       }).join('')
     + '</tbody></table>';
@@ -1507,7 +2035,12 @@ function tableHtml(rows) {
 function renderPages() {
   var title = document.getElementById('title-input').value || '参加者名簿';
   var div = parseInt(document.getElementById('division-select').value);
-  var rows = div ? _rows.filter(function(p) { return p.division === div; }) : _rows;
+  var slotSel = document.getElementById('slot-select');
+  var slotId = slotSel ? parseInt(slotSel.value) : 0;
+  var rows = _rows;
+  if (div) rows = rows.filter(function(p) { return p.division === div; });
+  if (slotId) rows = rows.filter(function(p) { return p.slot_id === slotId; });
+  _showSlotCol = (SLOTS.length > 1 && !slotId);
   var stage = document.getElementById('stage');
 
   if (rows.length === 0) {
@@ -1564,22 +2097,184 @@ window.addEventListener('beforeprint', fitAllSheets);
 });
 
 // ===== API =====
+
+// 回（slot）を保存する。incoming に id 付きは更新、id 無しは新規、
+// 既存で incoming に無いものは参加者ゼロなら削除・いれば拒否。
+// 併せて study_sessions の start_time/end_time/capacity を先頭回にミラーする（ポスター等の後方互換）。
+async function writeSlots(
+  db: D1Database, sessionId: number,
+  slots: { id: number | null; label: string | null; start_time: string | null; end_time: string | null; capacity: number }[],
+): Promise<{ error?: string }> {
+  const existing = await db.prepare('SELECT id FROM study_session_slots WHERE session_id = ?')
+    .bind(sessionId).all<{ id: number }>();
+  const existingIds = new Set((existing.results ?? []).map((r) => r.id));
+  const keptIds = new Set<number>();
+
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i];
+    if (s.id && existingIds.has(s.id)) {
+      keptIds.add(s.id);
+      await db.prepare(
+        `UPDATE study_session_slots SET slot_order = ?, label = ?, start_time = ?, end_time = ?, capacity = ?, updated_at = datetime('now','localtime')
+         WHERE id = ? AND session_id = ?`
+      ).bind(i, s.label, s.start_time, s.end_time, s.capacity, s.id, sessionId).run();
+    } else {
+      await db.prepare(
+        `INSERT INTO study_session_slots (session_id, slot_order, label, start_time, end_time, capacity)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(sessionId, i, s.label, s.start_time, s.end_time, s.capacity).run();
+    }
+  }
+
+  for (const oldId of existingIds) {
+    if (keptIds.has(oldId)) continue;
+    const cnt = await db.prepare('SELECT COUNT(*) AS n FROM study_session_participants WHERE slot_id = ?')
+      .bind(oldId).first<{ n: number }>();
+    if ((cnt?.n ?? 0) > 0) return { error: '参加者がいる回は削除できません。先に参加者を移動・取り消してください' };
+    await db.prepare('DELETE FROM study_session_slots WHERE id = ?').bind(oldId).run();
+  }
+
+  const first = slots[0];
+  await db.prepare(
+    `UPDATE study_sessions SET start_time = ?, end_time = ?, capacity = ?, updated_at = datetime('now','localtime') WHERE id = ?`
+  ).bind(first.start_time, first.end_time, first.capacity, sessionId).run();
+  return {};
+}
+
 app.get('/api/study-sessions', async (c) => {
   const rows = await c.env.DB.prepare(`
-    SELECT s.*, (SELECT COUNT(*) FROM study_session_participants p WHERE p.session_id = s.id) AS participant_count
-    FROM study_sessions s ORDER BY s.date DESC, s.id DESC
+    SELECT s.*, cat.name AS category_name,
+      (SELECT COUNT(*) FROM study_session_participants p WHERE p.session_id = s.id) AS participant_count
+    FROM study_sessions s
+    LEFT JOIN study_session_categories cat ON cat.id = s.category_id
+    ORDER BY s.date DESC, s.id DESC
+  `).all<Record<string, unknown>>();
+  const sessions = rows.results ?? [];
+  const slotRows = await c.env.DB.prepare(`
+    SELECT sl.id, sl.session_id, sl.slot_order, sl.label, sl.start_time, sl.end_time, sl.capacity,
+      (SELECT COUNT(*) FROM study_session_participants p WHERE p.slot_id = sl.id) AS participant_count
+    FROM study_session_slots sl
+    ORDER BY sl.slot_order, sl.id
+  `).all<{ session_id: number } & Record<string, unknown>>();
+  const bySession = new Map<number, unknown[]>();
+  for (const r of slotRows.results ?? []) {
+    if (!bySession.has(r.session_id)) bySession.set(r.session_id, []);
+    bySession.get(r.session_id)!.push(r);
+  }
+  for (const s of sessions) {
+    s.slots = bySession.get(s.id as number) ?? [];
+    const elig = parseEligibility(s.eligibility_json as string | null);
+    s.eligibility = elig;
+    s.eligibility_label = describeEligibility(elig);
+  }
+  return c.json({ sessions });
+});
+
+// カテゴリーマスター（公演／勉強会など・管理画面で編集）
+app.get('/api/study-sessions/categories', async (c) => {
+  const rows = await c.env.DB.prepare(`
+    SELECT cat.id, cat.name, cat.sort_order,
+      (SELECT COUNT(*) FROM study_sessions s WHERE s.category_id = cat.id) AS use_count
+    FROM study_session_categories cat ORDER BY cat.sort_order, cat.id
   `).all();
-  return c.json({ sessions: rows.results ?? [] });
+  return c.json({ categories: rows.results ?? [] });
+});
+
+app.post('/api/study-sessions/categories', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ name?: string }>();
+  const name = S(b.name, 40);
+  if (!name) return c.json({ error: 'カテゴリー名を入力してください' }, 400);
+  const max = await c.env.DB.prepare('SELECT COALESCE(MAX(sort_order), 0) AS m FROM study_session_categories').first<{ m: number }>();
+  const r = await c.env.DB.prepare('INSERT INTO study_session_categories (name, sort_order) VALUES (?, ?)')
+    .bind(name, (max?.m ?? 0) + 10).run();
+  return c.json({ ok: true, id: r.meta.last_row_id });
+});
+
+app.put('/api/study-sessions/categories/:id', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const id = parseInt(c.req.param('id'));
+  const b = await c.req.json<{ name?: string }>();
+  const name = S(b.name, 40);
+  if (!name) return c.json({ error: 'カテゴリー名を入力してください' }, 400);
+  await c.env.DB.prepare("UPDATE study_session_categories SET name = ? WHERE id = ?").bind(name, id).run();
+  return c.json({ ok: true });
+});
+
+// 並べ替え（管理画面の▲▼ボタン）: 与えられた id 配列の順に sort_order を振り直す
+app.post('/api/study-sessions/categories/reorder', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ order?: number[] }>();
+  const order = Array.isArray(b.order) ? b.order.filter((n) => Number.isFinite(n)) : [];
+  for (let i = 0; i < order.length; i++) {
+    await c.env.DB.prepare('UPDATE study_session_categories SET sort_order = ? WHERE id = ?').bind((i + 1) * 10, order[i]).run();
+  }
+  return c.json({ ok: true });
+});
+
+app.delete('/api/study-sessions/categories/:id', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const id = parseInt(c.req.param('id'));
+  const cnt = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM study_sessions WHERE category_id = ?').bind(id).first<{ n: number }>();
+  if ((cnt?.n ?? 0) > 0) return c.json({ error: 'このカテゴリーを使っているイベントがあるため削除できません' }, 400);
+  await c.env.DB.prepare('DELETE FROM study_session_categories WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
+// 「当日のご案内」チラシの名前付きテンプレート（他イベントへ使い回す雛形）
+// ※ /:id/participants より前に置くこと（"guide-templates" が id に食われないように）
+app.get('/api/study-sessions/guide-templates', async (c) => {
+  const rows = await c.env.DB.prepare(
+    'SELECT id, name, paper, created_at FROM study_session_guide_templates ORDER BY created_at DESC, id DESC'
+  ).all();
+  return c.json({ templates: rows.results ?? [] });
+});
+
+app.get('/api/study-sessions/guide-templates/:tid', async (c) => {
+  const tid = parseInt(c.req.param('tid'));
+  const row = await c.env.DB.prepare(
+    'SELECT id, name, paper, layout_json, created_at FROM study_session_guide_templates WHERE id = ?'
+  ).bind(tid).first();
+  if (!row) return c.json({ error: '見つかりません' }, 404);
+  return c.json({ template: row });
+});
+
+app.post('/api/study-sessions/guide-templates', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ name?: string; paper?: string; layout_json?: string }>();
+  const name = S(b.name, 60);
+  if (!name) return c.json({ error: 'テンプレート名を入力してください' }, 400);
+  const paper = ['a4p', 'a4l', 'a3p'].includes(String(b.paper)) ? String(b.paper) : 'a4p';
+  const layoutJson = typeof b.layout_json === 'string' ? b.layout_json : JSON.stringify(b.layout_json ?? {});
+  if (layoutJson.length > 1_800_000) return c.json({ error: 'データが大きすぎます（画像を減らしてください）' }, 413);
+  let createdBy = '';
+  try {
+    const me = await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?').bind(c.get('adminId')).first<{ username: string }>();
+    createdBy = me?.username ?? '';
+  } catch { /* username 取得失敗は無視 */ }
+  const r = await c.env.DB.prepare(
+    "INSERT INTO study_session_guide_templates (name, paper, layout_json, created_by) VALUES (?, ?, ?, ?)"
+  ).bind(name, paper, layoutJson, createdBy).run();
+  return c.json({ ok: true, id: r.meta.last_row_id });
+});
+
+app.delete('/api/study-sessions/guide-templates/:tid', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const tid = parseInt(c.req.param('tid'));
+  await c.env.DB.prepare('DELETE FROM study_session_guide_templates WHERE id = ?').bind(tid).run();
+  return c.json({ ok: true });
 });
 
 app.get('/api/study-sessions/:id/participants', async (c) => {
   const id = parseInt(c.req.param('id'));
   const rows = await c.env.DB.prepare(`
-    SELECT p.emp_no, p.updated_at, p.attended, e.name, e.division, e.team
+    SELECT p.emp_no, p.updated_at, p.attended, p.slot_id, sl.label AS slot_label, sl.slot_order, sl.start_time AS slot_start,
+      e.name, e.division, e.team
     FROM study_session_participants p
+    LEFT JOIN study_session_slots sl ON sl.id = p.slot_id
     LEFT JOIN employees e ON e.emp_no = p.emp_no
     WHERE p.session_id = ?
-    ORDER BY e.division, e.team, p.updated_at
+    ORDER BY sl.slot_order, sl.id, e.division, e.team, p.updated_at
   `).bind(id).all();
   return c.json({ participants: rows.results ?? [] });
 });
@@ -1605,66 +2300,78 @@ app.get('/api/study-sessions/search-employees', async (c) => {
   return c.json(rows.results ?? []);
 });
 
-// 管理者による突発的な参加者の手動追加（定員・締切・開催日を問わず追加できる）
+// 管理者による突発的な参加者の手動追加（定員・締切・開催日を問わず追加できる）。slot_id 必須
 app.post('/api/study-sessions/:id/participants', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
   const id = parseInt(c.req.param('id'));
   const session = await c.env.DB.prepare('SELECT id FROM study_sessions WHERE id = ?').bind(id).first();
   if (!session) return c.json({ error: 'イベントが見つかりません' }, 404);
-  const b = await c.req.json<{ emp_no?: string }>();
+  const b = await c.req.json<{ emp_no?: string; slot_id?: number }>();
   const empNo = S(b.emp_no, 20);
   if (!empNo) return c.json({ error: '社員番号を指定してください' }, 400);
+  const slotId = Number.isFinite(b.slot_id) ? Math.floor(b.slot_id as number) : 0;
+  const slot = await c.env.DB.prepare('SELECT id FROM study_session_slots WHERE id = ? AND session_id = ?').bind(slotId, id).first();
+  if (!slot) return c.json({ error: '回を指定してください' }, 400);
   const emp = await c.env.DB.prepare('SELECT emp_no FROM employees WHERE emp_no = ? AND is_active = 1').bind(empNo).first();
   if (!emp) return c.json({ error: '該当する社員が見つかりません' }, 404);
   await c.env.DB.prepare(
-    `INSERT INTO study_session_participants (session_id, emp_no) VALUES (?, ?)
-     ON CONFLICT(session_id, emp_no) DO UPDATE SET updated_at = datetime('now','localtime')`
-  ).bind(id, empNo).run();
+    `INSERT INTO study_session_participants (session_id, slot_id, emp_no) VALUES (?, ?, ?)
+     ON CONFLICT(session_id, emp_no, slot_id) DO UPDATE SET updated_at = datetime('now','localtime')`
+  ).bind(id, slotId, empNo).run();
   return c.json({ ok: true });
 });
 
-// 当日の出席消し込み（管理者がチェック・取り消しできる）
+// 当日の出席消し込み（管理者がチェック・取り消しできる）。slot_id で回を特定
 app.post('/api/study-sessions/:id/participants/:emp_no/attend', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
   const id = parseInt(c.req.param('id'));
   const empNo = c.req.param('emp_no');
-  const b = await c.req.json<{ attended?: number }>();
+  const b = await c.req.json<{ attended?: number; slot_id?: number }>();
+  const slotId = Number.isFinite(b.slot_id) ? Math.floor(b.slot_id as number) : 0;
   await c.env.DB.prepare(
-    `UPDATE study_session_participants SET attended = ?, updated_at = datetime('now','localtime') WHERE session_id = ? AND emp_no = ?`
-  ).bind(b.attended ? 1 : 0, id, empNo).run();
+    `UPDATE study_session_participants SET attended = ?, updated_at = datetime('now','localtime') WHERE session_id = ? AND emp_no = ? AND slot_id = ?`
+  ).bind(b.attended ? 1 : 0, id, empNo, slotId).run();
   return c.json({ ok: true });
 });
 
 // 管理者による強制キャンセル（前日・当日以降でも取り消し可。公開側のキャンセル回数ペナルティには加算しない）
+// slot_id 指定時はその回のみ、無指定ならイベント全回の登録を取り消す
 app.delete('/api/study-sessions/:id/participants/:emp_no', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
   const id = parseInt(c.req.param('id'));
   const empNo = c.req.param('emp_no');
-  await c.env.DB.prepare('DELETE FROM study_session_participants WHERE session_id = ? AND emp_no = ?').bind(id, empNo).run();
+  const slotId = parseInt(c.req.query('slot_id') ?? '', 10);
+  if (Number.isFinite(slotId) && slotId > 0) {
+    await c.env.DB.prepare('DELETE FROM study_session_participants WHERE session_id = ? AND emp_no = ? AND slot_id = ?').bind(id, empNo, slotId).run();
+  } else {
+    await c.env.DB.prepare('DELETE FROM study_session_participants WHERE session_id = ? AND emp_no = ?').bind(id, empNo).run();
+  }
   return c.json({ ok: true });
 });
 
 app.post('/api/study-sessions', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
   const b = await c.req.json<{
-    title?: string; date?: string; start_time?: string; end_time?: string;
-    location?: string; contact_name?: string; capacity?: number; target_audience?: string; note?: string;
+    title?: string; date?: string; location?: string; contact_name?: string;
+    target_audience?: string; note?: string; category_id?: number; slots?: unknown; eligibility?: unknown;
   }>();
   const title = S(b.title, 60);
   const date = S(b.date, 10);
-  const startTime = S(b.start_time, 5);
-  const endTime = S(b.end_time, 5);
   if (!title) return c.json({ error: 'タイトルを入力してください' }, 400);
   if (!isValidDate(date)) return c.json({ error: '開催日の形式が正しくありません' }, 400);
-  if (!isValidTime(startTime) || !isValidTime(endTime)) return c.json({ error: '時刻の形式が正しくありません' }, 400);
-  const capacity = Number.isFinite(b.capacity) && (b.capacity as number) >= 0 ? Math.floor(b.capacity as number) : 0;
+  const { slots, error } = normalizeSlots(b.slots);
+  if (error) return c.json({ error }, 400);
+  const categoryId = Number.isFinite(b.category_id) && (b.category_id as number) > 0 ? Math.floor(b.category_id as number) : null;
+  const eligibilityJson = serializeEligibility(b.eligibility);
 
   const result = await c.env.DB.prepare(
-    `INSERT INTO study_sessions (title, date, start_time, end_time, location, contact_name, capacity, target_audience, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(title, date, startTime || null, endTime || null, S(b.location, 60) || null, S(b.contact_name, 30) || null, capacity, S(b.target_audience, 60) || null, S(b.note, 300) || null).run();
+    `INSERT INTO study_sessions (title, date, start_time, end_time, location, contact_name, capacity, target_audience, note, category_id, eligibility_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(title, date, slots[0].start_time, slots[0].end_time, S(b.location, 60) || null, S(b.contact_name, 30) || null, slots[0].capacity, S(b.target_audience, 60) || null, S(b.note, 300) || null, categoryId, eligibilityJson).run();
+  const sessionId = Number(result.meta.last_row_id);
+  await writeSlots(c.env.DB, sessionId, slots);
 
-  return c.json({ ok: true, id: result.meta.last_row_id });
+  return c.json({ ok: true, id: sessionId });
 });
 
 app.put('/api/study-sessions/:id', async (c) => {
@@ -1674,22 +2381,24 @@ app.put('/api/study-sessions/:id', async (c) => {
   if (!existing) return c.json({ error: 'イベントが見つかりません' }, 404);
 
   const b = await c.req.json<{
-    title?: string; date?: string; start_time?: string; end_time?: string;
-    location?: string; contact_name?: string; capacity?: number; target_audience?: string; note?: string;
+    title?: string; date?: string; location?: string; contact_name?: string;
+    target_audience?: string; note?: string; category_id?: number; slots?: unknown; eligibility?: unknown;
   }>();
   const title = S(b.title, 60);
   const date = S(b.date, 10);
-  const startTime = S(b.start_time, 5);
-  const endTime = S(b.end_time, 5);
   if (!title) return c.json({ error: 'タイトルを入力してください' }, 400);
   if (!isValidDate(date)) return c.json({ error: '開催日の形式が正しくありません' }, 400);
-  if (!isValidTime(startTime) || !isValidTime(endTime)) return c.json({ error: '時刻の形式が正しくありません' }, 400);
-  const capacity = Number.isFinite(b.capacity) && (b.capacity as number) >= 0 ? Math.floor(b.capacity as number) : 0;
+  const { slots, error } = normalizeSlots(b.slots);
+  if (error) return c.json({ error }, 400);
+  const categoryId = Number.isFinite(b.category_id) && (b.category_id as number) > 0 ? Math.floor(b.category_id as number) : null;
+  const eligibilityJson = serializeEligibility(b.eligibility);
 
   await c.env.DB.prepare(
-    `UPDATE study_sessions SET title = ?, date = ?, start_time = ?, end_time = ?, location = ?, contact_name = ?, capacity = ?, target_audience = ?, note = ?, updated_at = datetime('now','localtime')
+    `UPDATE study_sessions SET title = ?, date = ?, location = ?, contact_name = ?, target_audience = ?, note = ?, category_id = ?, eligibility_json = ?, updated_at = datetime('now','localtime')
      WHERE id = ?`
-  ).bind(title, date, startTime || null, endTime || null, S(b.location, 60) || null, S(b.contact_name, 30) || null, capacity, S(b.target_audience, 60) || null, S(b.note, 300) || null, id).run();
+  ).bind(title, date, S(b.location, 60) || null, S(b.contact_name, 30) || null, S(b.target_audience, 60) || null, S(b.note, 300) || null, categoryId, eligibilityJson, id).run();
+  const res = await writeSlots(c.env.DB, id, slots);
+  if (res.error) return c.json({ error: res.error }, 400);
 
   return c.json({ ok: true });
 });
@@ -1707,6 +2416,7 @@ app.delete('/api/study-sessions/:id', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
   const id = parseInt(c.req.param('id'));
   await c.env.DB.prepare('DELETE FROM study_session_participants WHERE session_id = ?').bind(id).run();
+  await c.env.DB.prepare('DELETE FROM study_session_slots WHERE session_id = ?').bind(id).run();
   await c.env.DB.prepare('DELETE FROM study_sessions WHERE id = ?').bind(id).run();
   return c.json({ ok: true });
 });

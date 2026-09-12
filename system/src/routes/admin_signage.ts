@@ -8,7 +8,7 @@
 //   既存機能とはテーブル非共有の完全新規（signage_*）。
 import { Hono } from 'hono';
 import type { Env } from '../auth';
-import { ADMIN_PATH } from '../config';
+import { ADMIN_PATH, SIGNAGE_PUBLIC_PATH } from '../config';
 import { layout } from '../html/layout';
 import { getAdminPermissions } from '../permissions';
 import {
@@ -16,6 +16,7 @@ import {
   signageListPage, signageEditPage, signagePresentPage, signagePrintPage,
   type SignageDeck, type SignageSlide,
 } from '../html/signage';
+import { buildSignageLiveCtx } from './public_signage';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -61,7 +62,7 @@ app.get('/signage', async (c) => {
     canEdit(c),
     c.env.DB.prepare('SELECT * FROM signage_decks ORDER BY sort_order, id').all<SignageDeck>(),
   ]);
-  return c.html(layout('デジタルサイネージ', signageListPage(r.results ?? [], editable, ADMIN_PATH), 'settings'));
+  return c.html(layout('デジタルサイネージ', signageListPage(r.results ?? [], editable, ADMIN_PATH, SIGNAGE_PUBLIC_PATH), 'settings'));
 });
 
 app.get('/signage/:id', async (c) => {
@@ -78,7 +79,9 @@ app.get('/signage/:id/present', async (c) => {
   const deck = await loadDeck(c.env.DB, id);
   if (!deck) return c.text('デッキが見つかりません', 404);
   const slides = await loadSlides(c.env.DB, id);
-  return c.html(signagePresentPage(deck, slides));
+  // 'accidents' スライドがあれば実データを差し込む（固定URLの見え方と揃える）
+  const ctx = await buildSignageLiveCtx(c.env.DB, slides);
+  return c.html(signagePresentPage(deck, slides, ctx));
 });
 
 app.get('/signage/:id/print', async (c) => {
@@ -108,6 +111,21 @@ app.patch('/api/signage/decks/:id', async (c) => {
   const deck = await loadDeck(c.env.DB, id);
   if (!deck) return c.json({ error: '見つかりません' }, 404);
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
+  // is_monitor はデッキ間で排他（ログイン不要の固定URLが再生する1デッキを指す）。
+  // 個別のフィールド更新とは別処理にする。
+  let touchedMonitor = false;
+  if ('is_monitor' in body) {
+    const on = body.is_monitor === true || body.is_monitor === 1 || body.is_monitor === '1';
+    if (on) {
+      await c.env.DB.prepare('UPDATE signage_decks SET is_monitor = 0 WHERE is_monitor <> 0').run();
+      await c.env.DB.prepare('UPDATE signage_decks SET is_monitor = 1 WHERE id = ?').bind(id).run();
+    } else {
+      await c.env.DB.prepare('UPDATE signage_decks SET is_monitor = 0 WHERE id = ?').bind(id).run();
+    }
+    touchedMonitor = true;
+  }
+
   const fields: string[] = [];
   const vals: unknown[] = [];
   if ('title' in body) {
@@ -125,7 +143,10 @@ app.patch('/api/signage/decks/:id', async (c) => {
     const f = body.fx_mode === 'lux' ? 'lux' : 'std';
     fields.push('fx_mode = ?'); vals.push(f);
   }
-  if (!fields.length) return c.json({ error: '更新項目がありません' }, 400);
+  if (!fields.length) {
+    if (touchedMonitor) return c.json({ ok: true });
+    return c.json({ error: '更新項目がありません' }, 400);
+  }
   fields.push("updated_at = datetime('now','localtime')");
   vals.push(id);
   await c.env.DB.prepare(`UPDATE signage_decks SET ${fields.join(', ')} WHERE id = ?`).bind(...vals).run();

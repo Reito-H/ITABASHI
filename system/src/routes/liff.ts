@@ -243,8 +243,7 @@ app.get('/liff/staff-lookup-plus', (c) => {
 // ===== LIFF: その他機能（示達事項＋各種便利機能へのアクセス）=====
 app.get('/liff/other-features', (c) => {
   const liffId = c.env.LIFF_ID_OTHER_FEATURES ?? '';
-  const salesLiffId = c.env.LIFF_ID_SALES ?? '';
-  const html = liffOtherFeaturesPage(liffId, salesLiffId);
+  const html = liffOtherFeaturesPage(liffId);
   return c.html(html);
 });
 
@@ -4290,7 +4289,7 @@ const WEEKLY_NOTICES: { day: string; items: string[] }[] = [
   { day: '土', items: ['だろう運転をしない　かもしれない運転を', '大きな声で明るい挨拶　行先コースの確認'] },
 ];
 
-function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
+function liffOtherFeaturesPage(liffId: string): string {
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -4392,10 +4391,6 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
           <div class="icon">⏱️</div>
           <div class="label">時間計算</div>
         </button>
-        <button class="feature-btn wide" onclick="openSalesQr()">
-          <span class="icon">📷</span>
-          <span class="label">QR読み取り（売上実績確認）</span>
-        </button>
       </div>
     </div>
 
@@ -4469,7 +4464,6 @@ function liffOtherFeaturesPage(liffId: string, salesLiffId: string): string {
   <script>
   var LIFF_ACCESS_TOKEN = '';
 ${COPY_SUMMARY_JS}
-  var SALES_LIFF_ID = ${JSON.stringify(salesLiffId)};
   var WEEKLY_NOTICES = ${JSON.stringify(WEEKLY_NOTICES)};
   var TC_ITEM_H = 36;
   var tcInitialized = false;
@@ -4679,11 +4673,6 @@ ${COPY_SUMMARY_JS}
     tcScrollTo('tc-hour', tcHour, false);
     tcScrollTo('tc-minute', tcMinute, false);
     tcCompute();
-  }
-
-  function openSalesQr() {
-    if (!SALES_LIFF_ID) { alert('準備中です'); return; }
-    location.href = 'https://liff.line.me/' + SALES_LIFF_ID + '?tab=qr';
   }
 
   function showOffices() {

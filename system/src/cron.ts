@@ -176,24 +176,8 @@ async function checkRetirements(env: Env, todayStr: string): Promise<void> {
   `).bind(todayStr).run();
 }
 
-// ハッピーバースデーモード: 設定された発火時刻(birthday_fire_hours)と現在のJST時刻が一致し、
-// 本日誕生日の有効な対象者がいれば birthday_fire_events に1行記録する（同じ日時への重複記録はUNIQUE制約でスキップ）
-async function checkBirthdayFire(env: Env, nowJST: Date, todayStr: string, currentHour: number): Promise<void> {
-  const hourRow = await env.DB.prepare('SELECT 1 FROM birthday_fire_hours WHERE hour = ?').bind(currentHour).first();
-  if (!hourRow) return;
-
-  const birthMonth = nowJST.getUTCMonth() + 1;
-  const birthDay = nowJST.getUTCDate();
-  const celebrants = await env.DB.prepare(
-    'SELECT id FROM birthday_celebrants WHERE is_active = 1 AND birth_month = ? AND birth_day = ?'
-  ).bind(birthMonth, birthDay).all<{ id: number }>();
-  const ids = (celebrants.results ?? []).map(r => r.id);
-  if (ids.length === 0) return;
-
-  await env.DB.prepare(
-    'INSERT OR IGNORE INTO birthday_fire_events (event_date, hour, celebrant_ids) VALUES (?, ?, ?)'
-  ).bind(todayStr, currentHour, JSON.stringify(ids)).run();
-}
+// ハッピーバースデーモードの発火判定は /api/birthday/active（クライアントが45秒ごとにポーリング）側で
+// 分単位まで含めてその場で計算する方式に変更したため、cron 側の処理は廃止した（migration_147）。
 
 // AI売上分析: 前月分の気象庁データ（東京）を自動取込（気象庁側の確定を待つため月初数日空けて実行）
 async function checkMonthlyWeatherImport(env: Env, nowJST: Date, currentHour: number): Promise<void> {
@@ -214,9 +198,6 @@ export async function handleCron(env: Env): Promise<void> {
 
   // 退職日到達チェック（毎時実行）
   await checkRetirements(env, todayStr);
-
-  // ハッピーバースデーモードの発火判定（毎時実行）
-  await checkBirthdayFire(env, nowJST, todayStr, currentHour);
 
   // 前月分の気象庁データ自動取込（毎月3日4時）
   await checkMonthlyWeatherImport(env, nowJST, currentHour);

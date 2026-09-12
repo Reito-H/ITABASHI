@@ -8,50 +8,55 @@ import type { Env } from '../auth';
 import { MONITOR_ACCIDENTS_PATH } from '../config';
 import { accidentsMonitorPage } from '../html/accidents_monitor';
 import { bucketHourBands } from '../html/accidents';
-import { fetchPublicNewcomerIntros, getNewcomerCardIntervalSeconds } from './public_newcomer_monitor';
 
 const app = new Hono<{ Bindings: Env }>();
-
-// 表示モード: 'accidents'=事故のみ（既定・現行動作） / 'newcomers'=新人紹介のみ / 'alternate'=交互表示
-export const DISPLAY_MODE_KEY = 'accidents_monitor_display_mode';
-export const ALTERNATE_SECONDS_KEY = 'accidents_monitor_alternate_seconds';
-export const DEFAULT_ALTERNATE_SECONDS = 15;
-export const MIN_ALTERNATE_SECONDS = 2;
-
-export type MonitorDisplayMode = 'accidents' | 'newcomers' | 'alternate';
-
-export async function getMonitorDisplaySettings(db: D1Database): Promise<{ mode: MonitorDisplayMode; alternateSeconds: number }> {
-  const rows = await db.prepare(
-    `SELECT key, value FROM system_settings WHERE key IN (?, ?)`
-  ).bind(DISPLAY_MODE_KEY, ALTERNATE_SECONDS_KEY).all<{ key: string; value: string }>();
-  const map = new Map((rows.results ?? []).map(r => [r.key, r.value]));
-
-  const rawMode = map.get(DISPLAY_MODE_KEY);
-  const mode: MonitorDisplayMode = (rawMode === 'newcomers' || rawMode === 'alternate') ? rawMode : 'accidents';
-
-  const rawSeconds = parseInt(map.get(ALTERNATE_SECONDS_KEY) ?? '', 10);
-  const alternateSeconds = Number.isFinite(rawSeconds) && rawSeconds >= MIN_ALTERNATE_SECONDS ? rawSeconds : DEFAULT_ALTERNATE_SECONDS;
-
-  return { mode, alternateSeconds };
-}
-
-export async function saveMonitorDisplaySettings(db: D1Database, mode: MonitorDisplayMode, alternateSeconds: number): Promise<void> {
-  const seconds = Math.max(MIN_ALTERNATE_SECONDS, Math.round(alternateSeconds));
-  await db.batch([
-    db.prepare(`
-      INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now', 'localtime'))
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `).bind(DISPLAY_MODE_KEY, mode),
-    db.prepare(`
-      INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now', 'localtime'))
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-    `).bind(ALTERNATE_SECONDS_KEY, String(seconds)),
-  ]);
-}
 
 function prevYm(ym: string): string {
   const [y, m] = ym.split('-').map(Number);
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+}
+
+export type PublicAccidentBoard = {
+  monthLabel: string;
+  count: number;
+  prevCount: number | null;
+  divisions: Array<{ division: number | null; cnt: number }>;
+  bands: number[];
+};
+
+// 今月の事故件数ボード（総数・前月比・課別・時間帯）を組み立てる共通関数。
+// 事故モニター単独ページと、統合デジタルサイネージの 'accidents' スライドの両方から使う。
+export async function fetchPublicAccidentBoard(db: D1Database): Promise<PublicAccidentBoard> {
+  const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const ym = jstNow.toISOString().slice(0, 7);
+  const prevYmStr = prevYm(ym);
+
+  const [rows, prevCountRow, divisionRows] = await Promise.all([
+    db.prepare(`SELECT occurred_time FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
+      .bind(ym).all<{ occurred_time: string | null }>(),
+    db.prepare(`SELECT COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
+      .bind(prevYmStr).first<{ cnt: number }>(),
+    db.prepare(
+      `SELECT division, COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ? GROUP BY division ORDER BY division`
+    ).bind(ym).all<{ division: number | null; cnt: number }>(),
+  ]);
+
+  const times = (rows.results ?? []).map(r => r.occurred_time);
+  const [y, m] = ym.split('-');
+
+  const cntByDivision = new Map((divisionRows.results ?? []).map(r => [r.division, r.cnt]));
+  const divisions: Array<{ division: number | null; cnt: number }> =
+    [1, 2, 3, 4].map(division => ({ division, cnt: cntByDivision.get(division) ?? 0 }));
+  const unknownCnt = cntByDivision.get(null) ?? 0;
+  if (unknownCnt > 0) divisions.push({ division: null, cnt: unknownCnt });
+
+  return {
+    monthLabel: `${y}年${parseInt(m, 10)}月度`,
+    count: times.length,
+    prevCount: prevCountRow?.cnt ?? null,
+    divisions,
+    bands: bucketHourBands(times),
+  };
 }
 
 // 設定ページの「強制更新」ボタンから呼ばれる。system_settings の updated_at を更新するだけで、
@@ -83,45 +88,15 @@ app.get('/api/public/accidents-monitor-refresh-flag', async (c) => {
 
 app.get('/api/public/accidents-monitor', async (c) => {
   const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const ym = jstNow.toISOString().slice(0, 7);
-  const prevYmStr = prevYm(ym);
-
-  const displaySettings = await getMonitorDisplaySettings(c.env.DB);
-  const needsNewcomers = displaySettings.mode === 'newcomers' || displaySettings.mode === 'alternate';
-
-  const [rows, prevCountRow, divisionRows, newcomers, newcomerCardIntervalSeconds] = await Promise.all([
-    c.env.DB.prepare(`SELECT occurred_time FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
-      .bind(ym).all<{ occurred_time: string | null }>(),
-    c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
-      .bind(prevYmStr).first<{ cnt: number }>(),
-    c.env.DB.prepare(
-      `SELECT division, COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ? GROUP BY division ORDER BY division`
-    ).bind(ym).all<{ division: number | null; cnt: number }>(),
-    needsNewcomers ? fetchPublicNewcomerIntros(c.env.DB) : Promise.resolve([]),
-    needsNewcomers ? getNewcomerCardIntervalSeconds(c.env.DB) : Promise.resolve(8),
-  ]);
-
-  const times = (rows.results ?? []).map(r => r.occurred_time);
-  const [y, m] = ym.split('-');
-
-  // 事故が0件の課も含めて1〜4課を必ず全て表示する（データが無い＝欠落ではなく「0件」として見せる）
-  const cntByDivision = new Map((divisionRows.results ?? []).map(r => [r.division, r.cnt]));
-  const divisions: Array<{ division: number | null; cnt: number }> =
-    [1, 2, 3, 4].map(division => ({ division, cnt: cntByDivision.get(division) ?? 0 }));
-  const unknownCnt = cntByDivision.get(null) ?? 0;
-  if (unknownCnt > 0) divisions.push({ division: null, cnt: unknownCnt });
+  const board = await fetchPublicAccidentBoard(c.env.DB);
 
   return c.json({
-    monthLabel: `${y}年${parseInt(m, 10)}月度`,
-    count: times.length,
-    prevCount: prevCountRow?.cnt ?? null,
-    divisions,
-    bands: bucketHourBands(times),
+    monthLabel: board.monthLabel,
+    count: board.count,
+    prevCount: board.prevCount,
+    divisions: board.divisions,
+    bands: board.bands,
     generatedAt: jstNow.toISOString(),
-    displayMode: displaySettings.mode,
-    alternateSeconds: displaySettings.alternateSeconds,
-    newcomers,
-    newcomerCardIntervalSeconds,
   });
 });
 

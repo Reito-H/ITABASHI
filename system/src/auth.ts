@@ -45,10 +45,18 @@ export type Env = {
   DOCUMENTS_BUCKET: R2Bucket;
   // 点呼（仮眠室集合パワポ）の画像/動画/PDF素材の保管
   TENKO_BUCKET: R2Bucket;
+  // 乗務員証 証明写真の一時保存（30日で自動削除）
+  ID_PHOTO_BUCKET: R2Bucket;
+  // 学習ノート（個人用ノート教材のページ画像・生成PDFの保管）
+  STUDY_NOTES_BUCKET: R2Bucket;
+  // 学習ノートの無人アップロード用キー（kindle_capture.shから使う専用キー・wrangler secret putで設定）
+  STUDY_NOTES_UPLOAD_KEY?: string;
   // LINE連携統合ページ: 氏名入力+QR読取での登録LIFF
   LIFF_ID_REGISTER?: string;
   // 事故データCSVの無人アップロード用（社内PCの監視スクリプトから使う専用キー）
   ACCIDENTS_UPLOAD_KEY?: string;
+  // adminログイン2段階認証: 緊急停止キー（/login/verify/kill?key=... でゲートを無効化）
+  AUTH_GATE_KILL_KEY?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

@@ -12,6 +12,10 @@ import {
   LABOR_UNION_MIN_AGE, LABOR_UNION_MAX_AGE, type ContractEmp, type ContractAlert,
 } from '../utils/contract_alerts';
 import { XLSX_FILL_CLIENT_JS } from '../html/xlsx_fill_client';
+import { idPhotosPage } from '../html/id_photos';
+import {
+  autumnTefudaPrintDoc, autumnTefudaEditorContent, normalizeAutumnTefuda,
+} from '../html/autumn_safety_tefuda';
 import { JOSHINSHO_TEMPLATE_XLSX_B64 } from '../assets/joshinsho_template';
 import { KEIYAKUSHO_TEMPLATE_XLSX_B64 } from '../assets/keiyakusho_template';
 import { TENMATSUSHO_TEMPLATE_XLSX_B64 } from '../assets/tenmatsusho_template';
@@ -104,7 +108,10 @@ app.get('/kacho-mission', async (c) => {
     ${card(`${ADMIN_PATH}/kacho-mission/tenmatsusho`, '顛末書 作成')}
     ${card(`${ADMIN_PATH}/kacho-mission/haneda-riyusho`, '羽田定額適用外理由書 作成')}
     ${card(`${ADMIN_PATH}/kacho-mission/nokinbo`, '納金簿 印刷')}
+    ${card(`${ADMIN_PATH}/kacho-mission/id-photos`, '乗務員証 証明写真')}
     ${card(`${ADMIN_PATH}/kacho-mission/hiyari`, 'ヒヤリハット')}
+    ${card(`${ADMIN_PATH}/kacho-mission/summer-safety-2026`, '夏季交通安全（2026）')}
+    ${card(`${ADMIN_PATH}/kacho-mission/autumn-safety-tefuda`, '秋の全国交通安全運動 手札')}
     ${card(`${ADMIN_PATH}/kacho-mission/masters`, '課長マスタ')}
     ${isFullAccess ? card(`${ADMIN_PATH}/driver-reports`, 'ドライバー報告') : ''}
     ${card(`${ADMIN_PATH}/nojico`, 'nojico')}
@@ -1402,6 +1409,58 @@ app.get('/kacho-mission/nokinbo', async (c) => {
   });
   </script>`;
   return c.html(layout('納金簿 印刷', content, 'kacho-mission'));
+});
+
+// ============ 秋の全国交通安全運動 手札（A4横・片面） ============
+// 版下の文言は autumn_safety_2026_tefuda（migration_146）に1行だけ保存。
+// /print は ?d=<base64(JSON)> があればその内容、無ければ保存済みで描画。?auto=1 で自動印刷。
+
+async function loadAutumnTefuda(db: D1Database): Promise<{ raw: unknown; updatedAt: string | null }> {
+  const row = await db.prepare('SELECT data_json, updated_at FROM autumn_safety_2026_tefuda WHERE id = 1')
+    .first<{ data_json: string; updated_at: string }>().catch(() => null);
+  let raw: unknown = {};
+  try { raw = row?.data_json ? JSON.parse(row.data_json) : {}; } catch { raw = {}; }
+  return { raw, updatedAt: row?.updated_at ?? null };
+}
+
+function decodeTefudaParam(b64: string): unknown | null {
+  try {
+    const bin = atob(b64);
+    const bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch { return null; }
+}
+
+app.get('/kacho-mission/autumn-safety-tefuda', async (c) => {
+  const { raw, updatedAt } = await loadAutumnTefuda(c.env.DB).catch(() => ({ raw: {}, updatedAt: null }));
+  const content = autumnTefudaEditorContent({
+    data: normalizeAutumnTefuda(raw),
+    backHref: `${ADMIN_PATH}/kacho-mission`,
+    printPath: `${ADMIN_PATH}/kacho-mission/autumn-safety-tefuda/print`,
+    savedAt: updatedAt,
+  });
+  return c.html(layout('秋の全国交通安全運動 手札', content, 'kacho-mission'));
+});
+
+app.get('/kacho-mission/autumn-safety-tefuda/print', async (c) => {
+  const dParam = c.req.query('d');
+  let raw: unknown;
+  if (dParam) {
+    raw = decodeTefudaParam(dParam);
+    if (raw == null) raw = (await loadAutumnTefuda(c.env.DB).catch(() => ({ raw: {} }))).raw;
+  } else {
+    raw = (await loadAutumnTefuda(c.env.DB).catch(() => ({ raw: {} }))).raw;
+  }
+  return c.html(autumnTefudaPrintDoc(normalizeAutumnTefuda(raw), {
+    auto: c.req.query('auto') === '1',
+    backHref: `${ADMIN_PATH}/kacho-mission/autumn-safety-tefuda`,
+  }));
+});
+
+// ============ 乗務員証 証明写真 ============
+app.get('/kacho-mission/id-photos', (c) => {
+  // 右下のフローティング新規報告ボタンは、カメラ操作・調整パネルと重なるためこのページだけ非表示にする
+  return c.html(layout('乗務員証 証明写真', idPhotosPage(), 'kacho-mission', '', false, true));
 });
 
 export default app;

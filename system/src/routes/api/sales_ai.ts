@@ -757,4 +757,282 @@ app.get('/employee/:empId/pdf', async (c) => {
   });
 });
 
+// ===================================================
+// 新人成長分析（初乗務日を起点に 0〜12ヶ月目でバケツ集計）
+// 添付Excel「新人成長.xlsx」の自動集計版。2024年度以降に初乗務した新人が対象。
+// 月度(締め日)ではなく「初乗務日からの暦の経過月数」でバケツを切る（Excelと同じ考え方）。
+// ===================================================
+const NG_FY_MIN = 2024;           // 集計対象の最古年度（2024年度 = 2024-04〜2025-03）
+const NG_MAX_MONTH_INDEX = 12;    // 0ヶ月目〜12ヶ月目
+
+// ある日付が属する年度（4月始まり）
+function fiscalYearOf(dateISO: string): number {
+  const y = parseInt(dateISO.slice(0, 4), 10);
+  const m = parseInt(dateISO.slice(5, 7), 10);
+  return m >= 4 ? y : y - 1;
+}
+// from(初乗務日) から to(記録日) までの暦の経過月数（0始まり）。to が from の「同日」未満の月は繰り上がらない。
+function monthsSinceFirstDuty(fromISO: string, toISO: string): number {
+  const fy = parseInt(fromISO.slice(0, 4), 10), fm = parseInt(fromISO.slice(5, 7), 10), fd = parseInt(fromISO.slice(8, 10), 10);
+  const ty = parseInt(toISO.slice(0, 4), 10), tm = parseInt(toISO.slice(5, 7), 10), td = parseInt(toISO.slice(8, 10), 10);
+  let mi = (ty - fy) * 12 + (tm - fm);
+  if (td < fd) mi -= 1;
+  return mi;
+}
+
+export interface NewcomerGrowthBucket {
+  monthIndex: number;
+  days: number;                     // sales_records の日数
+  shifts: number;                   // 乗務数（隔勤=1.0 / 日勤=0.5 で集計）
+  total: number;                    // 総売上
+  avgPerShift: number | null;       // 月平均（総売上 ÷ 乗務数）
+  distanceTotal: number;            // 走行キロ合計
+  distancePerShift: number | null;  // 走行キロ平均
+  harshTotal: number;               // 急発進+急加速+急減速（実車+空車）合計
+  harshPerShift: number | null;     // 1乗務あたりの急運転回数
+  speedingDays: number;             // 速度超過（実車最高速度が閾値超）日数
+  safetyDataDays: number;           // 安全運転データがあった日数
+}
+export interface NewcomerGrowthPerson {
+  empId: number; empNo: string; name: string;
+  division: number | null; team: number | null; entryType: string | null;
+  hireDate: string | null; firstDutyDate: string; retirementDate: string | null; active: boolean;
+  buckets: NewcomerGrowthBucket[];
+  accidents: Array<{ date: string; monthIndex: number | null; category: string | null; no: string }>;
+  violations: Array<{ date: string; monthIndex: number | null; typeName: string | null; points: number | null }>;
+}
+export type NewcomerGrowthBasis = 'duty' | 'hire';  // 年度の絞り込み基準（乗務スタート日 / 入社日）
+
+export interface NewcomerGrowthResult {
+  fiscalYear: number;
+  basis: NewcomerGrowthBasis;
+  rangeStart: string; rangeEnd: string;
+  availableFiscalYears: number[];
+  people: NewcomerGrowthPerson[];
+  cohort: Array<{
+    monthIndex: number;
+    avgOfAvgPerShift: number | null;       // 月平均の平均
+    avgDistancePerShift: number | null;    // 月平均走行キロ
+    avgHarshPerShift: number | null;       // 1乗務あたり急運転（平均）
+    salesPersonCount: number;
+    safetyPersonCount: number;
+  }>;
+  thresholds: { highway: number; local: number; harshDaily: number };
+  generatedAt: string;
+}
+
+type NgSalesRow = { emp_id: number; date: string; amount: number; duty_code: string | null; distance_km: number | null };
+type NgSafetyRow = SafetyDbRow & { emp_id: number };
+
+export async function computeNewcomerGrowth(
+  db: D1Database, fiscalYear: number | null, basis: NewcomerGrowthBasis = 'duty',
+): Promise<NewcomerGrowthResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const nowFy = fiscalYearOf(today);
+
+  // 年度の絞り込みに使う列。0〜12ヶ月目のバケツは基準に関係なく常に「初乗務日」起点。
+  const basisCol = basis === 'hire' ? 'hire_date' : 'first_duty_date';
+
+  // 対象年度の決定（未指定なら「新人がいる最新年度」）
+  const rangeProbe = await db.prepare(
+    `SELECT MIN(${basisCol}) AS mn, MAX(${basisCol}) AS mx
+       FROM employees
+      WHERE first_duty_date IS NOT NULL AND ${basisCol} IS NOT NULL AND ${basisCol} >= ?`
+  ).bind(`${NG_FY_MIN}-04-01`).first<{ mn: string | null; mx: string | null }>();
+
+  const minFy = rangeProbe?.mn ? Math.max(NG_FY_MIN, fiscalYearOf(rangeProbe.mn)) : NG_FY_MIN;
+  const maxFy = rangeProbe?.mx ? fiscalYearOf(rangeProbe.mx) : nowFy;
+  const availableFiscalYears: number[] = [];
+  for (let y = minFy; y <= Math.max(minFy, maxFy); y++) availableFiscalYears.push(y);
+
+  const fy = fiscalYear && availableFiscalYears.includes(fiscalYear)
+    ? fiscalYear
+    : (availableFiscalYears.includes(nowFy) ? nowFy : availableFiscalYears[availableFiscalYears.length - 1] ?? NG_FY_MIN);
+
+  const rangeStart = `${fy}-04-01`;
+  const rangeEnd = `${fy + 1}-03-31`;
+
+  const riskSettings = await loadDrivingRiskSettings(db);
+
+  const empRows = (await db.prepare(
+    `SELECT id, emp_no, name, division, team, entry_type, hire_date, first_duty_date, retirement_date, is_active
+       FROM employees
+      WHERE first_duty_date IS NOT NULL AND ${basisCol} IS NOT NULL AND ${basisCol} >= ? AND ${basisCol} <= ?
+      ORDER BY ${basisCol}, division, team, seq_no, id`
+  ).bind(rangeStart, rangeEnd).all<{
+    id: number; emp_no: string; name: string; division: number | null; team: number | null;
+    entry_type: string | null; hire_date: string | null; first_duty_date: string;
+    retirement_date: string | null; is_active: number;
+  }>()).results ?? [];
+
+  const empIds = empRows.map(e => e.id);
+  const empNos = empRows.map(e => e.emp_no).filter(Boolean);
+  const firstDutyById = new Map<number, string>(empRows.map(e => [e.id, e.first_duty_date]));
+  const empIdByNo = new Map<string, number>(empRows.map(e => [e.emp_no, e.id]));
+
+  const empty = (): NewcomerGrowthResult => ({
+    fiscalYear: fy, basis, rangeStart, rangeEnd, availableFiscalYears, people: [],
+    cohort: [], thresholds: { highway: riskSettings.maxSpeedHighwayThreshold, local: riskSettings.maxSpeedLocalThreshold, harshDaily: riskSettings.harshEventDailyThreshold },
+    generatedAt: today,
+  });
+  if (!empIds.length) return empty();
+
+  // sales_records / driving_safety_records は emp_id をチャンク分割して取得（D1 変数上限対策）
+  const CHUNK = 50;
+  const salesRows: NgSalesRow[] = [];
+  const safetyRows: NgSafetyRow[] = [];
+  for (let i = 0; i < empIds.length; i += CHUNK) {
+    const ids = empIds.slice(i, i + CHUNK);
+    const ph = ids.map(() => '?').join(',');
+    const [s, sf] = await Promise.all([
+      db.prepare(
+        `SELECT emp_id, date, amount, duty_code, distance_km
+           FROM sales_records
+          WHERE emp_id IN (${ph}) AND date >= ? ORDER BY emp_id, date`
+      ).bind(...ids, rangeStart).all<NgSalesRow>(),
+      db.prepare(
+        `SELECT emp_id, date, harsh_start_loaded, harsh_start_empty, harsh_accel_loaded, harsh_accel_empty,
+                harsh_decel_loaded, harsh_decel_empty, max_speed_loaded_highway, max_speed_loaded_local
+           FROM driving_safety_records
+          WHERE emp_id IN (${ph}) AND date >= ?`
+      ).bind(...ids, rangeStart).all<NgSafetyRow>(),
+    ]);
+    for (const r of s.results ?? []) salesRows.push(r);
+    for (const r of sf.results ?? []) safetyRows.push(r);
+  }
+
+  // 事故・違反（emp_no 照合）
+  const accByEmpId = new Map<number, NewcomerGrowthPerson['accidents']>();
+  const vioByEmpId = new Map<number, NewcomerGrowthPerson['violations']>();
+  for (let i = 0; i < empNos.length; i += CHUNK) {
+    const nos = empNos.slice(i, i + CHUNK);
+    const ph = nos.map(() => '?').join(',');
+    const [acc, vio] = await Promise.all([
+      db.prepare(
+        `SELECT emp_no, occurred_date, accident_category, accident_no
+           FROM accident_records
+          WHERE emp_no IN (${ph}) AND occurred_date >= ?`
+      ).bind(...nos, rangeStart).all<{ emp_no: string; occurred_date: string; accident_category: string | null; accident_no: string }>(),
+      db.prepare(
+        `SELECT employee_emp_no, violation_at, violation_type_name, violation_points
+           FROM violation_reports
+          WHERE employee_emp_no IN (${ph}) AND violation_at >= ?`
+      ).bind(...nos, rangeStart).all<{ employee_emp_no: string; violation_at: string | null; violation_type_name: string | null; violation_points: number | null }>(),
+    ]);
+    for (const r of acc.results ?? []) {
+      const id = empIdByNo.get(r.emp_no); if (!id) continue;
+      const fd = firstDutyById.get(id)!;
+      const mi = monthsSinceFirstDuty(fd, r.occurred_date);
+      if (!accByEmpId.has(id)) accByEmpId.set(id, []);
+      accByEmpId.get(id)!.push({ date: r.occurred_date, monthIndex: mi >= 0 && mi <= NG_MAX_MONTH_INDEX ? mi : null, category: r.accident_category, no: r.accident_no });
+    }
+    for (const r of vio.results ?? []) {
+      const id = empIdByNo.get(r.employee_emp_no); if (!id || !r.violation_at) continue;
+      const d = r.violation_at.slice(0, 10);
+      const fd = firstDutyById.get(id)!;
+      const mi = monthsSinceFirstDuty(fd, d);
+      if (!vioByEmpId.has(id)) vioByEmpId.set(id, []);
+      vioByEmpId.get(id)!.push({ date: d, monthIndex: mi >= 0 && mi <= NG_MAX_MONTH_INDEX ? mi : null, typeName: r.violation_type_name, points: r.violation_points });
+    }
+  }
+
+  const salesByEmpId = new Map<number, NgSalesRow[]>();
+  for (const r of salesRows) {
+    if (!salesByEmpId.has(r.emp_id)) salesByEmpId.set(r.emp_id, []);
+    salesByEmpId.get(r.emp_id)!.push(r);
+  }
+  const safetyByEmpId = new Map<number, NgSafetyRow[]>();
+  for (const r of safetyRows) {
+    if (!safetyByEmpId.has(r.emp_id)) safetyByEmpId.set(r.emp_id, []);
+    safetyByEmpId.get(r.emp_id)!.push(r);
+  }
+
+  const people: NewcomerGrowthPerson[] = empRows.map(e => {
+    const fd = e.first_duty_date;
+    const buckets: NewcomerGrowthBucket[] = [];
+    for (let mi = 0; mi <= NG_MAX_MONTH_INDEX; mi++) {
+      buckets.push({
+        monthIndex: mi, days: 0, shifts: 0, total: 0, avgPerShift: null,
+        distanceTotal: 0, distancePerShift: null, harshTotal: 0, harshPerShift: null,
+        speedingDays: 0, safetyDataDays: 0,
+      });
+    }
+    for (const r of salesByEmpId.get(e.id) ?? []) {
+      const mi = monthsSinceFirstDuty(fd, r.date);
+      if (mi < 0 || mi > NG_MAX_MONTH_INDEX) continue;
+      const b = buckets[mi];
+      b.days += 1;
+      b.shifts += dutyWeight(r.duty_code);
+      b.total += r.amount;
+      if (r.distance_km != null) b.distanceTotal += r.distance_km;
+    }
+    for (const r of safetyByEmpId.get(e.id) ?? []) {
+      const mi = monthsSinceFirstDuty(fd, r.date);
+      if (mi < 0 || mi > NG_MAX_MONTH_INDEX) continue;
+      const b = buckets[mi];
+      const harsh = (r.harsh_start_loaded ?? 0) + (r.harsh_start_empty ?? 0)
+        + (r.harsh_accel_loaded ?? 0) + (r.harsh_accel_empty ?? 0)
+        + (r.harsh_decel_loaded ?? 0) + (r.harsh_decel_empty ?? 0);
+      b.harshTotal += harsh;
+      b.safetyDataDays += 1;
+      const hw = r.max_speed_loaded_highway ?? 0, lc = r.max_speed_loaded_local ?? 0;
+      if (hw > riskSettings.maxSpeedHighwayThreshold || lc > riskSettings.maxSpeedLocalThreshold) b.speedingDays += 1;
+    }
+    for (const b of buckets) {
+      b.total = Math.round(b.total);
+      b.distanceTotal = Math.round(b.distanceTotal);
+      b.shifts = Math.round(b.shifts * 100) / 100;
+      b.avgPerShift = b.shifts > 0 ? Math.round(b.total / b.shifts) : null;
+      b.distancePerShift = b.shifts > 0 ? Math.round((b.distanceTotal / b.shifts) * 10) / 10 : null;
+      const denom = b.shifts > 0 ? b.shifts : b.safetyDataDays;
+      b.harshPerShift = denom > 0 && b.safetyDataDays > 0 ? Math.round((b.harshTotal / denom) * 10) / 10 : null;
+    }
+    return {
+      empId: e.id, empNo: e.emp_no, name: e.name,
+      division: e.division, team: e.team, entryType: e.entry_type,
+      hireDate: e.hire_date, firstDutyDate: fd, retirementDate: e.retirement_date,
+      active: e.is_active === 1 && !e.retirement_date,
+      buckets,
+      accidents: (accByEmpId.get(e.id) ?? []).sort((a, b) => a.date.localeCompare(b.date)),
+      violations: (vioByEmpId.get(e.id) ?? []).sort((a, b) => a.date.localeCompare(b.date)),
+    };
+  });
+
+  // コホート（同年度新人全体）平均
+  const cohort = [];
+  for (let mi = 0; mi <= NG_MAX_MONTH_INDEX; mi++) {
+    const avgVals: number[] = [], distVals: number[] = [], harshVals: number[] = [];
+    for (const p of people) {
+      const b = p.buckets[mi];
+      if (b.avgPerShift != null) avgVals.push(b.avgPerShift);
+      if (b.distancePerShift != null) distVals.push(b.distancePerShift);
+      if (b.harshPerShift != null) harshVals.push(b.harshPerShift);
+    }
+    const mean = (a: number[]) => a.length ? a.reduce((s, n) => s + n, 0) / a.length : null;
+    const md = mean(distVals), mh = mean(harshVals);
+    cohort.push({
+      monthIndex: mi,
+      avgOfAvgPerShift: avgVals.length ? Math.round(mean(avgVals)!) : null,
+      avgDistancePerShift: md != null ? Math.round(md * 10) / 10 : null,
+      avgHarshPerShift: mh != null ? Math.round(mh * 10) / 10 : null,
+      salesPersonCount: avgVals.length,
+      safetyPersonCount: harshVals.length,
+    });
+  }
+
+  return {
+    fiscalYear: fy, basis, rangeStart, rangeEnd, availableFiscalYears, people, cohort,
+    thresholds: { highway: riskSettings.maxSpeedHighwayThreshold, local: riskSettings.maxSpeedLocalThreshold, harshDaily: riskSettings.harshEventDailyThreshold },
+    generatedAt: today,
+  };
+}
+
+app.get('/newcomer-growth', async (c) => {
+  const fyRaw = c.req.query('fy');
+  const fy = fyRaw && /^\d{4}$/.test(fyRaw) ? parseInt(fyRaw, 10) : null;
+  const basis: NewcomerGrowthBasis = c.req.query('basis') === 'hire' ? 'hire' : 'duty';
+  const result = await computeNewcomerGrowth(c.env.DB, fy, basis);
+  return c.json(result);
+});
+
 export default app;

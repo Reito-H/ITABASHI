@@ -12,6 +12,7 @@ export interface SignageDeck {
   seconds: number;
   fx_mode: string; // 'std' | 'lux'
   sort_order: number;
+  is_monitor?: number; // 1 = ログイン不要の固定URL(SIGNAGE_PUBLIC_PATH)が再生するデッキ（migration_144）
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -22,6 +23,18 @@ export interface SignageSlide {
   sort_order: number;
   kind: string;
   payload: string; // JSON文字列
+}
+
+// 'accidents' スライドは表示時に最新のDB値を差し込む。その受け渡し用。
+export interface SignageAccidentBoard {
+  monthLabel: string;
+  count: number;
+  prevCount: number | null;
+  divisions: Array<{ division: number | null; cnt: number }>;
+  bands: number[];
+}
+export interface SignageLiveCtx {
+  accidents: SignageAccidentBoard | null;
 }
 
 type Field = { name: string; label: string; type: 'text' | 'textarea' | 'select'; options?: Array<{ v: string; l: string }> };
@@ -110,6 +123,12 @@ export const SIGNAGE_KINDS: Array<{ kind: string; label: string; desc: string; f
       { name: 'sub', label: '補足', type: 'text' },
     ],
   },
+  {
+    kind: 'accidents', label: '今月の事故件数（自動）', desc: '総数・前月比・課別・ピーク時間帯。中身は自動で最新',
+    fields: [
+      { name: 'eyebrow', label: '見出し（既定：今月の事故件数）', type: 'text' },
+    ],
+  },
 ];
 
 // ---------- 文言ユーティリティ ----------
@@ -170,10 +189,49 @@ function signSvg(value: string, tone: string, cls: string, extraNumAttr = ''): s
   </svg>`;
 }
 
+// ---------- 今月の事故件数ボード（表示のたびに最新値を差し込む）----------
+function renderAccidentSection(slide: SignageSlide, ctx?: SignageLiveCtx): string {
+  const d = P(slide);
+  const eyebrow = (d.eyebrow ?? '').trim() || '今月の事故件数';
+  const b = ctx?.accidents ?? null;
+  if (!ctx || !b) {
+    return `<section class="slide acc">
+      <p class="eyebrow anim-wipe" style="--i:0">${mk(eyebrow)}</p>
+      <p class="line anim-wipe" style="--i:1; font-size:3.4cqw;">今月の事故件数ボード<br><span style="font-size:.6em;color:#8A8D91;">（投影時に自動で最新値を表示します）</span></p>
+    </section>`;
+  }
+  const diff = b.prevCount != null ? b.count - b.prevCount : null;
+  const diffTxt = diff == null ? '' : diff > 0 ? `前月比 +${diff}` : diff < 0 ? `前月比 ${diff}` : '前月と同数';
+  const diffCls = diff == null ? 'flat' : diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat';
+  const divCells = b.divisions.map((v) => {
+    const nm = v.division == null ? 'その他' : `${v.division}課`;
+    return `<div class="acc-div${v.cnt > 0 ? ' hot' : ''}"><span class="acc-div-nm">${esc(nm)}</span><span class="acc-div-ct">${v.cnt}</span></div>`;
+  }).join('');
+  // ピーク時間帯（2時間バンド×12）。0件のときは出さない
+  let peak = '';
+  if (b.count > 0) {
+    let mi = 0;
+    for (let i = 1; i < b.bands.length; i++) if (b.bands[i] > b.bands[mi]) mi = i;
+    if (b.bands[mi] > 0) peak = `${mi * 2}〜${mi * 2 + 2}時台が最多（${b.bands[mi]}件）`;
+  }
+  return `<section class="slide acc">
+    <p class="eyebrow anim-wipe" style="--i:0">${mk(eyebrow)}</p>
+    <p class="acc-month anim-fade" style="--i:1">${esc(b.monthLabel)}</p>
+    <div class="acc-total anim-pop" style="--i:2">
+      <span class="acc-num">${b.count}</span><span class="acc-unit">件</span>
+    </div>
+    ${diffTxt ? `<p class="acc-diff ${diffCls} anim-fade" style="--i:3">${esc(diffTxt)}${b.prevCount != null ? `（前月 ${b.prevCount}件）` : ''}</p>` : ''}
+    <div class="acc-divs anim-wipe" style="--i:4">${divCells}</div>
+    ${peak ? `<p class="acc-peak anim-fade" style="--i:5">${esc(peak)}</p>` : ''}
+  </section>`;
+}
+
 // ---------- 1スライド ----------
-export function renderSlideSection(slide: SignageSlide): string {
+export function renderSlideSection(slide: SignageSlide, ctx?: SignageLiveCtx): string {
   const d = P(slide);
   const k = slide.kind;
+
+  if (k === 'accidents') return renderAccidentSection(slide, ctx);
 
   if (k === 'title') {
     const big = esc(d.big ?? '').replace(/\./g, '<i>.</i>');
@@ -388,6 +446,25 @@ export const SIGNAGE_CSS = `
   .slide.mark .sub{color:rgba(27,29,32,.66);}
   .slide.mark .hazard{position:absolute;inset:0;z-index:0;background:repeating-linear-gradient(-45deg,rgba(0,0,0,.05) 0 3cqw,transparent 3cqw 6cqw);}
   .bigword{font-size:6.4cqw;font-weight:900;letter-spacing:.02em;color:var(--sign);line-height:1.05;}
+
+  /* ===== 今月の事故件数ボード ===== */
+  .slide.acc{gap:3cqh;}
+  .acc-month{font-size:2.6cqw;font-weight:800;letter-spacing:.06em;color:var(--hush);}
+  .acc-total{display:flex;align-items:baseline;gap:1.5cqw;}
+  .acc-total .acc-num{font-family:var(--disp);font-size:34cqh;line-height:.8;color:var(--sign);letter-spacing:.01em;}
+  .acc-total .acc-unit{font-size:5cqw;font-weight:900;color:var(--ink);}
+  .acc-diff{font-size:2.1cqw;font-weight:800;letter-spacing:.04em;padding:.8cqh 3cqw;border-radius:99cqh;}
+  .acc-diff.up{background:#FDE7EA;color:var(--sign);}
+  .acc-diff.down{background:#E7F5EC;color:#137a3e;}
+  .acc-diff.flat{background:#EFEDE6;color:var(--hush);}
+  .acc-divs{display:flex;gap:1.8cqw;flex-wrap:wrap;justify-content:center;}
+  .acc-div{display:grid;justify-items:center;gap:.6cqh;min-width:12cqw;padding:1.8cqh 1cqw;border-radius:1.6cqh;background:#FAFAF8;border:.25cqh solid var(--line);}
+  .acc-div.hot{background:#FEF6D6;border-color:#F0D775;}
+  .acc-div-nm{font-size:1.7cqw;font-weight:800;color:var(--ink);letter-spacing:.06em;}
+  .acc-div-ct{font-family:var(--disp);font-size:6.4cqh;line-height:1;color:var(--ink);}
+  .acc-div.hot .acc-div-ct{color:#B4870A;}
+  .acc-peak{font-size:2cqw;font-weight:700;color:var(--hush);}
+
   .footer{position:absolute;left:0;right:0;bottom:0;height:8cqh;padding:0 6cqw;display:flex;align-items:center;justify-content:space-between;background:#F1EFE9;border-top:.25cqh solid var(--sign);z-index:30;}
   .footer .brand{font-size:1.35cqw;font-weight:700;letter-spacing:.1em;color:var(--ink);}
   .footer .brand span{color:var(--hush);font-weight:500;}
@@ -663,8 +740,10 @@ function slug(deck: SignageDeck): string {
   return (deck.title || 'signage').replace(/[\s/\\?%*:|"<>]+/g, '_').slice(0, 40);
 }
 
-function stageInner(deck: SignageDeck, slides: SignageSlide[], withPanel: boolean): string {
-  const sections = slides.map(renderSlideSection).join('\n');
+function stageInner(deck: SignageDeck, slides: SignageSlide[], withPanel: boolean, ctx?: SignageLiveCtx): string {
+  // 1面も無いと再生スクリプトが割り算不能になるため必ず1面は出す。
+  const sections = slides.map((s) => renderSlideSection(s, ctx)).join('\n').trim()
+    || '<section class="slide"><p class="line">表示するスライドがありません</p></section>';
   const panel = withPanel
     ? `<div class="panel" id="panel">
         <button class="gear" id="gear" type="button">設定</button>
@@ -699,7 +778,7 @@ function stageInner(deck: SignageDeck, slides: SignageSlide[], withPanel: boolea
   ${panel}`;
 }
 
-export function signagePresentPage(deck: SignageDeck, slides: SignageSlide[]): string {
+export function signagePresentPage(deck: SignageDeck, slides: SignageSlide[], ctx?: SignageLiveCtx): string {
   const cfg = JSON.stringify({ deckId: deck.id, seconds: deck.seconds, fx: deck.fx_mode, slug: slug(deck) });
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -707,14 +786,37 @@ export function signagePresentPage(deck: SignageDeck, slides: SignageSlide[]): s
 ${FONT_LINK}
 <style>${SIGNAGE_CSS}</style>
 </head><body>
-${stageInner(deck, slides, true)}
+${stageInner(deck, slides, true, ctx)}
 <script>window.__SIG=${cfg};</script>
 <script>${SIGNAGE_JS}</script>
 </body></html>`;
 }
 
+// ログイン不要の固定URL(SIGNAGE_PUBLIC_PATH)で開く投影ページ。
+// 操作パネル・動画保存は無し。事故ボードの最新値を反映するため一定間隔でページ自体を再読み込みする。
+export function signagePublicPage(deck: SignageDeck, slides: SignageSlide[], ctx?: SignageLiveCtx): string {
+  const cfg = JSON.stringify({ deckId: deck.id, seconds: deck.seconds, fx: deck.fx_mode, slug: slug(deck) });
+  return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>${esc(deck.title)}｜サイネージ</title>
+${FONT_LINK}
+<style>${SIGNAGE_CSS}
+  html,body{cursor:none;}
+</style>
+</head><body>
+${stageInner(deck, slides, false, ctx)}
+<script>window.__SIG=${cfg};</script>
+<script>${SIGNAGE_JS}</script>
+<script>
+/* 事故ボードを最新に保つため、10分ごとにページを読み直す（回線断時は次回まで現状維持） */
+setTimeout(function(){ location.reload(); }, 600000);
+</script>
+</body></html>`;
+}
+
 export function signagePrintPage(deck: SignageDeck, slides: SignageSlide[]): string {
-  const sections = slides.map(renderSlideSection).join('\n');
+  const sections = slides.map((s) => renderSlideSection(s)).join('\n');
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
 <title>${esc(deck.title)}｜印刷</title>
 ${FONT_LINK}
@@ -738,18 +840,28 @@ ${FONT_LINK}
 // =====================================================================
 function h(s: unknown): string { return esc(s); }
 
-export function signageListPage(decks: SignageDeck[], editable: boolean, adminPath: string): string {
-  const rows = decks.map((d) => `
-    <tr>
-      <td style="font-weight:700;">${h(d.title)}</td>
-      <td style="color:#6b7280;font-size:12px;">既定 ${h(d.seconds)}秒 ・ ${d.fx_mode === 'lux' ? '豪華' : '標準'}</td>
+export function signageListPage(decks: SignageDeck[], editable: boolean, adminPath: string, publicPath: string): string {
+  const monitorDeck = decks.find((d) => d.is_monitor) ?? null;
+  const rows = decks.map((d) => {
+    const isMon = !!d.is_monitor;
+    return `
+    <tr${isMon ? ' class="is-mon"' : ''}>
+      <td>
+        <div style="font-weight:700;">${h(d.title)}${isMon ? ' <span class="mon-tag">モニター表示中</span>' : ''}</div>
+        <div style="color:#6b7280;font-size:12px;margin-top:2px;">既定 ${h(d.seconds)}秒 ・ ${d.fx_mode === 'lux' ? '豪華' : '標準'}</div>
+      </td>
       <td style="white-space:nowrap;text-align:right;">
+        ${editable
+          ? (isMon
+              ? '<span class="mon-cur">固定URLで表示中</span>'
+              : `<button class="btn ghost" type="button" onclick="sigSetMonitor(${d.id})">このデッキをモニターに出す</button>`)
+          : ''}
         ${editable ? `<a class="btn" href="${adminPath}/signage/${d.id}">編集</a>` : ''}
         <a class="btn" href="${adminPath}/signage/${d.id}/present" target="_blank" rel="noopener">投影を開く</a>
         <a class="btn ghost" href="${adminPath}/signage/${d.id}/print" target="_blank" rel="noopener">印刷</a>
-        <button class="btn ghost" type="button" onclick="navigator.clipboard&&navigator.clipboard.writeText(location.origin+'${adminPath}/signage/${d.id}/present');this.textContent='コピー済み'">投影URLをコピー</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   return `
   <style>
@@ -759,28 +871,61 @@ export function signageListPage(decks: SignageDeck[], editable: boolean, adminPa
     .sig-wrap table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;}
     .sig-wrap td{padding:12px 14px;border-top:1px solid #f1f1f1;font-size:14px;vertical-align:middle;}
     .sig-wrap tr:first-child td{border-top:0;}
+    .sig-wrap tr.is-mon td{background:#f0f7ff;}
     .btn{display:inline-block;padding:6px 12px;margin-left:6px;border-radius:7px;background:#2563eb;color:#fff;font-size:12px;font-weight:700;text-decoration:none;border:0;cursor:pointer;}
     .btn.ghost{background:#fff;color:#374151;border:1px solid #d1d5db;}
     .sig-new{margin-top:16px;display:flex;gap:8px;align-items:center;}
     .sig-new input{border:1px solid #d1d5db;border-radius:7px;padding:8px 10px;font-size:13px;flex:1;}
+    .mon-box{background:#fff;border:1px solid #bcd4f5;border-radius:12px;padding:14px 16px;margin-bottom:16px;}
+    .mon-box h2{font-size:14px;margin:0 0 6px;color:#1e3a5f;}
+    .mon-box p{font-size:12px;color:#6b7280;margin:0 0 10px;line-height:1.6;}
+    .mon-url{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .mon-url code{flex:1;min-width:220px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:7px;padding:8px 10px;font-size:12px;word-break:break-all;}
+    .mon-tag{display:inline-block;background:#2563eb;color:#fff;font-size:10px;font-weight:700;border-radius:99px;padding:2px 8px;vertical-align:middle;margin-left:4px;}
+    .mon-cur{font-size:11px;font-weight:700;color:#2563eb;margin-left:6px;}
   </style>
   <div class="sig-wrap">
     <h1>デジタルサイネージ</h1>
-    <p class="lead">営業所モニター用の周知スライド。「投影を開く」→ <b>F</b>キーで全画面 → 自動再生ループ。左下「設定」（<b>S</b>キー）で表示秒数・アニメーション・動画(webm)保存。投影は全アカウントが開けます（編集はフル権限のみ）。</p>
-    <table>${rows || '<tr><td colspan="3" style="color:#6b7280;">デッキがありません</td></tr>'}</table>
+    <p class="lead">営業所モニター用のスライド。「投影を開く」→ <b>F</b>キーで全画面 → 自動再生ループ。スライドには周知内容のほか「今月の事故件数（自動）」を差し込めます。投影は全アカウントが開けます（編集はフル権限のみ）。</p>
+
+    <div class="mon-box">
+      <h2>ログイン不要の固定URL（Fire TV等の常時表示用）</h2>
+      <p>このURLは<b>ログイン不要</b>で、URLを知っていれば誰でも開けます（変更されません）。再生する中身は下の一覧で「モニターに出す」を押したデッキ${monitorDeck ? `＝<b>${h(monitorDeck.title)}</b>` : '（未選択）'}。<br>※今月の事故件数もこのURLで表示されます。</p>
+      <div class="mon-url">
+        <code id="mon-url"></code>
+        <button class="btn" type="button" onclick="sigCopyUrl(this)">URLをコピー</button>
+        <a class="btn ghost" id="mon-open" href="#" target="_blank" rel="noopener">開いて確認</a>
+      </div>
+    </div>
+
+    <table>${rows || '<tr><td colspan="2" style="color:#6b7280;">デッキがありません</td></tr>'}</table>
     ${editable ? `
     <div class="sig-new">
       <input id="new-title" type="text" placeholder="新しいデッキのタイトル" />
       <button class="btn" type="button" onclick="sigNew()">新規作成</button>
-    </div>
+    </div>` : ''}
     <script>
+      (function(){
+        var full = location.origin + ${JSON.stringify(publicPath)};
+        var c = document.getElementById('mon-url'); if(c) c.textContent = full;
+        var o = document.getElementById('mon-open'); if(o) o.href = full;
+        window.sigCopyUrl = function(b){
+          if(navigator.clipboard) navigator.clipboard.writeText(full);
+          if(b){ var t=b.textContent; b.textContent='コピーしました'; setTimeout(function(){ b.textContent=t; }, 1500); }
+        };
+      })();
+      function sigSetMonitor(id){
+        if(!confirm('このデッキを固定URLで表示する対象にしますか？')) return;
+        fetch('${adminPath}/api/signage/decks/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_monitor:true})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.ok){ location.reload(); } else { alert((j&&j.error)||'変更に失敗しました'); } });
+      }
       function sigNew(){
         var t=(document.getElementById('new-title').value||'').trim();
         if(!t){ alert('タイトルを入力してください'); return; }
         fetch('${adminPath}/api/signage/decks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t})})
           .then(function(r){return r.json();}).then(function(j){ if(j&&j.id){ location.href='${adminPath}/signage/'+j.id; } else { alert((j&&j.error)||'作成に失敗しました'); } });
       }
-    </script>` : ''}
+    </script>
   </div>`;
 }
 

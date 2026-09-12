@@ -11,12 +11,16 @@ import {
   normalizeSettings, validateAnswer, isQType, answerForClient,
   type SurveyQType, type QSettings,
 } from '../data/surveys';
+import {
+  parseEligibility, isEligible, type EmpForEligibility,
+} from '../data/study_session_eligibility';
 
 const app = new Hono<{ Bindings: Env }>();
 
 type StudySession = {
   id: number; title: string; date: string; start_time: string | null; end_time: string | null;
   location: string | null; contact_name: string | null; capacity: number; note: string | null; is_closed: number;
+  category_id: number | null; eligibility_json: string | null;
 };
 
 // キャンセルがこの回数に達すると、カウンターを0に戻したうえでペナルティ期間（PENALTY_MONTHS）を設定する
@@ -39,9 +43,11 @@ function addMonths(dateStr: string, delta: number): string {
   d.setUTCMonth(d.getUTCMonth() + delta);
   return d.toISOString().slice(0, 10);
 }
-async function findActiveEmployee(db: D1Database, empNo: string): Promise<{ emp_no: string } | null> {
+async function findActiveEmployee(db: D1Database, empNo: string): Promise<EmpForEligibility | null> {
   if (!empNo) return null;
-  return db.prepare('SELECT emp_no FROM employees WHERE emp_no = ? AND is_active = 1').bind(empNo).first<{ emp_no: string }>();
+  return db.prepare(
+    'SELECT emp_no, hire_date, entry_type, is_newcomer FROM employees WHERE emp_no = ? AND is_active = 1'
+  ).bind(empNo).first<EmpForEligibility>();
 }
 async function getHomeOfficeId(db: D1Database): Promise<number> {
   const row = await db.prepare("SELECT value FROM system_settings WHERE key = 'home_office_id'").first<{ value: string }>();
@@ -70,15 +76,32 @@ app.get('/api/public/study-sessions', async (c) => {
   if (!emp) return c.json({ error: '社員番号が確認できませんでした。ご確認のうえ再度お試しください' }, 404);
 
   const rows = await c.env.DB.prepare(`
-    SELECT s.*,
-      (SELECT COUNT(*) FROM study_session_participants p WHERE p.session_id = s.id) AS participant_count,
-      (SELECT COUNT(*) FROM study_session_participants p2 WHERE p2.session_id = s.id AND p2.emp_no = ?) AS registered
+    SELECT s.*, cat.name AS category_name
     FROM study_sessions s
+    LEFT JOIN study_session_categories cat ON cat.id = s.category_id
     WHERE s.date >= ?
     ORDER BY s.date, s.start_time
-  `).bind(empNo, todayStr()).all();
+  `).bind(todayStr()).all<Record<string, unknown> & { id: number }>();
+  const today = todayStr();
+  // 対象者の絞り込み条件に合わないイベントは、この乗務員には見せない
+  const sessions = (rows.results ?? []).filter((s) =>
+    isEligible(parseEligibility(s.eligibility_json as string | null), emp, today)
+  );
+  const slotRows = await c.env.DB.prepare(`
+    SELECT sl.id, sl.session_id, sl.slot_order, sl.label, sl.start_time, sl.end_time, sl.capacity,
+      (SELECT COUNT(*) FROM study_session_participants p WHERE p.slot_id = sl.id) AS participant_count,
+      (SELECT COUNT(*) FROM study_session_participants p2 WHERE p2.slot_id = sl.id AND p2.emp_no = ?) AS registered
+    FROM study_session_slots sl
+    ORDER BY sl.slot_order, sl.id
+  `).bind(empNo).all<{ session_id: number } & Record<string, unknown>>();
+  const bySession = new Map<number, unknown[]>();
+  for (const r of slotRows.results ?? []) {
+    if (!bySession.has(r.session_id)) bySession.set(r.session_id, []);
+    bySession.get(r.session_id)!.push(r);
+  }
+  for (const s of sessions) s.slots = bySession.get(s.id) ?? [];
   const penaltyUntil = await getActivePenaltyUntil(c.env.DB, empNo);
-  return c.json({ sessions: rows.results ?? [], penalty: penaltyUntil ? { until: penaltyUntil } : null });
+  return c.json({ sessions, penalty: penaltyUntil ? { until: penaltyUntil } : null });
 });
 
 // マイページ（全期間の参加記録・スタンプラリー表示用）
@@ -89,11 +112,13 @@ app.get('/api/public/study-sessions/mypage', async (c) => {
   if (!emp) return c.json({ error: '社員番号が確認できませんでした。ご確認のうえ再度お試しください' }, 404);
 
   const rows = await c.env.DB.prepare(`
-    SELECT s.id, s.title, s.date, s.start_time, s.end_time, s.location, p.attended
+    SELECT s.id, s.title, s.date, s.location, p.attended,
+      sl.label AS slot_label, sl.start_time, sl.end_time
     FROM study_session_participants p
     JOIN study_sessions s ON s.id = p.session_id
+    LEFT JOIN study_session_slots sl ON sl.id = p.slot_id
     WHERE p.emp_no = ?
-    ORDER BY s.date DESC, s.start_time DESC
+    ORDER BY s.date DESC, sl.slot_order, sl.id
   `).bind(empNo).all();
   return c.json({ records: rows.results ?? [] });
 });
@@ -272,15 +297,21 @@ app.post('/api/public/surveys/:id/respond', async (c) => {
 
 app.post('/api/public/study-sessions/:id/register', async (c) => {
   const id = parseInt(c.req.param('id'));
-  const b = await c.req.json<{ emp_no?: string }>();
+  const b = await c.req.json<{ emp_no?: string; slot_id?: number }>();
   const empNo = toHalfWidth((b.emp_no ?? '').trim());
   if (!empNo) return c.json({ error: '社員番号を入力してください' }, 400);
   const emp = await findActiveEmployee(c.env.DB, empNo);
   if (!emp) return c.json({ error: '社員番号が確認できませんでした。ご確認のうえ再度お試しください' }, 404);
+  const slotId = Number.isFinite(b.slot_id) ? Math.floor(b.slot_id as number) : 0;
+
+  const slot = await c.env.DB.prepare(
+    'SELECT id, capacity FROM study_session_slots WHERE id = ? AND session_id = ?'
+  ).bind(slotId, id).first<{ id: number; capacity: number }>();
+  if (!slot) return c.json({ error: '回を選択してください' }, 400);
 
   const already = await c.env.DB.prepare(
-    'SELECT id FROM study_session_participants WHERE session_id = ? AND emp_no = ?'
-  ).bind(id, empNo).first();
+    'SELECT id FROM study_session_participants WHERE slot_id = ? AND emp_no = ?'
+  ).bind(slotId, empNo).first();
 
   if (!already) {
     const penaltyUntil = await getActivePenaltyUntil(c.env.DB, empNo);
@@ -291,38 +322,42 @@ app.post('/api/public/study-sessions/:id/register', async (c) => {
   if (!session) return c.json({ error: 'イベントが見つかりません' }, 404);
   if (session.is_closed) return c.json({ error: 'このイベントは受付を終了しています' }, 400);
   if (session.date < todayStr()) return c.json({ error: 'このイベントは開催日を過ぎています' }, 400);
+  if (!isEligible(parseEligibility(session.eligibility_json), emp, todayStr())) {
+    return c.json({ error: 'このイベントのお申し込み対象者ではありません' }, 403);
+  }
 
-  if (!already && session.capacity > 0) {
+  if (!already && slot.capacity > 0) {
     const cnt = await c.env.DB.prepare(
-      'SELECT COUNT(*) AS n FROM study_session_participants WHERE session_id = ?'
-    ).bind(id).first<{ n: number }>();
-    if ((cnt?.n ?? 0) >= session.capacity) {
-      return c.json({ error: '満席のため受付を終了しました' }, 400);
+      'SELECT COUNT(*) AS n FROM study_session_participants WHERE slot_id = ?'
+    ).bind(slotId).first<{ n: number }>();
+    if ((cnt?.n ?? 0) >= slot.capacity) {
+      return c.json({ error: 'この回は満席のため受付を終了しました' }, 400);
     }
   }
 
   await c.env.DB.prepare(
-    `INSERT INTO study_session_participants (session_id, emp_no) VALUES (?, ?)
-     ON CONFLICT(session_id, emp_no) DO UPDATE SET updated_at = datetime('now','localtime')`
-  ).bind(id, empNo).run();
+    `INSERT INTO study_session_participants (session_id, slot_id, emp_no) VALUES (?, ?, ?)
+     ON CONFLICT(session_id, emp_no, slot_id) DO UPDATE SET updated_at = datetime('now','localtime')`
+  ).bind(id, slotId, empNo).run();
 
   return c.json({ ok: true, session });
 });
 
 app.post('/api/public/study-sessions/:id/cancel', async (c) => {
   const id = parseInt(c.req.param('id'));
-  const b = await c.req.json<{ emp_no?: string }>();
+  const b = await c.req.json<{ emp_no?: string; slot_id?: number }>();
   const empNo = toHalfWidth((b.emp_no ?? '').trim());
   if (!empNo) return c.json({ error: '社員番号を入力してください' }, 400);
   const emp = await findActiveEmployee(c.env.DB, empNo);
   if (!emp) return c.json({ error: '社員番号が確認できませんでした。ご確認のうえ再度お試しください' }, 404);
+  const slotId = Number.isFinite(b.slot_id) ? Math.floor(b.slot_id as number) : 0;
 
   const session = await c.env.DB.prepare('SELECT * FROM study_sessions WHERE id = ?').bind(id).first<StudySession>();
   if (!session) return c.json({ error: 'イベントが見つかりません' }, 404);
 
   const existing = await c.env.DB.prepare(
-    'SELECT id FROM study_session_participants WHERE session_id = ? AND emp_no = ?'
-  ).bind(id, empNo).first();
+    'SELECT id FROM study_session_participants WHERE session_id = ? AND emp_no = ? AND slot_id = ?'
+  ).bind(id, empNo, slotId).first();
   if (!existing) return c.json({ error: '参加登録が見つかりません' }, 404);
 
   // 開催前日・当日以降のキャンセルは不可
@@ -330,7 +365,7 @@ app.post('/api/public/study-sessions/:id/cancel', async (c) => {
     return c.json({ error: '開催前日以降はキャンセルできません' }, 400);
   }
 
-  await c.env.DB.prepare('DELETE FROM study_session_participants WHERE session_id = ? AND emp_no = ?').bind(id, empNo).run();
+  await c.env.DB.prepare('DELETE FROM study_session_participants WHERE session_id = ? AND emp_no = ? AND slot_id = ?').bind(id, empNo, slotId).run();
 
   const penaltyRow = await c.env.DB.prepare(
     'SELECT cancel_count FROM study_session_penalties WHERE emp_no = ?'
@@ -626,60 +661,79 @@ async function loadBoard() {
     _penalty = d.penalty || null;
     renderBoard();
     document.getElementById('menu-btn').style.display = 'flex';
-    if (_startSurveyId) { openSurvey(_startSurveyId); }
-    else if (_startView === 'surveys' || _startView === 'survey') { showSurveyList(); }
-    else { showStep('step2'); }
+    proceedAfterLookup();
   } catch (e) {
     errEl.textContent = '確認に失敗しました。もう一度お試しください'; errEl.style.display = 'block';
   }
 }
 
-function statusOf(s) {
-  var full = s.capacity > 0 && s.participant_count >= s.capacity;
+function proceedAfterLookup() {
+  if (_startSurveyId) { openSurvey(_startSurveyId); }
+  else if (_startView === 'surveys' || _startView === 'survey') { showSurveyList(); }
+  else { showStep('step2'); }
+}
+
+function slotTimeStr(sl) {
+  return (sl.start_time || '') + (sl.end_time ? ' 〜 ' + sl.end_time : '') || '時刻は別途ご案内';
+}
+function slotNameStr(sl, i) { return sl.label || ((i + 1) + '回目'); }
+function slotStatus(s, sl) {
+  var full = sl.capacity > 0 && (sl.participant_count || 0) >= sl.capacity;
   if (s.is_closed) return { label: '受付終了', cls: 'closed', disabled: true };
   if (full) return { label: '満席', cls: 'full', disabled: true };
   return { label: '募集中', cls: 'open', disabled: false };
 }
+function findSession(id) { return _sessions.filter(function(x) { return x.id === id; })[0]; }
+function findSlot(s, slotId) { return (s.slots || []).filter(function(x) { return x.id === slotId; })[0]; }
 
 function renderBoard() {
   var board = document.getElementById('board');
   var banner = _penalty ? ('<div class="card penalty-banner">現在、新規のお申し込みができません（' + escH(_penalty.until) + ' まで）。既存の参加登録の確認・キャンセルは引き続き行えます。</div>') : '';
   if (_sessions.length === 0) { board.innerHTML = banner + '<div class="card" style="text-align:center;color:#9ca3af;">現在、募集中のイベントはありません</div>'; return; }
   board.innerHTML = banner + _sessions.map(function(s) {
-    var st = statusOf(s);
-    var capLabel = s.capacity > 0 ? ('残り ' + Math.max(s.capacity - s.participant_count, 0) + ' 名') : '定員なし';
-    var registeredBadge = s.registered ? '<span class="badge done">参加登録済み</span>' : '';
-    var actions;
-    if (s.registered) {
-      var canCancel = cancelAllowed(s);
-      actions = '<button class="sess-btn" onclick="showConfirmFor(' + s.id + ')">登録内容を確認する</button>'
-        + '<button class="sess-btn cancel" ' + (canCancel ? '' : 'disabled') + ' onclick="cancelReg(' + s.id + ')">' + (canCancel ? 'キャンセルする' : '前日以降はキャンセル不可') + '</button>';
-    } else {
-      var disabled = st.disabled || !!_penalty;
-      actions = '<button class="sess-btn" ' + (disabled ? 'disabled' : '') + ' onclick="register(' + s.id + ')">参加する</button>';
-    }
-    return '<div class="sess-card' + (st.disabled && !s.registered ? ' full' : '') + '">'
-      + '<div class="sess-title">' + escH(s.title) + ' <span class="badge ' + st.cls + '">' + st.label + '</span>' + registeredBadge + '</div>'
-      + '<div class="sess-row"><span class="lb">日時</span><span>' + fmtDate(s.date) + ' ' + escH(timeLabel(s)) + '</span></div>'
+    var slots = s.slots || [];
+    var multi = slots.length > 1;
+    var anyRegistered = slots.some(function(sl) { return sl.registered; });
+    var registeredBadge = anyRegistered ? '<span class="badge done">参加登録済み</span>' : '';
+    var catBadge = s.category_name ? ('<span class="badge open">' + escH(s.category_name) + '</span> ') : '';
+    var canCancel = cancelAllowed(s);
+
+    var slotRows = slots.map(function(sl, i) {
+      var st = slotStatus(s, sl);
+      var capLabel = sl.capacity > 0 ? ('残り ' + Math.max(sl.capacity - (sl.participant_count || 0), 0) + ' 名') : '定員なし';
+      var head = (multi ? ('<b>' + escH(slotNameStr(sl, i)) + '</b> ') : '') + escH(slotTimeStr(sl));
+      var act;
+      if (sl.registered) {
+        act = '<span class="badge done">登録済み</span>'
+          + '<button class="sess-btn cancel" ' + (canCancel ? '' : 'disabled') + ' onclick="cancelReg(' + s.id + ',' + sl.id + ')">' + (canCancel ? 'キャンセル' : '前日以降不可') + '</button>';
+      } else {
+        var disabled = st.disabled || !!_penalty;
+        act = '<span class="badge ' + st.cls + '">' + st.label + '</span>'
+          + '<button class="sess-btn" ' + (disabled ? 'disabled' : '') + ' onclick="register(' + s.id + ',' + sl.id + ')">参加する</button>';
+      }
+      return '<div class="slot-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 0;border-top:1px solid #eef2f7;">'
+        + '<span style="flex:1;min-width:150px;">' + head + '</span>'
+        + '<span class="lb" style="min-width:70px;">' + capLabel + '</span>'
+        + '<span style="display:flex;gap:6px;align-items:center;">' + act + '</span>'
+        + '</div>';
+    }).join('');
+
+    return '<div class="sess-card">'
+      + '<div class="sess-title">' + catBadge + escH(s.title) + ' ' + registeredBadge + '</div>'
+      + '<div class="sess-row"><span class="lb">開催日</span><span>' + fmtDate(s.date) + '</span></div>'
       + '<div class="sess-row"><span class="lb">場所</span><span>' + escH(s.location || '別途ご案内') + '</span></div>'
       + '<div class="sess-row"><span class="lb">担当</span><span>' + escH(s.contact_name || '別途ご案内') + '</span></div>'
       + (s.target_audience ? ('<div class="sess-row"><span class="lb">対象</span><span>' + escH(s.target_audience) + '</span></div>') : '')
-      + '<div class="sess-row"><span class="lb">定員</span><span>' + capLabel + '</span></div>'
-      + actions
+      + '<div style="margin-top:6px;"><div class="lb" style="margin-bottom:2px;">' + (multi ? '参加する回を選んでください' : '') + '</div>' + slotRows + '</div>'
       + '</div>';
   }).join('');
 }
 
-function showConfirmFor(id) {
-  var s = _sessions.filter(function(x) { return x.id === id; })[0];
-  if (s) { _lastRegistered = s; showConfirm(s); }
-}
-
-async function cancelReg(id) {
-  if (!confirm('このイベントの参加登録を取り消しますか？')) return;
+async function cancelReg(id, slotId) {
+  if (!confirm('この回の参加登録を取り消しますか？')) return;
   try {
     var res = await fetch('/api/public/study-sessions/' + id + '/cancel', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: _empNo })
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: _empNo, slot_id: slotId })
     });
     var d = await res.json().catch(function() { return {}; });
     if (!res.ok) { alert(d.error || '取り消しに失敗しました'); return; }
@@ -689,23 +743,27 @@ async function cancelReg(id) {
   }
 }
 
-async function register(id) {
+async function register(id, slotId) {
   try {
     var res = await fetch('/api/public/study-sessions/' + id + '/register', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: _empNo })
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ emp_no: _empNo, slot_id: slotId })
     });
     var d = await res.json().catch(function() { return {}; });
     if (!res.ok) { alert(d.error || '登録に失敗しました'); return; }
-    _lastRegistered = d.session;
-    showConfirm(d.session);
+    var s = findSession(id);
+    var sl = s ? findSlot(s, slotId) : null;
+    _lastRegistered = s;
+    showConfirm(s || d.session, sl);
   } catch (e) {
     alert('登録に失敗しました。もう一度お試しください');
   }
 }
 
-function showConfirm(s) {
+function showConfirm(s, sl) {
+  var idx = sl && s && s.slots ? s.slots.indexOf(sl) : -1;
+  var timeStr = sl ? ((idx >= 0 && s.slots.length > 1 ? slotNameStr(sl, idx) + '　' : '') + slotTimeStr(sl)) : '別途ご案内';
   var detail = '<div class="t">' + escH(s.title) + '</div>'
-    + '<div class="r"><span class="lb">日時</span><span>' + fmtDate(s.date) + ' ' + escH(timeLabel(s)) + '</span></div>'
+    + '<div class="r"><span class="lb">日時</span><span>' + fmtDate(s.date) + ' ' + escH(timeStr) + '</span></div>'
     + '<div class="r"><span class="lb">場所</span><span>' + escH(s.location || '別途ご案内') + '</span></div>'
     + '<div class="r"><span class="lb">担当</span><span>' + escH(s.contact_name || '別途ご案内') + '</span></div>';
   document.getElementById('confirm-detail').innerHTML = detail;
@@ -739,10 +797,12 @@ function renderMypage(records) {
   }
   document.getElementById('stamp-grid').innerHTML = records.map(function(r) {
     var filled = !!r.attended;
+    var t = (r.start_time || '') + (r.end_time ? '〜' + r.end_time : '');
+    var sub = fmtDate(r.date) + (r.slot_label ? ' ' + escH(r.slot_label) : '') + (t ? ' ' + escH(t) : '');
     return '<div class="stamp-card">'
       + '<div class="stamp-circle ' + (filled ? 'filled' : 'empty') + '">' + (filled ? '済' : '？') + '</div>'
       + '<div class="stamp-title">' + escH(r.title) + '</div>'
-      + '<div class="stamp-date">' + fmtDate(r.date) + '</div>'
+      + '<div class="stamp-date">' + sub + '</div>'
       + '</div>';
   }).join('');
 }

@@ -28,6 +28,10 @@ function isOpenNow(s: WishSettings | null): boolean {
   return true;
 }
 
+// 一旦停止中: 班長が希望休を提出したときに統括管理者等（送信権限者）のLINEへ即時通知する機能。
+// 再開するときは false を true に戻すだけでよい。
+const WISH_SUBMIT_NOTIFY_ENABLED = false;
+
 // 提出時のLINE即時通知（送信権限者へ1件ずつ内容が分かるように通知）
 async function notifyWishSubmitters(env: Env, text: string): Promise<void> {
   const token = env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -166,7 +170,9 @@ app.post('/api/public/kancho-wish/submit', async (c) => {
       }).join('\n')
     : '（なし）';
   const text = `【希望休 提出】${member.name}さんより\n\n希望休:\n${dateLines}\n\nその他要望:\n${remark.trim() || '（なし）'}`;
-  c.executionCtx.waitUntil(notifyWishSubmitters(c.env, text));
+  if (WISH_SUBMIT_NOTIFY_ENABLED) {
+    c.executionCtx.waitUntil(notifyWishSubmitters(c.env, text));
+  }
   return c.json({ ok: true });
 });
 

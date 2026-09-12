@@ -17,12 +17,22 @@ bucket_name = "benten-documents"
 binding = "TENKO_BUCKET"
 bucket_name = "benten-tenko"
 
+# 乗務員証 証明写真の一時保存（30日で自動削除・毎時cronで purge）
+[[r2_buckets]]
+binding = "ID_PHOTO_BUCKET"
+bucket_name = "benten-id-photos"
+
+# 学習ノート（個人用ノート教材のページ画像保管。管理者本人の私的学習用）
+[[r2_buckets]]
+binding = "STUDY_NOTES_BUCKET"
+bucket_name = "benten-study-notes"
+
 [vars]
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
 RICHMENU_ID_PATTERN1 = "richmenu-7ddc3e80e06b72a49103d5237a89a4ee"
-RICHMENU_ID_PATTERN2 = "richmenu-ff06b9f597db71b89ddac53ad16e48c4"
-RICHMENU_ID_PATTERN3 = "richmenu-ff06b9f597db71b89ddac53ad16e48c4"
+RICHMENU_ID_PATTERN2 = "richmenu-a7e9455f5aa958d9cd26e109d1946180"
+RICHMENU_ID_PATTERN3 = "richmenu-a7e9455f5aa958d9cd26e109d1946180"
 # LIFFアプリID（LINE Developers で作成後に設定）
 LIFF_ID_LOST_ITEM = "2010598812-y7oZBhGe"
 LIFF_ID_ACCIDENT = "2010598812-PaLPe9HP"
@@ -56,6 +66,7 @@ LIFF_ID_REGISTER = "2010598812-B8nxU525"
 BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/master/fonts/NotoSansCJKjp-Regular.ttf"
 # シークレット値は wrangler secret put で登録すること（このファイルには記載しない）
 # npx wrangler secret put SETUP_KEY
+# npx wrangler secret put AUTH_GATE_KILL_KEY   ← adminログイン2段階認証の緊急停止キー。/{SECRET}/admin/login/verify/kill?key=... でゲートOFF
 # npx wrangler secret put LINE_CHANNEL_SECRET
 # npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
 # npx wrangler secret put LINE_REG_PWD_VEHICLE       ← 車番管理者 登録パスワード
@@ -97,10 +108,6 @@ pattern = "bentenclub.com/mon-61b500053713bf4c69b959d7567202b4*"
 zone_name = "bentenclub.com"
 
 [[routes]]
-pattern = "bentenclub.com/mon-nc-0b7d8c366e91a5f42c974c7810219585*"
-zone_name = "bentenclub.com"
-
-[[routes]]
 pattern = "bentenclub.com/study-45b471c74a7d9e9b5c99540302df04f0*"
 zone_name = "bentenclub.com"
 
@@ -112,8 +119,18 @@ zone_name = "bentenclub.com"
 pattern = "bentenclub.com/hh-2738ceac08eac11269d76dc733598ba6*"
 zone_name = "bentenclub.com"
 
+# 統合デジタルサイネージ（ログイン不要の固定URL・SIGNAGE_PUBLIC_PATH）
+[[routes]]
+pattern = "bentenclub.com/sg-d8b62011db0a09c2c279a620202d9d45*"
+zone_name = "bentenclub.com"
+
 [[routes]]
 pattern = "bentenclub.com/robots.txt"
+zone_name = "bentenclub.com"
+
+# TEMP-RM-RESTORE: リッチメニュー再割当用一時エンドポイント（作業後に削除）
+[[routes]]
+pattern = "bentenclub.com/rmr-94eb102c62fa2b37b067999d8992896ce6f01001fcbad2ff*"
 zone_name = "bentenclub.com"
 
 [triggers]

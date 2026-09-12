@@ -7,6 +7,8 @@ import { Hono } from 'hono';
 import type { Env } from '../../auth';
 import { contractDateForBirthday, LABOR_UNION_MIN_AGE, LABOR_UNION_MAX_AGE } from '../../utils/contract_alerts';
 import { todayIsoJST } from '../../utils/accident_period';
+import { parseSS2026Import, SS2026_DAYS_IN_MONTH } from '../../data/summer_safety_2026';
+import { defaultDoc } from '../../html/autumn_safety_tefuda';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -361,6 +363,321 @@ app.get('/keiyakusho-data', async (c) => {
     return (A.division ?? 9) - (Z.division ?? 9) || (A.team ?? 99) - (Z.team ?? 99);
   });
   return c.json({ year, month, contract_date: target, rows });
+});
+
+// ============ 夏季の交通事故をゼロにする運動（2026）手札の集計 ============
+// テーブル: summer_safety_2026_people / _entries / _meta（migration_134）
+const divFromTeam = (t: number | null) => (t == null ? null : Math.ceil(t / 2));
+
+// AIレポート欄（総括）の保存
+app.post('/summer-safety-2026/report', async (c) => {
+  const body = await c.req.json<{ text?: string }>().catch(() => ({} as { text?: string }));
+  const text = (body.text ?? '').slice(0, 8000);
+  await c.env.DB.prepare(
+    `INSERT INTO summer_safety_2026_meta (key, value, updated_at) VALUES ('ai_report', ?, datetime('now','localtime'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(text).run();
+  return c.json({ ok: true });
+});
+
+// 1セル（person × day）の値を更新。value が null/0 なら削除。
+app.post('/summer-safety-2026/entry', async (c) => {
+  const b = await c.req.json<{ person_key?: string; day?: number; value?: number | null }>().catch(() => ({} as Record<string, unknown>));
+  const key = String(b.person_key ?? '').trim();
+  const day = Number(b.day);
+  if (!key || !Number.isInteger(day) || day < 1 || day > SS2026_DAYS_IN_MONTH) {
+    return c.json({ error: 'パラメータが不正です' }, 400);
+  }
+  const exists = await c.env.DB.prepare('SELECT 1 FROM summer_safety_2026_people WHERE person_key = ?').bind(key).first();
+  if (!exists) return c.json({ error: '対象の乗務員が見つかりません' }, 404);
+
+  const v = b.value == null ? null : Number(b.value);
+  if (v == null || v === 0) {
+    await c.env.DB.prepare('DELETE FROM summer_safety_2026_entries WHERE person_key = ? AND day = ?').bind(key, day).run();
+    return c.json({ ok: true, value: null });
+  }
+  if (v !== 1 && v !== 2 && v !== 3) return c.json({ error: '値は 1/2/3 のみです' }, 400);
+  await c.env.DB.prepare(
+    `INSERT INTO summer_safety_2026_entries (person_key, day, value, updated_at) VALUES (?, ?, ?, datetime('now','localtime'))
+     ON CONFLICT(person_key, day) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(key, day, v).run();
+  return c.json({ ok: true, value: v });
+});
+
+// 手札の氏名・社員番号・班を修正（社員名簿に紐づけ直す）。person_key（内部ID）は変えない。
+app.post('/summer-safety-2026/person-meta', async (c) => {
+  const b = await c.req.json<{ person_key?: string; emp_no?: string | null; emp_name?: string; team?: number | null }>()
+    .catch(() => ({} as Record<string, unknown>));
+  const key = String(b.person_key ?? '').trim();
+  const name = String(b.emp_name ?? '').trim().slice(0, 40);
+  if (!key || !name) return c.json({ error: '氏名は必須です' }, 400);
+
+  const row = await c.env.DB.prepare('SELECT person_key FROM summer_safety_2026_people WHERE person_key = ?').bind(key).first();
+  if (!row) return c.json({ error: '対象が見つかりません' }, 404);
+
+  const empNo = b.emp_no == null || String(b.emp_no).trim() === '' ? null : String(b.emp_no).trim().slice(0, 20);
+  const team = b.team == null || !Number.isInteger(Number(b.team)) ? null : Number(b.team);
+  const div = team == null ? null : Math.ceil(team / 2);
+
+  let dupWarning: string | null = null;
+  if (empNo) {
+    const dup = await c.env.DB.prepare(
+      'SELECT emp_name FROM summer_safety_2026_people WHERE emp_no = ? AND person_key != ?'
+    ).bind(empNo, key).first<{ emp_name: string }>();
+    if (dup) dupWarning = `社員番号 ${empNo} は既に「${dup.emp_name}」に紐づいています`;
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE summer_safety_2026_people
+        SET emp_name = ?, emp_no = ?, team = ?, division = ?, updated_at = datetime('now','localtime')
+      WHERE person_key = ?`
+  ).bind(name, empNo, team, div, key).run();
+
+  return c.json({ ok: true, emp_name: name, emp_no: empNo, team, division: div, warning: dupWarning });
+});
+
+// 貼り付けテキストの一括取込（社員番号 or 氏名で突き合わせ、同じ人・同じ日の値は上書き）
+app.post('/summer-safety-2026/import', async (c) => {
+  const body = await c.req.json<{ text?: string }>().catch(() => ({} as { text?: string }));
+  const parsed = parseSS2026Import(body.text ?? '');
+  if (!parsed.people.length) return c.json({ error: parsed.errors[0] ?? '取り込める行がありません', errors: parsed.errors }, 400);
+
+  const existing = await c.env.DB.prepare('SELECT person_key, emp_no, emp_name FROM summer_safety_2026_people')
+    .all<{ person_key: string; emp_no: string | null; emp_name: string }>();
+  const byEmpNo = new Map<string, string>();
+  const byName = new Map<string, string>();
+  for (const r of existing.results ?? []) {
+    if (r.emp_no) byEmpNo.set(r.emp_no, r.person_key);
+    byName.set(r.emp_name, r.person_key);
+  }
+  let maxSheet = 0;
+  const sheetRs = await c.env.DB.prepare('SELECT COALESCE(MAX(sheet_no),0) AS m FROM summer_safety_2026_people').first<{ m: number }>();
+  maxSheet = sheetRs?.m ?? 0;
+
+  const stmts: D1PreparedStatement[] = [];
+  let entryCount = 0;
+  for (const p of parsed.people) {
+    let key = '';
+    if (p.emp_no && byEmpNo.has(p.emp_no)) key = byEmpNo.get(p.emp_no)!;
+    else if (!p.emp_no && byName.has(p.emp_name)) key = byName.get(p.emp_name)!;
+    else key = p.emp_no || `imp:${p.emp_name}`;
+
+    const div = divFromTeam(p.team);
+    const isNew = !(byEmpNo.has(p.emp_no) || byName.has(p.emp_name)) && !((existing.results ?? []).some(r => r.person_key === key));
+    if (isNew) maxSheet++;
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO summer_safety_2026_people (person_key, emp_no, emp_name, team, division, sheet_no)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(person_key) DO UPDATE SET
+         emp_no = COALESCE(NULLIF(excluded.emp_no,''), summer_safety_2026_people.emp_no),
+         emp_name = excluded.emp_name,
+         team = COALESCE(excluded.team, summer_safety_2026_people.team),
+         division = COALESCE(excluded.division, summer_safety_2026_people.division),
+         updated_at = datetime('now','localtime')`
+    ).bind(key, p.emp_no || null, p.emp_name, p.team, div, isNew ? maxSheet : null));
+    byName.set(p.emp_name, key);
+    if (p.emp_no) byEmpNo.set(p.emp_no, key);
+
+    for (const [dStr, v] of Object.entries(p.days)) {
+      stmts.push(c.env.DB.prepare(
+        `INSERT INTO summer_safety_2026_entries (person_key, day, value, updated_at)
+         VALUES (?, ?, ?, datetime('now','localtime'))
+         ON CONFLICT(person_key, day) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+      ).bind(key, Number(dStr), v));
+      entryCount++;
+    }
+  }
+  // sheet_no を後から詰める（NULL のままだと一覧末尾）
+  await c.env.DB.batch(stmts);
+  await c.env.DB.prepare(
+    `UPDATE summer_safety_2026_people SET sheet_no = (SELECT COUNT(*) FROM summer_safety_2026_people p2 WHERE p2.rowid <= summer_safety_2026_people.rowid)
+     WHERE sheet_no IS NULL`
+  ).run().catch(() => {});
+  return c.json({ ok: true, people: parsed.people.length, entries: entryCount, warnings: parsed.errors });
+});
+
+// ============ 乗務員証 証明写真 — 作業一式の保存（migration_137/138 / R2: ID_PHOTO_BUCKET） ============
+// バッチ = 追加した写真＋切り取り設定＋人物＋出力設定＋保存時に生成した印刷シート(A4/L・表裏の各ページ画像＋PDF) の一式。
+// 自動削除はしない（手動削除ボタンのみ。expires_at は名残の列で実質使わない）。
+const IDP_NEVER = '9999-12-31T00:00:00.000Z';
+
+// 保存開始: 空のバッチ行を作る
+app.post('/id-photos/batches', async (c) => {
+  const b = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
+  const label = String(b.label ?? '').trim().slice(0, 100) || '(名称未設定)';
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare(
+    `INSERT INTO id_photo_batches (id, label, photo_count, settings_json, photos_json, created_by, expires_at)
+     VALUES (?, ?, 0, '{}', '[]', ?, ?)`
+  ).bind(id, label, c.get('adminId') ?? null, IDP_NEVER).run();
+  return c.json({ id });
+});
+
+// 写真1枚アップロード（本体はリクエストボディの生バイト = image/jpeg）
+app.put('/id-photos/batches/:id/photo/:idx', async (c) => {
+  const id = c.req.param('id');
+  const idx = parseInt(c.req.param('idx'), 10);
+  if (!Number.isInteger(idx) || idx < 0 || idx > 199) return c.json({ error: 'idxが不正です' }, 400);
+  const row = await c.env.DB.prepare('SELECT id FROM id_photo_batches WHERE id = ?').bind(id).first();
+  if (!row) return c.json({ error: 'バッチが見つかりません' }, 404);
+  const buf = await c.req.arrayBuffer();
+  if (!buf.byteLength || buf.byteLength > 8_000_000) return c.json({ error: '画像サイズが不正です' }, 400);
+  await c.env.ID_PHOTO_BUCKET.put(`${id}/photo-${idx}.jpg`, buf, { httpMetadata: { contentType: 'image/jpeg' } });
+  return c.json({ ok: true });
+});
+
+// 印刷シート1ページ分の画像アップロード（保存時点のA4/L表裏ページをそのまま保持する）
+app.put('/id-photos/batches/:id/sheet/:idx', async (c) => {
+  const id = c.req.param('id');
+  const idx = parseInt(c.req.param('idx'), 10);
+  if (!Number.isInteger(idx) || idx < 0 || idx > 199) return c.json({ error: 'idxが不正です' }, 400);
+  const row = await c.env.DB.prepare('SELECT id FROM id_photo_batches WHERE id = ?').bind(id).first();
+  if (!row) return c.json({ error: 'バッチが見つかりません' }, 404);
+  const buf = await c.req.arrayBuffer();
+  if (!buf.byteLength || buf.byteLength > 12_000_000) return c.json({ error: '画像サイズが不正です' }, 400);
+  await c.env.ID_PHOTO_BUCKET.put(`${id}/sheet-${idx}.jpg`, buf, { httpMetadata: { contentType: 'image/jpeg' } });
+  return c.json({ ok: true });
+});
+
+// 印刷シート一式のPDFをアップロード
+app.put('/id-photos/batches/:id/pdf', async (c) => {
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare('SELECT id FROM id_photo_batches WHERE id = ?').bind(id).first();
+  if (!row) return c.json({ error: 'バッチが見つかりません' }, 404);
+  const buf = await c.req.arrayBuffer();
+  if (!buf.byteLength || buf.byteLength > 40_000_000) return c.json({ error: 'PDFサイズが不正です' }, 400);
+  await c.env.ID_PHOTO_BUCKET.put(`${id}/sheet.pdf`, buf, { httpMetadata: { contentType: 'application/pdf' } });
+  return c.json({ ok: true });
+});
+
+// 上書き保存の後始末: 写真/印刷シートが減った場合に、不要になった旧インデックスのR2オブジェクトを削除する
+app.post('/id-photos/batches/:id/trim', async (c) => {
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare('SELECT id FROM id_photo_batches WHERE id = ?').bind(id).first();
+  if (!row) return c.json({ error: 'バッチが見つかりません' }, 404);
+  const b = await c.req.json<{ photo_count?: number; sheet_count?: number }>().catch(() => ({} as Record<string, unknown>));
+  const photoCount = Number.isInteger(b.photo_count) ? Math.max(0, b.photo_count as number) : null;
+  const sheetCount = Number.isInteger(b.sheet_count) ? Math.max(0, b.sheet_count as number) : null;
+  if (photoCount == null && sheetCount == null) return c.json({ ok: true, deleted: 0 });
+  const listed = await c.env.ID_PHOTO_BUCKET.list({ prefix: `${id}/` });
+  const toDelete: string[] = [];
+  for (const o of listed.objects) {
+    const key = o.key.slice(id.length + 1);
+    const mPhoto = /^photo-(\d+)\.jpg$/.exec(key);
+    const mSheet = /^sheet-(\d+)\.jpg$/.exec(key);
+    if (mPhoto && photoCount != null && parseInt(mPhoto[1], 10) >= photoCount) toDelete.push(o.key);
+    else if (mSheet && sheetCount != null && parseInt(mSheet[1], 10) >= sheetCount) toDelete.push(o.key);
+  }
+  if (toDelete.length) await c.env.ID_PHOTO_BUCKET.delete(toDelete);
+  return c.json({ ok: true, deleted: toDelete.length });
+});
+
+// 保存確定: メタを書き込む
+app.post('/id-photos/batches/:id/finalize', async (c) => {
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare('SELECT id FROM id_photo_batches WHERE id = ?').bind(id).first();
+  if (!row) return c.json({ error: 'バッチが見つかりません' }, 404);
+  const b = await c.req.json<{ label?: string; photo_count?: number; settings?: unknown; photos?: unknown; sheet_count?: number; has_sheets?: boolean }>()
+    .catch(() => ({} as Record<string, unknown>));
+  const label = String(b.label ?? '').trim().slice(0, 100) || '(名称未設定)';
+  const count = Number.isInteger(b.photo_count) ? Math.max(0, Math.min(200, b.photo_count as number)) : 0;
+  const sheetCount = Number.isInteger(b.sheet_count) ? Math.max(0, Math.min(200, b.sheet_count as number)) : 0;
+  const hasSheets = b.has_sheets && sheetCount > 0 ? 1 : 0;
+  const settingsStr = JSON.stringify(b.settings ?? {}).slice(0, 20_000);
+  const photosStr = JSON.stringify(b.photos ?? []).slice(0, 400_000);
+  await c.env.DB.prepare(
+    `UPDATE id_photo_batches SET label = ?, photo_count = ?, settings_json = ?, photos_json = ?, has_sheets = ?, sheet_count = ? WHERE id = ?`
+  ).bind(label, count, settingsStr, photosStr, hasSheets, sheetCount, id).run();
+  return c.json({ ok: true });
+});
+
+// 一覧（新しい順・全件＝自動削除しないため期限フィルタなし）
+app.get('/id-photos/batches', async (c) => {
+  const rs = await c.env.DB.prepare(
+    `SELECT id, label, photo_count, has_sheets, sheet_count, created_at
+       FROM id_photo_batches ORDER BY created_at DESC LIMIT 200`
+  ).all();
+  return c.json({ batches: rs.results ?? [] });
+});
+
+// 1バッチのメタ取得
+app.get('/id-photos/batches/:id', async (c) => {
+  const row = await c.env.DB.prepare(
+    'SELECT id, label, photo_count, settings_json, photos_json, has_sheets, sheet_count, created_at FROM id_photo_batches WHERE id = ?'
+  ).bind(c.req.param('id')).first<{ id: string; label: string; photo_count: number; settings_json: string; photos_json: string; has_sheets: number; sheet_count: number; created_at: string }>();
+  if (!row) return c.json({ error: 'バッチが見つかりません' }, 404);
+  let settings: unknown = {}, photos: unknown = [];
+  try { settings = JSON.parse(row.settings_json || '{}'); } catch { /* noop */ }
+  try { photos = JSON.parse(row.photos_json || '[]'); } catch { /* noop */ }
+  return c.json({
+    id: row.id, label: row.label, photo_count: row.photo_count, settings, photos,
+    has_sheets: !!row.has_sheets, sheet_count: row.sheet_count, created_at: row.created_at,
+  });
+});
+
+// 写真1枚を取得（R2からストリーム）
+app.get('/id-photos/batches/:id/photo/:idx', async (c) => {
+  const id = c.req.param('id');
+  const idx = parseInt(c.req.param('idx'), 10);
+  if (!Number.isInteger(idx) || idx < 0) return c.json({ error: 'idxが不正です' }, 400);
+  const obj = await c.env.ID_PHOTO_BUCKET.get(`${id}/photo-${idx}.jpg`);
+  if (!obj) return c.json({ error: '画像が見つかりません' }, 404);
+  return new Response(obj.body, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' } });
+});
+
+// 印刷シート1ページを取得（R2からストリーム）
+app.get('/id-photos/batches/:id/sheet/:idx', async (c) => {
+  const id = c.req.param('id');
+  const idx = parseInt(c.req.param('idx'), 10);
+  if (!Number.isInteger(idx) || idx < 0) return c.json({ error: 'idxが不正です' }, 400);
+  const obj = await c.env.ID_PHOTO_BUCKET.get(`${id}/sheet-${idx}.jpg`);
+  if (!obj) return c.json({ error: 'シートが見つかりません' }, 404);
+  return new Response(obj.body, { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' } });
+});
+
+// 保存時のPDFを取得（そのままダウンロード/表示）
+app.get('/id-photos/batches/:id/pdf', async (c) => {
+  const id = c.req.param('id');
+  const obj = await c.env.ID_PHOTO_BUCKET.get(`${id}/sheet.pdf`);
+  if (!obj) return c.json({ error: 'PDFが見つかりません' }, 404);
+  return new Response(obj.body, {
+    headers: { 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store', 'Content-Disposition': `inline; filename="idphotos-${id}.pdf"` },
+  });
+});
+
+// 手動削除（R2オブジェクト＋行）— 削除できるのはこの操作のみ（自動削除なし）
+app.delete('/id-photos/batches/:id', async (c) => {
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare('SELECT id FROM id_photo_batches WHERE id = ?').bind(id).first();
+  if (!row) return c.json({ error: 'バッチが見つかりません' }, 404);
+  const listed = await c.env.ID_PHOTO_BUCKET.list({ prefix: `${id}/` });
+  if (listed.objects.length) await c.env.ID_PHOTO_BUCKET.delete(listed.objects.map(o => o.key));
+  await c.env.DB.prepare('DELETE FROM id_photo_batches WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
+// ============ 秋の全国交通安全運動 手札（自由配置エディタの版下を1行だけ保存） ============
+app.get('/autumn-safety-2026-tefuda', async (c) => {
+  const tpl = c.req.query('tpl');
+  if (tpl === 'blocks' || tpl === 'row') {
+    return c.json({ data: defaultDoc(tpl) });
+  }
+  const row = await c.env.DB.prepare('SELECT data_json, updated_at FROM autumn_safety_2026_tefuda WHERE id = 1')
+    .first<{ data_json: string; updated_at: string }>().catch(() => null);
+  let data: unknown = {};
+  try { data = row?.data_json ? JSON.parse(row.data_json) : {}; } catch { data = {}; }
+  return c.json({ data, updated_at: row?.updated_at ?? null });
+});
+
+app.post('/autumn-safety-2026-tefuda', async (c) => {
+  const body = await c.req.json<{ data?: unknown }>().catch(() => ({} as { data?: unknown }));
+  const json = JSON.stringify(body.data ?? {}).slice(0, 120000);
+  await c.env.DB.prepare(
+    `INSERT INTO autumn_safety_2026_tefuda (id, data_json, updated_at)
+       VALUES (1, ?, datetime('now','localtime'))
+     ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at`
+  ).bind(json).run();
+  return c.json({ ok: true });
 });
 
 export default app;

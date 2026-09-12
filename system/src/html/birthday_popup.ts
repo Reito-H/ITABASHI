@@ -1,6 +1,7 @@
 // ハッピーバースデーモード: 誕生日当日の設定時刻に全ページへ表示するお祝いポップアップ
 // layout.ts の <body> 直後に birthdayPopupHtml() を1つ配置し、
-// birthdayPopupScript() でポーリング・表示・自動クローズを行う。
+// birthdayPopupScript() でポーリング・表示を行う。
+// 一度表示したら、右上の閉じるボタンを押すまで自動では消えない（対象者が複数なら裏で自動スライドし続ける）。
 // サーバー側に既読管理テーブルはなく、同一イベントを再表示しないための既読IDはブラウザのlocalStorageで管理する
 // （announcement_bar.ts の dismiss はアカウント単位でサーバー保存するが、こちらはブラウザ単位で十分なため簡略化）
 // 絵文字は使わず【】等の記号と紙吹雪風のCSSアニメーションで演出する
@@ -118,7 +119,6 @@ export function birthdayPopupScript(): string {
     var BDAY_LAST_KEY = 'ho_birthday_last_event_id';
     var BDAY_COLORS = ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#f472b6'];
     var BDAY_SLIDE_MS = 4500;
-    var _bdayAutoCloseTimer = null;
     var _bdaySlideTimer = null;
 
     function escBdayText(s) {
@@ -160,20 +160,16 @@ export function birthdayPopupScript(): string {
       renderBdaySlide(people[0], 1, people.length);
       clearInterval(_bdaySlideTimer);
       if (people.length > 1) {
+        // 閉じるボタンを押すまで自動では消さないので、複数人のときは先頭に戻って延々スライドし続ける
         _bdaySlideTimer = setInterval(function () {
-          idx++;
-          if (idx >= people.length) { clearInterval(_bdaySlideTimer); return; }
+          idx = (idx + 1) % people.length;
           renderBdaySlide(people[idx], idx + 1, people.length);
         }, BDAY_SLIDE_MS);
       }
 
-      clearTimeout(_bdayAutoCloseTimer);
-      var totalMs = Math.max(12000, people.length * BDAY_SLIDE_MS + 4000);
-      _bdayAutoCloseTimer = setTimeout(closeBirthdayPopup, totalMs);
       try { localStorage.setItem(BDAY_LAST_KEY, String(evt.id)); } catch (e) {}
     }
     function closeBirthdayPopup() {
-      clearTimeout(_bdayAutoCloseTimer);
       clearInterval(_bdaySlideTimer);
       document.getElementById('bday-overlay').style.display = 'none';
     }
@@ -186,7 +182,8 @@ export function birthdayPopupScript(): string {
         if (!evt || !evt.celebrants || !evt.celebrants.length) return;
         var lastId = null;
         try { lastId = localStorage.getItem(BDAY_LAST_KEY); } catch (e) {}
-        if (lastId !== null && Number(lastId) === Number(evt.id)) return;
+        // イベントIDは「2026-09-09-08:30」形式の文字列（テスト発火は test-xxxx）。文字列で厳密一致を見る
+        if (lastId !== null && lastId === String(evt.id)) return;
         showBirthdayPopup(evt);
       } catch (e) { /* 通信エラー時は次回ポーリングに委ねる */ }
     }

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  verifyPassword, hashPassword, createSession, deleteSession,
+  verifyPassword, hashPassword, deleteSession,
   isLockedOut, recordFailedLogin, getSessionFromCookie,
   getShiftDisplayRange, getPeriodRange, getPeriodSettings,
 } from '../auth';
@@ -10,17 +10,19 @@ import type { Env } from '../auth';
 import type {
   Employee, ShiftEntry, Instructor, InstructorSchedule, ScheduleType, Coach
 } from '../html/shift';
-import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH, MONITOR_NEWCOMERS_PATH } from '../config';
+import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH, SIGNAGE_PUBLIC_PATH } from '../config';
 import qrcode from 'qrcode-generator';
 import {
   getMaintenanceMode, setMaintenanceMode, isAdminAccount,
-  getMaintenanceSchedule, setMaintenanceSchedule, isWithinSchedule, isMaintenanceActive,
+  getMaintenanceSchedule, setMaintenanceSchedule, isWithinSchedule,
 } from '../utils/maintenance';
-import { triggerAccidentsMonitorForceRefresh, getMonitorDisplaySettings, saveMonitorDisplaySettings, type MonitorDisplayMode } from './public_accidents_monitor';
+import { triggerAccidentsMonitorForceRefresh } from './public_accidents_monitor';
 import { agoLabel } from './admin_line_usage';
-import { bucketCoarseBands, COARSE_BAND_LABELS } from '../html/accidents';
+import { getGateStatus, createChallenge, newChallengeToken } from '../utils/auth_gate';
+import { finalizeLoginResponse } from './admin_auth_gate';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
 import { getAdminPermissions } from '../permissions';
+import { computeKanchoAttendance } from '../cron';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -114,27 +116,23 @@ app.post('/login', async (c) => {
     return c.html(loginPage(mode, 'ユーザー名またはパスワードが正しくありません。', ''));
   }
 
-  const sessionId = await createSession(c.env.DB, admin.id);
+  // adminアカウントのみ: 2段階認証ゲートが「準備完了」なら、ここではセッションを発行せず
+  // 保留チャレンジを作って顔/LINE承認ページへ送る。前提が欠けている間は素通り（fail-open）。
+  if (username === 'admin') {
+    const gate = await getGateStatus(c.env.DB);
+    if (gate.ready && gate.adminId === admin.id) {
+      const token = newChallengeToken();
+      await createChallenge(c.env.DB, {
+        token, adminId: admin.id, ip,
+        ua: c.req.header('User-Agent') ?? '',
+      });
+      const res = c.redirect(`${ADMIN_PATH}/login/verify`);
+      res.headers.append('Set-Cookie', `login_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=360`);
+      return res;
+    }
+  }
 
-  // ログイン情報を記録
-  const cf = (c.req.raw as any).cf ?? {};
-  await c.env.DB.prepare(
-    'INSERT INTO login_logs (ip, country, city, latitude, longitude, timezone, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(
-    c.req.header('CF-Connecting-IP') ?? ip,
-    cf.country ?? c.req.header('CF-IPCountry') ?? null,
-    cf.city ?? null,
-    cf.latitude ? String(cf.latitude) : null,
-    cf.longitude ? String(cf.longitude) : null,
-    cf.timezone ?? null,
-    c.req.header('User-Agent') ?? null
-  ).run();
-
-  const res = c.redirect(ADMIN_PATH);
-  res.headers.set('Set-Cookie',
-    `session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`
-  );
-  return res;
+  return finalizeLoginResponse(c, admin.id, ip);
 });
 
 // ===== ログアウト =====
@@ -211,276 +209,59 @@ app.get('/', async (c) => {
   const jstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const today = jstNow.toISOString().split('T')[0];
 
-  // 直近6ヶ月の "YYYY-MM" リスト（分析グラフ用）
-  const months: string[] = [];
-  for (let i = 5; i >= 0; i--) {
-    const d = new Date(Date.UTC(jstNow.getUTCFullYear(), jstNow.getUTCMonth() - i, 1));
-    months.push(d.toISOString().slice(0, 7));
-  }
-  const sinceMonth = `${months[0]}-01`;
-  const curY = jstNow.getUTCFullYear();
-  const curM = jstNow.getUTCMonth() + 1;
-  const prevY = curM === 1 ? curY - 1 : curY;
-  const prevM = curM === 1 ? 12 : curM - 1;
-
-  // ===== ダッシュボード表示用データを一括取得 =====
-  // 互いに依存しない17クエリを単一のPromise.allにまとめ、D1への往復を1回に集約する
-  // （旧実装は Promise.all を2回 + 個別await5回に分かれており、直列の往復が発生していた）
+  // 「今日」画面に必要なデータだけを一括取得する（旧ホームの月次17クエリ＋グラフ描画は廃止）
   const selfAdminId = c.get('adminId');
-  const [
-    empStats, overdueInterviews, openReports, lastLogin,
-    hireTrend, reportTrend, divisionComp, salesStats, lineUsage,
-    overdueList, selfAdmin, maintenanceOn, dbHealthOk,
-    accidentTimes, prevAccidentCount,
-  ] = await Promise.all([
-    c.env.DB.prepare(`
-      SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN (status IS NULL OR status != 'completed') THEN 1 ELSE 0 END) AS training_count,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS regular_count
-      FROM employees WHERE is_active = 1
-    `).first<{ total: number; training_count: number; regular_count: number }>(),
-    c.env.DB.prepare(`
-      SELECT COUNT(DISTINCT emp_id) as cnt FROM interview_records
-      WHERE next_interview_date < ? AND next_interview_date != ''
-        AND emp_id NOT IN (
-          SELECT emp_id FROM interview_records WHERE interview_date >= ?
-        )
-    `).bind(today, today).first<{ cnt: number }>(),
+  const [openReports, lastLogin, selfAdmin, todayEvents, shuttleTrips, kanchoToday] = await Promise.all([
     c.env.DB.prepare(`
       SELECT
         (SELECT COUNT(*) FROM lost_item_reports WHERE status != 'resolved') AS lost,
-        (SELECT COUNT(*) FROM accident_reports WHERE status != 'resolved') AS accident,
+        (SELECT COUNT(*) FROM accident_reports  WHERE status != 'resolved') AS accident,
         (SELECT COUNT(*) FROM violation_reports WHERE status != 'resolved') AS violation,
-        (SELECT COUNT(*) FROM general_reports WHERE status != 'resolved') AS general
+        (SELECT COUNT(*) FROM general_reports   WHERE status != 'resolved') AS general
     `).first<{ lost: number; accident: number; violation: number; general: number }>().catch(() => null),
-    c.env.DB.prepare('SELECT * FROM login_logs ORDER BY logged_at DESC LIMIT 5').all<{
-      id: number; ip: string; country: string; city: string;
-      latitude: string; longitude: string; user_agent: string; logged_at: string;
-    }>(),
-    // 入社人数の推移（退職者含む・hire_date基準）
-    c.env.DB.prepare(`
-      SELECT substr(hire_date, 1, 7) AS ym, COUNT(*) AS cnt
-      FROM employees
-      WHERE hire_date >= ? AND hire_date != ''
-      GROUP BY ym
-    `).bind(sinceMonth).all<{ ym: string; cnt: number }>().catch(() => null),
-    // 報告件数の推移（忘れ物・事故・違反・一般の合算）
-    c.env.DB.prepare(`
-      SELECT ym, SUM(cnt) AS cnt FROM (
-        SELECT substr(created_at, 1, 7) AS ym, COUNT(*) AS cnt FROM lost_item_reports  WHERE created_at >= ? GROUP BY 1
-        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM accident_reports   WHERE created_at >= ? GROUP BY 1
-        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM violation_reports  WHERE created_at >= ? GROUP BY 1
-        UNION ALL SELECT substr(created_at, 1, 7), COUNT(*) FROM general_reports    WHERE created_at >= ? GROUP BY 1
-      ) GROUP BY ym
-    `).bind(sinceMonth, sinceMonth, sinceMonth, sinceMonth)
-      .all<{ ym: string; cnt: number }>().catch(() => null),
-    // 課別の在籍構成
-    c.env.DB.prepare(`
-      SELECT division, COUNT(*) AS cnt FROM employees
-      WHERE is_active = 1 GROUP BY division ORDER BY division
-    `).all<{ division: number | null; cnt: number }>().catch(() => null),
-    // 売上（今月度・前月度）
-    c.env.DB.prepare(`
-      SELECT period_year AS y, period_month AS m,
-             SUM(amount) AS total, COUNT(DISTINCT emp_id) AS people
-      FROM sales_records
-      WHERE (period_year = ? AND period_month = ?) OR (period_year = ? AND period_month = ?)
-      GROUP BY y, m
-    `).bind(curY, curM, prevY, prevM)
-      .all<{ y: number; m: number; total: number; people: number }>().catch(() => null),
-    // LINE利用（本日・直近7日）
-    c.env.DB.prepare(`
-      SELECT
-        SUM(CASE WHEN date(created_at) = date('now','localtime') THEN 1 ELSE 0 END) AS today_cnt,
-        SUM(CASE WHEN created_at >= datetime('now','localtime','-7 days') THEN 1 ELSE 0 END) AS week_cnt,
-        COUNT(DISTINCT CASE WHEN created_at >= datetime('now','localtime','-7 days') THEN line_uid END) AS week_users
-      FROM line_activity_logs
-    `).first<{ today_cnt: number; week_cnt: number; week_users: number }>().catch(() => null),
-    c.env.DB.prepare(`
-      SELECT e.id, e.name, e.emp_no, e.division, e.team,
-        ir.next_interview_date,
-        MAX(ir.interview_date) as last_interview
-      FROM interview_records ir
-      JOIN employees e ON ir.emp_id = e.id
-      WHERE ir.next_interview_date < ? AND ir.next_interview_date != ''
-        AND ir.emp_id NOT IN (
-          SELECT emp_id FROM interview_records WHERE interview_date >= ?
-        )
-      GROUP BY ir.emp_id
-      ORDER BY ir.next_interview_date
-      LIMIT 8
-    `).bind(today, today).all<{
-      id: number; name: string; emp_no: string; division: number; team: number;
-      next_interview_date: string; last_interview: string;
-    }>(),
+    c.env.DB.prepare('SELECT ip, country, city, logged_at FROM login_logs ORDER BY logged_at DESC LIMIT 5')
+      .all<{ ip: string; country: string; city: string; logged_at: string }>().catch(() => null),
     selfAdminId
       ? c.env.DB.prepare('SELECT username, permissions FROM admins WHERE id = ?')
           .bind(selfAdminId).first<{ username: string; permissions: string | null }>()
       : Promise.resolve(null),
-    isMaintenanceActive(c.env.DB).catch(() => false),
-    c.env.DB.prepare('SELECT 1').first().then(() => true).catch(() => false),
-    // 今月の事故（件数・時間帯）
-    c.env.DB.prepare(`SELECT occurred_time FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
-      .bind(`${curY}-${String(curM).padStart(2, '0')}`).all<{ occurred_time: string | null }>().catch(() => null),
-    c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM accident_records WHERE substr(occurred_date, 1, 7) = ?`)
-      .bind(`${prevY}-${String(prevM).padStart(2, '0')}`).first<{ cnt: number }>().catch(() => null),
+    // 今日のイベント（板橋ページの勉強会・公演など・回ごとの定員/参加数を合算）
+    c.env.DB.prepare(`
+      SELECT s.id, s.title, s.start_time,
+        (SELECT COALESCE(SUM(sl.capacity), 0) FROM study_session_slots sl WHERE sl.session_id = s.id) AS capacity,
+        (SELECT COUNT(*) FROM study_session_participants p
+           JOIN study_session_slots sl2 ON sl2.id = p.slot_id
+          WHERE sl2.session_id = s.id) AS participants
+      FROM study_sessions s
+      WHERE s.date = ?
+      ORDER BY s.start_time, s.id
+    `).bind(today).all<{ id: number; title: string; start_time: string | null; capacity: number; participants: number }>().catch(() => null),
+    // シャトルバス時刻表（有効な全便）
+    c.env.DB.prepare(`
+      SELECT id, destination, depart_office, depart_dest, arrive_office
+      FROM shuttle_trips WHERE is_active = 1 ORDER BY depart_office, id
+    `).all<{ id: number; destination: string; depart_office: string; depart_dest: string; arrive_office: string }>().catch(() => null),
+    // 本日の出勤班長・当直
+    computeKanchoAttendance(c.env, today).catch(() => null),
   ]);
-  const empCount     = { cnt: empStats?.total         ?? 0 };
-  const trainingCount = { cnt: empStats?.training_count ?? 0 };
-  const regularCount  = { cnt: empStats?.regular_count  ?? 0 };
-
-  const statusCheckedAt = jstNow.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit' });
 
   const openReportTotal = (openReports?.lost ?? 0) + (openReports?.accident ?? 0) + (openReports?.violation ?? 0) + (openReports?.general ?? 0);
-  const statCards = [
-    { label: '面談期限超過',     value: overdueInterviews?.cnt ?? 0, sub: '次回予定日を過ぎた社員',
-      color: (overdueInterviews?.cnt ?? 0) > 0 ? '#b45309' : '#1a3a5c', href: `${ADMIN_PATH}/interviews` },
-    { label: '対応中の現場報告', value: openReportTotal,
-      sub: `忘れ物 ${openReports?.lost ?? 0} / 事故 ${openReports?.accident ?? 0} / 違反 ${openReports?.violation ?? 0} / 一般 ${openReports?.general ?? 0}`,
-      color: openReportTotal > 0 ? '#b91c1c' : '#1a3a5c',
-      href: `${ADMIN_PATH}/settings/reports` },
-  ].map((s: { label: string; value: number; sub: string; color: string; href?: string }) => {
-    const inner = `
-      <div class="hm-stat-label">${escHtml(s.label)}</div>
-      <div class="hm-stat-value" style="color:${s.color};">${s.value}</div>
-      <div class="hm-stat-sub">${escHtml(s.sub)}</div>`;
-    return s.href
-      ? `<a href="${s.href}" class="hm-stat">${inner}</a>`
-      : `<div class="hm-stat">${inner}</div>`;
-  }).join('');
 
-  // ===== 上部の指針（標語）=====
-  // 設定画面からの入力は不可。定期的にここを直接書き換える運用。
-  const HOME_MOTTO = '現状維持は、後退';
-
-  // ===== よく使う操作（権限フィルタ: data-nav-id / data-perm-key で自動非表示）=====
-  // サイドバーと重複するため、利用頻度の高い項目だけに絞る
-  const quickLinks = [
-    { href: `${ADMIN_PATH}/staff`,            nav: 'staff',         label: '社員管理' },
-    { href: `${ADMIN_PATH}/vehicles`,         nav: 'vehicles',      label: '車両検索' },
-    { href: `${ADMIN_PATH}/shift`,            nav: 'shift',         label: '新人シフト管理' },
+  // ===== よく使う機能（提案アーティファクト準拠の8タイル。権限フィルタ: data-nav-id / data-perm-key で自動非表示）=====
+  const quickLinks: Array<{ href: string; label: string; nav?: string; perm?: string }> = [
+    { href: `${ADMIN_PATH}/staff`,                   nav: 'staff',         label: '社員管理' },
+    { href: `${ADMIN_PATH}/handover`,                nav: 'handover',      label: '引き継ぎ' },
+    { href: `${ADMIN_PATH}/tenko`,                   nav: 'tenko',         label: '点呼' },
+    { href: `${ADMIN_PATH}/settings/reports`,        perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos', label: '報告センター' },
+    { href: `${ADMIN_PATH}/kancho-shift`,            nav: 'kancho-shift',  label: '班長シフト' },
+    { href: `${ADMIN_PATH}/kacho-mission`,           perm: 'kacho-mission staff', label: '課長ミッション' },
+    { href: `${ADMIN_PATH}/sales-ai`,                nav: 'sales-ai',      label: 'AI売上分析' },
+    { href: `${ADMIN_PATH}/benri`,                   perm: 'benri',        label: '便利' },
   ];
-  const quickHtml = quickLinks.map(q =>
-    `<a href="${q.href}" data-nav-id="${q.nav}" class="hm-quick">${escHtml(q.label)}</a>`
-  ).join('') +
-    `<a href="${ADMIN_PATH}/settings/reports" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos" class="hm-quick">報告センター</a>`;
-
-  // ===== 分析グラフ（縦棒: 直近6ヶ月） =====
-  const monthLabel = (ym: string) => `${parseInt(ym.slice(5, 7))}月`;
-  const toSeries = (rows: Array<{ ym: string; cnt: number }> | undefined) => {
-    const map = new Map((rows ?? []).map(r => [r.ym, r.cnt]));
-    return months.map(ym => ({ label: monthLabel(ym), value: map.get(ym) ?? 0 }));
-  };
-  const barChart = (data: Array<{ label: string; value: number }>, color: string) => {
-    const max = Math.max(...data.map(d => d.value), 1);
-    return `<div class="hm-bars">` + data.map(d => `
-      <div class="hm-bar-col">
-        <div class="hm-bar-val">${d.value > 0 ? d.value : ''}</div>
-        <div class="hm-bar" style="height:${d.value > 0 ? Math.max(Math.round(d.value / max * 74), 5) : 2}px;background:${color};"></div>
-        <div class="hm-bar-lb">${escHtml(d.label)}</div>
-      </div>`).join('') + `</div>`;
-  };
-  const hireSeries   = toSeries(hireTrend?.results);
-  const reportSeries = toSeries(reportTrend?.results);
-  const hireTotal6   = hireSeries.reduce((a, b) => a + b.value, 0);
-  const reportTotal6 = reportSeries.reduce((a, b) => a + b.value, 0);
-
-  // 課別構成（横棒）
-  const divRows = divisionComp?.results ?? [];
-  const divMax = Math.max(...divRows.map(r => r.cnt), 1);
-  const divisionHtml = divRows.length === 0
-    ? '<div class="hm-empty">データなし</div>'
-    : divRows.map(r => `
-      <div class="hm-div-row">
-        <span class="hm-div-name">${r.division != null ? `${r.division}課` : '未配属'}</span>
-        <div class="hm-div-track"><div class="hm-div-fill" style="width:${Math.round(r.cnt / divMax * 100)}%;"></div></div>
-        <span class="hm-div-cnt">${r.cnt}名</span>
-      </div>`).join('');
-
-  // 売上サマリー（今月度 vs 前月度）
-  const salesRows = salesStats?.results ?? [];
-  const curSales  = salesRows.find(r => r.y === curY && r.m === curM);
-  const prevSales = salesRows.find(r => r.y === prevY && r.m === prevM);
-  const salesDiffHtml = (() => {
-    if (!curSales || !prevSales || !prevSales.total) return '<span class="hm-kpi-note">前月比 —</span>';
-    const pct = Math.round((curSales.total / prevSales.total - 1) * 1000) / 10;
-    const up = pct >= 0;
-    return `<span class="hm-kpi-note" style="color:${up ? '#16a34a' : '#b91c1c'};font-weight:700;">前月比 ${up ? '+' : ''}${pct}%</span>`;
-  })();
-  const salesCardHtml = `
-    <a href="${ADMIN_PATH}/staff" data-nav-id="staff" class="hm-card hm-card-link">
-      <div class="hm-card-head"><span class="hm-card-title">今月度の売上</span><span class="hm-card-sub">${curM}月度</span></div>
-      <div class="hm-card-body">
-        <div class="hm-kpi-main">${curSales ? '¥' + curSales.total.toLocaleString('ja-JP') : '記録なし'}</div>
-        <div class="hm-kpi-row">
-          ${salesDiffHtml}
-          <span class="hm-kpi-note">記録 ${curSales?.people ?? 0}名</span>
-          <span class="hm-kpi-note">前月 ${prevSales ? '¥' + prevSales.total.toLocaleString('ja-JP') : '—'}</span>
-        </div>
-      </div>
-    </a>`;
-
-  // LINE利用サマリー
-  const lineCardHtml = `
-    <div class="hm-card">
-      <div class="hm-card-head"><span class="hm-card-title">LINE利用状況</span><span class="hm-card-sub">Bot・LIFF操作</span></div>
-      <div class="hm-card-body">
-        <div class="hm-kpi-main">${lineUsage?.today_cnt ?? 0}<span class="hm-kpi-unit">件 / 本日</span></div>
-        <div class="hm-kpi-row">
-          <span class="hm-kpi-note">直近7日 ${lineUsage?.week_cnt ?? 0}件</span>
-          <span class="hm-kpi-note">利用者 ${lineUsage?.week_users ?? 0}名</span>
-        </div>
-      </div>
-    </div>`;
-
-  // 今月の事故（件数・時間帯） — 「無事故キロ数」は見る人が少ないため、代わりに件数・時間帯を常時表示する
-  const accidentCount = (accidentTimes?.results ?? []).length;
-  const accidentDiffHtml = (() => {
-    const prevCnt = prevAccidentCount?.cnt;
-    if (prevCnt === undefined || prevCnt === null) return '<span class="hm-kpi-note">前月比 —</span>';
-    const diff = accidentCount - prevCnt;
-    if (diff === 0) return `<span class="hm-kpi-note">前月比 ±0（前月 ${prevCnt}件）</span>`;
-    const up = diff > 0;
-    return `<span class="hm-kpi-note" style="color:${up ? '#b91c1c' : '#16a34a'};font-weight:700;">前月比 ${up ? '+' : ''}${diff}（前月 ${prevCnt}件）</span>`;
-  })();
-  const accidentBands = bucketCoarseBands((accidentTimes?.results ?? []).map(r => r.occurred_time));
-  const accidentBandMax = Math.max(...accidentBands, 1);
-  const accidentBandHtml = accidentBands.map((cnt, i) => `
-    <div class="hm-div-row">
-      <span class="hm-div-name" style="width:auto;">${COARSE_BAND_LABELS[i].split('（')[0]}</span>
-      <div class="hm-div-track"><div class="hm-div-fill" style="width:${Math.round(cnt / accidentBandMax * 100)}%;background:linear-gradient(90deg,#f59e0b,#b45309);"></div></div>
-      <span class="hm-div-cnt">${cnt}件</span>
-    </div>`).join('');
-  const accidentCardHtml = `
-    <a href="${ADMIN_PATH}/accidents" data-nav-id="accidents" class="hm-card hm-card-link">
-      <div class="hm-card-head"><span class="hm-card-title">今月の事故</span><span class="hm-card-sub">${curM}月度</span></div>
-      <div class="hm-card-body">
-        <div class="hm-kpi-main">${accidentCount}<span class="hm-kpi-unit">件</span></div>
-        <div class="hm-kpi-row">${accidentDiffHtml}</div>
-        <div style="margin-top:10px;">${accidentBandHtml}</div>
-      </div>
-    </a>`;
-
-
-  const overdueRows = (overdueList.results ?? []).length === 0
-    ? '<div style="padding:20px;text-align:center;color:#9ca3af;font-size:13px;">期限超過なし</div>'
-    : (overdueList.results ?? []).map(e => {
-        const overDays = Math.floor((new Date(today).getTime() - new Date(e.next_interview_date).getTime()) / 86400000);
-        return `
-      <a href="${ADMIN_PATH}/interviews/${e.id}" style="display:block;padding:10px 16px;border-bottom:1px solid #f3f4f6;text-decoration:none;transition:background 0.1s;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='white'">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <div style="flex:1;">
-            <div style="font-size:13px;font-weight:600;color:#1e293b;">${escHtml(e.name)}</div>
-            <div style="font-size:11px;color:#9ca3af;margin-top:1px;">${e.division ?? ''}課 ${e.team ?? ''}班</div>
-          </div>
-          <div style="text-align:right;">
-            <div style="font-size:11px;color:#b45309;">予定: ${escHtml(e.next_interview_date)}</div>
-            <div style="font-size:11px;font-weight:700;color:#b91c1c;">${overDays}日超過</div>
-          </div>
-        </div>
-      </a>`;
-      }).join('');
+  const quickHtml = quickLinks.map(q => {
+    const attr = q.nav ? ` data-nav-id="${q.nav}"` : (q.perm ? ` data-perm-key="${q.perm}"` : '');
+    return `<a href="${q.href}"${attr}>${escHtml(q.label)}</a>`;
+  }).join('');
 
   // ホームのプレビューでは詳細な監査目的の全IPは見せず、一部伏せ字にする（全件は権限のある/login-logsで確認）
   const maskIpForPreview = (ip: string | null | undefined): string => {
@@ -513,24 +294,145 @@ app.get('/', async (c) => {
       <span style="font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(selfAdmin.username)}</span>
     </span>` : '';
 
-  // ===== システム状態ミニウィジェット（実測値のみ。詳細は/settings/statusへ） =====
-  const statusRows = [
-    { label: 'システム稼働', ok: true },
-    { label: 'データベース', ok: dbHealthOk },
-    { label: 'メンテナンスモード', ok: !maintenanceOn, okLabel: 'OFF', ngLabel: '稼働中' },
-  ].map(s => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;">
-      <span style="font-size:12px;color:#475569;">${escHtml(s.label)}</span>
-      <span style="font-size:11px;font-weight:700;color:${s.ok ? '#16a34a' : '#b91c1c'};display:flex;align-items:center;gap:4px;">
-        <span style="width:6px;height:6px;border-radius:50%;background:${s.ok ? '#22c55e' : '#dc2626'};display:inline-block;"></span>
-        ${escHtml(s.ok ? (s.okLabel ?? '正常') : (s.ngLabel ?? '異常'))}
-      </span>
-    </div>`).join('');
+  // ===== 今日のオペレーション（この画面の主役） =====
+  // 「当直・出勤班長／引き継ぎシート／対応中の報告／今日のイベント」の4行＋シャトルバス運行ブロック。
+  // 点呼行・締切リミット・月次の統計は出さない。
+  const wdJa = ['日', '月', '火', '水', '木', '金', '土'][jstNow.getUTCDay()];
+  const todayLabel = `${jstNow.getUTCFullYear()}年${jstNow.getUTCMonth() + 1}月${jstNow.getUTCDate()}日（${wdJa}）`;
+  const nowHHMM = jstNow.toISOString().slice(11, 16);
+  const hhmmToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+  const nowMin = hhmmToMin(nowHHMM);
+
+  const kt = kanchoToday;
+  const kanchoBadge = !kt || !kt.hasAnyShift
+    ? '<span class="op-badge op-warn">シフト未入力</span>'
+    : (kt.choku.length
+        ? `<span class="op-badge op-info">当直 ${escHtml(kt.choku.join('・'))}</span>`
+        : '<span class="op-badge op-muted">当直なし</span>');
+  const kanchoSub = kt && kt.hasAnyShift
+    ? [kt.nikkin.length ? `日勤 ${kt.nikkin.join('・')}` : '',
+       kt.naname.length ? `斜め直 ${kt.naname.join('・')}` : '',
+       kt.oso.length ? `遅番 ${kt.oso.join('・')}` : '',
+       kt.shugyo.length ? `終業 ${kt.shugyo.join('・')}` : ''].filter(Boolean).join(' / ')
+    : '';
+
+  const evRows = todayEvents?.results ?? [];
+  const eventsBadge = evRows.length
+    ? `<span class="op-badge op-good">${evRows.length}件</span>`
+    : '<span class="op-badge op-muted">なし</span>';
+  const eventsSub = evRows
+    .map(e => `${e.start_time ? escHtml(e.start_time) + ' ' : ''}${escHtml(e.title)}（${e.participants}/${e.capacity || '-'}名）`)
+    .join(' ／ ');
+
+  const reportsBadge = openReportTotal
+    ? `<span class="op-badge op-crit">${openReportTotal}件</span>`
+    : '<span class="op-badge op-ok">なし</span>';
+  const reportsSub = `忘れ物 ${openReports?.lost ?? 0} / 事故 ${openReports?.accident ?? 0} / 違反 ${openReports?.violation ?? 0} / 一般 ${openReports?.general ?? 0}`;
+
+  const opRow = (o: { label: string; badge: string; sub: string; href: string; goLabel: string; nav?: string; perm?: string }) => `
+    <a class="op-row" href="${o.href}"${o.nav ? ` data-nav-id="${o.nav}"` : ''}${o.perm ? ` data-perm-key="${o.perm}"` : ''}>
+      <span class="op-label">${escHtml(o.label)}</span>
+      <span class="op-status">${o.badge}${o.sub ? `<span class="op-sub">${escHtml(o.sub)}</span>` : ''}</span>
+      <span class="op-go">${escHtml(o.goLabel)}</span>
+    </a>`;
+
+  const opsHtml = [
+    opRow({ label: '当直・出勤班長', badge: kanchoBadge, sub: kanchoSub, goLabel: '班長シフト', href: `${ADMIN_PATH}/kancho-shift`, nav: 'kancho-shift' }),
+    opRow({ label: '引き継ぎシート', badge: '<span class="op-badge op-muted">確認</span>', sub: '課の申し送り事項', goLabel: '開く', href: `${ADMIN_PATH}/handover`, nav: 'handover' }),
+    opRow({ label: '対応中の報告', badge: reportsBadge, sub: reportsSub, goLabel: '報告センター', href: `${ADMIN_PATH}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos' }),
+    opRow({ label: '今日のイベント', badge: eventsBadge, sub: eventsSub, goLabel: '板橋ページ', href: `${ADMIN_PATH}/settings/study-sessions`, perm: 'settings.study-sessions' }),
+  ].join('');
+
+  // ----- シャトルバス運行ブロック（直近運行2件＋路線上の推定現在位置） -----
+  const trips = (shuttleTrips?.results ?? []).slice().sort((a, b) => a.depart_office.localeCompare(b.depart_office));
+  const runningTrip = trips.find(t => hhmmToMin(t.depart_office) <= nowMin && nowMin <= hhmmToMin(t.arrive_office));
+  const nextTrip = trips.find(t => hhmmToMin(t.depart_office) > nowMin);
+  const pastTrips = trips.filter(t => hhmmToMin(t.depart_office) <= nowMin).slice(-2).reverse();
+  // 路線: 北赤羽駅(2%) ── 営業所(50%) ── 東武練馬駅(98%)。1便は 営業所→行先→営業所 を往復するので
+  // 出発時50%、中間で行先、到着時50%へ戻る三角波でバス位置を近似する。
+  const busLeft = (() => {
+    if (!runningTrip) return 50;
+    const d = hhmmToMin(runningTrip.depart_office), a = hhmmToMin(runningTrip.arrive_office);
+    const f = a > d ? Math.min(Math.max((nowMin - d) / (a - d), 0), 1) : 0;
+    const destX = runningTrip.destination === '北赤羽駅' ? 2 : 98;
+    return Math.round(50 + (destX - 50) * (1 - Math.abs(2 * f - 1)));
+  })();
+  const shuttleStatusText = runningTrip
+    ? `運行中（${escHtml(runningTrip.destination)}方面）`
+    : (nextTrip ? `待機中 ／ 次便 ${escHtml(nextTrip.depart_office)} ${escHtml(nextTrip.destination)}` : '本日の運行は終了');
+  const shuttleRecentHtml = pastTrips.length
+    ? pastTrips.map(t => `<div><span>${escHtml(t.depart_office)} 営業所発 → ${escHtml(t.destination)}</span><b>折返 ${escHtml(t.depart_dest)}</b></div>`).join('')
+    : '<div><span>本日の運行実績はまだありません</span><b></b></div>';
+  const shuttleBlock = trips.length === 0 ? '' : `
+    <a class="shuttle-block" href="${ADMIN_PATH}/shuttle" data-nav-id="shuttle">
+      <div class="sb-head"><span>シャトルバス</span><span>${shuttleStatusText}</span></div>
+      <div class="sb-line">
+        <span class="sb-stop" style="left:2%"></span>
+        <span class="sb-stop" style="left:50%"></span>
+        <span class="sb-stop" style="left:98%"></span>
+        <span class="sb-bus" style="left:${busLeft}%"></span>
+      </div>
+      <div class="sb-stops"><span>北赤羽駅</span><span>営業所</span><span>東武練馬駅</span></div>
+      <div class="sb-recent">${shuttleRecentHtml}</div>
+    </a>`;
 
   const content = `
 <style>
   .hm { font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; }
   .hm-sec-title { font-size:14px; font-weight:700; color:#64748b; letter-spacing:.06em; margin:0 2px 10px; }
+  /* ===== 今日オペレーション画面（新ホーム） ===== */
+  .today-head { display:flex; align-items:baseline; gap:12px; margin:2px 2px 16px; flex-wrap:wrap; }
+  .today-date { font-size:22px; font-weight:800; color:var(--color-text, #141d2c); letter-spacing:.02em; }
+  .today-sub { font-size:12px; color:#94a3b8; }
+  /* 横断検索バー（社員名・車番・案件ID・ページ名を1本で） */
+  .today-search { display:flex; gap:8px; align-items:center; background:#fff; border:1px solid var(--color-border, #e4eaf5); border-radius:12px; padding:12px 14px; margin-bottom:22px; }
+  .today-search svg { flex:none; color:#94a3b8; }
+  .today-search input { flex:1; min-width:0; border:none; outline:none; font-size:15px; padding:2px 0; background:transparent; color:var(--color-text, #141d2c); }
+  .today-search input::placeholder { color:#9aa6ba; }
+  /* オペレーション行 */
+  .op-list { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
+  .op-row { display:grid; grid-template-columns:150px 1fr auto; align-items:center; gap:14px; background:#fff; border:1px solid var(--color-border, #e4eaf5); border-radius:12px; padding:15px 18px; text-decoration:none; transition:border-color .15s, box-shadow .15s, transform .05s; }
+  .op-row:hover { border-color:var(--color-action, #5666ff); box-shadow:0 4px 16px rgba(86,102,255,.10); }
+  .op-row:active { transform:translateY(1px); }
+  .op-label { font-size:15px; font-weight:800; color:var(--color-text, #141d2c); }
+  .op-status { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .op-badge { align-self:flex-start; font-size:12px; font-weight:700; border-radius:999px; padding:3px 11px; white-space:nowrap; }
+  .op-badge.op-ok { background:#e9f7f1; color:#0f7a5a; }
+  .op-badge.op-good { background:#e9f7f1; color:#0f7a5a; }
+  .op-badge.op-warn { background:#fdeceb; color:#c0392b; }
+  .op-badge.op-crit { background:#fbe4e4; color:#c22f2f; }
+  .op-badge.op-info { background:var(--color-action-soft, #ecefff); color:var(--color-action, #4a5ae0); }
+  .op-badge.op-muted { background:#f1f5f9; color:#64748b; }
+  .op-sub { font-size:12px; color:#8a96a8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .op-go { font-size:13px; font-weight:800; color:var(--color-action, #5666ff); white-space:nowrap; border:1px solid var(--color-border, #e4eaf5); border-radius:8px; padding:6px 11px; }
+  .op-go-primary { background:var(--color-action, #5666ff); color:#fff; border-color:var(--color-action, #5666ff); box-shadow:0 0 0 4px rgba(86,102,255,.20); }
+  /* シャトルバス運行ブロック */
+  .shuttle-block { display:block; background:#fff; border:1px solid var(--color-border, #e4eaf5); border-radius:12px; padding:14px 18px 12px; margin-bottom:26px; text-decoration:none; color:var(--color-text, #141d2c); transition:border-color .15s, box-shadow .15s; }
+  .shuttle-block:hover { border-color:var(--color-action, #5666ff); box-shadow:0 4px 16px rgba(86,102,255,.10); }
+  .sb-head { display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#475569; margin-bottom:14px; }
+  .sb-line { position:relative; height:4px; background:#e4ecf8; border-radius:999px; margin:0 6px 8px; }
+  .sb-stop { position:absolute; top:50%; width:8px; height:8px; border-radius:50%; background:#ccd6ea; transform:translate(-50%,-50%); }
+  .sb-bus { position:absolute; top:50%; width:13px; height:13px; border-radius:50%; background:var(--color-action, #5666ff); border:2px solid #fff; transform:translate(-50%,-50%); box-shadow:0 0 0 4px rgba(86,102,255,.30); transition:left .4s ease; }
+  .sb-stops { display:flex; justify-content:space-between; font-size:11px; color:#94a3b8; margin:0 2px 12px; }
+  .sb-recent { display:grid; gap:4px; }
+  .sb-recent div { display:flex; justify-content:space-between; gap:12px; font-size:12px; color:#64748b; }
+  .sb-recent b { font-weight:700; color:var(--color-text, #141d2c); white-space:nowrap; }
+  /* 小ランチャー（よく使う機能・左アイリス罫のタイル） */
+  .today-launch { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:8px; }
+  .today-launch a { font-size:12px; font-weight:700; color:#475569; text-decoration:none; background:#f7f9fd; border:1px solid var(--color-border, #e4eaf5); border-left:3px solid var(--color-action, #5666ff); border-radius:8px; padding:11px 10px; text-align:center; }
+  .today-launch a:hover { background:var(--color-action-soft, #ecefff); color:var(--color-action, #5666ff); }
+  @media (max-width: 900px) { .today-launch { grid-template-columns:repeat(3,1fr); } }
+  @media (max-width: 560px) { .today-launch { grid-template-columns:repeat(2,1fr); } }
+  /* 折りたたみ（月次の統計） */
+  .today-more { margin-top:20px; border-top:1px solid #eef2f8; padding-top:8px; }
+  .today-more > summary { cursor:pointer; font-size:13px; font-weight:700; color:#64748b; padding:8px 2px; list-style:none; }
+  .today-more > summary::-webkit-details-marker { display:none; }
+  .today-more > summary::before { content:"\\25B8 "; color:#94a3b8; }
+  .today-more[open] > summary::before { content:"\\25BE "; }
+  @media (max-width: 640px) {
+    .op-row { grid-template-columns:1fr auto; }
+    .op-status { grid-column:1 / -1; }
+  }
   /* 指針バナー */
   .hm-motto { display:flex; align-items:center; gap:16px; background:linear-gradient(135deg,#1a3a5c,#2d6a9f); border-radius:14px; padding:18px 26px; margin-bottom:24px; box-shadow:0 4px 16px rgba(26,58,92,.18); }
   .hm-motto-label { flex:none; font-size:12px; font-weight:700; letter-spacing:.1em; color:#cfe0f2; border:1px solid rgba(255,255,255,.35); border-radius:999px; padding:5px 12px; }
@@ -592,71 +494,67 @@ app.get('/', async (c) => {
 </style>
 <div class="hm">
 
-  <!-- 指針 -->
-  <div class="hm-motto">
-    <span class="hm-motto-label">指針</span>
-    <span class="hm-motto-text">${escHtml(HOME_MOTTO)}</span>
+  <div class="today-head">
+    <span class="today-date">${escHtml(todayLabel)}</span>
+    <span class="today-sub">${escHtml(nowHHMM)} 時点</span>
   </div>
 
-  <!-- よく使う操作 -->
-  <div class="hm-sec-title">よく使う操作</div>
-  <div class="hm-quicks">
+  <!-- 横断検索（社員名・車番・案件ID・ページ名を1本で） -->
+  <div class="today-search">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    <input id="hm-q" type="text" placeholder="社員名・車番・案件ID・ページ名を検索（Enter）" autocomplete="off" />
+  </div>
+  <script>
+  (function(){
+    var i = document.getElementById('hm-q');
+    if (!i) return;
+    var A = '${ADMIN_PATH}';
+    function route(v){
+      var s = v.trim();
+      if (!s) return null;
+      // 先頭 # = 案件ID（報告センター）、数字だけ = 車番（車両検索）、それ以外 = 社員名で検索
+      if (/^#/.test(s)) return A + '/settings/reports?q=' + encodeURIComponent(s.replace(/[^0-9]/g, ''));
+      if (/^[0-9]{2,6}$/.test(s)) return A + '/vehicles?q=' + encodeURIComponent(s);
+      return A + '/staff?q=' + encodeURIComponent(s);
+    }
+    i.addEventListener('keydown', function(e){
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      var url = route(i.value || '');
+      if (url) location.href = url; else i.focus();
+    });
+  })();
+  </script>
+
+  <!-- 今日のオペレーション -->
+  <div class="hm-sec-title">今日のオペレーション</div>
+  <div class="op-list">
+    ${opsHtml}
+  </div>
+  ${shuttleBlock}
+
+  <!-- よく使う機能 -->
+  <div class="hm-sec-title">よく使う機能</div>
+  <div class="today-launch">
     ${quickHtml}
   </div>
 
-  <!-- 今日の対応 -->
-  <div class="hm-sec-title">今日の対応</div>
-  <div class="hm-stats">
-    ${statCards}
-  </div>
-
-  <!-- 今日の対応の詳細 -->
-  <div class="hm-lists">
-    <div class="hm-card">
-      <div class="hm-card-head">
-        <span class="hm-card-title">面談期限超過</span>
-        <a href="${ADMIN_PATH}/interviews" class="hm-card-more">面談一覧へ</a>
-      </div>
-      ${overdueRows}
-    </div>
-  </div>
-
-  <!-- 今月の状況 -->
-  <div class="hm-sec-title">今月の状況（直近6ヶ月の推移）</div>
-  <div class="hm-ana">
-    <div class="hm-card">
-      <div class="hm-card-head"><span class="hm-card-title">入社人数の推移</span><span class="hm-card-sub">合計 ${hireTotal6}名・在籍 ${empCount.cnt}名（研修中${trainingCount.cnt}／配属済${regularCount.cnt}）</span></div>
-      <div class="hm-card-body">${barChart(hireSeries, '#2d6a9f')}</div>
-    </div>
-    <div class="hm-card">
-      <div class="hm-card-head"><span class="hm-card-title">報告件数の推移</span><span class="hm-card-sub">全報告合算 ${reportTotal6}件</span></div>
-      <div class="hm-card-body">${barChart(reportSeries, '#b45309')}</div>
-    </div>
-  </div>
-  <div class="hm-ana4">
-    <div class="hm-card">
-      <div class="hm-card-head"><span class="hm-card-title">課別の在籍構成</span><span class="hm-card-sub">在籍 ${empCount.cnt}名</span></div>
-      <div class="hm-card-body">${divisionHtml}</div>
-    </div>
-    ${salesCardHtml}
-    ${accidentCardHtml}
-    ${lineCardHtml}
-    <div class="hm-card hm-card-link" style="cursor:default;">
-      <div class="hm-card-head"><span class="hm-card-title">システム状態</span><span class="hm-card-sub">${statusCheckedAt}時点</span></div>
-      <div class="hm-card-body">
-        ${statusRows}
-        <a href="${ADMIN_PATH}/settings/status" style="display:block;margin-top:8px;font-size:11px;color:#2563eb;text-decoration:none;">詳細を見る →</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- ログイン履歴 -->
-  <div class="hm-card" style="padding:0 20px 12px;">
+  <!-- 最近のログイン -->
+  <div class="hm-card" style="padding:0 20px 12px;margin-top:22px;">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0 10px;">
       <span class="hm-card-title">最近のログイン</span>
       <a href="${ADMIN_PATH}/login-logs" class="hm-card-more">すべて見る</a>
     </div>
     ${loginRows}
+  </div>
+
+  <!-- デジタルサイネージ（ログイン不要の常時表示URL） -->
+  <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:center;">
+    <a href="${SIGNAGE_PUBLIC_PATH}" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:#64748b;text-decoration:none;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      デジタルサイネージを開く（営業所モニター用・ログイン不要）
+    </a>
   </div>
 
 </div>`;
@@ -1004,7 +902,6 @@ app.get('/shift/print/:empId', async (c) => {
 // ===== 設定トップ（カード一覧）=====
 app.get('/settings', async (c) => {
   const ADMIN = ADMIN_PATH;
-  const displaySettings = await getMonitorDisplaySettings(c.env.DB);
   type SettingCard = { href: string; perm: string; title: string; desc: string; highlight?: boolean; newTab?: boolean };
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[]; extraHtml?: string }> = [
@@ -1016,12 +913,15 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
       { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINE連携',   desc: 'QRコード発行での新人・運行管理者等の登録・連携済みユーザー管理', highlight: true },
     ]},
+    { heading: 'セキュリティ（検証中）', cards: [
+      { href: `${ADMIN}/settings/face-auth`, perm: 'face-auth', title: '顔認証（顔の登録）', desc: 'カメラで顔を撮影し、その人固有の特徴（数値128個）だけを保存します。顔写真そのものは保存しません。登録した顔は左メニュー「顔認証」で照合テストでき、一致とみなす精度（しきい値）を動かして検証できます。今後のセキュリティ機能に向けた実験ページで、ログイン等には接続していません' },
+    ]},
     { heading: 'アナウンス', cards: [
       { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー', desc: '管理画面全ページ最上部に表示する常時テロップの投稿・期限設定' },
       { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード', desc: '対象者の誕生日当日、設定時刻に全ページへお祝いポップアップを表示' },
     ]},
     { heading: '画面カスタマイズ', cards: [
-      { href: `${ADMIN}/settings/manual-mode`, perm: 'settings', title: 'マニュアルモード', desc: '管理画面の下・中央に、よく使うページへのショートカットを並べた小さなバーを常時表示。中身は「登録者」ごとに設定し、どの登録者のバーを出すかは各ブラウザで選択（同じアカウントを複数人で使う場合向け）' },
+      { href: `${ADMIN}/settings/manual-mode`, perm: 'settings.manual-mode settings', title: 'マニュアルモード', desc: '管理画面の下・中央に、よく使うページへのショートカットを並べた小さなバーを常時表示。中身は「登録者」ごとに設定し、どの登録者のバーを出すかは各ブラウザで選択（同じアカウントを複数人で使う場合向け）' },
     ]},
     { heading: 'シフト関連の設定', cards: [
       { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', desc: 'シフト区分・勤務ダイヤ・研修担当・班長指導者・月度設定・ベンテンクラブ・班長関連 の一覧', highlight: true },
@@ -1035,7 +935,7 @@ app.get('/settings', async (c) => {
     { heading: 'マスタ管理', cards: [
       { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所',              desc: '各営業所の電話番号・住所の管理' },
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
-      { href: `${ADMIN}/cc-list`,                  perm: '',                         title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
+      { href: `${ADMIN}/cc-list`,                  perm: 'cc-list',                  title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
     ]},
     { heading: '調整', cards: [
       { href: `${ADMIN}/settings/chosei`, perm: 'settings.chosei', title: '調整', desc: '日程調整（調整さん形式）。調整を作ると推測されない共有URLが1本発行され、回答者はURLから社員番号を入力して各候補に ○/△/× とコメントを登録。集計表で最有力の候補が分かる' },
@@ -1049,34 +949,12 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/presentation`, perm: 'settings.presentation', title: 'ホシコン発表資料', desc: '社内システムのDX事例プレゼンテーション（横スライド・印刷対応、フル権限adminのみ）' },
     ]},
     { heading: 'モニター表示', cards: [
-      { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）。下の表示モード設定に従って表示内容が変わります', newTab: true },
-      { href: MONITOR_NEWCOMERS_PATH, perm: 'newcomers', title: '新人紹介モニター表示', desc: '新人紹介カードだけを常時表示するページ（ログイン不要。別の物理サイネージに映す用途で、表示モード設定に関わらず常に新人紹介のみ表示）', newTab: true },
-      { href: `${ADMIN}/newcomer-intros`, perm: 'settings.newcomer-intros', title: '新人紹介カード管理', desc: '事故モニターサイネージの「新人紹介」表示用カード（写真・名前・班・一言コメント）の登録' },
-      { href: `${ADMIN}/signage`, perm: 'settings', title: 'デジタルサイネージ', desc: '営業所モニター用の周知スライド（生活道路30km/h等）。横16:9で自動再生、Fキーで全画面、1周ぶんを動画(webm)で書き出し可。投影は全アカウントが開けて、編集はフル権限アカウントのみ。面の追加・文言編集ができます' },
-    ], extraHtml: `
-      <div data-perm-key="accidents" style="background:white;border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-top:12px;">
-        <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">事故モニター表示の表示モード</div>
-        <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;color:#374151;">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="radio" name="monitor-mode" value="accidents" ${displaySettings.mode === 'accidents' ? 'checked' : ''} onchange="onMonitorModeChange()"> 事故データのみ（既定）
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="radio" name="monitor-mode" value="newcomers" ${displaySettings.mode === 'newcomers' ? 'checked' : ''} onchange="onMonitorModeChange()"> 新人紹介のみ
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-            <input type="radio" name="monitor-mode" value="alternate" ${displaySettings.mode === 'alternate' ? 'checked' : ''} onchange="onMonitorModeChange()"> 事故データと新人紹介を交互表示
-          </label>
-          <div id="monitor-alternate-seconds-wrap" style="margin-left:26px;display:${displaySettings.mode === 'alternate' ? 'flex' : 'none'};align-items:center;gap:8px;">
-            <span style="color:#6b7280;">切替間隔:</span>
-            <input type="number" id="monitor-alternate-seconds" min="2" value="${displaySettings.alternateSeconds}" style="width:70px;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:13px;">
-            <span style="color:#6b7280;">秒ごと</span>
-          </div>
-        </div>
-        <div id="monitor-mode-msg" style="font-size:12px;color:#dc2626;margin-top:10px;"></div>
-        <button type="button" id="monitor-mode-save-btn" onclick="saveMonitorMode()" style="margin-top:12px;padding:7px 20px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">表示モードを保存</button>
-      </div>` },
+      { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）', newTab: true },
+      { href: `${ADMIN}/signage`, perm: 'signage', title: 'デジタルサイネージ', desc: '営業所モニター用の周知スライド（生活道路30km/h等）。横16:9で自動再生、Fキーで全画面、1周ぶんを動画(webm)で書き出し可。投影は全アカウントが開けて、編集はフル権限アカウントのみ。面の追加・文言編集ができます' },
+    ]},
     { heading: 'ガイド・システム', cards: [
       { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: 'データセンター',     desc: '資料保存に加え、社員CSV・点検写真AI取込・乗務員シフトPDFのアップロード窓口を集約' },
+      { href: `${ADMIN}/settings/study-notes`,          perm: 'settings.study-notes',          title: '学習ノート',       desc: '個人の学習用ノート教材をタイトルごとに保存し、PDFとして出力' },
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
       { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド',     desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
       { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・通信状態・利用統計・DB統計・アクセスQRコード' },
@@ -1143,60 +1021,12 @@ app.get('/settings', async (c) => {
           });
       }
 
-      function onMonitorModeChange() {
-        var mode = document.querySelector('input[name="monitor-mode"]:checked').value;
-        document.getElementById('monitor-alternate-seconds-wrap').style.display = mode === 'alternate' ? 'flex' : 'none';
-      }
-      function saveMonitorMode() {
-        var mode = document.querySelector('input[name="monitor-mode"]:checked').value;
-        var seconds = parseInt(document.getElementById('monitor-alternate-seconds').value, 10) || 15;
-        var msg = document.getElementById('monitor-mode-msg');
-        var btn = document.getElementById('monitor-mode-save-btn');
-        msg.textContent = '';
-        btn.disabled = true;
-        btn.textContent = '保存中…';
-        fetch(ADMIN_PATH + '/api/accidents-monitor-display-mode', {
-          method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: mode, alternateSeconds: seconds })
-        })
-          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-          .then(function (res) {
-            btn.disabled = false;
-            btn.textContent = '表示モードを保存';
-            if (!res.ok) { msg.textContent = res.j.error || '保存に失敗しました'; return; }
-            alert('表示モードを保存しました。モニター画面に反映まで少し時間がかかる場合があります。');
-          })
-          .catch(function () {
-            btn.disabled = false;
-            btn.textContent = '表示モードを保存';
-            msg.textContent = '通信エラーが発生しました';
-          });
-      }
     </script>`;
   return c.html(layout('設定', html, 'settings'));
 });
 
 // 事故モニターの強制更新（設定ページの「事故モニター表示」カードから実行）
 app.post('/api/accidents-monitor-force-refresh', async (c) => {
-  await triggerAccidentsMonitorForceRefresh(c.env.DB);
-  return c.json({ ok: true });
-});
-
-// 事故モニターの表示モード保存（設定ページ「モニター表示」の表示モード切替から実行）
-app.post('/api/accidents-monitor-display-mode', async (c) => {
-  let body: { mode?: string; alternateSeconds?: number };
-  try { body = await c.req.json(); } catch { return c.json({ error: '不正なリクエスト' }, 400); }
-
-  const mode = body.mode;
-  if (mode !== 'accidents' && mode !== 'newcomers' && mode !== 'alternate') {
-    return c.json({ error: '表示モードの値が不正です' }, 400);
-  }
-  const alternateSeconds = Number(body.alternateSeconds);
-  if (!Number.isFinite(alternateSeconds) || alternateSeconds < 2) {
-    return c.json({ error: '切替間隔は2秒以上の数値を指定してください' }, 400);
-  }
-
-  await saveMonitorDisplaySettings(c.env.DB, mode as MonitorDisplayMode, alternateSeconds);
   await triggerAccidentsMonitorForceRefresh(c.env.DB);
   return c.json({ ok: true });
 });

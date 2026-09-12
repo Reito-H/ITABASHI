@@ -60,11 +60,11 @@ async function loadDistanceGroups(db: D1Database): Promise<DistanceGroupData[]> 
 
 // ===== ハブページ =====
 app.get('/benri', (c) => {
-  type Card = { href: string; title: string; desc: string };
+  type Card = { href: string; title: string; desc: string; perm?: string };
   const cards: Card[] = [
     { href: `${ADMIN_PATH}/benri/highway`, title: '高速料金・距離控除表', desc: '距離控除一覧（IC間距離）と高速道路帰路会社負担路線一覧' },
     { href: `${ADMIN_PATH}/benri/airport`, title: '空港・ディズニー定額', desc: 'エリア別の定額運賃を地図で表示。羽田／成田／ディズニーと時間帯（昼／深夜）・障がい者割引で切替' },
-    { href: `${ADMIN_PATH}/garage`, title: '車庫見取り図', desc: '駐車マスへの車番の割り当て・自由配置マーカー（編集はフル権限アカウントのみ）' },
+    { href: `${ADMIN_PATH}/garage`, title: '車庫見取り図', desc: '駐車マスへの車番の割り当て・自由配置マーカー（編集はフル権限アカウントのみ）', perm: 'garage' },
   ];
   const html = `
     <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
@@ -74,7 +74,7 @@ app.get('/benri', (c) => {
       <p style="font-size:12px;color:#6b7280;margin-bottom:20px;">よく使う資料・ツールをここにまとめていきます。閲覧はどのアカウントでも可能です。</p>
       <div style="display:flex;flex-direction:column;gap:12px;">
         ${cards.map(card => `
-          <a href="${card.href}" style="display:flex;align-items:center;gap:16px;background:white;border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid #e5e7eb;transition:box-shadow 0.15s;"
+          <a href="${card.href}"${card.perm ? ` data-perm-key="${card.perm}"` : ''} style="display:flex;align-items:center;gap:16px;background:white;border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid #e5e7eb;transition:box-shadow 0.15s;"
             onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
             <div>
               <div style="font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:3px;">${escHtml(card.title)}</div>

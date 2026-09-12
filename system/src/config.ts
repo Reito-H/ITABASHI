@@ -12,10 +12,6 @@ export const KANCHO_WISH_PATH = '/kw-dea54792603559b9bb0e74ebb70188b4';
 // 事故モニター表示（ログイン不要・専用パスワードで保護する公開ページ）の秘密パス
 export const MONITOR_ACCIDENTS_PATH = '/mon-61b500053713bf4c69b959d7567202b4';
 
-// 新人紹介モニター表示（ログイン不要・完全公開の公開ページ）の秘密パス
-// 事故モニターと別の物理サイネージに映す用途のため別URLにしている。表示モード設定に関係なく常に新人紹介のみを表示する
-export const MONITOR_NEWCOMERS_PATH = '/mon-nc-0b7d8c366e91a5f42c974c7810219585';
-
 // イベント参加申し込みフォーム（ログイン不要・完全公開の掲示板ページ）の秘密パス。推測されないよう複雑な文字列にする
 // イベント（開催回）ごとに個別発行はせず、ポスターのQR/URLは全て同じこの1つを指す（開いた先の掲示板で開催中のイベント一覧から選ぶ）
 export const STUDY_SESSION_PATH = '/study-45b471c74a7d9e9b5c99540302df04f0';
@@ -27,3 +23,9 @@ export const CHOSEI_PATH = '/cs-4e9b1d7a6c0f42e8b3a95172d84c0f6e';
 // ヒヤリハット収集フォーム（ログイン不要・完全公開）の秘密パス。
 // 全ポスター/QRがこの1本を指す。開いた先で社員番号を入れて1件ずつ投稿する。
 export const HIYARI_PATH = '/hh-2738ceac08eac11269d76dc733598ba6';
+
+// 統合デジタルサイネージ（ログイン不要・完全公開の投影ページ）の秘密パス。
+// Fire TV 等の常時表示端末にはこのURL 1本だけを設定する。ログイン不要なのでセッション切れで止まらない。
+// 再生する中身は signage_decks.is_monitor=1 を付けたデッキ（/signage 一覧画面で切替）。
+// 印を別デッキへ付け替えても、このURL自体は今後変更しない。URLの推測困難さ自体をアクセス制御とする。
+export const SIGNAGE_PUBLIC_PATH = '/sg-d8b62011db0a09c2c279a620202d9d45';

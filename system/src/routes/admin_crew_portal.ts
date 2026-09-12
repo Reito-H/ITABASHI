@@ -5,12 +5,72 @@ import { layout, escHtml } from '../html/layout';
 import { crewPortalSubNav } from '../html/crew_portal_nav';
 import { ADMIN_PATH } from '../config';
 import { getAdminPermissions } from '../permissions';
+import { resolveEmployeeMonthShifts, type MonthShiftDay } from '../data/attendance';
 import type { Env } from '../auth';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
-type EmpRow = { id: number; name: string; emp_no: string; division: number | null; team: number | null };
-type TabId = 'overview' | 'sales' | 'insights' | 'safety';
+type EmpRow = {
+  id: number; name: string; emp_no: string; division: number | null; team: number | null;
+  hire_date: string | null; birth_date: string | null;
+  work_schedule: string | null; start_time: string | null; car_no: string | null;
+  enrollment_status: string | null; is_active: number | null; retirement_date: string | null;
+  is_hanchyo: number | null; is_caution: number | null; is_sales_followup: number | null;
+  status: string | null;
+};
+type TabId = 'overview' | 'sales' | 'shift' | 'insights' | 'safety';
+
+function calcAge(birthDate: string | null): number | null {
+  if (!birthDate) return null;
+  const today = new Date(Date.now() + 9 * 60 * 60 * 1000); // JST
+  const bd = new Date(birthDate);
+  if (isNaN(bd.getTime())) return null;
+  let age = today.getFullYear() - bd.getFullYear();
+  const m = today.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--;
+  return age >= 0 ? age : null;
+}
+
+// 入社日からの勤続年数を「11年6ヶ月」形式で返す
+function calcTenure(hireDate: string | null): string | null {
+  if (!hireDate) return null;
+  const today = new Date(Date.now() + 9 * 60 * 60 * 1000); // JST
+  const hd = new Date(hireDate);
+  if (isNaN(hd.getTime())) return null;
+  let months = (today.getFullYear() - hd.getFullYear()) * 12 + (today.getMonth() - hd.getMonth());
+  if (today.getDate() < hd.getDate()) months--;
+  if (months < 0) return null;
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  return (y > 0 ? `${y}年` : '') + `${m}ヶ月`;
+}
+
+const KARTE_ENROLLMENT_STYLE: Record<string, string> = {
+  '育休': 'background:#dbeafe;color:#1e40af;',
+  '病欠': 'background:#fed7aa;color:#92400e;',
+  '傷病': 'background:#fecaca;color:#991b1b;',
+  '長欠': 'background:#e9d5ff;color:#6b21a8;',
+};
+
+// 社員カルテ上部の識別バッジ（在籍状態・班長・新人・要注意など）
+function karteBadges(emp: EmpRow): string {
+  const b: string[] = [];
+  const chip = (style: string, label: string) =>
+    `<span style="${style}padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;">${label}</span>`;
+  if (emp.is_active === 0) {
+    b.push(chip('background:#fee2e2;color:#991b1b;', '退職済み'));
+  } else {
+    b.push(chip('background:#dcfce7;color:#166534;', '在籍'));
+  }
+  const en = emp.enrollment_status ?? '通常';
+  if (en !== '通常' && KARTE_ENROLLMENT_STYLE[en]) b.push(chip(KARTE_ENROLLMENT_STYLE[en], en));
+  if (emp.is_hanchyo) b.push(chip('background:#fef3c7;color:#92400e;', '班長'));
+  const isNewcomer = emp.status === 'training' || (!emp.status && emp.status !== 'completed');
+  if (isNewcomer) b.push(chip('background:#dbeafe;color:#1e40af;', '新人'));
+  if (emp.is_caution) b.push(chip('background:#fecaca;color:#991b1b;', '要注意'));
+  if (emp.is_sales_followup) b.push(chip('background:#ffedd5;color:#9a3412;', '売上要後追い'));
+  return b.join('');
+}
 
 // 旧・乗務員ポータル（社員選択一覧）は社員管理の一覧に統合したため、社員管理へリダイレクト
 app.get('/crew-portal', (c) => c.redirect(`${ADMIN_PATH}/staff`));
@@ -20,8 +80,12 @@ app.get('/crew-portal/employee/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
   if (isNaN(id)) return c.notFound();
 
-  const emp = await c.env.DB.prepare('SELECT id, name, emp_no, division, team FROM employees WHERE id = ?')
-    .bind(id).first<EmpRow>();
+  const emp = await c.env.DB.prepare(
+    `SELECT id, name, emp_no, division, team, hire_date, birth_date,
+            work_schedule, start_time, car_no, enrollment_status, is_active, retirement_date,
+            is_hanchyo, is_caution, is_sales_followup, status
+     FROM employees WHERE id = ?`
+  ).bind(id).first<EmpRow>();
   if (!emp) return c.text('社員が見つかりません', 404);
 
   const viewerPerms = await getAdminPermissions(c.env.DB, c.get('adminId'));
@@ -38,29 +102,90 @@ app.get('/crew-portal/employee/:id', async (c) => {
   const initialTab: TabId =
     (requestedTab === 'insights' && canViewInsights) ? 'insights' :
     (requestedTab === 'safety' && canViewSafety) ? 'safety' :
+    (requestedTab === 'shift') ? 'shift' :
     (requestedTab === 'sales') ? 'sales' : 'overview';
 
   const tabs: Array<{ id: TabId; label: string }> = [
     { id: 'overview', label: '概要' },
     { id: 'sales', label: '売上実績' },
+    { id: 'shift', label: 'シフト' },
     ...(canViewInsights ? [{ id: 'insights' as TabId, label: '売上インサイト' }] : []),
     ...(canViewSafety ? [{ id: 'safety' as TabId, label: '安全' }] : []),
   ];
 
+  // シフトタブ用: 当月・翌月の日別シフト（シフト優先＋勤務体系で補完）
+  const nowJst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const curYear = nowJst.getUTCFullYear();
+  const curMonth = nowJst.getUTCMonth() + 1;
+  const nextYear = curMonth === 12 ? curYear + 1 : curYear;
+  const nextMonth = curMonth === 12 ? 1 : curMonth + 1;
+  const [curMonthShifts, nextMonthShifts] = await Promise.all([
+    resolveEmployeeMonthShifts(c.env.DB, id, curYear, curMonth),
+    resolveEmployeeMonthShifts(c.env.DB, id, nextYear, nextMonth),
+  ]);
+  const renderShiftMonth = (label: string, days: MonthShiftDay[]): string => {
+    if (!days.length) return '';
+    const WDJ = ['日', '月', '火', '水', '木', '金', '土'];
+    const firstDow = new Date(days[0].date + 'T00:00:00+09:00').getDay();
+    const blanks = Array.from({ length: firstDow }, () => '<div></div>').join('');
+    const cells = days.map(d => {
+      const day = parseInt(d.date.slice(8), 10);
+      const bg = !d.working ? '#f3f4f6' : d.source === 'schedule' ? '#eef2ff' : '#dbeafe';
+      const fg = !d.working ? '#9ca3af' : '#1e40af';
+      const faded = d.source === 'schedule' ? 'opacity:.7;' : '';
+      return `<div style="border:1px solid #e5e7eb;border-radius:6px;min-height:44px;padding:3px 4px;font-size:10px;background:${bg};${faded}">
+        <div style="color:#9ca3af;font-family:monospace;">${day}</div>
+        <div style="color:${fg};font-weight:700;margin-top:1px;">${escHtml(d.label)}</div>
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:16px;">
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">${label}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;">
+        ${WDJ.map(w => `<div style="text-align:center;font-size:10px;color:#9ca3af;">${w}</div>`).join('')}
+        ${blanks}${cells}
+      </div>
+    </div>`;
+  };
+
+  const empAge = calcAge(emp.birth_date);
+  const empTenure = calcTenure(emp.hire_date);
+  const metaItem = (label: string, val: string, mono = false) =>
+    `<span><span style="color:#9ca3af;">${label}</span> <b style="color:#1f2937;${mono ? "font-family:'SFMono-Regular',Consolas,monospace;" : ''}">${val}</b></span>`;
+
   const content = `
 <div style="max-width:1000px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
-  <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0 0 4px;">社員カルテ</h2>
-  <p style="font-size:12px;color:#6b7280;margin:0 0 16px;">売上実績・売上インサイト・安全情報をまとめて確認できます。</p>
   ${crewPortalSubNav('none')}
 
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap;">
     <a href="${ADMIN_PATH}/staff" style="color:#2563eb;font-size:13px;text-decoration:none;">← 社員一覧に戻る</a>
-    <a href="${ADMIN_PATH}/staff/${emp.id}" style="color:#6b7280;font-size:12px;text-decoration:none;">社員情報を編集 →</a>
+    <a href="${ADMIN_PATH}/staff/${emp.id}?from=karte" style="padding:7px 18px;background:#1a3a5c;color:white;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">社員情報を編集</a>
+  </div>
+
+  <!-- 識別ヘッダー（基本情報の“表紙”） -->
+  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:18px 22px;margin-bottom:16px;">
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+      <div style="width:52px;height:52px;border-radius:13px;flex:none;background:linear-gradient(150deg,#1a3a5c,#2563eb);color:white;display:grid;place-items:center;font-size:20px;font-weight:700;">${escHtml(emp.name.slice(0, 1))}</div>
+      <div style="flex:1;min-width:240px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:19px;font-weight:700;color:#1f2937;">${escHtml(emp.name)}</span>
+          ${karteBadges(emp)}
+        </div>
+        <div style="margin-top:8px;font-size:12.5px;color:#4b5563;display:flex;flex-wrap:wrap;gap:3px 16px;line-height:1.9;">
+          ${metaItem('社員番号', escHtml(emp.emp_no), true)}
+          ${metaItem('所属', `${emp.division ? emp.division + '課' : '—'}${emp.team ? ' ' + emp.team + '班' : ''}`)}
+          ${metaItem('入社', `${emp.hire_date ? escHtml(emp.hire_date) : '—'}${empTenure ? `（勤続${empTenure}）` : ''}`)}
+          ${empAge !== null ? metaItem('年齢', `${empAge}歳`) : ''}
+          ${metaItem('勤務', `${emp.work_schedule ? escHtml(emp.work_schedule) : '—'}${emp.start_time ? ' / ' + escHtml(emp.start_time) + '出' : ''}`)}
+          ${metaItem('担当車', emp.car_no ? escHtml(emp.car_no) : '—', true)}
+          ${emp.is_active === 0 && emp.retirement_date ? metaItem('退職日', escHtml(emp.retirement_date)) : ''}
+        </div>
+      </div>
+    </div>
   </div>
 
   <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px;">
-      <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0;">${escHtml(emp.name)}（${emp.division ?? '—'}課${emp.team ? emp.team + '班' : ''} ／ ${escHtml(emp.emp_no)}）</h3>
+      <h3 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0;">売上・安全</h3>
       <select id="period-select" onchange="onPeriodChange()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
         <option value="3">直近3ヶ月</option>
         <option value="6" selected>直近6ヶ月</option>
@@ -95,6 +220,11 @@ app.get('/crew-portal/employee/:id', async (c) => {
             <div id="ov-mom" style="font-size:18px;font-weight:700;color:#1a3a5c;">—</div>
           </div>
         </div>
+        ${canViewInsights ? `
+        <div id="ov-company-rank" style="display:none;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+          <div style="font-size:11px;color:#9ca3af;margin-bottom:4px;">全社での位置（今月度・平均日商）</div>
+          <div id="ov-company-rank-body" style="font-size:13px;color:#374151;line-height:1.9;"></div>
+        </div>` : ''}
         <div id="ov-links" style="display:flex;gap:10px;flex-wrap:wrap;"></div>
       </div>
     </div>
@@ -150,6 +280,18 @@ app.get('/crew-portal/employee/:id', async (c) => {
           <tbody id="sales-factor-tbody"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- シフトタブ（この社員の当月・翌月の予定。乗務員シフト取込を優先し、無い日は勤務体系で補完） -->
+    <div class="crew-tab-panel" data-tab="shift" style="display:${initialTab === 'shift' ? '' : 'none'};">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+        <span style="font-size:11px;color:#6b7280;"><span style="display:inline-block;width:10px;height:10px;background:#dbeafe;border:1px solid #93c5fd;border-radius:2px;vertical-align:middle;"></span> 乗務員シフト取込　<span style="display:inline-block;width:10px;height:10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:2px;vertical-align:middle;"></span> 勤務体系から補完　<span style="display:inline-block;width:10px;height:10px;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:2px;vertical-align:middle;"></span> 公休・休み</span>
+        <a href="${ADMIN_PATH}/crew-shift" style="margin-left:auto;font-size:12px;color:#2563eb;text-decoration:none;">乗務員シフト表を開く →</a>
+      </div>
+      ${renderShiftMonth(`${curYear}年${curMonth}月`, curMonthShifts)}
+      ${renderShiftMonth(`${nextYear}年${nextMonth}月`, nextMonthShifts)}
+      ${!curMonthShifts.some(d => d.source !== 'none') && !nextMonthShifts.some(d => d.source !== 'none')
+        ? `<div style="color:#9ca3af;font-size:12px;">乗務員シフトが未取込で、勤務体系も未設定のため予定を表示できません。</div>` : ''}
     </div>
 
     ${canViewInsights ? `
@@ -354,8 +496,47 @@ async function renderOverviewTab() {
       links.push('<button type="button" onclick="switchTab(\\'safety\\')" style="padding:7px 14px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">' + label + '</button>');
     }
     document.getElementById('ov-links').innerHTML = links.join('');
+    loadCompanyRank();
   } catch (err) {
     document.getElementById('overview-loading').textContent = '通信エラーが発生しました';
+  }
+}
+
+// ===== 全社での位置（今月度・平均日商の順位）: 全社集計APIを流用し、この社員の行だけ取り出す =====
+let companyRankLoaded = false;
+async function loadCompanyRank() {
+  if (!CAN_VIEW_INSIGHTS || companyRankLoaded) return;
+  companyRankLoaded = true;
+  try {
+    const res = await fetch('/api/sales-ai/overview', { credentials: 'same-origin' });
+    if (!res.ok) return;
+    const json = await res.json();
+    const list = (json.employees || []).filter(function(e) { return e.curAvgPerDuty != null && e.curDutyCount > 0; });
+    if (list.length < 2) return;
+    const ranked = list.slice().sort(function(a, b) { return b.curAvgPerDuty - a.curAvgPerDuty; });
+    const meIdx = ranked.findIndex(function(e) { return e.empId === STAFF_ID; });
+    if (meIdx < 0) return;
+    const me = ranked[meIdx];
+    const total = ranked.length;
+    const companyAvg = Math.round(ranked.reduce(function(s, e) { return s + e.curAvgPerDuty; }, 0) / total);
+    const diff = me.curAvgPerDuty - companyAvg;
+    const diffColor = diff >= 0 ? '#059669' : '#dc2626';
+    const diffStr = (diff >= 0 ? '+' : '') + diff.toLocaleString('ja-JP') + '円';
+
+    let divPart = '';
+    if (me.division != null) {
+      const divList = ranked.filter(function(e) { return e.division === me.division; });
+      const divIdx = divList.findIndex(function(e) { return e.empId === STAFF_ID; });
+      if (divIdx >= 0) divPart = ' ／ ' + me.division + '課内 <b>' + (divIdx + 1) + '</b>/' + divList.length + '位';
+    }
+
+    document.getElementById('ov-company-rank-body').innerHTML =
+      '全社 <b style="font-size:15px;color:#1a3a5c;">' + (meIdx + 1) + '</b>/' + total + '位' + divPart +
+      ' ／ 全社平均（' + companyAvg.toLocaleString('ja-JP') + '円）との差 <b style="color:' + diffColor + ';">' + diffStr + '</b>' +
+      ' <a href="' + ADMIN_PATH + '/sales-ai" style="color:#2563eb;text-decoration:none;margin-left:8px;">全社ランキングを開く →</a>';
+    document.getElementById('ov-company-rank').style.display = '';
+  } catch (e) {
+    /* 参考情報なので、取得失敗時は静かに非表示のまま */
   }
 }
 

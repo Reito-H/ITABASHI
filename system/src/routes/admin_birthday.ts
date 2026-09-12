@@ -1,13 +1,15 @@
 // ハッピーバースデーモード: 一部の人だけを対象に、誕生日当日の設定時刻に全ページへお祝いポップアップを表示する
 // ページ: /settings/birthday（対象者の名前・誕生日・顔写真の管理、発火時刻の設定、表示対象アカウント、テスト発火）
-// 管理API: /api/birthday/celebrants・/api/birthday/fire-hours・/api/birthday/enabled-admins・/api/birthday/test-fire
+// 管理API: /api/birthday/celebrants・/api/birthday/fire-times・/api/birthday/enabled-admins・/api/birthday/test-fire・/api/birthday/force-fire
 //   （書き込みは settings.birthday.edit 必須）
 // 表示用API: /api/birthday/active・/api/birthday/photo/:id
 //   → 全アカウント共通で叩けるようにするため、index.ts の権限ミドルウェアでページ権限チェックを免除している
 //     （root /api/* はGETを常に許可するため、実際には明示的な除外設定は不要。ただしログインは必須で c.get('adminId') が使える）
 //   → 実際に演出を表示するかどうかは birthday_enabled_admins（表示対象アカウントのホワイトリスト）で絞り込む
-// 発火判定は cron.ts の checkBirthdayFire が毎時0分に行い、birthday_fire_events に1行記録する
+// 発火判定は /api/birthday/active が「本日誕生日の対象者がいて、設定した時刻(hh:mm)を既に過ぎているか」を
+//   その場で計算して行う（birthday_fire_times・分単位対応。migration_147。cron 側の処理は廃止）
 // テスト発火は birthday_test_triggers に1件保留し、対象アカウントの次回ポーリングで日時に関わらず消費・表示する
+// 強制発火（/api/birthday/force-fire）は表示対象アカウント全員 + 実行者に test-trigger を配り、今すぐ全員の画面に出す
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { layout, safeJson, escHtml } from '../html/layout';
@@ -54,7 +56,7 @@ app.get('/settings/birthday', async (c) => {
     c.env.DB.prepare(
       'SELECT id, name, birth_month, birth_day, photo_r2_key, photo_mime_type, is_active FROM birthday_celebrants ORDER BY birth_month ASC, birth_day ASC, id ASC'
     ).all<CelebrantRow>(),
-    c.env.DB.prepare('SELECT hour FROM birthday_fire_hours ORDER BY hour ASC').all<{ hour: number }>(),
+    c.env.DB.prepare('SELECT hour, minute FROM birthday_fire_times ORDER BY hour ASC, minute ASC').all<{ hour: number; minute: number }>(),
     c.env.DB.prepare('SELECT id, username FROM admins ORDER BY username ASC').all<{ id: number; username: string }>(),
     c.env.DB.prepare('SELECT admin_id FROM birthday_enabled_admins').all<{ admin_id: number }>(),
   ]);
@@ -62,14 +64,9 @@ app.get('/settings/birthday', async (c) => {
     id: r.id, name: r.name, birthMonth: r.birth_month, birthDay: r.birth_day,
     hasPhoto: !!r.photo_r2_key, isActive: !!r.is_active,
   }));
-  const fireHours = (hourRows.results ?? []).map(r => r.hour);
+  const fireTimes = (hourRows.results ?? []).map(r => ({ hour: r.hour, minute: r.minute }));
   const admins = (adminRows.results ?? []).map(r => ({ id: r.id, username: r.username }));
   const enabledAdminIds = (enabledRows.results ?? []).map(r => r.admin_id);
-
-  const hourCheckboxes = Array.from({ length: 24 }, (_, h) => `
-    <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;">
-      <input type="checkbox" class="fh-check" value="${h}" ${fireHours.includes(h) ? 'checked' : ''} ${editable ? '' : 'disabled'}>${h}時
-    </label>`).join('');
 
   const adminCheckboxes = admins.map(a => `
     <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:#374151;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:5px 8px;">
@@ -92,12 +89,11 @@ app.get('/settings/birthday', async (c) => {
 
       <div style="background:white;border-radius:10px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);border:1px solid #e5e7eb;margin-bottom:20px;">
         <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:4px;">発火時刻</div>
-        <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">チェックした時刻ごとに1回、対象者がいるか判定してポップアップを発火します（複数選択可）。</div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:${editable ? '12px' : '0'};">
-          ${hourCheckboxes}
-        </div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">登録した時刻（時：分）ごとに1回、本日誕生日の対象者がいればポップアップを発火します。分単位で指定できます（複数登録可）。</div>
+        <div id="ft-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:${editable ? '12px' : '0'};"></div>
         ${editable ? `
-        <button type="button" onclick="saveFireHours()" id="fh-save-btn" style="padding:7px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;">保存</button>
+        <button type="button" onclick="addFireTimeRow()" style="padding:6px 14px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;margin-right:8px;">時刻を追加</button>
+        <button type="button" onclick="saveFireTimes()" id="fh-save-btn" style="padding:7px 20px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;">保存</button>
         <span id="fh-msg" style="font-size:12px;color:#dc2626;margin-left:10px;"></span>` : ''}
       </div>
 
@@ -127,6 +123,14 @@ app.get('/settings/birthday', async (c) => {
           <button type="button" onclick="fireTest()" id="test-fire-btn" style="padding:7px 20px;background:#b45309;color:white;border:none;border-radius:6px;font-size:12.5px;font-weight:600;cursor:pointer;">テスト実行</button>
           <span id="test-msg" style="font-size:12px;color:#6b7280;"></span>
         </div>
+      </div>` : ''}
+
+      ${editable ? `
+      <div style="background:white;border-radius:10px;padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.08);border:1px solid #fca5a5;margin-bottom:20px;">
+        <div style="font-size:13px;font-weight:700;color:#b91c1c;margin-bottom:4px;">強制発火</div>
+        <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">今すぐ「表示対象アカウント」全員と自分の画面に、お祝いポップアップを1回出します。誕生日・発火時刻の設定は無視します。演出には本日誕生日の対象者（いなければ有効な対象者全員）が登場します。各画面には最大45秒後（次のポーリング時）に表示されます。</div>
+        <button type="button" onclick="forceFire()" id="force-fire-btn" style="padding:8px 22px;background:#dc2626;color:white;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">今すぐ強制発火</button>
+        <span id="force-msg" style="font-size:12px;color:#6b7280;margin-left:10px;"></span>
       </div>` : ''}
 
       ${editable ? `
@@ -173,6 +177,7 @@ app.get('/settings/birthday', async (c) => {
     <script>
     var EDITABLE = ${editable ? 'true' : 'false'};
     var CELEBRANTS = ${safeJson(celebrants)};
+    var FIRE_TIMES = ${safeJson(fireTimes)};
     var API = ${safeJson(`${ADMIN_PATH}/api/birthday`)};
     // 写真は秘密パス配下ではなくルート /api/birthday/photo に公開しているため別変数を使う（表示用APIと共用）
     var PHOTO_API = '/api/birthday/photo';
@@ -266,23 +271,72 @@ app.get('/settings/birthday', async (c) => {
       location.reload();
     }
 
-    function saveFireHours() {
-      var hours = [];
-      document.querySelectorAll('.fh-check:checked').forEach(function(el) { hours.push(Number(el.value)); });
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+    function fireTimeRowHtml(hour, minute) {
+      var hourOpts = '';
+      for (var h = 0; h < 24; h++) hourOpts += '<option value="' + h + '"' + (h === hour ? ' selected' : '') + '>' + pad2(h) + '</option>';
+      var minOpts = '';
+      for (var m = 0; m < 60; m++) minOpts += '<option value="' + m + '"' + (m === minute ? ' selected' : '') + '>' + pad2(m) + '</option>';
+      return '<div class="ft-row" style="display:flex;align-items:center;gap:6px;">'
+        + '<select class="ft-hour" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"' + (EDITABLE ? '' : ' disabled') + '>' + hourOpts + '</select>'
+        + '<span style="font-size:13px;color:#374151;">時</span>'
+        + '<select class="ft-min" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:13px;"' + (EDITABLE ? '' : ' disabled') + '>' + minOpts + '</select>'
+        + '<span style="font-size:13px;color:#374151;">分</span>'
+        + (EDITABLE ? '<button type="button" onclick="this.closest(\\'.ft-row\\').remove()" style="margin-left:4px;padding:4px 10px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:12px;cursor:pointer;">削除</button>' : '')
+        + '</div>';
+    }
+    function renderFireTimeRows() {
+      var wrap = document.getElementById('ft-rows');
+      if (!FIRE_TIMES.length) {
+        wrap.innerHTML = '<div style="font-size:12px;color:#9ca3af;">発火時刻が未設定です' + (EDITABLE ? '（「時刻を追加」で登録してください）' : '') + '</div>';
+        return;
+      }
+      wrap.innerHTML = FIRE_TIMES.map(function(t) { return fireTimeRowHtml(Number(t.hour), Number(t.minute)); }).join('');
+    }
+    function addFireTimeRow() {
+      var wrap = document.getElementById('ft-rows');
+      var placeholder = wrap.querySelector('div:not(.ft-row)');
+      if (placeholder) wrap.innerHTML = '';
+      wrap.insertAdjacentHTML('beforeend', fireTimeRowHtml(9, 0));
+    }
+    function saveFireTimes() {
+      var times = [];
+      document.querySelectorAll('#ft-rows .ft-row').forEach(function(row) {
+        times.push({ hour: Number(row.querySelector('.ft-hour').value), minute: Number(row.querySelector('.ft-min').value) });
+      });
       var btn = document.getElementById('fh-save-btn');
       var msg = document.getElementById('fh-msg');
-      btn.disabled = true; var orig = btn.textContent; btn.textContent = '保存中…'; msg.textContent = '';
-      fetch(API + '/fire-hours', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hours: hours }),
+      btn.disabled = true; var orig = btn.textContent; btn.textContent = '保存中…'; msg.style.color = '#dc2626'; msg.textContent = '';
+      fetch(API + '/fire-times', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ times: times }),
       })
         .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
         .then(function(res) {
           btn.disabled = false; btn.textContent = orig;
-          if (!res.ok) { msg.textContent = res.j.error || '保存に失敗しました'; return; }
-          msg.textContent = '保存しました';
+          if (!res.ok) { msg.style.color = '#dc2626'; msg.textContent = res.j.error || '保存に失敗しました'; return; }
+          FIRE_TIMES = (res.j.times || times).slice().sort(function(a, b) { return (a.hour - b.hour) || (a.minute - b.minute); });
+          renderFireTimeRows();
+          msg.style.color = '#059669'; msg.textContent = '保存しました';
           setTimeout(function() { msg.textContent = ''; }, 2500);
         })
-        .catch(function() { btn.disabled = false; btn.textContent = orig; msg.textContent = '通信エラーが発生しました'; });
+        .catch(function() { btn.disabled = false; btn.textContent = orig; msg.style.color = '#dc2626'; msg.textContent = '通信エラーが発生しました'; });
+    }
+
+    function forceFire() {
+      if (!confirm('今すぐ「表示対象アカウント」全員と自分の画面にお祝いポップアップを出します。よろしいですか？')) return;
+      var btn = document.getElementById('force-fire-btn');
+      var msg = document.getElementById('force-msg');
+      btn.disabled = true; var orig = btn.textContent; btn.textContent = '実行中…'; msg.style.color = '#6b7280'; msg.textContent = '';
+      fetch(API + '/force-fire', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j }; }); })
+        .then(function(res) {
+          btn.disabled = false; btn.textContent = orig;
+          if (!res.ok) { msg.style.color = '#dc2626'; msg.textContent = res.j.error || '実行に失敗しました'; return; }
+          msg.style.color = '#059669';
+          msg.textContent = res.j.targetCount + '件のアカウントに発火しました（各画面に最大45秒後に表示）';
+          setTimeout(function() { msg.textContent = ''; }, 6000);
+        })
+        .catch(function() { btn.disabled = false; btn.textContent = orig; msg.style.color = '#dc2626'; msg.textContent = '通信エラーが発生しました'; });
     }
 
     function saveEnabledAdmins() {
@@ -329,6 +383,7 @@ app.get('/settings/birthday', async (c) => {
     }
 
     renderList();
+    renderFireTimeRows();
     </script>`;
 
   return c.html(layout('ハッピーバースデーモード', html, 'settings'));
@@ -427,19 +482,69 @@ app.delete('/api/birthday/celebrants/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// ===== 管理API（発火時刻） =====
-app.post('/api/birthday/fire-hours', async (c) => {
+// ===== 管理API（発火時刻・分単位） =====
+app.post('/api/birthday/fire-times', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
-  const b = await c.req.json<{ hours?: number[] }>().catch(() => ({}) as { hours?: number[] });
-  const hours = Array.isArray(b.hours)
-    ? Array.from(new Set(b.hours.map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 23)))
-    : [];
+  const b = await c.req.json<{ times?: { hour?: unknown; minute?: unknown }[] }>().catch(() => ({}) as { times?: { hour?: unknown; minute?: unknown }[] });
+
+  // hour*60+minute で重複を除去し、正規化した配列を作る
+  const seen = new Set<number>();
+  const times: { hour: number; minute: number }[] = [];
+  if (Array.isArray(b.times)) {
+    for (const t of b.times) {
+      const hour = Number(t?.hour);
+      const minute = Number(t?.minute);
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
+      if (!Number.isInteger(minute) || minute < 0 || minute > 59) continue;
+      const key = hour * 60 + minute;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      times.push({ hour, minute });
+    }
+  }
+  times.sort((a, b2) => (a.hour - b2.hour) || (a.minute - b2.minute));
 
   await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM birthday_fire_hours'),
-    ...hours.map(h => c.env.DB.prepare('INSERT INTO birthday_fire_hours (hour) VALUES (?)').bind(h)),
+    c.env.DB.prepare('DELETE FROM birthday_fire_times'),
+    ...times.map(t => c.env.DB.prepare('INSERT INTO birthday_fire_times (hour, minute) VALUES (?, ?)').bind(t.hour, t.minute)),
   ]);
-  return c.json({ ok: true });
+  return c.json({ ok: true, times });
+});
+
+// ===== 管理API（強制発火） =====
+// 「表示対象アカウント」全員 + 実行者本人に test-trigger を配り、誕生日・発火時刻の設定を無視して
+// それぞれの次回ポーリングで1回だけ演出を出す。演出対象は本日誕生日の有効な対象者（いなければ有効な対象者全員）。
+app.post('/api/birthday/force-fire', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const bMonth = nowJST.getUTCMonth() + 1;
+  const bDay = nowJST.getUTCDate();
+
+  const todays = await c.env.DB.prepare(
+    'SELECT id FROM birthday_celebrants WHERE is_active = 1 AND birth_month = ? AND birth_day = ?'
+  ).bind(bMonth, bDay).all<{ id: number }>();
+  let celebrantIds = (todays.results ?? []).map(r => r.id);
+  if (!celebrantIds.length) {
+    const all = await c.env.DB.prepare('SELECT id FROM birthday_celebrants WHERE is_active = 1').all<{ id: number }>();
+    celebrantIds = (all.results ?? []).map(r => r.id);
+  }
+  if (!celebrantIds.length) return c.json({ error: '有効なお祝い対象者が登録されていません' }, 400);
+
+  const enabled = await c.env.DB.prepare('SELECT admin_id FROM birthday_enabled_admins').all<{ admin_id: number }>();
+  const targetIds = new Set<number>((enabled.results ?? []).map(r => r.admin_id));
+  targetIds.add(c.get('adminId')); // 実行者本人にも出す（表示対象未設定でも確認できるように）
+
+  const payload = JSON.stringify(celebrantIds);
+  await c.env.DB.batch(
+    Array.from(targetIds).map(adminId =>
+      c.env.DB.prepare(
+        `INSERT INTO birthday_test_triggers (admin_id, celebrant_ids, created_at) VALUES (?, ?, datetime('now','localtime'))
+         ON CONFLICT(admin_id) DO UPDATE SET celebrant_ids = excluded.celebrant_ids, created_at = excluded.created_at`
+      ).bind(adminId, payload)
+    )
+  );
+  return c.json({ ok: true, targetCount: targetIds.size });
 });
 
 // ===== 管理API（表示対象アカウント） =====
@@ -530,28 +635,38 @@ birthdayPublicApi.get('/active', async (c) => {
     .bind(adminId).first();
   if (!enabled) return c.json({ event: null });
 
+  // 発火判定はここでその場で行う（cron は毎時0分しか回らないため分単位に非対応。
+  // クライアントは45秒ごとにこの API を叩くので、設定時刻(hh:mm)を過ぎた最初のポーリングで演出が始まる）。
   const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const todayStr = nowJST.toISOString().split('T')[0];
+  const bMonth = nowJST.getUTCMonth() + 1;
+  const bDay = nowJST.getUTCDate();
+  const nowMinutes = nowJST.getUTCHours() * 60 + nowJST.getUTCMinutes();
 
-  const row = await c.env.DB.prepare(
-    'SELECT id, celebrant_ids FROM birthday_fire_events WHERE event_date = ? ORDER BY hour DESC LIMIT 1'
-  ).bind(todayStr).first<{ id: number; celebrant_ids: string }>();
-  if (!row) return c.json({ event: null });
-
-  let ids: number[] = [];
-  try { ids = JSON.parse(row.celebrant_ids); } catch { ids = []; }
-  ids = ids.filter(n => Number.isInteger(n)).slice(0, 50);
-  if (!ids.length) return c.json({ event: null });
-
-  const placeholders = ids.map(() => '?').join(',');
+  // 本日誕生日の有効な対象者
   const celebrants = await c.env.DB.prepare(
-    `SELECT id, name, photo_r2_key FROM birthday_celebrants WHERE id IN (${placeholders})`
-  ).bind(...ids).all<{ id: number; name: string; photo_r2_key: string | null }>();
+    'SELECT id, name, photo_r2_key FROM birthday_celebrants WHERE is_active = 1 AND birth_month = ? AND birth_day = ? ORDER BY id ASC'
+  ).bind(bMonth, bDay).all<{ id: number; name: string; photo_r2_key: string | null }>();
+  const list = celebrants.results ?? [];
+  if (!list.length) return c.json({ event: null });
+
+  // 設定済みの発火時刻のうち、今日すでに過ぎているものの中で最も遅い時刻を採用する
+  const fireTimes = await c.env.DB.prepare('SELECT hour, minute FROM birthday_fire_times').all<{ hour: number; minute: number }>();
+  let latestPassed = -1;
+  for (const t of fireTimes.results ?? []) {
+    const m = t.hour * 60 + t.minute;
+    if (m <= nowMinutes && m > latestPassed) latestPassed = m;
+  }
+  if (latestPassed < 0) return c.json({ event: null });
+
+  // イベントID = 「日付 + 発火時刻」の文字列。ブラウザの localStorage でこのIDが既読なら再表示しない
+  const hh = String(Math.floor(latestPassed / 60)).padStart(2, '0');
+  const mm = String(latestPassed % 60).padStart(2, '0');
 
   return c.json({
     event: {
-      id: row.id,
-      celebrants: (celebrants.results ?? []).map(r => ({ id: r.id, name: r.name, hasPhoto: !!r.photo_r2_key })),
+      id: `${todayStr}-${hh}:${mm}`,
+      celebrants: list.map(r => ({ id: r.id, name: r.name, hasPhoto: !!r.photo_r2_key })),
     },
   });
 });

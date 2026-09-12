@@ -196,7 +196,7 @@ app.get('/staff', async (c) => {
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1') || 1);
   const offset = (page - 1) * PAGE_SIZE;
 
-  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,car_no,enrollment_status,retirement_date,is_caution,is_active,status,exclude_retirement_candidate,is_hanchyo FROM employees ${where} ORDER BY division, team, seq_no, id LIMIT ? OFFSET ?`);
+  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,car_no,enrollment_status,retirement_date,is_caution,is_active,status,exclude_retirement_candidate,is_hanchyo,hire_date,is_sales_followup FROM employees ${where} ORDER BY division, team, seq_no, id LIMIT ? OFFSET ?`);
   const countStmt = c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM employees ${where}`);
 
   // staffRows・件数・退職クエリを並列実行
@@ -325,6 +325,18 @@ app.get('/staff', async (c) => {
       data-has-ret="${e.retirement_date ? '1' : '0'}"
       data-newcomer="${isNewcomer ? '1' : '0'}"
       data-enrollment="${escHtml(enStatus)}"
+      data-name="${escHtml(e.name)}"
+      data-empno="${escHtml(e.emp_no)}"
+      data-div="${e.division ?? ''}"
+      data-team="${e.team ?? ''}"
+      data-hire="${escHtml(e.hire_date ?? '')}"
+      data-car="${escHtml(e.car_no ?? '')}"
+      data-sched="${escHtml(e.work_schedule ?? '')}"
+      data-start="${escHtml(e.start_time ?? '')}"
+      data-hanchyo="${e.is_hanchyo ? '1' : '0'}"
+      data-caution="${e.is_caution ? '1' : '0'}"
+      data-followup="${e.is_sales_followup ? '1' : '0'}"
+      data-ret="${escHtml(e.retirement_date ?? '')}"
       style="cursor:pointer;background:${rowBg};"
       onmouseover="if(!this.classList.contains('sel'))this.style.background='${rowHover}'"
       onmouseout="if(!this.classList.contains('sel'))this.style.background='${rowBg}'"
@@ -555,6 +567,28 @@ app.get('/staff', async (c) => {
     </table>
   </div>
 
+  <!-- のぞき見ドロワー（行クリックで開く。ページ遷移せず要点だけ確認） -->
+  <div id="staff-drawer-overlay" onclick="closeStaffDrawer()"
+    style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:400;"></div>
+  <aside id="staff-drawer"
+    style="display:none;position:fixed;top:0;right:0;bottom:0;width:min(92vw,380px);background:white;z-index:401;box-shadow:-8px 0 32px rgba(15,23,42,0.18);padding:20px;overflow-y:auto;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div id="sd-avatar" style="width:44px;height:44px;border-radius:12px;flex:none;background:linear-gradient(150deg,#1a3a5c,#2563eb);color:white;display:grid;place-items:center;font-size:18px;font-weight:700;"></div>
+        <div>
+          <div id="sd-name" style="font-size:17px;font-weight:700;color:#1f2937;"></div>
+          <div id="sd-badges" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;"></div>
+        </div>
+      </div>
+      <button onclick="closeStaffDrawer()" aria-label="閉じる" style="border:none;background:none;font-size:20px;color:#9ca3af;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <div id="sd-meta" style="margin-top:14px;font-size:12.5px;color:#4b5563;line-height:2;"></div>
+    <div style="display:flex;gap:8px;margin-top:18px;">
+      <a id="sd-karte" href="#" style="flex:1;text-align:center;padding:9px 12px;background:#1a3a5c;color:white;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none;">カルテを開く</a>
+      <a id="sd-edit" href="#" style="padding:9px 14px;background:#f1f5f9;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none;">編集</a>
+    </div>
+  </div>
+
   <!-- ページング -->
   ${totalPages > 1 ? `
   <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:10px 16px;margin-top:10px;margin-bottom:80px;flex-wrap:wrap;">
@@ -693,9 +727,69 @@ function sortTable(col) {
 }
 
 function rowClick(e, id) {
-  if (e.target.type === 'checkbox') return;
-  location.href = ADMIN_PATH_S + '/crew-portal/employee/' + id;
+  if (e.target.closest('a') || e.target.closest('input')) return;
+  openStaffDrawer(e.currentTarget);
 }
+
+function sdBadge(text, bg, fg) {
+  return '<span style="background:' + bg + ';color:' + fg + ';padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;">' + text + '</span>';
+}
+
+function sdTenure(hire) {
+  if (!hire) return '';
+  var h = new Date(hire + 'T00:00:00+09:00');
+  if (isNaN(h.getTime())) return '';
+  var n = new Date();
+  var months = (n.getFullYear() - h.getFullYear()) * 12 + (n.getMonth() - h.getMonth());
+  if (n.getDate() < h.getDate()) months--;
+  if (months < 0) return '';
+  var y = Math.floor(months / 12), m = months % 12;
+  return ' （勤続' + (y > 0 ? y + '年' : '') + m + 'ヶ月）';
+}
+
+function openStaffDrawer(tr) {
+  var d = tr.dataset;
+  document.getElementById('sd-avatar').textContent = (d.name || '').slice(0, 1);
+  document.getElementById('sd-name').textContent = d.name || '';
+
+  var badges = [];
+  if (d.active === '0') badges.push(sdBadge('退職済み', '#fee2e2', '#991b1b'));
+  else badges.push(sdBadge('在籍', '#dcfce7', '#166534'));
+  if (d.enrollment && d.enrollment !== '通常') badges.push(sdBadge(d.enrollment, '#e0e7ff', '#3730a3'));
+  if (d.hanchyo === '1') badges.push(sdBadge('班長', '#fef3c7', '#92400e'));
+  if (d.newcomer === '1') badges.push(sdBadge('新人', '#dbeafe', '#1e40af'));
+  if (d.caution === '1') badges.push(sdBadge('要注意', '#fecaca', '#991b1b'));
+  if (d.followup === '1') badges.push(sdBadge('売上要後追い', '#ffedd5', '#9a3412'));
+  document.getElementById('sd-badges').innerHTML = badges.join('');
+
+  var dept = d.div ? (d.div + '課' + (d.team ? ' ' + d.team + '班' : '')) : '—';
+  var sched = d.sched ? (d.sched + (d.start ? ' / ' + d.start + '出' : '')) : '—';
+  var rows = [
+    ['社員番号', d.empno || '—'],
+    ['所属', dept],
+    ['入社', (d.hire || '—') + (d.hire ? sdTenure(d.hire) : '')],
+    ['勤務', sched],
+    ['担当車', d.car || '—'],
+  ];
+  if (d.active === '0' && d.ret) rows.push(['退職日', d.ret]);
+  document.getElementById('sd-meta').innerHTML = rows.map(function(r) {
+    return '<div><span style="color:#9ca3af;">' + r[0] + '</span>　' + r[1] + '</div>';
+  }).join('');
+
+  document.getElementById('sd-karte').href = ADMIN_PATH_S + '/crew-portal/employee/' + d.id;
+  document.getElementById('sd-edit').href = ADMIN_PATH_S + '/staff/' + d.id;
+
+  document.getElementById('staff-drawer-overlay').style.display = 'block';
+  document.getElementById('staff-drawer').style.display = 'block';
+}
+
+function closeStaffDrawer() {
+  var o = document.getElementById('staff-drawer-overlay');
+  var p = document.getElementById('staff-drawer');
+  if (o) o.style.display = 'none';
+  if (p) p.style.display = 'none';
+}
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeStaffDrawer(); });
 
 function onCbChange(cb) {
   const row = cb.closest('tr');
@@ -984,11 +1078,14 @@ app.get('/staff/:id', async (c) => {
   const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
   const canRegisterNewcomer = perms === null || perms.includes('newcomers.register.edit');
 
-  return c.html(layout(`${emp.name} — 社員情報`, staffForm(emp, nav, qsStr, canRegisterNewcomer), 'staff'));
+  // カルテ（社員カルテ）から編集に入った場合は、戻る・キャンセル・保存後の遷移先をカルテにする
+  const fromKarte = c.req.query('from') === 'karte';
+
+  return c.html(layout(`${emp.name} — 社員情報`, staffForm(emp, nav, qsStr, canRegisterNewcomer, fromKarte), 'staff'));
 });
 
 // ===== フォームHTML生成 =====
-function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegisterNewcomer?: boolean): string {
+function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegisterNewcomer?: boolean, fromKarte?: boolean): string {
   const isNew = !emp;
   const v = (key: keyof StaffRow) => (emp ? String(emp[key] ?? '') : '');
   const checked = (key: keyof StaffRow) => emp && emp[key] ? 'checked' : '';
@@ -1019,6 +1116,10 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
   const START_TIMES_JSON = JSON.stringify(START_TIMES);
 
   const listHref = `${ADMIN_PATH}/staff${qsStr ? '?' + qsStr : ''}`;
+  // カルテ経由なら戻り先＝カルテ。それ以外（一覧の鉛筆・退職予定バナー等）は従来どおり一覧。
+  const karteHref = emp ? `${ADMIN_PATH}/crew-portal/employee/${emp.id}` : listHref;
+  const backHref = fromKarte && emp ? karteHref : listHref;
+  const backLabel = fromKarte && emp ? '← カルテに戻る' : '← 社員一覧に戻る';
   const navBar = nav && !isNew ? `
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;">
   ${nav.prevId
@@ -1034,7 +1135,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
   ${navBar}
   <!-- ヘッダー -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-    <a href="${listHref}" style="color:#2563eb;font-size:13px;text-decoration:none;">← 社員一覧に戻る</a>
+    <a href="${backHref}" style="color:#2563eb;font-size:13px;text-decoration:none;">${backLabel}</a>
     ${!isNew ? `
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
       ${emp!.is_active && isNewcomer
@@ -1269,7 +1370,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
 
     <!-- 保存ボタン -->
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:20px;">
-      <a href="${ADMIN_PATH}/staff" style="padding:10px 20px;border:1px solid #d1d5db;border-radius:7px;font-size:13px;text-decoration:none;color:#374151;">キャンセル</a>
+      <a href="${backHref}" style="padding:10px 20px;border:1px solid #d1d5db;border-radius:7px;font-size:13px;text-decoration:none;color:#374151;">キャンセル</a>
       <button type="button" onclick="saveStaff()" style="padding:10px 28px;background:#1a3a5c;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">
         ${isNew ? '登録する' : '変更を保存'}
       </button>
@@ -1284,6 +1385,8 @@ const STAFF_ID = ${emp?.id ?? 'null'};
 const ADMIN_PATH = '${ADMIN_PATH}';
 const CURRENT_NOTES = ${emp?.problem_notes ? JSON.stringify(emp.problem_notes) : 'null'};
 const START_TIMES_MAP = ${START_TIMES_JSON};
+const BACK_HREF = ${JSON.stringify(backHref)};
+const FROM_KARTE = ${fromKarte && emp ? 'true' : 'false'};
 
 function updateStartTimes() {
   const sched = document.getElementById('f-work_schedule').value;
@@ -1350,7 +1453,8 @@ async function saveStaff() {
         window.location.href = ADMIN_PATH + '/staff/' + json.id;
       } else {
         showToast('✓ 保存しました', '#166534');
-        setTimeout(() => location.reload(), 800);
+        // カルテから来た場合は保存後にカルテへ戻す。それ以外は従来どおりフォームを再読み込み。
+        setTimeout(() => { if (FROM_KARTE) window.location.href = BACK_HREF; else location.reload(); }, 800);
       }
     } else {
       alert('保存に失敗しました: ' + (json.error ?? '不明なエラー'));

@@ -33,7 +33,9 @@ const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift
 
 // embed=true: サイドバー・ヘッダー・お知らせ・リミットポーリング等を全て省いた最小限のHTML文書を返す。
 // 引き継ぎシートのフローティングパネル（やることリスト）のようにiframeへ埋め込む用途専用。
-export function layout(title: string, content: string, activePage: string = '', headerExtra: string = '', embed: boolean = false): string {
+// hideReportFab=true: activePage単位ではなく、このページ1枚だけフローティング新規報告ボタンを消す
+// （例: 乗務員証証明写真＝画面右下をカメラ操作等で使うため。同じactivePageの他ページには影響しない）。
+export function layout(title: string, content: string, activePage: string = '', headerExtra: string = '', embed: boolean = false, hideReportFab: boolean = false): string {
   if (embed) {
     return `<!DOCTYPE html>
 <html lang="ja">
@@ -44,12 +46,13 @@ export function layout(title: string, content: string, activePage: string = '', 
   <title>${escHtml(title)}</title>
   <style>
     :root {
-      --color-primary: #1a3a5c; --color-primary-dark: #0f2740; --color-primary-hover: #244a70;
-      --color-accent: #f2c14e; --color-danger: #dc2626; --color-danger-bg: #fef2f2; --color-danger-border: #fecaca;
+      --color-primary: #232a6b; --color-primary-dark: #171c4d; --color-primary-hover: #2f3888;
+      --color-action: #5666ff; --color-action-soft: #ecefff;
+      --color-accent: #f4a621; --color-danger: #dc2626; --color-danger-bg: #fef2f2; --color-danger-border: #fecaca;
       --color-success: #166534; --color-success-bg: #f0fdf4; --color-warning: #d97706; --color-warning-bg: #fffbeb;
-      --color-text: #1e293b; --color-text-muted: #6b7280; --color-border: #e5e7eb;
-      --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px;
-      --font-xs: 11px; --font-sm: 12px; --font-base: 13px; --font-lg: 15px;
+      --color-text: #141d2c; --color-text-muted: #566178; --color-border: #e4eaf5; --color-bg: #f5f8fd;
+      --radius-sm: 5px; --radius-md: 8px; --radius-lg: 12px;
+      --font-xs: 11px; --font-sm: 12px; --font-base: 14px; --font-lg: 16px;
     }
     * { box-sizing: border-box; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #fff; margin: 0; color: var(--color-text); }
@@ -62,7 +65,7 @@ export function layout(title: string, content: string, activePage: string = '', 
 </body>
 </html>`;
   }
-  const showReportFab = !REPORT_FAB_HIDDEN_PAGES.has(activePage);
+  const showReportFab = !hideReportFab && !REPORT_FAB_HIDDEN_PAGES.has(activePage);
   // permKey省略時は id をそのまま権限キーとして使う（filterHtmlByPermissionsのdata-nav-id判定用）。
   // 報告センターは専用の権限キーを持たず、既存の5つの報告権限のいずれかで表示する（スペース区切り＝OR）
   const REPORT_CENTER_PERM = 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos';
@@ -76,14 +79,16 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/tenko`,         label: '点呼',            id: 'tenko' },
     { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
-    { href: `${ADMIN_PATH}/kacho-mission`, label: '課長ミッション',  id: 'kacho-mission', permKey: 'staff' },
-    { href: `${ADMIN_PATH}/settings/study-sessions`, label: '板橋ページ', id: 'office-page', permKey: 'settings.study-sessions' },
+    { href: `${ADMIN_PATH}/attendance-board`, label: '出勤者ボード',   id: 'attendance-board', permKey: 'crew-shift' },
+    { href: `${ADMIN_PATH}/kacho-mission`, label: '課長ミッション',  id: 'kacho-mission', permKey: 'kacho-mission staff' },
+    { href: `${ADMIN_PATH}/settings/study-sessions`, label: '板橋ページ', id: 'office-page', permKey: 'settings.study-sessions settings.office-opinions settings.hiyari settings.surveys settings.daihon' },
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
-    { href: `${ADMIN_PATH}/vehicles`,      label: '車両検索',        id: 'vehicles' },
-    { href: `${ADMIN_PATH}/benri`,         label: '便利',            id: 'benri', public: true },
-    { href: `${ADMIN_PATH}/shuttle`,       label: 'シャトルバス',    id: 'shuttle', public: true },
+    // 車両検索はサイドバーから廃止（ホームの横断検索バーへ一本化）。/vehicles ルートと vehicles 権限は存置。
+    { href: `${ADMIN_PATH}/benri`,         label: '便利',            id: 'benri', permKey: 'benri' },
+    { href: `${ADMIN_PATH}/shuttle`,       label: 'シャトルバス',    id: 'shuttle', permKey: 'shuttle' },
     { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
+    { href: `${ADMIN_PATH}/face-auth`,     label: '顔認証',          id: 'face-auth' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
 
@@ -100,10 +105,16 @@ export function layout(title: string, content: string, activePage: string = '', 
        新規実装・改修時はここを参照する。既存の直書き色は無理に置換しない。
        ブレークポイントはCSS変数に出来ないため運用ルールとして明記: モバイル<768px / タブレット768-1024px / PC>1024px */
     :root {
-      --color-primary: #1a3a5c;
-      --color-primary-dark: #0f2740;
-      --color-primary-hover: #244a70;
-      --color-accent: #f2c14e;
+      /* 明るい近未来パレット v3（2026-09〜 デザイン刷新 Phase 1）
+         主色は旧ネイビー #1a3a5c を深いインディゴへ。対話的な操作（主CTA・現在地・
+         アクティブ表示）は --color-action（アイリス）を1画面に1つだけ使う。
+         --color-accent（アンバー＝星）は強調の差し色。直書き色は段階的にこれらへ寄せる。 */
+      --color-primary: #232a6b;
+      --color-primary-dark: #171c4d;
+      --color-primary-hover: #2f3888;
+      --color-action: #5666ff;
+      --color-action-soft: #ecefff;
+      --color-accent: #f4a621;
       --color-danger: #dc2626;
       --color-danger-bg: #fef2f2;
       --color-danger-border: #fecaca;
@@ -111,16 +122,17 @@ export function layout(title: string, content: string, activePage: string = '', 
       --color-success-bg: #f0fdf4;
       --color-warning: #d97706;
       --color-warning-bg: #fffbeb;
-      --color-text: #1e293b;
-      --color-text-muted: #6b7280;
-      --color-border: #e5e7eb;
-      --radius-sm: 4px;
-      --radius-md: 6px;
-      --radius-lg: 8px;
+      --color-text: #141d2c;
+      --color-text-muted: #566178;
+      --color-border: #e4eaf5;
+      --color-bg: #f5f8fd;
+      --radius-sm: 5px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
       --font-xs: 11px;
       --font-sm: 12px;
-      --font-base: 13px;
-      --font-lg: 15px;
+      --font-base: 14px;
+      --font-lg: 16px;
       --ann-bar-h: 0px;
     }
     /* Tailwind utility subset — CDN不要のインラインCSS */
@@ -150,7 +162,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     .focus\:ring-2:focus{box-shadow:0 0 0 2px rgba(59,130,246,.5)}.focus\:ring-blue-500:focus{outline:2px solid #3b82f6}
     /* ===== */
     * { box-sizing: border-box; }
-    body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #f5f5f5; margin: 0; }
+    body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: var(--color-bg); margin: 0; }
     .sidebar {
       width: 200px; height: calc(100vh - var(--ann-bar-h, 0px)); background: var(--color-primary);
       position: fixed; top: var(--ann-bar-h, 0px); left: 0; z-index: 40;
@@ -165,20 +177,21 @@ export function layout(title: string, content: string, activePage: string = '', 
       border-left: 3px solid transparent;
     }
     .nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
-    .nav-item.active { background: rgba(255,255,255,0.12); color: white; border-left-color: #60a5fa; }
+    .nav-item.active { background: rgba(255,255,255,0.12); color: white; border-left-color: var(--color-action); }
     .nav-item.nav-item-highlight { color: var(--color-accent); font-weight: 700; background: rgba(242,193,78,0.08); }
     .nav-item.nav-item-highlight:hover { background: rgba(242,193,78,0.16); color: var(--color-accent); }
     .nav-item.nav-item-highlight.active { background: rgba(242,193,78,0.22); border-left-color: var(--color-accent); color: var(--color-accent); }
+    /* ビルドタグ: 以前は目立つゴールドのピルだったが、情報量に対して主張が強すぎたため
+       控えめなモノスペースのタグへ格下げ（デザイン刷新 Phase 1）。 */
     .version-pill {
-      font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; font-weight: 700;
-      letter-spacing: 0.06em; color: var(--color-accent);
-      background: linear-gradient(135deg, var(--color-primary) 0%, #2e1354 100%);
-      border: 1px solid rgba(242,193,78,0.45);
-      border-radius: 999px; padding: 3px 9px 3px 8px; line-height: 1.4;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
+      font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 10px; font-weight: 600;
+      letter-spacing: 0.04em; color: var(--color-text-muted);
+      background: transparent;
+      border: 1px solid var(--color-border);
+      border-radius: 6px; padding: 2px 7px; line-height: 1.4;
       user-select: none; white-space: nowrap;
     }
-    .version-pill-m { color: var(--color-accent); background: rgba(255,255,255,0.1); border: 1px solid rgba(242,193,78,0.35); }
+    .version-pill-m { color: #c7d2fe; background: transparent; border: 1px solid rgba(255,255,255,0.25); }
     .sidebar-collapse-btn {
       flex-shrink: 0; width: 24px; height: 24px; border-radius: 6px; border: none;
       background: rgba(255,255,255,0.12); color: #cbd5e1; cursor: pointer;
@@ -301,7 +314,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   <div class="main-content">
     <div class="desktop-header bg-white shadow-sm px-5 py-3 flex items-center justify-between">
       <div style="display:flex;align-items:center;gap:14px;flex:1;min-width:0;">
-        <h1 style="font-size:20px;font-weight:700;color:#1e293b;white-space:nowrap;">${escHtml(title)}</h1>
+        <h1 style="font-size:20px;font-weight:700;color:var(--color-text);white-space:nowrap;">${escHtml(title)}</h1>
         ${headerExtra}
       </div>
       <div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">
@@ -688,7 +701,7 @@ export function loginSelectPage(): string {
     body {
       font-family: 'Hiragino Sans', 'Meiryo', -apple-system, sans-serif;
       min-height: 100vh;
-      background: linear-gradient(160deg, #3d1a6e 0%, #2e1354 60%, #200d3d 100%);
+      background: linear-gradient(155deg, #3b40b4 0%, #262a80 54%, #1b1f5c 100%);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -698,7 +711,7 @@ export function loginSelectPage(): string {
     .wrap { width: 100%; max-width: 380px; }
     .brand {
       text-align: center;
-      color: var(--color-accent);
+      color: #f4a621;
       font-size: 15px;
       font-weight: 700;
       letter-spacing: 0.1em;
@@ -706,7 +719,7 @@ export function loginSelectPage(): string {
     }
     .lead {
       text-align: center;
-      color: #d9cdf0;
+      color: #c7cbf3;
       font-size: 13px;
       margin-bottom: 28px;
     }
@@ -720,7 +733,7 @@ export function loginSelectPage(): string {
       margin-bottom: 16px;
       text-align: left;
       text-decoration: none;
-      box-shadow: 0 8px 24px rgba(20,6,45,0.35);
+      box-shadow: 0 8px 24px rgba(15,20,60,0.35);
       -webkit-tap-highlight-color: transparent;
       transition: transform 0.1s;
     }
@@ -730,12 +743,12 @@ export function loginSelectPage(): string {
       flex-shrink: 0;
       width: 44px; height: 44px;
       border-radius: 10px;
-      background: #ede6f9;
+      background: #ecefff;
       display: flex; align-items: center; justify-content: center;
     }
-    .choice-title { font-size: 15px; font-weight: 700; color: #2e1354; }
-    .choice-sub { font-size: 11.5px; color: #7a6a99; margin-top: 2px; }
-    .choice-arrow { margin-left: auto; color: #9a8ac0; font-size: 18px; }
+    .choice-title { font-size: 15px; font-weight: 700; color: #232a6b; }
+    .choice-sub { font-size: 11.5px; color: #6b7593; margin-top: 2px; }
+    .choice-arrow { margin-left: auto; color: #94a0b6; font-size: 18px; }
   </style>
 </head>
 <body>
@@ -746,7 +759,7 @@ export function loginSelectPage(): string {
     <a class="choice" href="${ADMIN_PATH}/login?mode=pc">
       <div class="choice-row">
         <div class="choice-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="13" rx="1.5" stroke="#3d1a6e" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="#3d1a6e" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="13" rx="1.5" stroke="#232a6b" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="#232a6b" stroke-width="1.8" stroke-linecap="round"/></svg>
         </div>
         <div>
           <div class="choice-title">PCでログイン</div>
@@ -759,7 +772,7 @@ export function loginSelectPage(): string {
     <a class="choice" href="${ADMIN_PATH}/login?mode=sp">
       <div class="choice-row">
         <div class="choice-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="2" width="12" height="20" rx="2" stroke="#3d1a6e" stroke-width="1.8"/><path d="M11 19h2" stroke="#3d1a6e" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="2" width="12" height="20" rx="2" stroke="#232a6b" stroke-width="1.8"/><path d="M11 19h2" stroke="#232a6b" stroke-width="1.8" stroke-linecap="round"/></svg>
         </div>
         <div>
           <div class="choice-title">スマホでログイン</div>
@@ -778,6 +791,8 @@ export function loginPage(mode: LoginMode, error: string = '', csrfToken: string
 }
 
 function loginPagePc(error: string = '', csrfToken: string = ''): string {
+  // 背景写真を全画面（cover）で見せる。写真の左上に写っているロゴが隠れないよう
+  // 位置は left top 固定にし、入力欄は右下の小さなカードにまとめる。
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -792,145 +807,95 @@ function loginPagePc(error: string = '', csrfToken: string = ''): string {
     body {
       font-family: 'Hiragino Sans', 'Meiryo', -apple-system, sans-serif;
       min-height: 100vh;
-      background: #2e1354;
-      position: relative;
-      overflow-x: hidden;
+      background: #0a0f1e;
+      color: #141d2c;
+      overflow: hidden;
     }
-    .bg-frame {
+    .bg {
       position: fixed;
       inset: 0;
-      padding: 6vh 6vw;
-      box-sizing: border-box;
+      background-image: url('${ADMIN_PATH}/login-bg.jpg');
+      background-size: cover;
+      background-position: left top;
+      background-repeat: no-repeat;
     }
-    .bg-frame img {
-      display: block;
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      border-radius: 16px;
-    }
-    .center {
-      position: relative;
-      z-index: 1;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
+    /* コントラスト確保のスクリムは右下のカード周辺だけ。左上のロゴには掛けない。 */
+    .bg::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(720px 560px at 100% 100%, rgba(10,15,30,0.44) 0, rgba(10,15,30,0.12) 56%, transparent 80%);
+      pointer-events: none;
     }
     .card {
-      width: 100%;
-      max-width: 340px;
-      background: rgba(238,231,247,0.96);
-      border-radius: 16px;
-      box-shadow: 0 12px 40px rgba(20,6,45,0.45);
-      padding: 28px 26px 24px;
-      backdrop-filter: blur(2px);
+      position: fixed;
+      right: clamp(16px, 4vw, 48px);
+      bottom: clamp(16px, 4vw, 48px);
+      width: min(370px, calc(100vw - 32px));
+      background: rgba(255,255,255,0.90);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255,255,255,0.6);
+      border-radius: 18px;
+      box-shadow: 0 24px 60px rgba(10,15,30,0.38);
+      padding: 26px 26px 24px;
     }
-    .card-title {
-      font-size: 15px;
-      font-weight: 700;
-      color: #2e1354;
-      letter-spacing: 0.04em;
-      margin-bottom: 2px;
+    .brand {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+      color: #232a6b; margin-bottom: 16px;
     }
-    .card-sub {
-      font-size: 11px;
-      color: #6b5a8a;
-      margin-bottom: 20px;
-    }
-    .error-box {
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      color: #b91c1c;
-      padding: 10px 14px;
-      border-radius: 6px;
-      font-size: 12px;
-      margin-bottom: 18px;
-      line-height: 1.6;
-    }
+    .brand .star { color: #f4a621; font-size: 14px; line-height: 1; }
+    .headline { font-size: 20px; font-weight: 800; color: #141d2c; letter-spacing: 0.02em; margin-bottom: 3px; }
+    .sub { font-size: 12px; color: #566178; margin-bottom: 20px; }
+    .error-box { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:10px 13px; border-radius:8px; font-size:12px; margin-bottom:16px; line-height:1.6; }
     .field { margin-bottom: 14px; }
-    .field label {
-      display: block;
-      font-size: 11px;
-      font-weight: 600;
-      color: #5b4a7a;
-      letter-spacing: 0.06em;
-      margin-bottom: 6px;
+    .field label { display:block; font-size:11px; font-weight:700; color:#566178; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px; }
+    .field input { width:100%; border:1px solid #ccd6ea; border-radius:9px; padding:11px 13px; font-size:14px; color:#141d2c; outline:none; transition:border-color .15s, box-shadow .15s; font-family:inherit; background:#fff; }
+    .field input:focus { border-color:#5666ff; box-shadow:0 0 0 3px rgba(86,102,255,0.18); }
+    .btn { width:100%; background:#5666ff; color:#fff; border:none; border-radius:9px; padding:12px; font-size:14px; font-weight:700; letter-spacing:0.06em; cursor:pointer; margin-top:4px; box-shadow:0 10px 24px rgba(86,102,255,0.34); transition:background .15s, transform .05s; font-family:inherit; }
+    .btn:hover { background:#4553e6; }
+    .btn:active { transform: translateY(1px); }
+    .switch-link { display:block; text-align:center; margin-top:16px; font-size:11px; color:#566178; text-decoration:none; }
+    .switch-link:hover { text-decoration:underline; color:#232a6b; }
+    @media (max-width: 560px) {
+      body { overflow: auto; }
+      .bg::after { background: linear-gradient(0deg, rgba(10,15,30,0.52) 0, rgba(10,15,30,0.08) 44%, transparent 66%); }
+      .card {
+        right: 12px; left: 12px; bottom: 12px; width: auto;
+        padding: 22px 20px calc(20px + env(safe-area-inset-bottom));
+      }
     }
-    .field input {
-      width: 100%;
-      border: 1px solid #cabde0;
-      border-radius: 6px;
-      padding: 10px 12px;
-      font-size: 14px;
-      color: #2e1354;
-      outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s;
-      font-family: inherit;
-      background: #ffffff;
-    }
-    .field input:focus {
-      border-color: #6a3fb5;
-      box-shadow: 0 0 0 3px rgba(106,63,181,0.15);
-    }
-    .btn {
-      width: 100%;
-      background: #3d1a6e;
-      color: #ffffff;
-      border: none;
-      border-radius: 6px;
-      padding: 12px;
-      font-size: 14px;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      cursor: pointer;
-      margin-top: 4px;
-      transition: background 0.15s;
-      font-family: inherit;
-    }
-    .btn:hover { background: #5a2ba0; }
-    .btn:active { background: #2e1354; }
-    .switch-link {
-      display: block;
-      text-align: center;
-      margin-top: 16px;
-      font-size: 11px;
-      color: #6b5a8a;
-      text-decoration: none;
-    }
-    .switch-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-  <div class="bg-frame">
-    <img src="${ADMIN_PATH}/login-bg.jpg" alt="">
-  </div>
-  <div class="center">
-    <div class="card">
-      <div class="card-title">管理者ログイン（PC）</div>
-      <div class="card-sub">IDとパスワードを入力してください</div>
-      ${error ? `<div class="error-box">${escHtml(error)}</div>` : ''}
-      <form method="POST" action="${ADMIN_PATH}/login">
-        ${csrfToken ? `<input type="hidden" name="csrf_token" value="${escHtml(csrfToken)}">` : ''}
-        <div class="field">
-          <label>ログインID</label>
-          <input type="text" name="username" required autocomplete="username" placeholder="ID">
-        </div>
-        <div class="field">
-          <label>パスワード</label>
-          <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••">
-        </div>
-        <button type="submit" class="btn">ログイン</button>
-      </form>
-      <a class="switch-link" href="${ADMIN_PATH}/login?reset=1">スマホ表示に切り替える</a>
-    </div>
+  <div class="bg"></div>
+  <div class="card">
+    <div class="brand"><span class="star">★</span>ホシコン 管理システム</div>
+    <div class="headline">管理者ログイン</div>
+    <div class="sub">ID とパスワードを入力してください（PC）</div>
+    ${error ? `<div class="error-box">${escHtml(error)}</div>` : ''}
+    <form method="POST" action="${ADMIN_PATH}/login">
+      ${csrfToken ? `<input type="hidden" name="csrf_token" value="${escHtml(csrfToken)}">` : ''}
+      <div class="field">
+        <label>ログインID</label>
+        <input type="text" name="username" required autocomplete="username" placeholder="ID">
+      </div>
+      <div class="field">
+        <label>パスワード</label>
+        <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+      </div>
+      <button type="submit" class="btn">ログイン</button>
+    </form>
+    <a class="switch-link" href="${ADMIN_PATH}/login?reset=1">スマホ表示に切り替える</a>
   </div>
 </body>
 </html>`;
 }
 
 function loginPageSp(error: string = '', csrfToken: string = ''): string {
+  // 背景写真を全画面（cover）で表示し、入力欄は下部のシートへ寄せる。
+  // 写真は画面上側にしっかり見え、入力中もシートだけが手元にある。
   return `<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -945,40 +910,58 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
     body {
       font-family: 'Hiragino Sans', 'Meiryo', -apple-system, sans-serif;
       min-height: 100vh;
-      background: linear-gradient(160deg, #3d1a6e 0%, #2e1354 55%, #200d3d 100%);
-      display: flex;
-      flex-direction: column;
-      align-items: stretch;
-      justify-content: center;
-      padding: 20px;
-      padding-top: max(20px, env(safe-area-inset-top));
-      padding-bottom: max(20px, env(safe-area-inset-bottom));
+      background: #0a0f1e;
+      color: #141d2c;
     }
-    .brand {
-      text-align: center;
-      color: var(--color-accent);
-      font-size: 14px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      margin-bottom: 18px;
+    .bg {
+      position: fixed;
+      inset: 0;
+      background-image: url('${ADMIN_PATH}/login-bg.jpg');
+      background-size: cover;
+      background-position: left top;
+      background-repeat: no-repeat;
     }
-    .card {
-      width: 100%;
-      background: #ffffff;
-      border-radius: 18px;
-      box-shadow: 0 10px 30px rgba(20,6,45,0.4);
-      padding: 26px 20px 22px;
+    .bg::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(0deg, rgba(10,15,30,0.5) 0, rgba(10,15,30,0.05) 46%, transparent 70%);
+      pointer-events: none;
     }
+    .sheet {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      z-index: 3;
+      background: rgba(255,255,255,0.93);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-radius: 22px 22px 0 0;
+      box-shadow: 0 -16px 46px rgba(10,15,30,0.4);
+      padding: 22px 20px calc(20px + env(safe-area-inset-bottom));
+      max-height: 86vh;
+      overflow-y: auto;
+    }
+    .grip {
+      width: 40px; height: 4px;
+      border-radius: 999px;
+      background: #ccd6ea;
+      margin: 0 auto 16px;
+    }
+    .brand-line {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+      color: #232a6b; margin-bottom: 10px;
+    }
+    .brand-line .star { color: #f4a621; }
     .card-title {
-      font-size: 17px;
-      font-weight: 700;
-      color: #2e1354;
+      font-size: 18px;
+      font-weight: 800;
+      color: #141d2c;
       margin-bottom: 4px;
     }
     .card-sub {
       font-size: 13px;
-      color: #6b5a8a;
-      margin-bottom: 22px;
+      color: #566178;
+      margin-bottom: 20px;
     }
     .error-box {
       background: #fef2f2;
@@ -987,36 +970,35 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
       padding: 12px 14px;
       border-radius: 10px;
       font-size: 13px;
-      margin-bottom: 18px;
+      margin-bottom: 16px;
       line-height: 1.6;
     }
-    .field { margin-bottom: 16px; }
+    .field { margin-bottom: 15px; }
     .field label {
       display: block;
-      font-size: 12.5px;
-      font-weight: 600;
-      color: #5b4a7a;
-      letter-spacing: 0.03em;
+      font-size: 12px;
+      font-weight: 700;
+      color: #566178;
+      letter-spacing: 0.04em;
       margin-bottom: 7px;
     }
     .field input {
       width: 100%;
-      border: 1px solid #cabde0;
-      border-radius: 10px;
-      padding: 14px 14px;
+      border: 1px solid #ccd6ea;
+      border-radius: 12px;
+      padding: 14px;
       /* 16px未満だとiOS Safariでフォーカス時に自動ズームされてしまうため固定 */
       font-size: 16px;
-      color: #2e1354;
+      color: #141d2c;
       outline: none;
       transition: border-color 0.15s, box-shadow 0.15s;
       font-family: inherit;
-      background: #faf8fd;
+      background: #ffffff;
       min-height: 52px;
     }
     .field input:focus {
-      border-color: #6a3fb5;
-      box-shadow: 0 0 0 3px rgba(106,63,181,0.15);
-      background: #ffffff;
+      border-color: #5666ff;
+      box-shadow: 0 0 0 3px rgba(86,102,255,0.18);
     }
     .pw-wrap { position: relative; }
     .pw-wrap input { padding-right: 52px; }
@@ -1028,7 +1010,7 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
       width: 44px;
       border: none;
       background: transparent;
-      color: #7a6a99;
+      color: #566178;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1039,10 +1021,10 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
     .pw-toggle svg { pointer-events: none; }
     .btn {
       width: 100%;
-      background: #3d1a6e;
+      background: #5666ff;
       color: #ffffff;
       border: none;
-      border-radius: 12px;
+      border-radius: 13px;
       padding: 16px;
       font-size: 16px;
       font-weight: 700;
@@ -1050,18 +1032,19 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
       cursor: pointer;
       margin-top: 6px;
       min-height: 52px;
+      box-shadow: 0 10px 24px rgba(86,102,255,0.32);
       transition: background 0.15s;
       font-family: inherit;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
     }
-    .btn:active { background: #2e1354; }
+    .btn:active { background: #4553e6; }
     .switch-link {
       display: block;
       text-align: center;
-      margin-top: 20px;
+      margin-top: 18px;
       font-size: 12.5px;
-      color: #d9cdf0;
+      color: #566178;
       text-decoration: none;
       padding: 8px;
     }
@@ -1069,8 +1052,10 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
   </style>
 </head>
 <body>
-  <div class="brand">ホシコン 管理システム</div>
-  <div class="card">
+  <div class="bg"></div>
+  <div class="sheet">
+    <div class="grip"></div>
+    <div class="brand-line"><span class="star">★</span> ホシコン 管理システム</div>
     <div class="card-title">管理者ログイン</div>
     <div class="card-sub">IDとパスワードを入力してください</div>
     ${error ? `<div class="error-box">${escHtml(error)}</div>` : ''}
@@ -1092,8 +1077,8 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
       </div>
       <button type="submit" class="btn">ログイン</button>
     </form>
+    <a class="switch-link" href="${ADMIN_PATH}/login?reset=1">PC表示に切り替える</a>
   </div>
-  <a class="switch-link" href="${ADMIN_PATH}/login?reset=1">PC表示に切り替える</a>
   <script>
     (function () {
       var toggle = document.getElementById('pw-toggle');

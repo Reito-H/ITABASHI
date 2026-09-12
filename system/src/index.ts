@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { requireAuth, requireJapan } from './middleware/auth';
 import { getAdminPermissions, isPathAllowed, isRootApiWriteAllowed, filterHtmlByPermissions } from './permissions';
 import adminRoutes from './routes/admin';
+import adminAuthGateRoutes from './routes/admin_auth_gate';
 import adminExtraRoutes from './routes/admin_extra';
 import adminStaffRoutes from './routes/admin_staff';
 import adminSalesAiRoutes from './routes/admin_sales_ai';
@@ -46,8 +47,12 @@ import adminVehicleDeadlinesRoutes from './routes/admin_vehicle_deadlines';
 import inspectionApi from './routes/api/inspection';
 import adminDocumentsRoutes from './routes/admin_documents';
 import documentsApi from './routes/api/documents';
+import adminStudyNotesRoutes from './routes/admin_study_notes';
+import studyNotesApi from './routes/api/study_notes';
 import adminKachoMissionRoutes from './routes/admin_kacho_mission';
+import adminFaceAuthRoutes from './routes/admin_face_auth';
 import adminKachoHiyariRoutes from './routes/admin_kacho_hiyari';
+import adminSummerSafety2026Routes from './routes/admin_summer_safety_2026';
 import kachoMissionApi from './routes/api/kacho_mission';
 import adminKanchoRoutes from './routes/admin_kancho';
 import adminKanchoWishRoutes from './routes/admin_kancho_wish';
@@ -61,6 +66,7 @@ import diaApi from './routes/api/dia';
 import adminTantoshaRoutes from './routes/admin_tantosha';
 import adminTodoRoutes from './routes/admin_todo';
 import adminCrewShiftRoutes from './routes/admin_crew_shift';
+import adminAttendanceBoardRoutes from './routes/admin_attendance_board';
 import adminDispatchRoutes from './routes/admin_dispatch';
 import adminHandoverRoutes from './routes/admin_handover';
 import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
@@ -84,25 +90,26 @@ import adminAccidentsTrainingRecordRoutes from './routes/admin_accidents_trainin
 import adminAccidentsPersonRoutes from './routes/admin_accidents_person';
 import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
-import adminNewcomerIntrosRoutes from './routes/admin_newcomer_intros';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import adminChoseiRoutes from './routes/admin_chosei';
 import adminManualModeRoutes, { manualModePublicApi } from './routes/admin_manual_mode';
 import adminTenkoRoutes from './routes/admin_tenko';
 import adminSignageRoutes from './routes/admin_signage';
+import adminDaihonRoutes from './routes/admin_daihon';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import publicAccidentsMonitorRoutes from './routes/public_accidents_monitor';
 import publicAccidentsUploadRoutes from './routes/public_accidents_upload';
-import publicNewcomerMonitorRoutes from './routes/public_newcomer_monitor';
+import publicStudyNotesUploadRoutes from './routes/public_study_notes_upload';
 import publicStudySessionsRoutes from './routes/public_study_sessions';
 import publicChoseiRoutes from './routes/public_chosei';
 import publicHiyariRoutes from './routes/public_hiyari';
+import publicSignageRoutes from './routes/public_signage';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
-import { ADMIN_PATH, SECRET, MONITOR_ACCIDENTS_PATH } from './config';
+import { ADMIN_PATH, SECRET, MONITOR_ACCIDENTS_PATH, SIGNAGE_PUBLIC_PATH } from './config';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -132,7 +139,12 @@ app.use('*', (c, next) => {
 });
 
 // 日本国内限定アクセス
-app.use('*', requireJapan);
+// TEMP-RM-RESTORE: リッチメニュー再割当の一時エンドポイントだけ除外（作業後に削除）
+app.use('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith('/rmr-94eb102c62fa2b37b067999d8992896ce6f01001fcbad2ff/')) return next();
+  return requireJapan(c, next);
+});
 
 // セキュリティヘッダー
 app.use('*', async (c, next) => {
@@ -151,16 +163,42 @@ app.use('*', async (c, next) => {
   // 点呼のプレゼン投影で「事故件数レポート」スライドがホシコン事故モニターを同一オリジンでiframe表示するため、
   // このモニターページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続きDENY）
   const isAccidentsMonitorEmbed = pathname === MONITOR_ACCIDENTS_PATH;
+  // 秋の全国交通安全運動 手札: 編集ページが印刷イメージを同一オリジンでiframeプレビュー表示するため、
+  // この印刷ページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続きDENY）
+  const isAutumnTefudaPrint = pathname === `/${SECRET}/admin/kacho-mission/autumn-safety-tefuda/print`;
   // デジタルサイネージの編集ページが、投影プレビューを同一オリジンでiframe表示するため、
   // present ページのみフレーム表示を許可する（他ページは引き続きDENY）
   // デジタルサイネージの投影/印刷ページは Google Fonts（見出し用 Anton など）を読み込むため CSP を個別に緩める。
   // present は編集ページから同一オリジンで iframe プレビュー表示する
   const isSignageDeckPage = /^\/[^/]+\/admin\/signage\/\d+\/(present|print)$/.test(pathname);
+  // 統合デジタルサイネージのログイン不要ページも Google Fonts（Anton など）を読み込むため CSP を同じく緩める
+  const isSignagePublicPage = pathname === SIGNAGE_PUBLIC_PATH;
+  // 乗務員証 証明写真: MediaPipe(WebAssembly)による顔検出とカメラ撮影のため、
+  // このページのみ CSP に wasm-unsafe-eval / blob: を、Permissions-Policy にカメラ許可を追加する。
+  const isIdPhotosPage = pathname === `/${SECRET}/admin/kacho-mission/id-photos`;
+  // 顔認証（検証用）: face-api.js（WebAssembly/WebGL）による顔認識とカメラ撮影のため、
+  // 証明写真ページと同じく CSP に wasm-unsafe-eval / blob: を、Permissions-Policy にカメラ許可を追加する。
+  const isFaceAuthPage = pathname === `/${SECRET}/admin/face-auth`
+    || pathname === `/${SECRET}/admin/settings/face-auth`
+    || pathname === `/${SECRET}/admin/login/verify`;
+  const isWasmCameraPage = isIdPhotosPage || isFaceAuthPage;
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   c.res.headers.set('Cache-Control', 'no-store');
-  c.res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  if (isLiff) {
+  c.res.headers.set('Permissions-Policy',
+    (isWasmCameraPage ? 'camera=(self)' : 'camera=()') + ', microphone=(), geolocation=(), payment=()');
+  if (isWasmCameraPage) {
+    c.res.headers.set('X-Frame-Options', 'DENY');
+    c.res.headers.set('Referrer-Policy', 'no-referrer');
+    c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net https://static.cloudflareinsights.com blob:; " +
+      "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
+      "connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net blob: data:; " +
+      "worker-src 'self' blob:; frame-ancestors 'none';"
+    );
+  } else if (isLiff) {
     // LIFF ページ: LINE SDKを許可、フレーム制限を緩和
     c.res.headers.set('Content-Security-Policy',
       "default-src 'self'; script-src 'self' 'unsafe-inline' https://static.line-scdn.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.line.me https://liff.line.me;"
@@ -172,8 +210,9 @@ app.use('*', async (c, next) => {
     c.res.headers.set('Content-Security-Policy',
       "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';"
     );
-  } else if (isSignageDeckPage) {
-    // デジタルサイネージ投影/印刷: Google Fonts を許可。present は編集ページから同一オリジンで iframe 表示する
+  } else if (isSignageDeckPage || isSignagePublicPage) {
+    // デジタルサイネージ投影/印刷・ログイン不要の固定URLページ: Google Fonts を許可。
+    // present は編集ページから同一オリジンで iframe 表示する
     c.res.headers.set('X-Frame-Options', 'SAMEORIGIN');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -183,7 +222,7 @@ app.use('*', async (c, next) => {
   } else {
     // やることリスト・事故防止AIレポートのembedページのみ、引き継ぎシートのフローティングパネル/ポップアップから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAccidentsMonitorEmbed;
+    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAccidentsMonitorEmbed || isAutumnTefudaPrint;
     c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -226,6 +265,31 @@ app.use('*', async (c, next) => {
 // robots.txt
 app.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /\n'));
 
+// TEMP-RM-RESTORE: ユーザーへの実際のリッチメニュー割当を、正しいIDへ戻す一時エンドポイント。
+// 作業完了後にこのブロックごと削除すること。
+app.post('/rmr-94eb102c62fa2b37b067999d8992896ce6f01001fcbad2ff/apply', async (c) => {
+  const token = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
+  const MENU_ID = c.env.RICHMENU_ID_PATTERN2 ?? '';
+  const TARGET_USERS = [
+    'U1a0c87213423f99151e0129de56965d4', 'Ua0d98586de60f233d9b24a0a79c61269',
+    'U3d308d18ce07fd5a8ed860c5ddaaa36c', 'U7221aad3731d2c08863a4e3553278daa',
+    'Ud79a726bd58dd8ac14a1636cb6077658', 'U2ae7dc404e7b65b85e0deca86016c699',
+    'Ufa9eede527b8db2a37e016ef72a4799e', 'U06245a23ccd74cb295b411be97f15ff4',
+    'U6e7893b673927eec912b1cafad3fe401', 'Ub23f0ec7e06e432fe65f70e34a1c1bb6',
+    'U0dc3b8465011a42e49202403b5060899', 'Uc0cf9d3b694b33a84fe9dbc5fb16b0f3',
+    'U103156390f198002c81eddf880759304', 'Udb8efb952657ac7785434b851ece8602',
+  ];
+  const results: { uid: string; ok: boolean }[] = [];
+  for (const uid of TARGET_USERS) {
+    const res = await fetch(`https://api.line.me/v2/bot/user/${uid}/richmenu/${MENU_ID}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    results.push({ uid, ok: res.ok });
+  }
+  return c.json({ menuId: MENU_ID, results });
+});
+
 // =====================
 // 管理者画面ルーティング
 // 秘密パス配下のみ許可。login・logout・setup は認証不要
@@ -257,34 +321,34 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
   if (!perms) return next(); // 全権限アカウント
 
-  // CC名簿: ページ権限は使わず全アカウント共通でアクセス可（代わりに専用パスワード(5931)でガードする）。
-  // ただし他のメニュー項目のフィルタは通常通り効かせたいため、権限チェックだけを免除しawait next()以降は共通処理に合流させる
-  const isCcList = subPath.startsWith('/cc-list') || subPath.startsWith('/api/cc-list');
-
-  // 便利（距離控除表・高速料金表など）: 閲覧はページ権限を使わず全アカウント共通でアクセス可。
-  // 編集（非GET）はルート側でフル権限アカウント（permissions IS NULL）かどうかを別途チェックする
-  const isBenri = subPath.startsWith('/benri') || subPath.startsWith('/api/benri');
-
-  // 車庫見取り図: 便利ハブ配下に移動。閲覧はページ権限を使わず全アカウント共通。
-  // 編集（非GET）は admin_garage.ts の requireEdit でフル権限アカウントか別途チェックする
-  const isGarage = subPath.startsWith('/garage') || subPath.startsWith('/api/garage');
-
   // nojico: 外部サイトをアプリ内ブラウザで開くだけのページ。ページ権限は使わず全アカウント共通でアクセス可
   const isNojico = subPath.startsWith('/nojico');
 
-  // シャトルバス: 閲覧はページ権限を使わず全アカウント共通。編集（非GET）はルート側でフル権限アカウントか別途チェックする
-  const isShuttle = subPath.startsWith('/shuttle') || subPath.startsWith('/api/shuttle');
+  // 「以前は全アカウント共通で表示」だった機能に、アカウント別の閲覧ON/OFFキーを付与（migration_140）。
+  //   キーを持っていれば従来どおり通す（編集の可否は各ルートが requireEdit / requireFull / 専用パスワード で判定）。
+  //   キーが無ければ 403。既存の制限付きアカウントには migration_140 で5キーを追記済み。
+  const commonFeatureKey =
+    (subPath.startsWith('/benri')   || subPath.startsWith('/api/benri'))   ? 'benri'   :
+    (subPath.startsWith('/garage')  || subPath.startsWith('/api/garage'))  ? 'garage'  :
+    (subPath.startsWith('/shuttle') || subPath.startsWith('/api/shuttle')) ? 'shuttle' :
+    (subPath.startsWith('/signage') || subPath.startsWith('/api/signage')) ? 'signage' :
+    (subPath.startsWith('/cc-list') || subPath.startsWith('/api/cc-list')) ? 'cc-list' :
+    null;
 
-  // デジタルサイネージ: 投影/印刷/一覧の閲覧は全アカウント共通。編集（非GET・編集ページ）は admin_signage.ts の requireFull でフル権限アカウントか別途チェックする
-  const isSignage = subPath.startsWith('/signage') || subPath.startsWith('/api/signage');
-
-  if (!isCcList && !isBenri && !isGarage && !isNojico && !isShuttle && !isSignage && !isPathAllowed(perms, subPath, c.req.method)) {
+  const deny403 = () => {
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
     return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>アクセス権限がありません</title>
     <style>body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center}h1{font-size:1.05rem;margin:0 0 .5rem}p{font-size:.85rem;color:#6b7280;margin:0 0 1rem}a{display:inline-block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem 1.25rem;font-size:.85rem;text-decoration:none}</style></head>
     <body><div class="box"><h1>アクセス権限がありません</h1><p>このページを表示する権限がこのアカウントにはありません。</p><a href="${ADMIN_PATH}">ホームに戻る</a></div></body></html>`, 403);
+  };
+
+  if (commonFeatureKey !== null) {
+    if (!perms.includes(commonFeatureKey)) return deny403();
+    // キーあり: 権限チェック通過（編集可否はルート側で判定）
+  } else if (!isNojico && !isPathAllowed(perms, subPath, c.req.method)) {
+    return deny403();
   }
 
   await next();
@@ -312,8 +376,12 @@ app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminVehicleDeadlinesRoutes);
 app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
+app.route(`/${SECRET}/admin`, adminStudyNotesRoutes);
 app.route(`/${SECRET}/admin`, adminKachoMissionRoutes);
+app.route(`/${SECRET}/admin`, adminFaceAuthRoutes);
+app.route(`/${SECRET}/admin`, adminAuthGateRoutes);
 app.route(`/${SECRET}/admin`, adminKachoHiyariRoutes);
+app.route(`/${SECRET}/admin`, adminSummerSafety2026Routes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoWishRoutes);
 app.route(`/${SECRET}/admin`, adminKanchoRosterRoutes);
@@ -325,6 +393,7 @@ app.route(`/${SECRET}/admin`, adminDiaRoutes);
 app.route(`/${SECRET}/admin`, adminTantoshaRoutes);
 app.route(`/${SECRET}/admin`, adminTodoRoutes);
 app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
+app.route(`/${SECRET}/admin`, adminAttendanceBoardRoutes);
 app.route(`/${SECRET}/admin`, adminDispatchRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
@@ -348,12 +417,12 @@ app.route(`/${SECRET}/admin`, adminAccidentsTrainingRecordRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsPersonRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
-app.route(`/${SECRET}/admin`, adminNewcomerIntrosRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 app.route(`/${SECRET}/admin`, adminChoseiRoutes);
 app.route(`/${SECRET}/admin`, adminManualModeRoutes);
 app.route(`/${SECRET}/admin`, adminTenkoRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
+app.route(`/${SECRET}/admin`, adminDaihonRoutes);
 
 // =====================
 // API（認証必須）
@@ -415,6 +484,7 @@ app.route('/api/line-reg', lineRegApi);
 app.route('/api/inspection', inspectionApi);
 app.route('/api/dia', diaApi);
 app.route('/api/documents', documentsApi);
+app.route('/api/study-notes', studyNotesApi);
 app.route('/api/kacho-mission', kachoMissionApi);
 app.route('/api/requests', requestsApi);
 
@@ -468,10 +538,11 @@ app.route('', liffKanchoRoutes);
 app.route('', publicKanchoWishRoutes);
 app.route('', publicAccidentsMonitorRoutes);
 app.route('', publicAccidentsUploadRoutes);
-app.route('', publicNewcomerMonitorRoutes);
+app.route('', publicStudyNotesUploadRoutes);
 app.route('', publicStudySessionsRoutes);
 app.route('', publicChoseiRoutes);
 app.route('', publicHiyariRoutes);
+app.route('', publicSignageRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));
