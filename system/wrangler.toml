@@ -12,11 +12,6 @@ database_id = "b50865b1-be1d-411c-bf71-fc9a7da3c5e0"
 binding = "DOCUMENTS_BUCKET"
 bucket_name = "benten-documents"
 
-# 点呼（仮眠室集合パワポ）の画像/動画/PDF素材の保管
-[[r2_buckets]]
-binding = "TENKO_BUCKET"
-bucket_name = "benten-tenko"
-
 # 乗務員証 証明写真の一時保存（30日で自動削除・毎時cronで purge）
 [[r2_buckets]]
 binding = "ID_PHOTO_BUCKET"

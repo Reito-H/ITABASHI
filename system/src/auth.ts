@@ -43,8 +43,6 @@ export type Env = {
   RICHMENU_ID_UNKNOWN?: string;
   // 資料センター（マニュアルPDF・就業規則等のファイル保管）
   DOCUMENTS_BUCKET: R2Bucket;
-  // 点呼（仮眠室集合パワポ）の画像/動画/PDF素材の保管
-  TENKO_BUCKET: R2Bucket;
   // 乗務員証 証明写真の一時保存（30日で自動削除）
   ID_PHOTO_BUCKET: R2Bucket;
   // 学習ノート（個人用ノート教材のページ画像・生成PDFの保管）

@@ -92,7 +92,6 @@ import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import adminChoseiRoutes from './routes/admin_chosei';
-import adminTenkoRoutes from './routes/admin_tenko';
 import adminSignageRoutes from './routes/admin_signage';
 import adminDaihonRoutes from './routes/admin_daihon';
 import requestsApi from './routes/api/requests';
@@ -108,7 +107,7 @@ import publicSignageRoutes from './routes/public_signage';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
-import { ADMIN_PATH, SECRET, MONITOR_ACCIDENTS_PATH, SIGNAGE_PUBLIC_PATH } from './config';
+import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH } from './config';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -159,9 +158,6 @@ app.use('*', async (c, next) => {
   // 事故防止AI: 引き継ぎシートのポップアップに課別傾向分析レポートをiframe埋め込みするため、
   // このレポートページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
   const isAccidentAiEmbed = pathname.startsWith(`/${SECRET}/admin/accidents/division/`) && pathname.endsWith('/report/print');
-  // 点呼のプレゼン投影で「事故件数レポート」スライドがホシコン事故モニターを同一オリジンでiframe表示するため、
-  // このモニターページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続きDENY）
-  const isAccidentsMonitorEmbed = pathname === MONITOR_ACCIDENTS_PATH;
   // 秋の全国交通安全運動 手札: 編集ページが印刷イメージを同一オリジンでiframeプレビュー表示するため、
   // この印刷ページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続きDENY）
   const isAutumnTefudaPrint = pathname === `/${SECRET}/admin/kacho-mission/autumn-safety-tefuda/print`;
@@ -221,7 +217,7 @@ app.use('*', async (c, next) => {
   } else {
     // やることリスト・事故防止AIレポートのembedページのみ、引き継ぎシートのフローティングパネル/ポップアップから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAccidentsMonitorEmbed || isAutumnTefudaPrint;
+    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAutumnTefudaPrint;
     c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -415,7 +411,6 @@ app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 app.route(`/${SECRET}/admin`, adminChoseiRoutes);
-app.route(`/${SECRET}/admin`, adminTenkoRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
 

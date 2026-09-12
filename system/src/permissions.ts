@@ -9,7 +9,7 @@
 
 // 権限キーの一覧・階層は下部の PERMISSION_TREE（アカウント権限編集UIのカタログ）を参照。
 // 主なもの:
-//   サイドバー: home / kancho-shift / kanri-kobo / handover / tenko / newcomers / staff /
+//   サイドバー: home / kancho-shift / kanri-kobo / handover / newcomers / staff /
 //               kacho-mission / sales-ai / accidents / vehicles / inspection /
 //               announcements / line / requests / crew-portal / tantosha / todo / crew-shift / shift
 //   「全アカウント共通だった機能」に付けた閲覧ON/OFFキー: benri / garage / shuttle / signage / cc-list
@@ -101,8 +101,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/kanri-kobo/, 'kanri-kobo'],
   [/^\/handover/,     'handover'],
   [/^\/api\/handover/, 'handover'],
-  [/^\/tenko/,        'tenko'],
-  [/^\/api\/tenko/,   'tenko'],
   [/^\/tantosha/,     'tantosha'],
   [/^\/api\/tantosha/, 'tantosha'],
   [/^\/todo/,         'todo'],
@@ -255,7 +253,6 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'kancho-shift', label: '班長シフト' },
     { key: 'kanri-kobo',   label: '管理者公休表' },
     { key: 'handover',     label: '引き継ぎシート' },
-    { key: 'tenko',        label: '点呼（仮眠室集合パワポ）' },
     { key: 'newcomers',    label: '総合新人管理', children: [
       { key: 'newcomers.register', label: '新人登録（新人フラグ・種別・新卒年度の設定）' },
     ]},
