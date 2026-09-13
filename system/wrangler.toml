@@ -63,6 +63,7 @@ BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/
 # npx wrangler secret put LINE_REG_PWD_OPERATIONS    ← 運行管理者 登録パスワード
 # npx wrangler secret put LINE_REG_PWD_GENERAL       ← 統括管理者 登録パスワード
 # npx wrangler secret put LINE_REG_PWD_CREW_MEMBER   ← 乗務社員 登録パスワード
+# npx wrangler secret put SR_PASSWORD                ← SR（S.RIDE迎車分析）ページの専用パスワード
 
 # PDF出力フォント用R2（使う場合はコメントを外し、バケット作成後にフォントを置く）
 # npx wrangler r2 bucket create benten-fonts

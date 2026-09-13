@@ -47,6 +47,8 @@ export type Env = {
   LIFF_ID_REGISTER?: string;
   // 事故データCSVの無人アップロード用（社内PCの監視スクリプトから使う専用キー）
   ACCIDENTS_UPLOAD_KEY?: string;
+  // SR（S.RIDE迎車分析）ページの専用パスワード（wrangler secret putで設定）
+  SR_PASSWORD?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

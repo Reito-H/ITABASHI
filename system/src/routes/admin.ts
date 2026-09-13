@@ -902,66 +902,69 @@ app.get('/shift/print/:empId', async (c) => {
 // ===== 設定トップ（カード一覧）=====
 app.get('/settings', async (c) => {
   const ADMIN = ADMIN_PATH;
-  type SettingCard = { href: string; perm: string; title: string; desc: string; highlight?: boolean; newTab?: boolean };
+  type SettingCard = { href: string; perm: string; title: string; desc?: string; highlight?: boolean; newTab?: boolean };
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[]; extraHtml?: string }> = [
     { heading: '日々の運用', cards: [
       // 報告センター・便利（車庫を含む）は左サイドバーに独立項目として配置したため、ここには表示しない
-      { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄',       desc: 'ホシコンについての要望・意見・欲しい機能などを自由に投稿' },
+      { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄' },
     ]},
     { heading: '権限・アカウント', cards: [
-      { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
-      { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINE連携',   desc: 'QRコード発行での新人・運行管理者等の登録・連携済みユーザー管理', highlight: true },
+      { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', highlight: true },
+      { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINE連携', highlight: true },
     ]},
     { heading: 'アナウンス', cards: [
-      { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー', desc: '管理画面全ページ最上部に表示する常時テロップの投稿・期限設定' },
-      { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード', desc: '対象者の誕生日当日、設定時刻に全ページへお祝いポップアップを表示' },
+      { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー' },
+      { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード' },
     ]},
     { heading: 'シフト関連の設定', cards: [
-      { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', desc: 'シフト区分・勤務ダイヤ・研修担当・班長指導者・月度設定・班長関連 の一覧', highlight: true },
+      { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', highlight: true },
     ]},
     { heading: 'LINE関連', cards: [
-      { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理',     desc: '新人招待コード発行・紐付け状況' },
-      { href: `${ADMIN}/announcements`,          perm: 'announcements',         title: 'お知らせ配信', desc: '全員・入社月・個別指定・LINE連携者への一斉配信、Web管理画面のお知らせベル、アンケート' },
-      { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定', desc: '朝レポート・報告アラート・ベンテン/班長通知の時刻とON/OFF' },
-      { href: `${ADMIN}/usage`,                  perm: 'settings.line-usage',    title: 'LINE利用状況', desc: 'トーク・LIFF操作のユーザー別利用集計（フル権限adminのみ）' },
+      { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理' },
+      { href: `${ADMIN}/announcements`,          perm: 'announcements',         title: 'お知らせ配信' },
+      { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定' },
+      { href: `${ADMIN}/usage`,                  perm: 'settings.line-usage',    title: 'LINE利用状況' },
     ]},
     { heading: 'マスタ管理', cards: [
-      { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所',              desc: '各営業所の電話番号・住所の管理' },
-      { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金', desc: '違反報告フォームの選択肢と点数・反則金の管理' },
-      { href: `${ADMIN}/cc-list`,                  perm: 'cc-list',                  title: 'CC名簿',              desc: 'クレーム客の記録台帳（専用パスワードが必要）' },
+      { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所' },
+      { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金' },
+      { href: `${ADMIN}/cc-list`,                  perm: 'cc-list',                  title: 'CC名簿' },
+    ]},
+    { heading: '迎車データ分析', cards: [
+      { href: `${ADMIN}/settings/sr`, perm: 'settings.sr', title: 'SR（S.RIDE 迎車分析）' },
     ]},
     { heading: '調整', cards: [
-      { href: `${ADMIN}/settings/chosei`, perm: 'settings.chosei', title: '調整', desc: '日程調整（調整さん形式）。調整を作ると推測されない共有URLが1本発行され、回答者はURLから社員番号を入力して各候補に ○/△/× とコメントを登録。集計表で最有力の候補が分かる' },
+      { href: `${ADMIN}/settings/chosei`, perm: 'settings.chosei', title: '調整' },
     ]},
     { heading: 'AI売上分析の設定', cards: [
-      { href: `${ADMIN}/settings/wage-estimate`, perm: 'settings.wage-estimate', title: '賃金試算設定', desc: 'AI売上分析「賃金インパクト試算」で使う成果手当の概算計算パラメータ（曜日別基準額・歩合率）' },
-      { href: `${ADMIN}/settings/driving-risk`,  perm: 'settings.driving-risk',  title: '運転リスク検証設定', desc: 'AI売上分析「安全運転リスク」判定のしきい値（急挙動件数・最高速度）' },
-      { href: `${ADMIN}/settings/fare-revision-guide`, perm: 'settings', title: '運賃改定影響分析のしくみ', desc: '「運賃改定影響分析」が何をどう計算しているか、やさしい言葉で解説' },
+      { href: `${ADMIN}/settings/wage-estimate`, perm: 'settings.wage-estimate', title: '賃金試算設定' },
+      { href: `${ADMIN}/settings/driving-risk`,  perm: 'settings.driving-risk',  title: '運転リスク検証設定' },
+      { href: `${ADMIN}/settings/fare-revision-guide`, perm: 'settings', title: '運賃改定影響分析のしくみ' },
     ]},
     { heading: '経営・対外資料', cards: [
-      { href: `${ADMIN}/presentation`, perm: 'settings.presentation', title: 'ホシコン発表資料', desc: '社内システムのDX事例プレゼンテーション（横スライド・印刷対応、フル権限adminのみ）' },
+      { href: `${ADMIN}/presentation`, perm: 'settings.presentation', title: 'ホシコン発表資料' },
     ]},
     { heading: 'モニター表示', cards: [
-      { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', desc: '事故件数・時間帯を大きく常時表示するページ（ログイン不要・専用パスワードが必要、モニターに映しっぱなしにする用途）', newTab: true },
-      { href: `${ADMIN}/signage`, perm: 'signage', title: 'デジタルサイネージ', desc: '営業所モニター用の周知スライド（生活道路30km/h等）。横16:9で自動再生、Fキーで全画面、1周ぶんを動画(webm)で書き出し可。投影は全アカウントが開けて、編集はフル権限アカウントのみ。面の追加・文言編集ができます' },
+      { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', newTab: true },
+      { href: `${ADMIN}/signage`, perm: 'signage', title: 'デジタルサイネージ' },
     ]},
     { heading: 'ガイド・システム', cards: [
-      { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: 'データセンター',     desc: '資料保存に加え、社員CSV・点検写真AI取込・乗務員シフトPDFのアップロード窓口を集約' },
-      { href: `${ADMIN}/settings/study-notes`,          perm: 'settings.study-notes',          title: '学習ノート',       desc: '個人の学習用ノート教材をタイトルごとに保存し、PDFとして出力' },
-      { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル',     desc: 'システムの使い方ガイド（印刷・PDF出力対応）' },
-      { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド',     desc: '班長・指導者向けLINE車番検索の使い方ページ（配布用）' },
-      { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス', desc: 'サーバー・DB・通信状態・利用統計・DB統計・アクセスQRコード' },
-      { href: `${ADMIN}/request-review`,                perm: 'settings.requests-admin',       title: '要望欄（収集一覧）', desc: '設定ページ「要望欄」から寄せられた要望・意見の一覧（フル権限adminのみ）' },
+      { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: 'データセンター' },
+      { href: `${ADMIN}/settings/study-notes`,          perm: 'settings.study-notes',          title: '学習ノート' },
+      { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル' },
+      { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド' },
+      { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス' },
+      { href: `${ADMIN}/request-review`,                perm: 'settings.requests-admin',       title: '要望欄（収集一覧）' },
     ]},
   ];
   const cardHtml = (card: SettingCard) => {
     const linkTag = `
-          <a href="${card.href}" ${card.newTab ? 'target="_blank" rel="noopener"' : ''} ${card.href === MONITOR_ACCIDENTS_PATH ? '' : `data-perm-key="${card.perm}"`} style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:18px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
+          <a href="${card.href}" ${card.newTab ? 'target="_blank" rel="noopener"' : ''} ${card.href === MONITOR_ACCIDENTS_PATH ? '' : `data-perm-key="${card.perm}"`} style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:${card.desc ? '18px 20px' : '14px 20px'};box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
             onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
             <div>
-              <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};margin-bottom:3px;">${card.title}</div>
-              <div style="font-size:12px;color:#6b7280;">${card.desc}</div>
+              <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};${card.desc ? 'margin-bottom:3px;' : ''}">${card.title}</div>
+              ${card.desc ? `<div style="font-size:12px;color:#6b7280;">${card.desc}</div>` : ''}
             </div>
             <div style="margin-left:auto;color:#9ca3af;font-size:18px;">›</div>
           </a>`;

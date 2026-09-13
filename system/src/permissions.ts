@@ -19,7 +19,7 @@
 //              （親 settings.study-sessions を持てば全タブ利用可）
 //   設定サブページ: settings.accounts / settings.liff / settings.line-usage /
 //              settings.notifications / settings.offices / settings.documents / settings.study-notes / settings.tutorial /
-//              settings.status / settings.chosei / settings.announcement-bar / settings.birthday /
+//              settings.status / settings.sr / settings.chosei / settings.announcement-bar / settings.birthday /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
 //              settings.lost-items / settings.accidents / settings.violations / settings.general-reports /
 //              settings.handover-memos / settings.violation-types /
@@ -51,6 +51,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/notifications/,        'settings.notifications'],
   [/^\/settings\/offices/,              'settings.offices'],
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
+  // SR（S.RIDE迎車注文リスト）分析。ページ権限に加え、開くたび専用パスワードも必要（admin_sr.ts側で判定）
+  [/^\/settings\/sr/,                   'settings.sr'],
   // データセンター（資料センター拡張）: 資料/社員CSV/点検写真AI/乗務員シフトPDFの入口。各タブの表示は data-perm-key で個別制御
   [/^\/settings\/documents/,            'settings.documents|staff|inspection|crew-shift'],
   // 学習ノート（管理者本人の私的な学習用ノート教材。タイトルごとにページ保存しPDF出力）
@@ -90,6 +92,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
   [/^\/api\/birthday/,                  'settings.birthday'],
+  [/^\/api\/sr/,                        'settings.sr'],
   // 各ページ
   [/^\/daihon(\/|$)/, 'settings.daihon|settings.study-sessions'],
   [/^\/kancho-shift/, 'kancho-shift'],
@@ -297,6 +300,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.tutorial',         label: 'チュートリアル' },
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
     { key: 'settings.status',           label: 'システムステータス' },
+    { key: 'settings.sr',               label: 'SR（S.RIDE迎車分析）', note: '別途、専用パスワードでも保護' },
     { key: 'settings.wage-estimate',    label: '賃金試算設定' },
     { key: 'settings.driving-risk',     label: '運転リスク検証設定' },
     { label: 'シフト関連の設定', children: [
