@@ -921,7 +921,7 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード', desc: '対象者の誕生日当日、設定時刻に全ページへお祝いポップアップを表示' },
     ]},
     { heading: 'シフト関連の設定', cards: [
-      { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', desc: 'シフト区分・勤務ダイヤ・研修担当・班長指導者・月度設定・ベンテンクラブ・班長関連 の一覧', highlight: true },
+      { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', desc: 'シフト区分・勤務ダイヤ・研修担当・班長指導者・月度設定・班長関連 の一覧', highlight: true },
     ]},
     { heading: 'LINE関連', cards: [
       { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理',     desc: '新人招待コード発行・紐付け状況' },
@@ -1046,7 +1046,6 @@ app.get('/settings/shift', (c) => {
     { href: `${ADMIN}/settings/coaches`,        perm: 'settings.coaches',        title: '研修担当',     desc: 'シフト表の研修担当者（コーチ）一覧' },
     { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
     { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },
-    { href: `${ADMIN}/settings/benten`,         perm: 'settings.benten',         title: 'ベンテンクラブ シフト', desc: '会員・グループ・シフト種別・表示期間・LINE自動送信の管理' },
     { href: `${ADMIN}/settings/kancho`,         perm: 'settings.kancho settings.kancho-roster settings.kancho-wish settings.kancho-logic', title: '班長関連', desc: '班長リスト（社員番号・内勤）、希望休フォームの設定、ロジック仕様' },
   ];
   const html = settingsSubHeader('シフト関連の設定') + `
@@ -1412,7 +1411,6 @@ app.get('/settings/notifications', async (c) => {
 
   const TYPE_LABELS: Record<string, { label: string; desc: string; dest: string }> = {
     morning_report:     { label: '朝の出勤レポート',       desc: '当直・出勤担当者一覧 / 今月度平均売上', dest: 'LINE連携済みの班長・指導者' },
-    benten_shift_daily: { label: 'ベンテンシフト通知',     desc: '当日のベンテンクラブシフトをLINEグループへ自動送信（設定 → ベンテンクラブ シフト でも管理可）', dest: 'ベンテンクラブのLINEグループ' },
     kancho_attendance:  { label: '班長出勤通知【停止中】',   desc: 'LINE無料枠(月200通)対策で毎日0時の一斉送信は停止。出勤班長はLINE「その他機能」ページ→出勤班長（今日・明日）で確認する運用に移行。※ONにすると再び通数を消費します', dest: 'オプトイン済みの統括・運行管理者（個人宛）' },
   };
 
@@ -1710,11 +1708,10 @@ app.get('/settings/tutorial', (c) => {
     <a href="#inspection" data-perm-key="inspection">1-14. 点検管理 — 車両点検スケジュール</a>
     <a href="#document-center" data-perm-key="settings.documents">1-15. 資料センター — マニュアル・就業規則の保管</a>
     <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">1-16. 報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</a>
-    <a href="#benten-shift" data-perm-key="settings.benten">1-17. ベンテンクラブ シフト</a>
-    <a href="#line-usage" data-perm-key="settings.line-usage">1-18. LINE利用状況 — 操作ログの確認</a>
-    <a href="#handover" data-perm-key="handover">1-19. 引き継ぎシート — 課の申し送り事項</a>
-    <a href="#crew-portal" data-perm-key="crew-portal">1-20. 個人データ参照・乗務員シフト・売上分析・担当車表</a>
-    <a href="#todo" data-perm-key="todo">1-21. やることリスト — 課ごとの日次チェックリスト・当直共通タスク</a>
+    <a href="#line-usage" data-perm-key="settings.line-usage">1-17. LINE利用状況 — 操作ログの確認</a>
+    <a href="#handover" data-perm-key="handover">1-18. 引き継ぎシート — 課の申し送り事項</a>
+    <a href="#crew-portal" data-perm-key="crew-portal">1-19. 個人データ参照・乗務員シフト・売上分析・担当車表</a>
+    <a href="#todo" data-perm-key="todo">1-20. やることリスト — 課ごとの日次チェックリスト・当直共通タスク</a>
     <div class="tut-toc-section" style="margin-top:12px;" data-perm-key="settings.vehicle-search-guide">第2章 — 班長・指導者向け（LINE車番検索ガイド）</div>
     <a href="#veh-guide" data-perm-key="settings.vehicle-search-guide">2-1. LINE車番検索ガイド（詳細は専用ページへ）</a>
     <div class="tut-toc-section" style="margin-top:12px;">第3章 — 現場スタッフ向け（LINE利用ガイド）</div>
@@ -1971,7 +1968,6 @@ app.get('/settings/tutorial', (c) => {
       <tr><td>研修担当</td><td>シフト入力時に選択できるコーチ（研修担当者）の名前を登録</td></tr>
       <tr><td>班長・指導者</td><td>シフト表下部の指導者スケジュール欄を管理</td></tr>
       <tr><td>月度設定</td><td>各月の締め日・開始日を設定（例：17日締め 18日開始）</td></tr>
-      <tr><td>ベンテンクラブ シフト</td><td>ベンテンクラブの会員・グループ・シフト種別・LINE自動送信の管理（詳細は 1-18）</td></tr>
       <tr><td>班長関連</td><td>班長リスト（社員番号・内勤）、希望休フォームの設定</td></tr>
     </table>
 
@@ -1979,7 +1975,7 @@ app.get('/settings/tutorial', (c) => {
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>LINE管理</td><td>新人向け招待コードの発行・紐付け状況の確認</td></tr>
-      <tr><td>LINE通知設定</td><td>朝の出勤レポート・ベンテンシフト通知・班長出勤通知の時刻とON/OFFをまとめて管理</td></tr>
+      <tr><td>LINE通知設定</td><td>朝の出勤レポート・班長出勤通知の時刻とON/OFFをまとめて管理</td></tr>
     </table>
 
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍マスタ管理</p>
@@ -2084,30 +2080,16 @@ app.get('/settings/tutorial', (c) => {
     <div class="tut-note">報告を削除してもデータ上の履歴には「誰が・いつ・何を削除したか」が残ります。</div>
   </div>
 
-  <!-- 1-17 ベンテンクラブ シフト -->
-  <div class="tut-section" id="benten-shift" data-perm-key="settings.benten">
-    <h3><span class="num">17</span>ベンテンクラブ シフト</h3>
-    <p style="font-size:13px;">ベンテンクラブ会員のシフトを管理し、LINEグループへ毎日自動送信します。</p>
-    <table class="tut-table">
-      <tr><th>設定項目</th><th>内容</th></tr>
-      <tr><td>会員</td><td>会員の名前・所属グループ・表示順の管理</td></tr>
-      <tr><td>グループ / シフト種別</td><td>グループ分けと、H勤・D勤などの種別・色の管理</td></tr>
-      <tr><td>表示期間</td><td>LIFFのシフト表に表示する期間の追加・削除</td></tr>
-      <tr><td>LINE自動送信</td><td>毎日決まった時刻に「本日出勤者」をグループへ送信。時刻・ON/OFFはLINE通知設定と共通</td></tr>
-    </table>
-    <div class="tut-note">グループ連携は、Botをグループに招待して「ベンテングループ登録」と送信すると完了します。</div>
-  </div>
-
-  <!-- 1-18 LINE利用状況 -->
+  <!-- 1-17 LINE利用状況 -->
   <div class="tut-section" id="line-usage" data-perm-key="settings.line-usage">
-    <h3><span class="num">18</span>LINE利用状況 — 操作ログの確認</h3>
+    <h3><span class="num">17</span>LINE利用状況 — 操作ログの確認</h3>
     <p style="font-size:13px;">LINE連携ユーザーが「いつ・どの機能を使ったか」を確認できます。今日・7日間・30日間の利用者数と、ユーザーごとの利用回数・最終利用日時が一覧になります。</p>
     <div class="tut-note">このページはフル権限の管理者（admin）だけが見られます。</div>
   </div>
 
-  <!-- 1-19 引き継ぎシート -->
+  <!-- 1-18 引き継ぎシート -->
   <div class="tut-section" id="handover" data-perm-key="handover">
-    <h3><span class="num">19</span>引き継ぎシート — 課の申し送り事項</h3>
+    <h3><span class="num">18</span>引き継ぎシート — 課の申し送り事項</h3>
     <p style="font-size:13px;">課ごとの当日・翌日の引き継ぎ事項（事故車・車両異常・乗務希望・点検車検リコールなど）を項目単位で入力・保存します。</p>
     <table class="tut-table">
       <tr><th>機能</th><th>内容</th></tr>
@@ -2118,9 +2100,9 @@ app.get('/settings/tutorial', (c) => {
     </table>
   </div>
 
-  <!-- 1-20 個人データ参照・乗務員シフト・売上分析・担当車表 -->
+  <!-- 1-19 個人データ参照・乗務員シフト・売上分析・担当車表 -->
   <div class="tut-section" id="crew-portal" data-perm-key="crew-portal">
-    <h3><span class="num">20</span>個人データ参照・乗務員シフト・売上分析・担当車表</h3>
+    <h3><span class="num">19</span>個人データ参照・乗務員シフト・売上分析・担当車表</h3>
     <p style="font-size:13px;">社員管理の一覧の各行、またはヘッダーの「関連ページ」から、乗務員ごとの日別明細・売上分析（個人データ参照）、乗務員シフト、全社の売上分析、担当車表にアクセスできます。</p>
     <table class="tut-table">
       <tr><th>機能</th><th>内容</th></tr>
@@ -2131,9 +2113,9 @@ app.get('/settings/tutorial', (c) => {
     </table>
   </div>
 
-  <!-- 1-21 やることリスト -->
+  <!-- 1-20 やることリスト -->
   <div class="tut-section" id="todo" data-perm-key="todo">
-    <h3><span class="num">21</span>やることリスト — 課ごとの日次チェックリスト・当直共通タスク</h3>
+    <h3><span class="num">20</span>やることリスト — 課ごとの日次チェックリスト・当直共通タスク</h3>
     <p style="font-size:13px;">1〜4課それぞれの日次定型業務と、当直担当者の共通業務をチェックリストで管理します。日付を切り替えて過去・当日・翌日の状況を確認できます。</p>
     <table class="tut-table">
       <tr><th>機能</th><th>内容</th></tr>

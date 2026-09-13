@@ -1,6 +1,5 @@
 import type { Env } from './auth';
 import { getPeriodSettings, getPeriodRange, getPeriod } from './auth';
-import { sendBentenDaily } from './benten';
 import { importJmaMonthlyWeather } from './utils/weather_jma';
 
 // LINE 連携済みの班長・指導者全員にプッシュ通知
@@ -157,8 +156,6 @@ export async function runNotification(env: Env, type: string): Promise<void> {
 
   if (type === 'morning_report') {
     await sendMorningReport(env, todayStr);
-  } else if (type === 'benten_shift_daily') {
-    await sendBentenDaily(env);
   } else if (type === 'kancho_attendance') {
     await sendKanchoAttendance(env, todayStr);
   }

@@ -101,7 +101,7 @@ app.get('/kanri-kobo', async (c) => {
   const { year, month } = parseYM(c);
   const data = await loadPageData(c.env, year, month, await canEdit(c));
   const html = kanriKoboPage(data);
-  return c.html(layout('管理者公休表', html, 'kanri-kobo', kkPeriodNavHtml(year, month)));
+  return c.html(layout('課長・職員シフト', html, 'kanri-kobo', kkPeriodNavHtml(year, month)));
 });
 
 app.get('/kanri-kobo/print', async (c) => {

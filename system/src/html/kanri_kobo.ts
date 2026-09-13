@@ -303,9 +303,9 @@ export function kanriKoboPage(d: KkPageData): string {
     const md = `${parseInt(dt.slice(5, 7), 10)}/${parseInt(dt.slice(8, 10), 10)}`;
     return `<tr style="${isWe ? 'background:#fef2f2;' : ''}">
       <td style="border:1px solid #d1d5db;padding:3px 8px;font-size:12px;white-space:nowrap;">${md}（${WEEKDAY_JA[wd]}）</td>
-      <td style="border:1px solid #d1d5db;padding:2px;"><input class="kk-wr" data-d="${dt}" data-kind="resp" value="${escHtml(r.resp ?? '')}" ${d.canEdit ? '' : 'disabled'} style="width:100%;border:none;font-size:12px;padding:3px 6px;background:transparent;box-sizing:border-box;"></td>
-      <td style="border:1px solid #d1d5db;padding:2px;"><input class="kk-wr" data-d="${dt}" data-kind="akake" value="${escHtml(r.akake ?? '')}" ${d.canEdit ? '' : 'disabled'} style="width:100%;border:none;font-size:12px;padding:3px 6px;background:transparent;box-sizing:border-box;"></td>
-      <td style="border:1px solid #d1d5db;padding:3px 8px;text-align:center;"><input type="checkbox" class="kk-wr-chin" data-d="${dt}" ${r.chinshime === '1' ? 'checked' : ''} ${d.canEdit ? '' : 'disabled'}></td>
+      <td style="border:1px solid #d1d5db;padding:2px;"><input class="kk-wr" data-d="${dt}" data-kind="resp" value="${escHtml(r.resp ?? '')}" disabled style="width:100%;border:none;font-size:12px;padding:3px 6px;background:transparent;box-sizing:border-box;"></td>
+      <td style="border:1px solid #d1d5db;padding:2px;"><input class="kk-wr" data-d="${dt}" data-kind="akake" value="${escHtml(r.akake ?? '')}" disabled style="width:100%;border:none;font-size:12px;padding:3px 6px;background:transparent;box-sizing:border-box;"></td>
+      <td style="border:1px solid #d1d5db;padding:3px 8px;text-align:center;"><input type="checkbox" class="kk-wr-chin" data-d="${dt}" ${r.chinshime === '1' ? 'checked' : ''} disabled></td>
     </tr>`;
   }).join('');
 
@@ -327,7 +327,7 @@ export function kanriKoboPage(d: KkPageData): string {
   const toitsuRows = persons.map(p => {
     const cells = ymList.map(y => {
       const v = tMap[`${p}_${y.ym}`] ?? 0;
-      return `<td style="border:1px solid #d1d5db;padding:1px;"><input class="kk-toitsu" data-p="${escHtml(p)}" data-ym="${y.ym}" value="${v || ''}" ${d.canEdit ? '' : 'disabled'} inputmode="numeric" style="width:34px;border:none;text-align:center;font-size:12px;padding:3px 1px;background:transparent;"></td>`;
+      return `<td style="border:1px solid #d1d5db;padding:1px;"><input class="kk-toitsu" data-p="${escHtml(p)}" data-ym="${y.ym}" value="${v || ''}" disabled inputmode="numeric" style="width:34px;border:none;text-align:center;font-size:12px;padding:3px 1px;background:transparent;"></td>`;
     }).join('');
     let sum = 0;
     for (const y of ymList) sum += tMap[`${p}_${y.ym}`] ?? 0;
@@ -351,7 +351,15 @@ export function kanriKoboPage(d: KkPageData): string {
     </div>
   </div>
 
-  ${d.canEdit ? '' : '<div style="margin-bottom:8px;font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:6px 12px;display:inline-block;">閲覧専用（編集権限がありません）</div>'}
+  ${d.canEdit ? `
+  <div id="kk-edit-mode-bar" style="display:none;background:#fffbeb;border:2px solid #fbbf24;border-radius:8px;padding:8px 14px;margin-bottom:8px;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span style="color:#d97706;font-weight:700;font-size:13px;">編集モード中</span>
+    <span style="font-size:11px;color:#92400e;">セル・日付ヘッダー・アサヒ・メモ・土日責任者・当直回数を編集できます</span>
+    <button onclick="kkEndEdit()" style="margin-left:auto;padding:7px 16px;background:#fff;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;touch-action:manipulation;">編集モードを終了</button>
+  </div>
+  <div id="kk-edit-start-wrap" style="margin-bottom:8px;">
+    <button onclick="kkStartEdit()" id="kk-edit-start-btn" style="padding:7px 16px;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;font-size:13px;font-weight:600;color:#166534;cursor:pointer;touch-action:manipulation;">編集モードを開始</button>
+  </div>` : '<div style="margin-bottom:8px;font-size:12px;color:#6b7280;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:6px 12px;display:inline-block;">閲覧専用（編集権限がありません）</div>'}
 
   <!-- ===== 公休予定表タブ ===== -->
   <div id="kk-pane-grid">
@@ -542,6 +550,25 @@ function kkTab(name){
 function kkClose(id){ kkSel('#'+id).classList.remove('open'); }
 function kkOpen(id){ kkSel('#'+id).classList.add('open'); }
 
+// ===== 編集モード（班長シフトと同じく、開始しないとセル等を編集できない） =====
+var KK_EDIT_MODE = false;
+function kkStartEdit(){
+  KK_EDIT_MODE = true;
+  kkSel('#kk-edit-start-wrap').style.display = 'none';
+  kkSel('#kk-edit-mode-bar').style.display = 'flex';
+  document.querySelectorAll('.kk-wr, .kk-wr-chin, .kk-toitsu').forEach(function(el){ el.disabled = false; });
+}
+function kkEndEdit(){
+  KK_EDIT_MODE = false;
+  kkSel('#kk-edit-start-wrap').style.display = 'block';
+  kkSel('#kk-edit-mode-bar').style.display = 'none';
+  document.querySelectorAll('.kk-wr, .kk-wr-chin, .kk-toitsu').forEach(function(el){ el.disabled = true; });
+}
+function kkNeedEdit(){
+  if (!KK_EDIT_MODE) { showToast('編集モードを開始してください'); return true; }
+  return false;
+}
+
 async function kkPost(path, body){
   var res = await fetch(KK_API + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   var d = await res.json().catch(function(){ return {}; });
@@ -595,13 +622,13 @@ function kkRecalc(){
 var kkCur = null;
 document.addEventListener('click', function(e){
   var c = e.target.closest && e.target.closest('td.kk-cell');
-  if (c && KK_CAN_EDIT) { kkOpenCell(c); return; }
+  if (c && KK_CAN_EDIT) { if (kkNeedEdit()) return; kkOpenCell(c); return; }
   var dh = e.target.closest && e.target.closest('th.kk-daycol');
-  if (dh && KK_CAN_EDIT) { kkToggleHoliday(dh.getAttribute('data-date')); return; }
+  if (dh && KK_CAN_EDIT) { if (kkNeedEdit()) return; kkToggleHoliday(dh.getAttribute('data-date')); return; }
   var a = e.target.closest && e.target.closest('td.kk-asahi');
-  if (a && KK_CAN_EDIT) { kkOpenText('asahi', a, 'アサヒ担当', a.textContent.trim()); return; }
+  if (a && KK_CAN_EDIT) { if (kkNeedEdit()) return; kkOpenText('asahi', a, 'アサヒ担当', a.textContent.trim()); return; }
   var dn = e.target.closest && e.target.closest('td.kk-daynote');
-  if (dn && KK_CAN_EDIT) { kkOpenText('daynote', dn, '日別メモ', (dn.innerHTML||'').replace(/<br\\s*\\/?>/gi,'\\n').replace(/<[^>]+>/g,'')); return; }
+  if (dn && KK_CAN_EDIT) { if (kkNeedEdit()) return; kkOpenText('daynote', dn, '日別メモ', (dn.innerHTML||'').replace(/<br\\s*\\/?>/gi,'\\n').replace(/<[^>]+>/g,'')); return; }
 });
 
 function kkOpenCell(td){
@@ -690,12 +717,14 @@ async function kkSaveToitsu(p, ym, cnt){
   catch (e) { alert('保存に失敗しました: ' + e.message); }
 }
 async function kkAddToitsu(){
+  if (kkNeedEdit()) return;
   var nm = kkSel('#kk-toitsu-newname').value.trim();
   if (!nm) return;
   try { await kkPost('/toitsu', { person: nm, ym: 'prev', cnt: 0 }); location.reload(); }
   catch (e) { alert('追加に失敗しました: ' + e.message); }
 }
 async function kkDelToitsu(p){
+  if (kkNeedEdit()) return;
   if (!confirm(p + ' を削除しますか？')) return;
   try { await kkPost('/toitsu/delete', { person: p }); location.reload(); }
   catch (e) { alert('削除に失敗しました: ' + e.message); }
@@ -1030,7 +1059,7 @@ async function kkRunImport(){
 // ===== 印刷 =====
 export function kanriKoboPrintPage(d: KkPageData): string {
   const { start, end } = kkPeriodRange(d.year, d.month);
-  return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>管理者公休予定表 ${d.year}年${d.month}月度</title>
+  return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>課長・職員シフト ${d.year}年${d.month}月度</title>
 <style>
   @page { size: A4 landscape; margin: 8mm; }
   * { box-sizing: border-box; }
@@ -1044,7 +1073,7 @@ export function kanriKoboPrintPage(d: KkPageData): string {
   <button onclick="window.print()" style="padding:8px 20px;font-size:14px;cursor:pointer;">印刷</button>
 </div>
 <div id="kk-print-scale">
-  <h1>管理者公休予定表　${d.year}年${d.month}月度（${start}〜${end}）</h1>
+  <h1>課長・職員シフト　${d.year}年${d.month}月度（${start}〜${end}）</h1>
   ${gridTable(d, true)}
   ${d.memoNote ? `<div style="margin-top:8px;font-size:11px;white-space:pre-wrap;border:1px solid #999;padding:6px;">特記事項：${escHtml(d.memoNote)}</div>` : ''}
 </div>

@@ -42,10 +42,6 @@ LIFF_ID_GENERAL_REPORT = "2010598812-HftZFUKb"
 LIFF_ID_REPORT2 = "2010598812-TkOArc17"
 # 電話検索 LIFF（電話番号で忘れ物/事故/一般報告/CC名簿を横断検索。LINE Developers で LIFF作成後に設定。エンドポイントURL: https://bentenclub.com/liff/case-search）
 LIFF_ID_CASE_SEARCH = "2010598812-fcbO9x7e"
-# ベンテンクラブ シフト（LINE Developers で LIFF作成後に設定）
-LIFF_ID_BENTEN_SHIFT = "2010598812-yt0r1ZAW"
-# ベンテン会員・シフトマスター用リッチメニュー（未作成なら空のまま=メニューなし）
-RICHMENU_ID_BENTEN = ""
 # 乗務社員用リッチメニュー（未作成なら空のまま=メニューなし）
 RICHMENU_ID_CREW_MEMBER = "richmenu-1d8eaed8df2c9c29ca0f712ef01cf82d"
 # 売上サマリー LIFF（LINE Developers で LIFF作成後に設定）
@@ -56,7 +52,7 @@ LIFF_ID_KANCHO_SHIFT = ""
 RICHMENU_ID_UNKNOWN = "richmenu-ac5365723768242e0e61331f7e63f121"
 # LINE連携登録 LIFF（氏名入力+QR読み取りで新人・運行管理者などを登録。エンドポイントURL: https://bentenclub.com/liff/register。LINE Developers で LIFF作成後に設定）
 LIFF_ID_REGISTER = "2010598812-B8nxU525"
-# シフト表PDF用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）
+# PDF出力用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）
 # R2を使う場合は下の [[r2_buckets]] を有効化してフォントをアップロードする（R2が優先）
 BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/master/fonts/NotoSansCJKjp-Regular.ttf"
 # シークレット値は wrangler secret put で登録すること（このファイルには記載しない）
@@ -67,11 +63,9 @@ BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/
 # npx wrangler secret put LINE_REG_PWD_VEHICLE       ← 車番管理者 登録パスワード
 # npx wrangler secret put LINE_REG_PWD_OPERATIONS    ← 運行管理者 登録パスワード
 # npx wrangler secret put LINE_REG_PWD_GENERAL       ← 統括管理者 登録パスワード
-# npx wrangler secret put LINE_REG_PWD_BENTEN        ← ベンテンクラブ会員 登録パスワード
-# npx wrangler secret put LINE_REG_PWD_BENTEN_MASTER ← ベンテンシフトマスター 登録パスワード
 # npx wrangler secret put LINE_REG_PWD_CREW_MEMBER   ← 乗務社員 登録パスワード
 
-# ベンテンPDFフォント用R2（使う場合はコメントを外し、バケット作成後にフォントを置く）
+# PDF出力フォント用R2（使う場合はコメントを外し、バケット作成後にフォントを置く）
 # npx wrangler r2 bucket create benten-fonts
 # npx wrangler r2 object put benten-fonts/NotoSansJP-Regular.ttf --file=NotoSansJP-Regular.ttf --remote
 # [[r2_buckets]]

@@ -6,7 +6,6 @@ import { getPeriod, getPeriodRange } from './auth';
 import type { Env } from './auth';
 import { getRichMenuForRole } from './routes/admin_liff';
 import { logLineActivity } from './utils/activity_log';
-import { setBentenConfig, linkBentenMember, BENTEN_MASTER_ROLES } from './benten';
 import { getTantoshaShiftMap, tantoshaShiftLabel, isItabashi } from './utils/tantosha_lookup';
 import type { TantoshaShift } from './utils/tantosha_lookup';
 
@@ -196,9 +195,8 @@ async function linkEmployeeByName(db: D1Database, lineUid: string, name: string)
 // ===================================================
 
 const REG_COMMANDS = [
-  '統括管理者登録', '運行管理者登録', '車番連携', 'ベンテン会員登録', 'ベンテンクラブ会員登録',
-  'シフトマスター登録', 'ベンテンシフトマスター登録', '乗務社員登録',
-  'LINE連携', '友達追加', '連携', '新人', '乗務社員', '弁天倶楽部会員', '車番管理者',
+  '統括管理者登録', '運行管理者登録', '車番連携', '乗務社員登録',
+  'LINE連携', '友達追加', '連携', '新人', '乗務社員', '車番管理者',
 ];
 
 function classifyBotFeature(inputText: string, state: string): string {
@@ -214,7 +212,6 @@ function classifyBotFeature(inputText: string, state: string): string {
   if (inputText === '一般報告' || inputText === '一般') return '一般報告';
   if (inputText === '報告') return '報告メニュー';
   if (inputText === 'シフト確認') return 'シフト確認';
-  if (['シフト', 'シフト表', 'ベンテンシフト', 'ベンテン'].includes(inputText)) return 'ベンテンシフト';
   if (inputText === '社員照会＋' || inputText === '社員照会プラス') return '社員照会';
   if (REG_COMMANDS.includes(inputText)) return '登録・連携';
   if (inputText === 'れんけいかいじょ') return '連携解除';
@@ -283,22 +280,9 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   if (event.type !== 'message' && event.type !== 'postback') return;
 
   // ===== グループ内メッセージ =====
-  // ベンテンクラブのLINEグループ登録コマンドのみ反応し、それ以外は無視
+  // グループへの投稿には反応しない（1:1トークのみ対応）
   const source = event.source as Record<string, string>;
-  if (source?.type === 'group') {
-    if (inputText === 'ベンテングループ登録') {
-      const sender = await env.DB.prepare(
-        'SELECT role FROM line_liff_users WHERE line_uid = ?'
-      ).bind(lineUid).first<{ role: string }>();
-      if (sender && BENTEN_MASTER_ROLES.includes(sender.role)) {
-        await setBentenConfig(env.DB, 'line_group_id', source.groupId);
-        await reply(replyToken, at, [text('✅ このグループをベンテンクラブの送信先に登録しました。\n毎日のシフト自動送信はこのグループに届きます。')]);
-      } else {
-        await reply(replyToken, at, [text('この操作はシフトマスターまたは統括管理者のみ実行できます。')]);
-      }
-    }
-    return;
-  }
+  if (source?.type === 'group') return;
 
   // ===== 定型ブロックの自動返信抑止 =====
   // 報告フォーム(LIFF)の liff.sendMessages で本人がトークに流した報告まとめや、
@@ -353,7 +337,6 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
     await env.DB.prepare('DELETE FROM line_liff_users WHERE line_uid = ?').bind(lineUid).run();
     await env.DB.prepare('DELETE FROM line_users WHERE line_uid = ?').bind(lineUid).run();
     await env.DB.prepare('DELETE FROM line_conv_states WHERE line_uid = ?').bind(lineUid).run();
-    await env.DB.prepare('UPDATE benten_members SET line_uid = NULL WHERE line_uid = ?').bind(lineUid).run();
     await removeRichMenu(lineUid, at);
     await reply(replyToken, at, [text('LINE連携を解除しました。')]);
     return;
@@ -363,7 +346,7 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
   const role = liffUser.role;
 
   // ===== 売上記録・ODO記録（対象ロール共通）=====
-  const SALES_ODO_ROLES = ['crew_member', 'newcomer', 'benten_member', 'benten_shift_master', 'general_manager'];
+  const SALES_ODO_ROLES = ['crew_member', 'newcomer', 'general_manager'];
   if (SALES_ODO_ROLES.includes(role)) {
     const handled = await handleSalesOdoFlow(env, lineUid, replyToken, at, inputText, state, data, liffUser);
     if (handled) return;
@@ -381,10 +364,6 @@ export async function handleLineEvent(env: Env, event: Record<string, unknown>):
     case 'crew_member':
       await handleNewcomer(env, lineUid, replyToken, at, inputText, state, data, liffUser);
       break;
-    case 'benten_member':
-    case 'benten_shift_master':
-      await handleBentenUser(env, replyToken, at, inputText);
-      break;
     default: // unknown（友達追加直後を含む・未登録と同じ「LINE連携」フローに合流させる）
       await handleUnregisteredUser(env, lineUid, replyToken, at, inputText, state, data);
       break;
@@ -401,7 +380,6 @@ function menuRolePassword(role: string, env: Env): string {
   switch (role) {
     case 'newcomer':
     case 'crew_member':     return env.LINE_REG_PWD_CREW_MEMBER ?? '';
-    case 'benten_member':   return env.LINE_REG_PWD_BENTEN ?? '';
     case 'vehicle_manager': return env.LINE_REG_PWD_VEHICLE ?? '';
     default:                return '';
   }
@@ -409,7 +387,6 @@ function menuRolePassword(role: string, env: Env): string {
 const MENU_ROLE_LABELS: Record<string, string> = {
   newcomer: '新人',
   crew_member: '乗務社員',
-  benten_member: '弁天倶楽部会員',
   vehicle_manager: '車番管理者',
 };
 
@@ -429,8 +406,6 @@ async function handleRegistrationFlow(
     reg_general_name:       'reg_general_password',
     reg_operations_name:    'reg_operations_password',
     reg_vehicle_name:       'reg_vehicle_password',
-    reg_benten_name:        'reg_benten_password',
-    reg_benten_master_name: 'reg_benten_master_password',
     reg_crew_member_name:   'reg_crew_member_password',
   };
   if (nameStates[state]) {
@@ -479,40 +454,6 @@ async function handleRegistrationFlow(
     return true;
   }
 
-  if (state === 'reg_benten_password') {
-    const pwd = env.LINE_REG_PWD_BENTEN ?? '';
-    if (!pwd || inputText !== pwd) {
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text('パスワードが正しくありません。最初からやり直してください。')]);
-    } else {
-      await registerLiffUser(env.DB, lineUid, String(data.name), 'benten_member', null, env);
-      await linkBentenMember(env.DB, lineUid, String(data.name));
-      await linkEmployeeByName(env.DB, lineUid, String(data.name));
-      await setState(env.DB, lineUid, 'idle');
-      const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
-      const url = liffId ? `\n\n📱 シフト入力・確認はこちら:\nhttps://liff.line.me/${liffId}` : '';
-      await reply(replyToken, at, [text(`あなたは ベンテンクラブ会員 で登録されました。\n\n「シフト」と送信するとシフト入力・シフト表を開けます。${url}`)]);
-    }
-    return true;
-  }
-
-  if (state === 'reg_benten_master_password') {
-    const pwd = env.LINE_REG_PWD_BENTEN_MASTER ?? '';
-    if (!pwd || inputText !== pwd) {
-      await setState(env.DB, lineUid, 'idle');
-      await reply(replyToken, at, [text('パスワードが正しくありません。最初からやり直してください。')]);
-    } else {
-      await registerLiffUser(env.DB, lineUid, String(data.name), 'benten_shift_master', null, env);
-      await linkBentenMember(env.DB, lineUid, String(data.name));
-      await linkEmployeeByName(env.DB, lineUid, String(data.name));
-      await setState(env.DB, lineUid, 'idle');
-      const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
-      const url = liffId ? `\n\n📱 シフト入力・確認はこちら:\nhttps://liff.line.me/${liffId}` : '';
-      await reply(replyToken, at, [text(`あなたは ベンテンクラブシフトマスター で登録されました。\n\n全会員のシフトを編集できます。\n「シフト」と送信するとシフト入力・シフト表を開けます。${url}`)]);
-    }
-    return true;
-  }
-
   if (state === 'reg_crew_member_password') {
     const pwd = env.LINE_REG_PWD_CREW_MEMBER ?? '';
     if (!pwd || inputText !== pwd) {
@@ -527,7 +468,7 @@ async function handleRegistrationFlow(
     return true;
   }
 
-  // ===== ステータス選択メニュー経由の登録フロー（新人/乗務社員/弁天倶楽部会員/車番管理者）=====
+  // ===== ステータス選択メニュー経由の登録フロー（新人/乗務社員/車番管理者）=====
   if (state === 'reg_menu_password') {
     const role = String(data.role);
     const pwd = menuRolePassword(role, env);
@@ -574,14 +515,6 @@ async function handleRegistrationFlow(
       } else {
         await reply(replyToken, at, [text(`あなたは 乗務社員 で登録されました。\n\n「売上記録」「ODO」のボタンからご利用いただけます。`)]);
       }
-    } else if (role === 'benten_member') {
-      await registerLiffUser(env.DB, lineUid, name, 'benten_member', null, env);
-      await linkBentenMember(env.DB, lineUid, name);
-      await linkEmployeeByName(env.DB, lineUid, name);
-      await setState(env.DB, lineUid, 'idle');
-      const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
-      const url = liffId ? `\n\n📱 シフト入力・確認はこちら:\nhttps://liff.line.me/${liffId}` : '';
-      await reply(replyToken, at, [text(`あなたは ベンテンクラブ会員 で登録されました。\n\n「シフト」と送信するとシフト入力・シフト表を開けます。${url}`)]);
     } else if (role === 'vehicle_manager') {
       await registerLiffUser(env.DB, lineUid, name, 'vehicle_manager', null, env);
       await setState(env.DB, lineUid, 'idle');
@@ -620,16 +553,6 @@ async function handleUnregisteredUser(
     await reply(replyToken, at, [text('車番管理者として登録します。\nあなたの名前を漢字フルネームで入力してください。')]);
     return;
   }
-  if (inputText === 'ベンテン会員登録' || inputText === 'ベンテンクラブ会員登録') {
-    await setState(env.DB, lineUid, 'reg_benten_name');
-    await reply(replyToken, at, [text('ベンテンクラブ会員として登録します。\nあなたの名前を漢字フルネームで入力してください。\n（シフト表の名前と同じ表記にしてください）')]);
-    return;
-  }
-  if (inputText === 'シフトマスター登録' || inputText === 'ベンテンシフトマスター登録') {
-    await setState(env.DB, lineUid, 'reg_benten_master_name');
-    await reply(replyToken, at, [text('ベンテンクラブシフトマスターとして登録します。\nあなたの名前を漢字フルネームで入力してください。')]);
-    return;
-  }
   if (inputText === '乗務社員登録') {
     await setState(env.DB, lineUid, 'reg_crew_member_name');
     await reply(replyToken, at, [text('乗務社員として登録します。\nあなたの名前を漢字フルネームで入力してください。\n（社員名簿の表記と同じにしてください）')]);
@@ -644,14 +567,13 @@ async function handleUnregisteredUser(
       [
         { label: '新人', text: '新人' },
         { label: '乗務社員', text: '乗務社員' },
-        { label: '弁天倶楽部会員', text: '弁天倶楽部会員' },
         { label: '車番管理者', text: '車番管理者' },
         { label: 'キャンセル', text: 'キャンセル' },
       ]
     )]);
     return;
   }
-  if (['新人', '乗務社員', '弁天倶楽部会員', '車番管理者'].includes(inputText)) {
+  if (['新人', '乗務社員', '車番管理者'].includes(inputText)) {
     const role = Object.keys(MENU_ROLE_LABELS).find(r => MENU_ROLE_LABELS[r] === inputText)!;
     await setState(env.DB, lineUid, 'reg_menu_password', { role });
     await reply(replyToken, at, [text(`${inputText}として登録します。\nパスワードを入力してください。`)]);
@@ -735,17 +657,6 @@ async function handleOperationsUser(
     return;
   }
 
-  // ベンテンクラブ シフト → LIFF URLを送信（統括管理者のみ。運行管理者はアクセス不可）
-  if ((inputText === 'ベンテンシフト' || inputText === 'ベンテン') && liffUser.role === 'general_manager') {
-    const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
-    if (liffId) {
-      await reply(replyToken, at, [text(`🗓 ベンテンクラブ シフト\n\n下をタップして開いてください:\nhttps://liff.line.me/${liffId}`)]);
-    } else {
-      await reply(replyToken, at, [text('🗓 ベンテンクラブ シフト\n\nただいま準備中です。もうしばらくお待ちください！')]);
-    }
-    return;
-  }
-
   // 社員照会＋（課選択→絞り込み検索）→ LIFF URLを送信
   if (inputText === '社員照会＋' || inputText === '社員照会プラス') {
     const liffId = env.LIFF_ID_STAFF_LOOKUP_PLUS ?? '';
@@ -791,7 +702,7 @@ async function handleVehicleManager(
 }
 
 // ===================================================
-// 売上記録・ODO記録（対象ロール共通: crew_member / newcomer / benten_member / benten_shift_master / general_manager）
+// 売上記録・ODO記録（対象ロール共通: crew_member / newcomer / general_manager）
 // ===================================================
 
 // 売上記録（LIFFフォーム誘導）・ODO記録（会話フロー）を一括処理する。
@@ -955,27 +866,5 @@ async function handleNewcomer(
 
   await setState(env.DB, lineUid, 'idle');
   await reply(replyToken, at, [text('リッチメニューからご利用ください。')]);
-}
-
-// ===================================================
-// ベンテンクラブ会員・シフトマスター
-// ===================================================
-
-async function handleBentenUser(
-  env: Env, replyToken: string, at: string, inputText: string,
-): Promise<void> {
-  if (inputText === 'シフト' || inputText === 'シフト表' || inputText === 'ベンテンシフト') {
-    const liffId = env.LIFF_ID_BENTEN_SHIFT ?? '';
-    if (liffId) {
-      await reply(replyToken, at, [text(`🗓 ベンテンクラブ シフト\n\n下をタップして開いてください:\nhttps://liff.line.me/${liffId}`)]);
-    } else {
-      await reply(replyToken, at, [text('🗓 ベンテンクラブ シフト\n\nただいま準備中です。もうしばらくお待ちください！')]);
-    }
-    return;
-  }
-  await reply(replyToken, at, [textWithQuickReply(
-    '「シフト」と送信するとシフト入力・シフト表を開けます。',
-    [{ label: 'シフト', text: 'シフト' }]
-  )]);
 }
 

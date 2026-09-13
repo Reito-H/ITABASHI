@@ -76,6 +76,14 @@ function renderBody(body: string): string {
   return html;
 }
 
+// 長い見出しは1行に収まる目安の文字数を超えたぶんだけ縮小（表紙・中扉などの巨大文字向け）
+function titleFitStyle(text: unknown, baseCqw: number, oneLineChars: number): string {
+  const len = Array.from(String(text ?? '')).length;
+  if (len <= oneLineChars) return '';
+  const scale = Math.max(0.55, oneLineChars / len);
+  return ` style="font-size:${(baseCqw * scale).toFixed(2)}cqw"`;
+}
+
 // ---------- 1スライド ----------
 export function renderSlide(s: DaihonSlide, index: number, total: number): string {
   const ac = `ac-${normAccent(s.accent)}`;
@@ -84,9 +92,9 @@ export function renderSlide(s: DaihonSlide, index: number, total: number): strin
 
   if (layout === 'cover') {
     return `<section class="dh-slide dh-cover ${ac}" data-i="${index}">
-      <div class="dh-cover-inner">
+      <div class="dh-cover-inner dh-fit">
         <span class="dh-kicker">${inline(s.subtitle)}</span>
-        <h1 class="dh-cover-title">${inline(s.title)}</h1>
+        <h1 class="dh-cover-title"${titleFitStyle(s.title, 8.4, 11)}>${inline(s.title)}</h1>
         ${s.body ? `<div class="dh-cover-sub">${renderBody(s.body)}</div>` : ''}
       </div>
       ${pageno}
@@ -94,9 +102,9 @@ export function renderSlide(s: DaihonSlide, index: number, total: number): strin
   }
   if (layout === 'section') {
     return `<section class="dh-slide dh-section ${ac}" data-i="${index}">
-      <div class="dh-section-inner">
+      <div class="dh-section-inner dh-fit">
         <span class="dh-section-no">${String(index).padStart(2, '0')}</span>
-        <h2 class="dh-section-title">${inline(s.title)}</h2>
+        <h2 class="dh-section-title"${titleFitStyle(s.title, 9, 10)}>${inline(s.title)}</h2>
         ${s.subtitle ? `<p class="dh-section-sub">${inline(s.subtitle)}</p>` : ''}
       </div>
       ${pageno}
@@ -104,8 +112,8 @@ export function renderSlide(s: DaihonSlide, index: number, total: number): strin
   }
   if (layout === 'closing') {
     return `<section class="dh-slide dh-closing ${ac}" data-i="${index}">
-      <div class="dh-closing-inner">
-        <h2 class="dh-closing-title">${inline(s.title)}</h2>
+      <div class="dh-closing-inner dh-fit">
+        <h2 class="dh-closing-title"${titleFitStyle(s.title, 8, 10)}>${inline(s.title)}</h2>
         ${s.subtitle ? `<p class="dh-closing-sub">${inline(s.subtitle)}</p>` : ''}
         ${s.body ? `<div class="dh-closing-body">${renderBody(s.body)}</div>` : ''}
       </div>
@@ -114,11 +122,13 @@ export function renderSlide(s: DaihonSlide, index: number, total: number): strin
   }
   // content
   return `<section class="dh-slide dh-content ${ac}" data-i="${index}">
-    <div class="dh-head">
-      <h2 class="dh-title">${inline(s.title)}</h2>
-      ${s.subtitle ? `<p class="dh-sub">${inline(s.subtitle)}</p>` : ''}
+    <div class="dh-content-inner dh-fit">
+      <div class="dh-head">
+        <h2 class="dh-title"${titleFitStyle(s.title, 5.2, 19)}>${inline(s.title)}</h2>
+        ${s.subtitle ? `<p class="dh-sub">${inline(s.subtitle)}</p>` : ''}
+      </div>
+      <div class="dh-body">${renderBody(s.body)}</div>
     </div>
-    <div class="dh-body">${renderBody(s.body)}</div>
     ${pageno}
   </section>`;
 }
@@ -140,15 +150,19 @@ export const DAIHON_CSS = `
   html,body{height:100%;}
   body{background:#0b0c0d;color:var(--ink);font-family:var(--jp);-webkit-font-smoothing:antialiased;}
   .dh-stage-wrap{position:fixed;inset:0;display:grid;place-items:center;background:#0b0c0d;overflow:hidden;}
+  /* 16:9固定：vw/vhのminで先に確定させ、対応ブラウザではaspect-ratio/container queryで上書き（未対応環境でも比率が崩れない） */
   .dh-stage{position:relative;width:min(100vw,177.78vh);height:min(100vh,56.25vw);aspect-ratio:16/9;background:var(--paper);overflow:hidden;container-type:size;box-shadow:0 30px 80px rgba(0,0,0,.5);}
   .dh-slide{position:absolute;inset:0;padding:7cqw 8cqw;opacity:0;visibility:hidden;transform:translateY(1.2cqh);transition:opacity .35s ease,transform .35s ease;display:flex;flex-direction:column;}
   .dh-slide.is-active{opacity:1;visibility:visible;transform:none;}
   .dh-pageno{position:absolute;right:3.4cqw;bottom:2.6cqw;font-size:1.7cqw;color:#9ca3af;letter-spacing:.05em;}
   .dh-slide::before{content:"";position:absolute;left:0;top:0;bottom:0;width:.9cqw;background:var(--ac);}
+  /* 内容が枠に収まりきらない時だけ、ページ番号はそのままに中身だけ縮小する */
+  .dh-fit{--dhfit:1;transform:scale(var(--dhfit));transition:transform .2s ease;}
 
   /* content */
-  .dh-head{border-bottom:.25cqw solid var(--hair);padding-bottom:2.4cqh;margin-bottom:3cqh;}
-  .dh-title{font-size:5.2cqw;font-weight:800;line-height:1.25;color:var(--ink);letter-spacing:.01em;}
+  .dh-content-inner{flex:1;min-height:0;display:flex;flex-direction:column;transform-origin:top left;}
+  .dh-head{border-bottom:.25cqw solid var(--hair);padding-bottom:2.4cqh;margin-bottom:3cqh;flex:none;}
+  .dh-title{font-size:5.2cqw;font-weight:800;line-height:1.25;color:var(--ink);letter-spacing:.01em;word-break:keep-all;overflow-wrap:anywhere;}
   .dh-sub{margin-top:1.2cqh;font-size:2.5cqw;font-weight:700;color:var(--ac);}
   .dh-body{flex:1;display:flex;flex-direction:column;justify-content:center;gap:1cqh;}
   .dh-list{list-style:none;display:flex;flex-direction:column;gap:2cqh;}
@@ -161,9 +175,9 @@ export const DAIHON_CSS = `
   /* cover */
   .dh-cover{align-items:flex-start;justify-content:center;}
   .dh-cover::after{content:"";position:absolute;right:-8cqw;top:-8cqw;width:34cqw;height:34cqw;border-radius:50%;background:var(--ac-soft);}
-  .dh-cover-inner{position:relative;z-index:1;}
+  .dh-cover-inner{position:relative;z-index:1;transform-origin:top left;}
   .dh-kicker{display:inline-block;font-size:2.6cqw;font-weight:800;letter-spacing:.14em;color:var(--ac);background:var(--ac-soft);padding:1cqh 2cqw;border-radius:999px;}
-  .dh-cover-title{margin-top:3cqh;font-size:8.4cqw;font-weight:900;line-height:1.18;letter-spacing:.01em;color:var(--ink);}
+  .dh-cover-title{margin-top:3cqh;font-size:8.4cqw;font-weight:900;line-height:1.18;letter-spacing:.01em;color:var(--ink);word-break:keep-all;overflow-wrap:anywhere;}
   .dh-cover-sub{margin-top:4cqh;font-size:3cqw;font-weight:700;color:var(--muted);}
   .dh-cover-sub .dh-list{gap:1cqh;}
   .dh-cover-sub .dh-list li{padding-left:0;font-size:3cqw;color:var(--muted);}
@@ -172,16 +186,16 @@ export const DAIHON_CSS = `
   /* section */
   .dh-section{align-items:flex-start;justify-content:center;background:var(--ac);}
   .dh-section::before{display:none;}
-  .dh-section-inner{color:#fff;}
+  .dh-section-inner{color:#fff;transform-origin:top left;}
   .dh-section .dh-pageno{color:rgba(255,255,255,.7);}
   .dh-section-no{font-size:6cqw;font-weight:900;opacity:.55;letter-spacing:.06em;}
-  .dh-section-title{margin-top:1cqh;font-size:9cqw;font-weight:900;line-height:1.15;}
+  .dh-section-title{margin-top:1cqh;font-size:9cqw;font-weight:900;line-height:1.15;word-break:keep-all;overflow-wrap:anywhere;}
   .dh-section-sub{margin-top:3cqh;font-size:3.2cqw;font-weight:700;opacity:.92;}
 
   /* closing */
   .dh-closing{align-items:center;justify-content:center;text-align:center;}
-  .dh-closing-inner{max-width:78cqw;}
-  .dh-closing-title{font-size:8cqw;font-weight:900;line-height:1.2;color:var(--ink);}
+  .dh-closing-inner{max-width:78cqw;transform-origin:top center;}
+  .dh-closing-title{font-size:8cqw;font-weight:900;line-height:1.2;color:var(--ink);word-break:keep-all;overflow-wrap:anywhere;}
   .dh-closing-sub{margin-top:3cqh;font-size:3.2cqw;font-weight:700;color:var(--ac);}
   .dh-closing-body{margin-top:3cqh;font-size:2.7cqw;color:var(--muted);}
   .dh-closing-body .dh-list li{padding-left:0;}
@@ -235,10 +249,33 @@ export const DAIHON_PRESENT_JS = `
     noteText.textContent = n.text || '（このスライドの台本は未記入です）';
     if(noteHd) noteHd.textContent = '台本  ' + (idx+1) + ' / ' + total + (n.title ? '　― ' + n.title : '');
   }
+  // スライドの内容が枠(16:9)からはみ出す場合、ページ番号の位置は保ったまま中身だけ縮小して必ず収まるようにする
+  // 注意：transformを掛けた要素の中のはみ出しは祖先のscrollHeightに伝わらないため、
+  //       中身側(.dh-fit)のscrollHeightと、枠側(.dh-slide)のclientHeightを直接比較する
+  function fitSlide(el){
+    if(!el) return;
+    var fit = el.querySelector('.dh-fit');
+    if(!fit) return;
+    fit.style.setProperty('--dhfit','1');
+    var cs = getComputedStyle(el);
+    var ch = el.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+    var cw = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    var sh = fit.scrollHeight, sw = fit.scrollWidth;
+    var scale = 1;
+    if(sh > ch && ch > 0) scale = Math.min(scale, ch/sh);
+    if(sw > cw && cw > 0) scale = Math.min(scale, cw/sw);
+    if(scale < 1){
+      scale = Math.max(0.55, scale * 0.97);
+      fit.style.setProperty('--dhfit', scale.toFixed(3));
+    }
+  }
   function render(){
     slides.forEach(function(s,n){ s.classList.toggle('is-active', n===idx); });
     renderNote();
+    var active = slides[idx];
+    if(active){ requestAnimationFrame(function(){ fitSlide(active); }); }
   }
+  window.addEventListener('resize', function(){ fitSlide(slides[idx]); });
   function go(n){ idx = (n % total + total) % total; render(); }
   function setNotes(on){
     notesOn = on;

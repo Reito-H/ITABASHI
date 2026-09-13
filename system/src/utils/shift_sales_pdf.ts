@@ -2,7 +2,7 @@
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import type { Env } from '../auth';
-import { loadBentenFont } from '../benten';
+import { loadBentenFont } from '../liff_common';
 
 export type ShiftSalesRow = { date: string; amount: number; dutyCode: string | null };
 

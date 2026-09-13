@@ -22,8 +22,6 @@ export const ROLE_LABELS: Record<string, string> = {
   operations_manager:  '運行管理者',
   vehicle_manager:     '車番管理者',
   newcomer:            '新人',
-  benten_shift_master: 'ベンテンシフトマスター',
-  benten_member:       'ベンテンクラブ会員',
   crew_member:         '乗務社員',
   unknown:             '権限不明者',
 };
@@ -33,8 +31,6 @@ export const ROLE_COLORS: Record<string, string> = {
   operations_manager:  '#065f46',
   vehicle_manager:     '#7c3aed',
   newcomer:            '#1d4ed8',
-  benten_shift_master: '#b45309',
-  benten_member:       '#0891b2',
   crew_member:         '#d97706',
   unknown:             '#9ca3af',
 };
@@ -789,9 +785,7 @@ app.get('/settings/liff', async (c) => {
         WHEN 'operations_manager' THEN 2
         WHEN 'vehicle_manager' THEN 3
         WHEN 'newcomer' THEN 4
-        WHEN 'benten_shift_master' THEN 5
-        WHEN 'benten_member' THEN 6
-        ELSE 7
+        ELSE 5
       END, u.created_at DESC
   `).all<{
     id: number; line_uid: string; name: string; role: string;
@@ -2295,7 +2289,7 @@ app.get('/settings/violation-types', async (c) => {
 app.put('/api/liff-users/:id/role', async (c) => {
   const id = parseInt(c.req.param('id'));
   const { role } = await c.req.json<{ role: string }>();
-  const validRoles = ['general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'benten_shift_master', 'benten_member', 'crew_member', 'unknown'];
+  const validRoles = ['general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'crew_member', 'unknown'];
   if (!validRoles.includes(role)) return c.json({ error: 'invalid role' }, 400);
 
   await c.env.DB.prepare(
@@ -2848,8 +2842,6 @@ export function getRichMenuForRole(role: string, env: Env): string {
     case 'newcomer':            return env.RICHMENU_ID_PATTERN1 ?? '';
     case 'operations_manager':  return env.RICHMENU_ID_PATTERN2 ?? '';
     case 'general_manager':     return env.RICHMENU_ID_PATTERN3 ?? '';
-    case 'benten_member':
-    case 'benten_shift_master': return env.RICHMENU_ID_BENTEN ?? '';
     case 'crew_member':         return env.RICHMENU_ID_CREW_MEMBER ?? '';
     case 'unknown':             return env.RICHMENU_ID_UNKNOWN ?? '';
     default:                    return '';

@@ -3,7 +3,7 @@
 
 import { Hono } from 'hono';
 import type { Env } from '../auth';
-import { bentenUidFromRequest } from '../benten';
+import { bentenUidFromRequest } from '../liff_common';
 import { registerLiffUser } from '../line_bot';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -13,8 +13,6 @@ const ROLE_LABELS: Record<string, string> = {
   operations_manager: '運行管理者',
   vehicle_manager: '車番管理者',
   newcomer: '新人',
-  benten_shift_master: 'ベンテンシフトマスター',
-  benten_member: 'ベンテンクラブ会員',
   crew_member: '乗務社員',
 };
 

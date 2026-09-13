@@ -36,12 +36,10 @@ import liffRegisterRoutes from './routes/liff_register';
 import { handleLineEvent } from './line_bot';
 import { handleCron } from './cron';
 import liffRoutes from './routes/liff';
-import liffBentenRoutes from './routes/liff_benten';
 import liffSalesRoutes from './routes/liff_sales';
 import adminLiffRoutes from './routes/admin_liff';
 import adminLineUsageRoutes from './routes/admin_line_usage';
 import adminPresentationRoutes from './routes/admin_presentation';
-import adminBentenRoutes from './routes/admin_benten';
 import adminInspectionRoutes from './routes/admin_inspection';
 import adminVehicleDeadlinesRoutes from './routes/admin_vehicle_deadlines';
 import inspectionApi from './routes/api/inspection';
@@ -364,7 +362,6 @@ app.route(`/${SECRET}/admin`, adminCrewPortalRoutes);
 app.route(`/${SECRET}/admin`, adminLiffRoutes);
 app.route(`/${SECRET}/admin`, adminLineUsageRoutes);
 app.route(`/${SECRET}/admin`, adminPresentationRoutes);
-app.route(`/${SECRET}/admin`, adminBentenRoutes);
 app.route(`/${SECRET}/admin`, adminInspectionRoutes);
 app.route(`/${SECRET}/admin`, adminVehicleDeadlinesRoutes);
 app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
@@ -516,7 +513,6 @@ app.post('/api/line/webhook', async (c) => {
 
 // LIFF ページ（認証不要・公開）
 app.route('', liffRoutes);
-app.route('', liffBentenRoutes);
 app.route('', liffSalesRoutes);
 app.route('', liffRegisterRoutes);
 app.route('', liffKanchoRoutes);

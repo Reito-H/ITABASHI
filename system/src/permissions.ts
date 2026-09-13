@@ -24,7 +24,7 @@
 //              settings.lost-items / settings.accidents / settings.violations / settings.general-reports /
 //              settings.handover-memos / settings.violation-types /
 //              settings.schedule-types / settings.dia / settings.coaches / settings.instructors /
-//              settings.periods / settings.benten /
+//              settings.periods /
 //              settings.kancho / settings.kancho-roster / settings.kancho-wish / settings.kancho-logic
 
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
@@ -41,7 +41,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/violations/,           'settings.violations'],
   [/^\/settings\/general-reports/,      'settings.general-reports'],
   [/^\/settings\/handover-memos/,       'settings.handover-memos'],
-  [/^\/settings\/benten/,               'settings.benten'],
   [/^\/settings\/schedule-types/,       'settings.schedule-types'],
   [/^\/settings\/dia/,                  'settings.dia'],
   [/^\/settings\/coaches/,              'settings.coaches'],
@@ -74,7 +73,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/accounts/,                  'settings.accounts'],
   [/^\/api\/account-presets/,           'settings.accounts'],
   [/^\/api\/offices/,                   'settings.offices'],
-  [/^\/api\/benten/,                    'settings.benten'],
   [/^\/api\/liff-users/,                'settings.liff'],
   [/^\/api\/liff\/lost-items/,          'settings.lost-items'],
   [/^\/api\/liff\/accident-reports/,    'settings.accidents'],
@@ -251,7 +249,7 @@ export const PERMISSION_TREE: PermNode[] = [
       { key: 'settings.violation-types', label: '違反種類・点数/反則金' },
     ]},
     { key: 'kancho-shift', label: '班長シフト' },
-    { key: 'kanri-kobo',   label: '管理者公休表' },
+    { key: 'kanri-kobo',   label: '課長・職員シフト' },
     { key: 'handover',     label: '引き継ぎシート' },
     { key: 'newcomers',    label: '総合新人管理', children: [
       { key: 'newcomers.register', label: '新人登録（新人フラグ・種別・新卒年度の設定）' },
@@ -311,7 +309,6 @@ export const PERMISSION_TREE: PermNode[] = [
       { key: 'settings.coaches',        label: '研修担当' },
       { key: 'settings.instructors',    label: '班長・指導者' },
       { key: 'settings.periods',        label: '月度設定' },
-      { key: 'settings.benten',         label: 'ベンテンクラブ シフト' },
     ]},
     { key: 'settings.kancho', label: '班長関連（ハブ）', children: [
       { key: 'settings.kancho-roster', label: '班長リスト（班長登録の解除のみ編集可）' },

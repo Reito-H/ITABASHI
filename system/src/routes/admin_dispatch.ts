@@ -7,7 +7,7 @@ import { layout } from '../html/layout';
 import { dispatchBoardPage, type DispatchVehicleRow, type DispatchAssignmentRow, type DispatchMember, type DispatchType } from '../html/dispatch_board';
 import { crewPortalSubNav } from '../html/crew_portal_nav';
 import { getAdminPermissions } from '../permissions';
-import { todayJST } from '../benten';
+import { todayJST } from '../liff_common';
 import { loadTimeMasterMap, computeDailyAlerts, type CarAssignmentForAlert } from '../utils/dispatch_alerts';
 import { getTantoshaPriorityMap } from '../utils/tantosha_lookup';
 import { vehicleRotationPage, type RotationVehicleRow, type RotationCell, type RotationAlertLevel } from '../html/vehicle_rotation';

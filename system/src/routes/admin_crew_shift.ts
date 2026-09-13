@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { layout } from '../html/layout';
 import { crewShiftPage, type CrewShiftMember, type CrewShiftType, type CrewShiftCell } from '../html/crew_shift';
-import { todayJST } from '../benten';
+import { todayJST } from '../liff_common';
 import { summerReportPage, type SummerReportPeriod, type SummerReportDailyRow, type ForecastByDate } from '../html/summer_report';
 import { crewPortalSubNav } from '../html/crew_portal_nav';
 import { getAdminPermissions } from '../permissions';

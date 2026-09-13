@@ -247,7 +247,7 @@ export function quickReportModalScript(): string {
 
   var QR_ROLE_LABELS = {
     general_manager: '統括管理者', operations_manager: '運行管理者', vehicle_manager: '車番管理者',
-    newcomer: '新人', benten_shift_master: 'ベンテンシフトマスター', benten_member: 'ベンテンクラブ会員',
+    newcomer: '新人',
     crew_member: '乗務社員',
   };
 

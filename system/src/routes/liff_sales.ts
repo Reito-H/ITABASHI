@@ -2,7 +2,7 @@
 // /liff/sales        : 本人の売上記録（入力フォーム・タブ切替で月次サマリー/グラフ/PDF）
 // /api/liff/sales/*  : LIFFアクセストークン認証API
 //
-// 権限: crew_member / newcomer / benten_member / benten_shift_master / general_manager（line_bot.tsのSALES_ODO_ROLESと同じ）
+// 権限: crew_member / newcomer / general_manager（line_bot.tsのSALES_ODO_ROLESと同じ）
 //       それ以外（運行管理者・車番管理者・権限不明者）は403
 // 常に「本人分のみ」表示（他者閲覧機能は今回のスコープ外）
 
@@ -11,13 +11,13 @@ import { PDFDocument, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import type { Env } from '../auth';
 import { getPeriod, getPeriodRange, getPeriodSettings } from '../auth';
-import { bentenUidFromRequest, loadBentenFont } from '../benten';
+import { bentenUidFromRequest, loadBentenFont } from '../liff_common';
 import { logLineActivity } from '../utils/activity_log';
 import { buildShiftSalesPdf } from '../utils/shift_sales_pdf';
 
 const app = new Hono<{ Bindings: Env }>();
 
-const SALES_ODO_ROLES = ['crew_member', 'newcomer', 'benten_member', 'benten_shift_master', 'general_manager'];
+const SALES_ODO_ROLES = ['crew_member', 'newcomer', 'general_manager'];
 const DUTY_CODES = ['a', 'b', 'B', 'D', 'H'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 

@@ -19,7 +19,7 @@ type WishSettings = { target_year: number; target_month: number; open_from: stri
 
 const ROLE_LABEL: Record<string, string> = {
   general_manager: '統括管理者', operations_manager: '運行管理者', vehicle_manager: '車両管理者',
-  newcomer: '新人', benten_shift_master: 'ベンテンシフトマスター', benten_member: 'ベンテン会員',
+  newcomer: '新人',
   crew_member: '乗務社員', unknown: '未設定',
 };
 
