@@ -59,7 +59,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
-  [/^\/settings\/face-auth/,            'face-auth'],
   // 板橋ページ本体。親キー settings.study-sessions を持てば全タブ利用可。
   // タブ単位で絞るための子キー（settings.hiyari 等）のいずれかでもページに入れる。
   [/^\/settings\/study-sessions/,       'settings.study-sessions|settings.hiyari|settings.surveys|settings.daihon|settings.office-opinions'],
@@ -124,8 +123,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // 課長ミッションは専用キー kacho-mission。社員管理(staff)の権限でも従来どおり利用可
   [/^\/kacho-mission/, 'kacho-mission|staff'],
   [/^\/api\/kacho-mission/, 'kacho-mission|staff'],
-  [/^\/face-auth/,      'face-auth'],
-  [/^\/api\/face-auth/, 'face-auth'],
   [/^\/sales-ai/,     'sales-ai'],
   [/^\/sales/,        'staff'],
   [/^\/vehicles/,     'vehicles'],
@@ -265,7 +262,6 @@ export const PERMISSION_TREE: PermNode[] = [
       { key: 'settings.daihon',          label: '台本（スライド＋台本デッキ）' },
     ]},
     { key: 'sales-ai',    label: 'AI売上分析' },
-    { key: 'face-auth',   label: '顔認証（顔の登録・照合テスト）', note: 'セキュリティ機能の検証用。登録・削除は「編集」権限が必要（設定→顔認証で登録）' },
     { key: 'accidents',   label: '事故分析' },
     { key: 'vehicles',    label: '車両検索' },
     { key: 'inspection',  label: '点検管理（メーター検査・車検管理を含む）' },

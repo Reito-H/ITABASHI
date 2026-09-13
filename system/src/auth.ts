@@ -47,8 +47,6 @@ export type Env = {
   LIFF_ID_REGISTER?: string;
   // 事故データCSVの無人アップロード用（社内PCの監視スクリプトから使う専用キー）
   ACCIDENTS_UPLOAD_KEY?: string;
-  // adminログイン2段階認証: 緊急停止キー（/login/verify/kill?key=... でゲートを無効化）
-  AUTH_GATE_KILL_KEY?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

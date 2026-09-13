@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import {
-  verifyPassword, hashPassword, deleteSession,
+  verifyPassword, hashPassword, deleteSession, createSession,
   isLockedOut, recordFailedLogin, getSessionFromCookie,
   getShiftDisplayRange, getPeriodRange, getPeriodSettings,
 } from '../auth';
@@ -18,8 +18,6 @@ import {
 } from '../utils/maintenance';
 import { triggerAccidentsMonitorForceRefresh } from './public_accidents_monitor';
 import { agoLabel } from './admin_line_usage';
-import { getGateStatus, createChallenge, newChallengeToken } from '../utils/auth_gate';
-import { finalizeLoginResponse } from './admin_auth_gate';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
 import { getAdminPermissions } from '../permissions';
 import { computeKanchoAttendance } from '../cron';
@@ -116,23 +114,25 @@ app.post('/login', async (c) => {
     return c.html(loginPage(mode, 'ユーザー名またはパスワードが正しくありません。', ''));
   }
 
-  // adminアカウントのみ: 2段階認証ゲートが「準備完了」なら、ここではセッションを発行せず
-  // 保留チャレンジを作って顔/LINE承認ページへ送る。前提が欠けている間は素通り（fail-open）。
-  if (username === 'admin') {
-    const gate = await getGateStatus(c.env.DB);
-    if (gate.ready && gate.adminId === admin.id) {
-      const token = newChallengeToken();
-      await createChallenge(c.env.DB, {
-        token, adminId: admin.id, ip,
-        ua: c.req.header('User-Agent') ?? '',
-      });
-      const res = c.redirect(`${ADMIN_PATH}/login/verify`);
-      res.headers.append('Set-Cookie', `login_challenge=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=360`);
-      return res;
-    }
-  }
+  const sessionId = await createSession(c.env.DB, admin.id);
+  const cf = (c.req.raw as any).cf ?? {};
+  try {
+    await c.env.DB.prepare(
+      'INSERT INTO login_logs (ip, country, city, latitude, longitude, timezone, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      c.req.header('CF-Connecting-IP') ?? ip,
+      cf.country ?? c.req.header('CF-IPCountry') ?? null,
+      cf.city ?? null,
+      cf.latitude ? String(cf.latitude) : null,
+      cf.longitude ? String(cf.longitude) : null,
+      cf.timezone ?? null,
+      c.req.header('User-Agent') ?? null
+    ).run();
+  } catch { /* ログ失敗はログインを妨げない */ }
 
-  return finalizeLoginResponse(c, admin.id, ip);
+  const res = c.redirect(ADMIN_PATH);
+  res.headers.set('Set-Cookie', `session=${sessionId}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400`);
+  return res;
 });
 
 // ===== ログアウト =====
@@ -912,9 +912,6 @@ app.get('/settings', async (c) => {
     { heading: '権限・アカウント', cards: [
       { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', desc: '管理画面アカウントの作成・機能ごとの閲覧/編集権限の設定', highlight: true },
       { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINE連携',   desc: 'QRコード発行での新人・運行管理者等の登録・連携済みユーザー管理', highlight: true },
-    ]},
-    { heading: 'セキュリティ（検証中）', cards: [
-      { href: `${ADMIN}/settings/face-auth`, perm: 'face-auth', title: '顔認証（顔の登録）', desc: 'カメラで顔を撮影し、その人固有の特徴（数値128個）だけを保存します。顔写真そのものは保存しません。登録した顔は左メニュー「顔認証」で照合テストでき、一致とみなす精度（しきい値）を動かして検証できます。今後のセキュリティ機能に向けた実験ページで、ログイン等には接続していません' },
     ]},
     { heading: 'アナウンス', cards: [
       { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー', desc: '管理画面全ページ最上部に表示する常時テロップの投稿・期限設定' },

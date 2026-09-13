@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { requireAuth, requireJapan } from './middleware/auth';
 import { getAdminPermissions, isPathAllowed, isRootApiWriteAllowed, filterHtmlByPermissions } from './permissions';
 import adminRoutes from './routes/admin';
-import adminAuthGateRoutes from './routes/admin_auth_gate';
 import adminExtraRoutes from './routes/admin_extra';
 import adminStaffRoutes from './routes/admin_staff';
 import adminSalesAiRoutes from './routes/admin_sales_ai';
@@ -48,7 +47,6 @@ import documentsApi from './routes/api/documents';
 import adminStudyNotesRoutes from './routes/admin_study_notes';
 import studyNotesApi from './routes/api/study_notes';
 import adminKachoMissionRoutes from './routes/admin_kacho_mission';
-import adminFaceAuthRoutes from './routes/admin_face_auth';
 import adminKachoHiyariRoutes from './routes/admin_kacho_hiyari';
 import adminSummerSafety2026Routes from './routes/admin_summer_safety_2026';
 import kachoMissionApi from './routes/api/kacho_mission';
@@ -169,12 +167,7 @@ app.use('*', async (c, next) => {
   // 乗務員証 証明写真: MediaPipe(WebAssembly)による顔検出とカメラ撮影のため、
   // このページのみ CSP に wasm-unsafe-eval / blob: を、Permissions-Policy にカメラ許可を追加する。
   const isIdPhotosPage = pathname === `/${SECRET}/admin/kacho-mission/id-photos`;
-  // 顔認証（検証用）: face-api.js（WebAssembly/WebGL）による顔認識とカメラ撮影のため、
-  // 証明写真ページと同じく CSP に wasm-unsafe-eval / blob: を、Permissions-Policy にカメラ許可を追加する。
-  const isFaceAuthPage = pathname === `/${SECRET}/admin/face-auth`
-    || pathname === `/${SECRET}/admin/settings/face-auth`
-    || pathname === `/${SECRET}/admin/login/verify`;
-  const isWasmCameraPage = isIdPhotosPage || isFaceAuthPage;
+  const isWasmCameraPage = isIdPhotosPage;
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   c.res.headers.set('Cache-Control', 'no-store');
@@ -367,8 +360,6 @@ app.route(`/${SECRET}/admin`, adminVehicleDeadlinesRoutes);
 app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
 app.route(`/${SECRET}/admin`, adminStudyNotesRoutes);
 app.route(`/${SECRET}/admin`, adminKachoMissionRoutes);
-app.route(`/${SECRET}/admin`, adminFaceAuthRoutes);
-app.route(`/${SECRET}/admin`, adminAuthGateRoutes);
 app.route(`/${SECRET}/admin`, adminKachoHiyariRoutes);
 app.route(`/${SECRET}/admin`, adminSummerSafety2026Routes);
 app.route(`/${SECRET}/admin`, adminKanchoRoutes);

@@ -86,7 +86,6 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/benri`,         label: '便利',            id: 'benri', permKey: 'benri' },
     { href: `${ADMIN_PATH}/shuttle`,       label: 'シャトルバス',    id: 'shuttle', permKey: 'shuttle' },
     { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
-    { href: `${ADMIN_PATH}/face-auth`,     label: '顔認証',          id: 'face-auth' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
 

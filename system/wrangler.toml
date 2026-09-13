@@ -57,7 +57,6 @@ LIFF_ID_REGISTER = "2010598812-B8nxU525"
 BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/master/fonts/NotoSansCJKjp-Regular.ttf"
 # シークレット値は wrangler secret put で登録すること（このファイルには記載しない）
 # npx wrangler secret put SETUP_KEY
-# npx wrangler secret put AUTH_GATE_KILL_KEY   ← adminログイン2段階認証の緊急停止キー。/{SECRET}/admin/login/verify/kill?key=... でゲートOFF
 # npx wrangler secret put LINE_CHANNEL_SECRET
 # npx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN
 # npx wrangler secret put LINE_REG_PWD_VEHICLE       ← 車番管理者 登録パスワード
