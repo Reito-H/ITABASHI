@@ -49,6 +49,11 @@ export type Env = {
   ACCIDENTS_UPLOAD_KEY?: string;
   // SR（S.RIDE迎車分析）ページの専用パスワード（wrangler secret putで設定）
   SR_PASSWORD?: string;
+  // SR自動取込: S.RIDE管理画面への自動ログイン用アカウント（wrangler secret putで設定）
+  SRIDE_LOGIN_ID?: string;
+  SRIDE_PASSWORD?: string;
+  // CC名簿（クレーム客記録台帳）ページの専用パスワード（wrangler secret putで設定）
+  CC_PASSWORD?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

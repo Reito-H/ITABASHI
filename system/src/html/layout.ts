@@ -96,7 +96,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>${escHtml(title)} | ホシコン</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyZTEzNTQiLz4KICA8cG9seWdvbiBwb2ludHM9IjMyLjAwLDEwLjAwIDM3LjI5LDI0LjcyIDUyLjkyLDI1LjIwIDQwLjU2LDM0Ljc4IDQ0LjkzLDQ5LjgwIDMyLjAwLDQxLjAwIDE5LjA3LDQ5LjgwIDIzLjQ0LDM0Ljc4IDExLjA4LDI1LjIwIDI2LjcxLDI0LjcyIiBmaWxsPSIjZjJjMTRlIi8+Cjwvc3ZnPgo=">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <style>
     /* ===== デザイントークン =====
        新規実装・改修時はここを参照する。既存の直書き色は無理に置換しない。
@@ -675,7 +675,7 @@ export function layout(title: string, content: string, activePage: string = '', 
 }
 
 
-const LOGIN_FAVICON = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyZTEzNTQiLz4KICA8cG9seWdvbiBwb2ludHM9IjMyLjAwLDEwLjAwIDM3LjI5LDI0LjcyIDUyLjkyLDI1LjIwIDQwLjU2LDM0Ljc4IDQ0LjkzLDQ5LjgwIDMyLjAwLDQxLjAwIDE5LjA3LDQ5LjgwIDIzLjQ0LDM0Ljc4IDExLjA4LDI1LjIwIDI2LjcxLDI0LjcyIiBmaWxsPSIjZjJjMTRlIi8+Cjwvc3ZnPgo=';
+export const FAVICON_DATA_URI = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyZTEzNTQiLz4KICA8cG9seWdvbiBwb2ludHM9IjMyLjAwLDEwLjAwIDM3LjI5LDI0LjcyIDUyLjkyLDI1LjIwIDQwLjU2LDM0Ljc4IDQ0LjkzLDQ5LjgwIDMyLjAwLDQxLjAwIDE5LjA3LDQ5LjgwIDIzLjQ0LDM0Ljc4IDExLjA4LDI1LjIwIDI2LjcxLDI0LjcyIiBmaWxsPSIjZjJjMTRlIi8+Cjwvc3ZnPgo=';
 
 export type LoginMode = 'pc' | 'sp';
 
@@ -688,7 +688,7 @@ export function loginSelectPage(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>ホシコン ログイン</title>
-  <link rel="icon" type="image/svg+xml" href="${LOGIN_FAVICON}">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -794,7 +794,7 @@ function loginPagePc(error: string = '', csrfToken: string = ''): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>ホシコン ログイン</title>
-  <link rel="icon" type="image/svg+xml" href="${LOGIN_FAVICON}">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
@@ -897,7 +897,7 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>ホシコン ログイン</title>
-  <link rel="icon" type="image/svg+xml" href="${LOGIN_FAVICON}">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }

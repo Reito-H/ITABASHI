@@ -75,18 +75,22 @@ app.get('/api/public/kancho-wish/lookup', async (c) => {
   return c.json({ id: member.id, name: member.name, periodStart: start, periodEnd: end });
 });
 
-async function resolveMember(c: { env: Env }, memberId: number): Promise<{ id: number; name: string } | null> {
+// member_id だけでなく、最初のlookupと同じ emp_no も毎回一致させる（他人のIDを類推しての
+// 閲覧・改ざんを防ぐ）。chosei.ts / study_sessions.ts と同様、書き込み系は毎回本人確認する方針。
+async function resolveMember(c: { env: Env }, memberId: number, empNo: string): Promise<{ id: number; name: string } | null> {
+  if (!empNo) return null;
   const settings = await getWishSettings(c.env.DB);
   if (!isOpenNow(settings)) return null;
   return c.env.DB.prepare(
-    'SELECT id, name FROM kancho_members WHERE id = ? AND is_active = 1 AND is_indoor = 1 AND year = ? AND month = ?'
-  ).bind(memberId, settings!.target_year, settings!.target_month).first<{ id: number; name: string }>();
+    'SELECT id, name FROM kancho_members WHERE id = ? AND emp_no = ? AND is_active = 1 AND is_indoor = 1 AND year = ? AND month = ?'
+  ).bind(memberId, empNo, settings!.target_year, settings!.target_month).first<{ id: number; name: string }>();
 }
 
 app.get('/api/public/kancho-wish', async (c) => {
   const memberId = parseInt(c.req.query('member_id') ?? '');
+  const empNo = toHalfWidth((c.req.query('emp_no') ?? '').trim());
   if (!memberId) return c.json({ error: 'member_id が必要です' }, 400);
-  const member = await resolveMember(c, memberId);
+  const member = await resolveMember(c, memberId, empNo);
   if (!member) return c.json({ error: '対象の班長が見つかりません' }, 404);
   const rows = await c.env.DB.prepare('SELECT id, date FROM kancho_wishes WHERE member_id = ? ORDER BY date')
     .bind(memberId).all<{ id: number; date: string }>();
@@ -94,11 +98,12 @@ app.get('/api/public/kancho-wish', async (c) => {
 });
 
 app.post('/api/public/kancho-wish', async (c) => {
-  const b = await c.req.json<{ member_id?: number; date?: string }>();
+  const b = await c.req.json<{ member_id?: number; date?: string; emp_no?: string }>();
   if (!b.member_id || !/^\d{4}-\d{2}-\d{2}$/.test(b.date ?? '')) {
     return c.json({ error: 'member_id と date が必要です' }, 400);
   }
-  const member = await resolveMember(c, b.member_id);
+  const empNo = toHalfWidth((b.emp_no ?? '').trim());
+  const member = await resolveMember(c, b.member_id, empNo);
   if (!member) return c.json({ error: '対象の班長が見つかりません' }, 404);
   await c.env.DB.prepare(
     `INSERT INTO kancho_wishes (member_id, date, note) VALUES (?, ?, '')
@@ -112,8 +117,9 @@ app.post('/api/public/kancho-wish', async (c) => {
 app.delete('/api/public/kancho-wish/:id', async (c) => {
   const id = parseInt(c.req.param('id'));
   const memberId = parseInt(c.req.query('member_id') ?? '');
+  const empNo = toHalfWidth((c.req.query('emp_no') ?? '').trim());
   if (!memberId) return c.json({ error: 'member_id が必要です' }, 400);
-  const member = await resolveMember(c, memberId);
+  const member = await resolveMember(c, memberId, empNo);
   if (!member) return c.json({ error: '対象の班長が見つかりません' }, 404);
   const old = await c.env.DB.prepare('SELECT date FROM kancho_wishes WHERE id = ? AND member_id = ?')
     .bind(id, memberId).first<{ date: string }>();
@@ -124,17 +130,19 @@ app.delete('/api/public/kancho-wish/:id', async (c) => {
 
 app.get('/api/public/kancho-wish/remarks', async (c) => {
   const memberId = parseInt(c.req.query('member_id') ?? '');
+  const empNo = toHalfWidth((c.req.query('emp_no') ?? '').trim());
   if (!memberId) return c.json({ error: 'member_id が必要です' }, 400);
-  const member = await resolveMember(c, memberId);
+  const member = await resolveMember(c, memberId, empNo);
   if (!member) return c.json({ error: '対象の班長が見つかりません' }, 404);
   const row = await c.env.DB.prepare('SELECT content FROM kancho_wish_remarks WHERE member_id = ?').bind(memberId).first<{ content: string }>();
   return c.json({ content: row?.content ?? '' });
 });
 
 app.post('/api/public/kancho-wish/remarks', async (c) => {
-  const b = await c.req.json<{ member_id?: number; content?: string }>();
+  const b = await c.req.json<{ member_id?: number; content?: string; emp_no?: string }>();
   if (!b.member_id) return c.json({ error: 'member_id が必要です' }, 400);
-  const member = await resolveMember(c, b.member_id);
+  const empNo = toHalfWidth((b.emp_no ?? '').trim());
+  const member = await resolveMember(c, b.member_id, empNo);
   if (!member) return c.json({ error: '対象の班長が見つかりません' }, 404);
   const content = (b.content ?? '').slice(0, 500);
   await c.env.DB.prepare(
@@ -146,9 +154,10 @@ app.post('/api/public/kancho-wish/remarks', async (c) => {
 
 // 送信ボタン: その時点の希望休一覧＋その他要望をまとめて1通のレポートとして通知
 app.post('/api/public/kancho-wish/submit', async (c) => {
-  const b = await c.req.json<{ member_id?: number; remark?: string }>();
+  const b = await c.req.json<{ member_id?: number; remark?: string; emp_no?: string }>();
   if (!b.member_id) return c.json({ error: 'member_id が必要です' }, 400);
-  const member = await resolveMember(c, b.member_id);
+  const empNo = toHalfWidth((b.emp_no ?? '').trim());
+  const member = await resolveMember(c, b.member_id, empNo);
   if (!member) return c.json({ error: '対象の班長が見つかりません' }, 404);
 
   const remark = (b.remark ?? '').slice(0, 500);
@@ -260,6 +269,7 @@ app.get(KANCHO_WISH_PATH, (c) => {
 <script>
 var WD = ['月','火','水','木','金','土','日'];
 var _member = null;      // {id, name}
+var _empNo = '';         // ロックアップ時の社員番号。以後の全リクエストで本人確認に使う
 var _periodStart = '', _periodEnd = '';
 var _wishSet = {};       // date -> wishId
 
@@ -300,6 +310,7 @@ async function lookup() {
     var d = await res.json();
     if (!res.ok) { errEl.textContent = d.error || '見つかりませんでした'; errEl.style.display = 'block'; return; }
     _member = { id: d.id, name: d.name };
+    _empNo = empNo;
     _periodStart = d.periodStart; _periodEnd = d.periodEnd;
     document.getElementById('confirm-name').textContent = d.name + ' さん';
     showStep('step2');
@@ -309,6 +320,7 @@ async function lookup() {
 }
 function backToStep1() {
   _member = null;
+  _empNo = '';
   document.getElementById('emp-no').value = '';
   showStep('step1');
 }
@@ -318,7 +330,7 @@ async function goStep3() {
   renderCalHeader();
   document.getElementById('cal-grid').innerHTML = '読み込み中...';
   try {
-    var res = await fetch('/api/public/kancho-wish?member_id=' + _member.id);
+    var res = await fetch('/api/public/kancho-wish?member_id=' + _member.id + '&emp_no=' + encodeURIComponent(_empNo));
     var d = await res.json();
     _wishSet = {};
     (d.wishes || []).forEach(function(w) { _wishSet[w.date] = w.id; });
@@ -362,7 +374,7 @@ async function toggleDate(el) {
   el.classList.add('loading');
   try {
     if (_wishSet[date]) {
-      var res = await fetch('/api/public/kancho-wish/' + _wishSet[date] + '?member_id=' + _member.id, { method: 'DELETE' });
+      var res = await fetch('/api/public/kancho-wish/' + _wishSet[date] + '?member_id=' + _member.id + '&emp_no=' + encodeURIComponent(_empNo), { method: 'DELETE' });
       if (!res.ok) throw new Error();
       delete _wishSet[date];
       el.classList.remove('wish');
@@ -370,7 +382,7 @@ async function toggleDate(el) {
     } else {
       var res2 = await fetch('/api/public/kancho-wish', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ member_id: _member.id, date: date })
+        body: JSON.stringify({ member_id: _member.id, date: date, emp_no: _empNo })
       });
       var dd = await res2.json().catch(function() { return {}; });
       if (!res2.ok) throw new Error(dd.error || '');
@@ -386,7 +398,7 @@ async function toggleDate(el) {
 }
 async function loadRemark() {
   try {
-    var res = await fetch('/api/public/kancho-wish/remarks?member_id=' + _member.id);
+    var res = await fetch('/api/public/kancho-wish/remarks?member_id=' + _member.id + '&emp_no=' + encodeURIComponent(_empNo));
     var d = await res.json();
     document.getElementById('remark').value = d.content || '';
   } catch (e) {}
@@ -399,7 +411,7 @@ async function submitReport() {
   try {
     var res = await fetch('/api/public/kancho-wish/submit', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ member_id: _member.id, remark: document.getElementById('remark').value })
+      body: JSON.stringify({ member_id: _member.id, remark: document.getElementById('remark').value, emp_no: _empNo })
     });
     var d = await res.json().catch(function() { return {}; });
     if (!res.ok) { errEl.textContent = d.error || '送信に失敗しました'; errEl.style.display = 'block'; return; }

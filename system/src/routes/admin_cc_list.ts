@@ -8,10 +8,10 @@ import { ADMIN_PATH } from '../config';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
-const CC_PASSWORD = '5931';
-
-function checkPassword(c: { req: { header: (n: string) => string | undefined } }): boolean {
-  return c.req.header('X-CC-Password') === CC_PASSWORD;
+// パスワードはソースに書かず wrangler secret put CC_PASSWORD で設定する（wrangler.toml参照）
+function checkPassword(c: { req: { header: (n: string) => string | undefined }; env: Env }): boolean {
+  const expected = c.env.CC_PASSWORD;
+  return !!expected && c.req.header('X-CC-Password') === expected;
 }
 
 type CcRow = {

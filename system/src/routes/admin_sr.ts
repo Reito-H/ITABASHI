@@ -35,6 +35,114 @@ function isValidDate(v: unknown): v is string {
   return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
+// ===== S.RIDE管理画面への自動ログイン＆CSV取得 =====
+// S.RIDEの「CSV出力」ボタンが裏側で叩いているAPIを直接呼び出す。Cloudflare Workersの
+// fetch()はブラウザと違い自動のCookie jarを持たないため、リダイレクトを手動で追跡しながら
+// Set-CookieをMapに蓄積し、次のリクエストのCookieヘッダーに手動で付与する。
+const SRIDE_REDIRECT_URL = 'https://api.sride.taxi/v2/redirect/manager';
+const SRIDE_CSV_URL = 'https://api.sride.taxi/v2/order/orders/csv';
+const SRIDE_UA = 'Mozilla/5.0 (compatible; BentenSRImporter/1.0)';
+
+type CookieJar = Map<string, string>;
+
+function srideCookieHeader(jar: CookieJar): string {
+  return Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
+function srideMergeSetCookies(res: Response, jar: CookieJar): void {
+  const h = res.headers as Headers & { getSetCookie?: () => string[] };
+  const list: string[] = typeof h.getSetCookie === 'function'
+    ? h.getSetCookie()
+    : (res.headers.get('set-cookie') ?? '')
+        .split(/,(?=\s*[A-Za-z0-9_-]+=)/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+  for (const sc of list) {
+    const pair = sc.split(';')[0];
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    jar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+  }
+}
+
+// リダイレクトを手動で追跡しつつ、3xxでなくなった時点のレスポンスを返す（最大10ホップ）。
+async function srideFollow(
+  url: string,
+  init: { method: 'GET' | 'POST'; body?: string; headers?: Record<string, string> },
+  jar: CookieJar,
+): Promise<Response> {
+  let currentUrl = url;
+  let method: 'GET' | 'POST' = init.method;
+  let body = init.body;
+  const extraHeaders = init.headers ?? {};
+  for (let hop = 0; hop < 10; hop++) {
+    const headers: Record<string, string> = {
+      'User-Agent': SRIDE_UA,
+      Cookie: srideCookieHeader(jar),
+      ...(hop === 0 ? extraHeaders : {}),
+    };
+    const res = await fetch(currentUrl, {
+      method,
+      headers,
+      body: hop === 0 ? body : undefined,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(15000),
+    });
+    srideMergeSetCookies(res, jar);
+    const loc = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && loc) {
+      currentUrl = new URL(loc, currentUrl).toString();
+      method = 'GET';
+      body = undefined;
+      continue;
+    }
+    return res;
+  }
+  throw new Error('リダイレクトの回数が上限を超えました（S.RIDE側の仕様変更の可能性）');
+}
+
+async function srideLoginAndFetchCsv(
+  loginId: string,
+  password: string,
+  orderDateFrom: string,
+  orderDateTo: string,
+): Promise<{ ok: true; bytes: ArrayBuffer } | { ok: false; status: 400 | 401 | 500 | 502; message: string }> {
+  const jar: CookieJar = new Map();
+
+  const loginPage = await srideFollow(SRIDE_REDIRECT_URL, { method: 'GET' }, jar);
+  const loginHtml = await loginPage.text();
+  const actionMatch = loginHtml.match(/<form[^>]+action="([^"]+)"/i);
+  if (!actionMatch) {
+    return { ok: false, status: 502, message: 'ログインフォームの抽出に失敗しました（S.RIDE側の画面仕様が変わった可能性があります）' };
+  }
+  const actionUrl = actionMatch[1].replace(/&amp;/g, '&');
+
+  const form = new URLSearchParams({ username: loginId, password });
+  const afterLogin = await srideFollow(
+    actionUrl,
+    { method: 'POST', body: form.toString(), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    jar,
+  );
+  const afterLoginText = await afterLogin.text().catch(() => '');
+  if (afterLoginText.includes('無効なユーザー名またはパスワードです')) {
+    return { ok: false, status: 401, message: 'S.RIDEのログインID・パスワードが正しくありません' };
+  }
+  if (!jar.has('SESSION')) {
+    return { ok: false, status: 502, message: 'S.RIDEへのログインに失敗しました（セッションCookieを取得できませんでした）' };
+  }
+
+  const csvUrl = `${SRIDE_CSV_URL}?order_date_from=${encodeURIComponent(orderDateFrom)}&order_date_to=${encodeURIComponent(orderDateTo)}`;
+  const csvRes = await fetch(csvUrl, {
+    headers: { 'User-Agent': SRIDE_UA, Cookie: srideCookieHeader(jar) },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!csvRes.ok) {
+    return { ok: false, status: 502, message: `CSV取得に失敗しました（S.RIDE側ステータス: ${csvRes.status}）` };
+  }
+  const bytes = await csvRes.arrayBuffer();
+  return { ok: true, bytes };
+}
+
 // sr_orders のカラム（order_no先頭、以降はCSV列準拠 + 派生列pickup_area）。
 // INSERT文の組み立てとクライアント側の送信ペイロード双方でこの並びに合わせる。
 const SR_COLUMNS = [
@@ -315,6 +423,21 @@ app.get('/settings/sr', async (c) => {
             <p style="font-size:12px;color:#6b7280;margin:0 0 14px;line-height:1.7;">
               S.RIDE管理画面からダウンロードした「注文リスト」CSV（Shift-JIS）を選択してください。注文番号をキーに、既存の注文は最新の内容へ更新、未登録の注文は追加します。同じ注文が複数回のCSVに重複して含まれていても問題ありません。
             </p>
+
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+              <div style="font-size:12px;font-weight:700;color:#1a3a5c;margin-bottom:8px;">S.RIDEから直接取得</div>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <label style="font-size:12px;color:#6b7280;">開始日
+                  <input type="date" id="sr-remote-start" style="margin-left:4px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;">
+                </label>
+                <label style="font-size:12px;color:#6b7280;">終了日
+                  <input type="date" id="sr-remote-end" style="margin-left:4px;padding:4px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;">
+                </label>
+                <button type="button" id="sr-remote-fetch-btn" onclick="srFetchRemote()" style="padding:6px 16px;background:#1a3a5c;color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">取得する</button>
+              </div>
+              <div id="sr-remote-status" style="font-size:11px;color:#9ca3af;margin-top:6px;"></div>
+            </div>
+
             <input type="file" id="sr-csv-file" accept=".csv,.CSV" style="display:none;" onchange="srHandleFile(this.files[0])">
             <label id="sr-drop-zone" for="sr-csv-file"
               style="display:block;border:2px dashed #d1d5db;border-radius:8px;padding:28px;text-align:center;cursor:pointer;margin-bottom:14px;"
@@ -850,6 +973,47 @@ app.get('/settings/sr', async (c) => {
       if (file) srHandleFile(file);
     }
 
+    function srFetchRemote() {
+      var start = document.getElementById('sr-remote-start').value;
+      var end = document.getElementById('sr-remote-end').value;
+      var statusEl = document.getElementById('sr-remote-status');
+      var btn = document.getElementById('sr-remote-fetch-btn');
+      if (!start || !end) {
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = '開始日と終了日を指定してください';
+        return;
+      }
+      btn.disabled = true;
+      statusEl.style.color = '#6b7280';
+      statusEl.textContent = 'S.RIDEに接続中…（数秒〜十数秒かかることがあります）';
+      document.getElementById('sr-import-result').style.display = 'none';
+      srSetProgress(0, 'S.RIDEから取得中…');
+
+      fetch(ADMIN_PATH + '/api/sr/fetch_remote?start=' + encodeURIComponent(start) + '&end=' + encodeURIComponent(end), {
+        headers: { 'X-SR-Password': srPassword }
+      }).then(function(r) {
+        var ct = r.headers.get('content-type') || '';
+        if (!r.ok || ct.indexOf('text/csv') === -1) {
+          return r.json().then(function(j) { throw new Error(j.error || ('取得に失敗しました（' + r.status + '）')); });
+        }
+        return r.arrayBuffer();
+      }).then(function(buf) {
+        var text;
+        try { text = new TextDecoder('shift-jis').decode(buf); }
+        catch (err) { text = new TextDecoder('utf-8').decode(buf); }
+        srFileName = 'sride_' + start + '_' + end + '.csv';
+        srParseCsv(text);
+        btn.disabled = false;
+        statusEl.style.color = '#166534';
+        statusEl.textContent = '取得完了。内容を確認のうえ「取り込む」を押してください。';
+      }).catch(function(err) {
+        btn.disabled = false;
+        srSetProgress(null, '');
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = err.message || '取得に失敗しました';
+      });
+    }
+
     function srSetProgress(pct, label) {
       var wrap = document.getElementById('sr-progress');
       var bar = document.getElementById('sr-progress-bar');
@@ -1213,6 +1377,40 @@ app.get('/api/sr/uploads', async (c) => {
   if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
   const rows = await c.env.DB.prepare('SELECT * FROM sr_uploads ORDER BY id DESC LIMIT 50').all();
   return c.json({ items: rows.results ?? [] });
+});
+
+// S.RIDE管理画面に自動ログインして注文リストCSVを取得し、生バイト列（Shift_JIS）をそのまま返す。
+// サーバー側ではパースせず、ブラウザ側の既存ロジック（srParseCsv）にそのまま渡す。
+app.get('/api/sr/fetch_remote', async (c) => {
+  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
+
+  const loginId = c.env.SRIDE_LOGIN_ID;
+  const loginPw = c.env.SRIDE_PASSWORD;
+  if (!loginId || !loginPw) {
+    return c.json({ error: 'S.RIDEの自動取得用アカウントが未設定です（SRIDE_LOGIN_ID / SRIDE_PASSWORD）' }, 500);
+  }
+
+  const start = c.req.query('start');
+  const end = c.req.query('end');
+  if (!isValidDate(start) || !isValidDate(end)) {
+    return c.json({ error: '取得期間（開始日・終了日）が不正です' }, 400);
+  }
+
+  try {
+    const result = await srideLoginAndFetchCsv(loginId, loginPw, `${start}T00:00`, `${end}T23:59`);
+    if (!result.ok) {
+      return c.json({ error: result.message }, result.status);
+    }
+    return new Response(result.bytes, {
+      headers: { 'Content-Type': 'text/csv;charset=Shift_JIS' },
+    });
+  } catch (err) {
+    console.error('sr fetch_remote failed', err);
+    const message = err instanceof Error && err.name === 'TimeoutError'
+      ? 'S.RIDEへの接続がタイムアウトしました。時間をおいて再度お試しください。'
+      : 'S.RIDEからの取得中にエラーが発生しました。S.RIDE側の仕様変更の可能性があります。手動アップロードをご利用ください。';
+    return c.json({ error: message }, 502);
+  }
 });
 
 app.post('/api/sr/import/rows', async (c) => {

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>nojico API 検証ツール</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --border: #dcdfe4;
+    --text: #1f2328;
+    --sub: #6a737d;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --ok: #1a7f37;
+    --ng: #cf222e;
+    --code-bg: #0d1117;
+    --code-text: #e6edf3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    line-height: 1.5;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .lead { color: var(--sub); font-size: 13px; margin: 0 0 20px; }
+  .warn {
+    background: #fff8c5;
+    border: 1px solid #d4a72c;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 15px;
+    margin: 0 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  label { font-size: 12px; color: var(--sub); display: block; margin-bottom: 3px; }
+  input[type=text], input[type=password], input[type=email], input[type=date] {
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: #fff;
+    color: var(--text);
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .row > div { flex: 1; min-width: 140px; }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--accent-hover); }
+  button.ghost {
+    background: #fff;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.ghost:hover { background: #f0f1f3; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status-pill {
+    display: inline-block;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .status-pill.on { background: #dafbe1; color: var(--ok); }
+  .status-pill.off { background: #ffebe9; color: var(--ng); }
+  .ep-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 8px;
+  }
+  .ep-btn {
+    text-align: left;
+    background: #f6f8fa;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .ep-btn:hover { background: #eef1f4; border-color: var(--accent); }
+  .ep-btn .path { display: block; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 11.5px; color: var(--sub); margin-top: 2px; }
+  .group-title { font-size: 12px; font-weight: 700; color: var(--sub); margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .group-title:first-child { margin-top: 0; }
+  #result {
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 8px;
+    padding: 14px;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 12.5px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 500px;
+    overflow: auto;
+    margin: 0;
+  }
+  .result-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--sub);
+  }
+  .req-line {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 12px;
+    color: var(--sub);
+    margin-bottom: 8px;
+    word-break: break-all;
+  }
+  #loginBox.hidden, #mainBox.hidden { display: none; }
+  .small { font-size: 12px; color: var(--sub); }
+</style>
+</head>
+<body>
+
+<h1>nojico API 検証ツール</h1>
+<p class="lead">app.no-jico.com（ドラレコ運行管理SaaS）の内部APIをブラウザから直接叩いて検証するためのローカルツール。docs/NOJICO_API.md 参照。</p>
+
+<div class="warn">
+  ⚠️ 非公式APIです。検証目的以外での利用・自動化・本番バッチ組み込みは避けてください。パスワードはこのページ内のJavaScript変数にのみ保持し、どこにも送信・保存しません（ページを閉じれば消えます）。
+</div>
+
+<div id="loginBox" class="card">
+  <h2>① ログイン</h2>
+  <div class="row">
+    <div>
+      <label>メールアドレス</label>
+      <input type="email" id="email" placeholder="xxx@km-group.jp">
+    </div>
+    <div>
+      <label>パスワード</label>
+      <input type="password" id="password" placeholder="パスワード">
+    </div>
+  </div>
+  <button id="loginBtn" onclick="doLogin()">ログイン</button>
+  <span id="loginMsg" class="small" style="margin-left:10px;"></span>
+</div>
+
+<div id="mainBox" class="card hidden">
+  <h2>
+    アカウント状態
+    <span id="statusPill" class="status-pill off">未ログイン</span>
+  </h2>
+  <div class="row">
+    <div class="small" id="accountInfo">-</div>
+  </div>
+  <div class="row">
+    <div>
+      <label>driver_id（ドライバー個別APIに使用）</label>
+      <input type="text" id="driverId" placeholder="例: 7548">
+    </div>
+    <div>
+      <label>device_id（ライブ/スナップショットAPIに使用）</label>
+      <input type="text" id="deviceId" placeholder="例: MH1D02400820">
+    </div>
+    <div>
+      <label>branch_office_id（絞り込み用・空欄可）</label>
+      <input type="text" id="branchOfficeId" placeholder="例: 5">
+    </div>
+  </div>
+  <button class="ghost" onclick="doLogout()">ログアウト</button>
+</div>
+
+<div id="epBox" class="card hidden">
+  <h2>② エンドポイントを実行</h2>
+  <div id="epGroups"></div>
+</div>
+
+<div id="customBox" class="card hidden">
+  <h2>③ 自由入力（任意のパス・クエリを直接指定）</h2>
+  <div class="row">
+    <div style="flex:0 0 90px;">
+      <label>メソッド</label>
+      <select id="customMethod" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;">
+        <option>GET</option>
+        <option>POST</option>
+      </select>
+    </div>
+    <div style="flex:3;">
+      <label>パス＋クエリ（例: /drivers?page=1&limit=10）</label>
+      <input type="text" id="customPath" placeholder="/drivers?page=1&limit=10">
+    </div>
+  </div>
+  <button onclick="runCustom()">実行</button>
+</div>
+
+<div id="resultBox" class="card hidden">
+  <h2>実行結果</h2>
+  <div class="result-meta">
+    <span id="resultStatus"></span>
+    <button class="ghost" onclick="copyResult()">JSONをコピー</button>
+  </div>
+  <div class="req-line" id="resultReq"></div>
+  <pre id="result">ここに結果が表示されます。</pre>
+</div>
+
+<script>
+const API_BASE = 'https://api.no-jico.com';
+let idToken = null;
+let lastResultText = '';
+
+function el(id) { return document.getElementById(id); }
+
+async function doLogin() {
+  const email = el('email').value.trim();
+  const password = el('password').value;
+  if (!email || !password) {
+    el('loginMsg').textContent = 'メールアドレスとパスワードを入力してください。';
+    return;
+  }
+  el('loginBtn').disabled = true;
+  el('loginMsg').textContent = 'ログイン中...';
+  try {
+    const res = await fetch(API_BASE + '/auth/sign_in', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.token_info) {
+      throw new Error(data.message || ('HTTP ' + res.status));
+    }
+    idToken = data.token_info.id_token;
+    el('loginMsg').textContent = '';
+    el('statusPill').textContent = 'ログイン中: ' + data.token_info.username;
+    el('statusPill').className = 'status-pill on';
+    el('mainBox').classList.remove('hidden');
+    el('epBox').classList.remove('hidden');
+    el('customBox').classList.remove('hidden');
+    el('loginBox').classList.add('hidden');
+    fetchAccountInfo();
+  } catch (e) {
+    el('loginMsg').textContent = 'ログイン失敗: ' + e.message;
+  } finally {
+    el('loginBtn').disabled = false;
+  }
+}
+
+function doLogout() {
+  idToken = null;
+  el('password').value = '';
+  el('statusPill').textContent = '未ログイン';
+  el('statusPill').className = 'status-pill off';
+  el('mainBox').classList.add('hidden');
+  el('epBox').classList.add('hidden');
+  el('customBox').classList.add('hidden');
+  el('loginBox').classList.remove('hidden');
+}
+
+async function fetchAccountInfo() {
+  try {
+    const data = await callApi('GET', '/account', false);
+    if (data && data.result) {
+      const r = data.result;
+      el('accountInfo').textContent =
+        `${r.family_name}${r.first_name}（${r.email}） / ${r.branch_office?.name || ''} ${r.department_master?.name || ''} / 会社: ${r.company?.name || ''}`;
+    }
+  } catch (e) { /* 表示できなくても致命的ではない */ }
+}
+
+// エンドポイント定義。path はテンプレート文字列で {driverId}/{deviceId} を差し込む。
+// params はクエリパラメータの雛形（name, default）。空文字のdefaultは未指定として省略可。
+const ENDPOINTS = [
+  { group: 'アカウント・マスタ', items: [
+    { label: 'アカウント情報', method: 'GET', path: '/account' },
+    { label: '営業所一覧', method: 'GET', path: '/offices', params: [['page',''],['limit','1000']] },
+    { label: '課一覧（営業所指定）', method: 'GET', path: '/departments', params: [['branch_office_id','{branchOfficeId}']] },
+    { label: '管理者一覧', method: 'GET', path: '/admins', params: [['page','1'],['sort','updated_at:desc'],['limit','10'],['branch_office_id','{branchOfficeId}']] },
+    { label: 'ドライバー一覧', method: 'GET', path: '/drivers', params: [['page','1'],['sort','updated_at:desc'],['limit','10'],['branch_office_id','{branchOfficeId}'],['only_deleted','false']] },
+    { label: 'ドライバー詳細（要driver_id）', method: 'GET', path: '/drivers/{driverId}' },
+    { label: '車両一覧', method: 'GET', path: '/vehicles', params: [['page','1'],['sort','updated_at:desc'],['limit','10'],['branch_office_id','{branchOfficeId}']] },
+    { label: '評価基準一覧', method: 'GET', path: '/evaluation-criteria', params: [['page','1'],['sort','updated_at:desc'],['limit','10']] },
+    { label: '評価項目マスタ', method: 'GET', path: '/evaluation_item_masters', params: [['categories','1,999']] },
+    { label: 'イベント種別マスタ', method: 'GET', path: '/event_masters', params: [['categories','1,2,999,-1']] },
+    { label: 'お知らせ一覧', method: 'GET', path: '/announcements' },
+  ]},
+  { group: '日報・イベント', items: [
+    { label: '日報一覧', method: 'GET', path: '/reports', params: [['page','1'],['sort','start_at:desc'],['limit','10'],['branch_office_id','{branchOfficeId}']] },
+    { label: 'ドライバー別日報（要driver_id）', method: 'GET', path: '/drivers/{driverId}/reports', params: [['page','1'],['sort','start_at:desc'],['limit','10']] },
+    { label: '検知イベント一覧（本日）', method: 'GET', path: '/events', params: [['page','1'],['sort','occurred_at:desc'],['limit','10'],['event_master_id','0'],['occurred_at','{today}'],['branch_office_id','{branchOfficeId}']] },
+    { label: 'ドライバー別イベント（要driver_id・本日）', method: 'GET', path: '/drivers/{driverId}/events', params: [['page','1'],['sort','occurred_at:desc'],['limit','10'],['event_master_id','0'],['event_date','{today}']] },
+  ]},
+  { group: '分析・ランキング', items: [
+    { label: '走行距離別スコア分布', method: 'GET', path: '/analytics/distance_chart', params: [['evaluation_item_master_id','0'],['period','week'],['branch_office_id','{branchOfficeId}']] },
+    { label: '運転時間別スコア分布', method: 'GET', path: '/analytics/duration_chart', params: [['evaluation_item_master_id','0'],['period','week'],['branch_office_id','{branchOfficeId}']] },
+    { label: '曜日別スコア', method: 'GET', path: '/analytics/dow_chart', params: [['evaluation_item_master_id','0'],['period','week'],['branch_office_id','{branchOfficeId}']] },
+    { label: '時間帯別スコア', method: 'GET', path: '/analytics/hourly_chart', params: [['evaluation_item_master_id','0'],['period','week'],['branch_office_id','{branchOfficeId}']] },
+    { label: 'スコア分布（レンジ）', method: 'GET', path: '/analytics/range_chart', params: [['evaluation_item_master_id','0'],['period','week'],['branch_office_id','{branchOfficeId}']] },
+    { label: 'ドライバー個人：距離別スコア（要driver_id）', method: 'GET', path: '/drivers/{driverId}/analytics/distance_chart', params: [['evaluation_item_master_id','0'],['period','week']] },
+    { label: 'ドライバー個人：イベント割合（要driver_id）', method: 'GET', path: '/drivers/{driverId}/analytics/event_ratio', params: [['period','week']] },
+    { label: 'ドライバー個人：スコア推移（要driver_id）', method: 'GET', path: '/drivers/{driverId}/analytics/score_trend', params: [['evaluation_item_master_id','0'],['period','week']] },
+    { label: 'ドライバーランキング', method: 'GET', path: '/rankings/driver', params: [['page','1'],['sort','score:asc'],['limit','10'],['evaluation_item_master_id','0'],['request_date','{today}'],['only_5percent','false'],['period','day'],['branch_office_id','{branchOfficeId}']] },
+    { label: '営業所ランキング', method: 'GET', path: '/rankings/office', params: [['page','1'],['sort','avg_score:asc'],['limit','10'],['evaluation_item_master_id','0'],['request_date','{today}'],['only_5percent','false'],['period','day']] },
+    { label: '課別ランキング', method: 'GET', path: '/rankings/department', params: [['page','1'],['sort','avg_score:asc'],['limit','10'],['evaluation_item_master_id','0'],['request_date','{today}'],['only_5percent','false'],['period','day'],['branch_office_id','{branchOfficeId}']] },
+  ]},
+  { group: 'ダッシュボード', items: [
+    { label: '稼働車両数', method: 'GET', path: '/dashboards/active_vehicles' },
+    { label: 'イベント比率（直近24h）', method: 'GET', path: '/dashboards/event_ratio' },
+    { label: '居眠りイベント一覧', method: 'GET', path: '/dashboards/events', params: [['event_code','Fatigue']] },
+    { label: '車両エラー通知', method: 'GET', path: '/dashboards/notices' },
+    { label: '当日ランキングTOP', method: 'GET', path: '/dashboards/ranking' },
+    { label: '本日の日報一覧', method: 'GET', path: '/dashboards/reports/today' },
+  ]},
+  { group: 'ライブ・スナップショット', items: [
+    { label: 'ライブ対象車両一覧', method: 'GET', path: '/lives', params: [['include_events','false']] },
+    { label: '本日の運行状況一覧', method: 'GET', path: '/lives/reports', params: [['target_date','{today}'],['include_events','false']] },
+    { label: '機器詳細（要device_id）', method: 'GET', path: '/lives/devices/{deviceId}/details', params: [['latitude','35.7591'],['longitude','139.7093']] },
+    { label: '録画時間帯一覧（要device_id）', method: 'GET', path: '/lives/{deviceId}/record_time_tables', params: [['request_date','{today}']] },
+    { label: 'スナップショット撮影を指示（要device_id・POST）', method: 'POST', path: '/lives/{deviceId}/snapshots' },
+  ]},
+];
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+
+function resolveTemplate(str) {
+  return str
+    .replace('{driverId}', el('driverId').value.trim())
+    .replace('{deviceId}', el('deviceId').value.trim())
+    .replace('{branchOfficeId}', el('branchOfficeId').value.trim())
+    .replace('{today}', todayStr());
+}
+
+function buildEpGrid() {
+  const container = el('epGroups');
+  container.innerHTML = '';
+  ENDPOINTS.forEach((g, gi) => {
+    const title = document.createElement('div');
+    title.className = 'group-title';
+    title.textContent = g.group;
+    container.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'ep-grid';
+    g.items.forEach((item, ii) => {
+      const btn = document.createElement('button');
+      btn.className = 'ep-btn';
+      btn.innerHTML = `${item.label}<span class="path">${item.method} ${item.path}</span>`;
+      btn.onclick = () => runEndpoint(item);
+      grid.appendChild(btn);
+    });
+    container.appendChild(grid);
+  });
+}
+
+async function runEndpoint(item) {
+  let path = resolveTemplate(item.path);
+  if (path.includes('{driverId}') || path.includes('{deviceId}')) {
+    alert('driver_id / device_id を上の入力欄に入力してから実行してください。');
+    return;
+  }
+  const query = new URLSearchParams();
+  (item.params || []).forEach(([name, def]) => {
+    const val = resolveTemplate(String(def));
+    if (val !== '') query.set(name, val);
+  });
+  const qs = query.toString();
+  const fullPath = path + (qs ? ('?' + qs) : '');
+  await callApi(item.method, fullPath, true);
+}
+
+async function runCustom() {
+  const method = el('customMethod').value;
+  const path = el('customPath').value.trim();
+  if (!path) return;
+  await callApi(method, path, true);
+}
+
+async function callApi(method, path, showInUi) {
+  if (!idToken) { alert('ログインしてください。'); return; }
+  const url = API_BASE + path;
+  if (showInUi) {
+    el('resultBox').classList.remove('hidden');
+    el('resultReq').textContent = method + ' ' + url;
+    el('resultStatus').textContent = '実行中...';
+    el('result').textContent = '';
+  }
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Authorization': idToken }
+    });
+    const contentType = res.headers.get('content-type') || '';
+    let bodyText;
+    let pretty;
+    if (contentType.includes('application/json')) {
+      const data = await res.json();
+      pretty = JSON.stringify(data, null, 2);
+      bodyText = data;
+    } else {
+      pretty = await res.text();
+      bodyText = pretty;
+    }
+    if (showInUi) {
+      el('resultStatus').innerHTML = `<b style="color:${res.ok ? 'var(--ok)' : 'var(--ng)'}">${res.status} ${res.statusText}</b>`;
+      el('result').textContent = pretty;
+      lastResultText = pretty;
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return bodyText;
+  } catch (e) {
+    if (showInUi) {
+      el('resultStatus').innerHTML = `<b style="color:var(--ng)">失敗</b>`;
+      el('result').textContent = 'エラー: ' + e.message;
+    }
+    throw e;
+  }
+}
+
+function copyResult() {
+  if (!lastResultText) return;
+  navigator.clipboard.writeText(lastResultText);
+}
+
+buildEpGrid();
+</script>
+
+</body>
+</html>

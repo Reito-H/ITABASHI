@@ -134,10 +134,7 @@ app.use('*', (c, next) => {
 });
 
 // 日本国内限定アクセス
-// TEMP-RM-RESTORE: リッチメニュー再割当の一時エンドポイントだけ除外（作業後に削除）
 app.use('*', async (c, next) => {
-  const path = new URL(c.req.url).pathname;
-  if (path.startsWith('/rmr-94eb102c62fa2b37b067999d8992896ce6f01001fcbad2ff/')) return next();
   return requireJapan(c, next);
 });
 
@@ -251,31 +248,6 @@ app.use('*', async (c, next) => {
 
 // robots.txt
 app.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /\n'));
-
-// TEMP-RM-RESTORE: ユーザーへの実際のリッチメニュー割当を、正しいIDへ戻す一時エンドポイント。
-// 作業完了後にこのブロックごと削除すること。
-app.post('/rmr-94eb102c62fa2b37b067999d8992896ce6f01001fcbad2ff/apply', async (c) => {
-  const token = c.env.LINE_CHANNEL_ACCESS_TOKEN ?? '';
-  const MENU_ID = c.env.RICHMENU_ID_PATTERN2 ?? '';
-  const TARGET_USERS = [
-    'U1a0c87213423f99151e0129de56965d4', 'Ua0d98586de60f233d9b24a0a79c61269',
-    'U3d308d18ce07fd5a8ed860c5ddaaa36c', 'U7221aad3731d2c08863a4e3553278daa',
-    'Ud79a726bd58dd8ac14a1636cb6077658', 'U2ae7dc404e7b65b85e0deca86016c699',
-    'Ufa9eede527b8db2a37e016ef72a4799e', 'U06245a23ccd74cb295b411be97f15ff4',
-    'U6e7893b673927eec912b1cafad3fe401', 'Ub23f0ec7e06e432fe65f70e34a1c1bb6',
-    'U0dc3b8465011a42e49202403b5060899', 'Uc0cf9d3b694b33a84fe9dbc5fb16b0f3',
-    'U103156390f198002c81eddf880759304', 'Udb8efb952657ac7785434b851ece8602',
-  ];
-  const results: { uid: string; ok: boolean }[] = [];
-  for (const uid of TARGET_USERS) {
-    const res = await fetch(`https://api.line.me/v2/bot/user/${uid}/richmenu/${MENU_ID}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    results.push({ uid, ok: res.ok });
-  }
-  return c.json({ menuId: MENU_ID, results });
-});
 
 // =====================
 // 管理者画面ルーティング

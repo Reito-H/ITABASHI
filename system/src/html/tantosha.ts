@@ -4,7 +4,7 @@
 //   ・3台廻り: シフト区切り内の3行ごとのブロック単位。ブロック先頭行の r_* に保持
 //   ・付帯リスト: 短労供 / スペア / 長欠 / 退職予定 / 待機 / 班長 などの右側リスト
 //   ・色: 文字色 = ''(黒)/blue/red/gold、背景 = ''/yellow/green/red、行背景 = ''/blue/yellow
-import { escHtml, safeJson } from './layout';
+import { escHtml, safeJson, FAVICON_DATA_URI } from './layout';
 import { ADMIN_PATH } from '../config';
 
 export type TantoshaGroup = {
@@ -594,7 +594,7 @@ export function tantoshaPrintPage(group: TantoshaGroupData): string {
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>${escHtml(group.name)}担当者一覧表${group.month_label ? `（${escHtml(group.month_label)}）` : ''}</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyZTEzNTQiLz4KICA8cG9seWdvbiBwb2ludHM9IjMyLjAwLDEwLjAwIDM3LjI5LDI0LjcyIDUyLjkyLDI1LjIwIDQwLjU2LDM0Ljc4IDQ0LjkzLDQ5LjgwIDMyLjAwLDQxLjAwIDE5LjA3LDQ5LjgwIDIzLjQ0LDM0Ljc4IDExLjA4LDI1LjIwIDI2LjcxLDI0LjcyIiBmaWxsPSIjZjJjMTRlIi8+Cjwvc3ZnPgo=">
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; margin: 20px; color: #111; }

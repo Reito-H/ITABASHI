@@ -4,7 +4,7 @@
 //   ・直 = 当直 9:00〜翌3:00 / 斜体の直 = 斜め直 14:00〜翌8:00
 //   ・赤文字 = 希望休の反映
 //   ・セル背景 = セル個別色(他班ヘルプ等) > 班色(直遅早) > 記号色 > 空白は班色
-import { escHtml, safeJson, saveToastHtml, saveToastScript } from './layout';
+import { escHtml, safeJson, saveToastHtml, saveToastScript, FAVICON_DATA_URI } from './layout';
 import { ADMIN_PATH } from '../config';
 
 export type KanchoMember = {
@@ -2083,7 +2083,7 @@ export function kanchoPrintPage(
   <meta charset="UTF-8">
   <meta name="robots" content="noindex, nofollow">
   <title>班長シフト ${year}年${month}月度</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyZTEzNTQiLz4KICA8cG9seWdvbiBwb2ludHM9IjMyLjAwLDEwLjAwIDM3LjI5LDI0LjcyIDUyLjkyLDI1LjIwIDQwLjU2LDM0Ljc4IDQ0LjkzLDQ5LjgwIDMyLjAwLDQxLjAwIDE5LjA3LDQ5LjgwIDIzLjQ0LDM0Ljc4IDExLjA4LDI1LjIwIDI2LjcxLDI0LjcyIiBmaWxsPSIjZjJjMTRlIi8+Cjwvc3ZnPgo=">
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
   <style>
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; padding: 10px; }
