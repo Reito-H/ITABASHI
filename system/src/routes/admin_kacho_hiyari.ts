@@ -6,7 +6,7 @@
 // /kacho-mission/hiyari       … 分析ページ（印刷内容の選択パネルつき）
 // /kacho-mission/hiyari/print … 選択されたセクションだけを組んだ印刷用スタンドアロンページ
 import { Hono } from 'hono';
-import { layout, escHtml } from '../html/layout';
+import { layout, escHtml, FAVICON_DATA_URI } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 import {
@@ -354,6 +354,7 @@ app.get('/kacho-mission/hiyari/print', async (c) => {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>ヒヤリハット分析レポート</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Hiragino Sans','Meiryo',sans-serif; margin: 0; padding: 20px; background: #e5e7eb; color: #0f172a; }

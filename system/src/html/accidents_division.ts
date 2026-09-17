@@ -2,7 +2,7 @@
 // ページ: /accidents/division（一覧）, /accidents/division/:div（詳細データ一覧・印刷可）
 // 課ごとの事故傾向を確認し、傾向分析レポート（/accidents/division/:div/report/print）への入口も提供する。
 import { ADMIN_PATH } from '../config';
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import { type AccidentRecord, accidentsTabNav, faultBand, bucketWeekday, WEEKDAY_LABELS_JA, PERIOD_FILTER_BAR_CSS, periodFilterBarHtml } from './accidents';
 import { type AccidentPeriod, periodLabel as formatPeriodLabel, todayIsoJST } from '../utils/accident_period';
 
@@ -152,6 +152,7 @@ export function renderAccidentDivisionDetailPrintPage(o: AccidentDivisionDetailP
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>事故記録詳細一覧（${division}課）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

@@ -69,23 +69,24 @@ export function layout(title: string, content: string, activePage: string = '', 
   // 報告センターは専用の権限キーを持たず、既存の5つの報告権限のいずれかで表示する（スペース区切り＝OR）
   const REPORT_CENTER_PERM = 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos';
   // public:true の項目は data-nav-id を出さず、全アカウントで常に表示する（権限フィルタの対象外）
-  const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean; public?: boolean }> = [
+  const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean; public?: boolean; large?: boolean }> = [
     { href: `${ADMIN_PATH}`,               label: 'ホーム',          id: 'home' },
-    { href: `${ADMIN_PATH}/settings/reports`, label: '報告センター', id: 'report-center', permKey: REPORT_CENTER_PERM, highlight: true },
+    { href: `${ADMIN_PATH}/handover`,      label: '引き継ぎシート',  id: 'handover', large: true },
+    { href: `${ADMIN_PATH}/settings/reports`, label: '報告センター', id: 'report-center', permKey: REPORT_CENTER_PERM, highlight: true, large: true },
+    { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection', large: true },
     { href: `${ADMIN_PATH}/kancho-shift`,  label: '班長シフト',      id: 'kancho-shift' },
     { href: `${ADMIN_PATH}/kanri-kobo`,    label: '課長・職員シフト',    id: 'kanri-kobo' },
-    { href: `${ADMIN_PATH}/handover`,      label: '引き継ぎシート',  id: 'handover' },
-    { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
+    { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
     { href: `${ADMIN_PATH}/attendance-board`, label: '出勤者ボード',   id: 'attendance-board', permKey: 'crew-shift' },
     { href: `${ADMIN_PATH}/kacho-mission`, label: '課長ミッション',  id: 'kacho-mission', permKey: 'kacho-mission staff' },
     { href: `${ADMIN_PATH}/settings/study-sessions`, label: '板橋ページ', id: 'office-page', permKey: 'settings.study-sessions settings.office-opinions settings.hiyari settings.surveys settings.daihon' },
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
+    { href: `${ADMIN_PATH}/settings/sales-strategy`, label: '営業戦略', id: 'sales-strategy', permKey: 'settings.sales-strategy' },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
     // 車両検索はサイドバーから廃止（ホームの横断検索バーへ一本化）。/vehicles ルートと vehicles 権限は存置。
     { href: `${ADMIN_PATH}/benri`,         label: '便利',            id: 'benri', permKey: 'benri' },
     { href: `${ADMIN_PATH}/shuttle`,       label: 'シャトルバス',    id: 'shuttle', permKey: 'shuttle' },
-    { href: `${ADMIN_PATH}/inspection`,    label: '点検管理',        id: 'inspection' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
 
@@ -169,15 +170,38 @@ export function layout(title: string, content: string, activePage: string = '', 
     .main-content { margin-left: 200px; min-height: 100vh; }
     .nav-item {
       display: flex; align-items: center;
-      padding: 11px 18px; color: #cbd5e1;
-      text-decoration: none; font-size: 13px; transition: all 0.15s;
-      border-left: 3px solid transparent;
+      margin: 4px 10px;
+      padding: 12px 16px; color: #dbe4f3;
+      text-decoration: none; font-size: 13px; font-weight: 600;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
     }
-    .nav-item:hover { background: rgba(255,255,255,0.08); color: white; }
-    .nav-item.active { background: rgba(255,255,255,0.12); color: white; border-left-color: var(--color-action); }
-    .nav-item.nav-item-highlight { color: var(--color-accent); font-weight: 700; background: rgba(242,193,78,0.08); }
-    .nav-item.nav-item-highlight:hover { background: rgba(242,193,78,0.16); color: var(--color-accent); }
-    .nav-item.nav-item-highlight.active { background: rgba(242,193,78,0.22); border-left-color: var(--color-accent); color: var(--color-accent); }
+    .nav-item:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.2); color: white; }
+    .nav-item:active { transform: scale(0.98); }
+    .nav-item.active {
+      background: linear-gradient(135deg, rgba(86,102,255,0.42), rgba(86,102,255,0.18));
+      border-color: rgba(86,102,255,0.55); color: white;
+      box-shadow: 0 6px 16px rgba(86,102,255,0.28), inset 0 1px 0 rgba(255,255,255,0.15);
+    }
+    .nav-item.nav-item-highlight { color: var(--color-accent); background: rgba(242,193,78,0.1); border-color: rgba(242,193,78,0.22); }
+    .nav-item.nav-item-highlight:hover { background: rgba(242,193,78,0.2); border-color: rgba(242,193,78,0.34); color: var(--color-accent); }
+    .nav-item.nav-item-highlight.active {
+      background: linear-gradient(135deg, rgba(242,193,78,0.45), rgba(242,193,78,0.18));
+      border-color: rgba(242,193,78,0.6); color: var(--color-accent);
+      box-shadow: 0 6px 16px rgba(242,193,78,0.25), inset 0 1px 0 rgba(255,255,255,0.15);
+    }
+    .nav-item.nav-item-large {
+      margin: 6px 10px;
+      padding: 18px 16px;
+      font-size: 17px;
+      font-weight: 800;
+      border-radius: 14px;
+      letter-spacing: 0.02em;
+    }
     /* ビルドタグ: 以前は目立つゴールドのピルだったが、情報量に対して主張が強すぎたため
        控えめなモノスペースのタグへ格下げ（デザイン刷新 Phase 1）。 */
     .version-pill {
@@ -293,7 +317,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     </div>
     <nav style="flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 0;">
       ${navItems.map(item => `
-        <a href="${item.href}"${item.public ? '' : ` data-nav-id="${item.permKey ?? item.id}"`} class="nav-item${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
+        <a href="${item.href}"${item.public ? '' : ` data-nav-id="${item.permKey ?? item.id}"`} class="nav-item${item.large ? ' nav-item-large' : ''}${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
           ${escHtml(item.label)}
         </a>
       `).join('')}

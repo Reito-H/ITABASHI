@@ -1,3 +1,4 @@
+import { FAVICON_DATA_URI } from './layout';
 // デジタルサイネージ（営業所モニター用 周知スライド）
 //   - 横16:9・自動再生ループ・標準/豪華アニメ切替・1周ぶんを webm 書き出し
 //   - スライドは kind + payload(JSON) でDB化。renderSlideSection() が <section class="slide"> を生成
@@ -784,6 +785,7 @@ export function signagePresentPage(deck: SignageDeck, slides: SignageSlide[], ct
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(deck.title)}｜サイネージ</title>
 ${FONT_LINK}
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${SIGNAGE_CSS}</style>
 </head><body>
 ${stageInner(deck, slides, true, ctx)}
@@ -801,6 +803,7 @@ export function signagePublicPage(deck: SignageDeck, slides: SignageSlide[], ctx
 <meta name="robots" content="noindex, nofollow" />
 <title>${esc(deck.title)}｜サイネージ</title>
 ${FONT_LINK}
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${SIGNAGE_CSS}
   html,body{cursor:none;}
 </style>
@@ -820,6 +823,7 @@ export function signagePrintPage(deck: SignageDeck, slides: SignageSlide[]): str
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
 <title>${esc(deck.title)}｜印刷</title>
 ${FONT_LINK}
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${SIGNAGE_CSS}
   .slide{position:relative!important;inset:auto!important;opacity:1!important;visibility:visible!important;transform:none!important;height:auto;min-height:44vh;page-break-inside:avoid;}
   .slide *{animation:none!important;opacity:1!important;transform:none!important;filter:none!important;}

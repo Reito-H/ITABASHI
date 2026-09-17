@@ -2,7 +2,7 @@
 // 一覧でチェックした複数の報告を、A4横1枚に一覧表としてまとめて印刷/PNG保存する。
 // 宛先・各行の内容・追加備考は contenteditable にして、印刷前にその場で書き換えできる。
 
-import { escHtml, safeJson } from './layout';
+import { escHtml, safeJson, FAVICON_DATA_URI } from './layout';
 
 export interface ReportPrintBulkItem {
   kindLabel: string;
@@ -51,6 +51,7 @@ export function renderReportPrintBulkPage(o: ReportPrintBulkOptions): string {
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>${escHtml(o.pageTitle)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

@@ -47,13 +47,21 @@ export type Env = {
   LIFF_ID_REGISTER?: string;
   // 事故データCSVの無人アップロード用（社内PCの監視スクリプトから使う専用キー）
   ACCIDENTS_UPLOAD_KEY?: string;
-  // SR（S.RIDE迎車分析）ページの専用パスワード（wrangler secret putで設定）
-  SR_PASSWORD?: string;
   // SR自動取込: S.RIDE管理画面への自動ログイン用アカウント（wrangler secret putで設定）
   SRIDE_LOGIN_ID?: string;
   SRIDE_PASSWORD?: string;
   // CC名簿（クレーム客記録台帳）ページの専用パスワード（wrangler secret putで設定）
   CC_PASSWORD?: string;
+  // 営業戦略ページ（SR分析＋km-operator連携ピンデータ分析を統合）の専用パスワード（wrangler secret putで設定）
+  SALES_STRATEGY_PASSWORD?: string;
+  // km-operator連携（乗降ピンデータ収集）: 自動ログイン用アカウント（wrangler secret putで設定）
+  // ※Cloudflare Workersからkm-operatorへ直接アクセスすると接続がブロックされることが判明したため、
+  //   現在この2つはWorkers側では未使用。社内PCのスクリプト側でログインし、結果をKM_PINS_UPLOAD_KEYで
+  //   ホシコンへ送り返す方式に変更（scripts/km_pins_collector.ps1参照）。値はスクリプト側の設定で使う。
+  KM_OPERATOR_LOGIN_ID?: string;
+  KM_OPERATOR_PASSWORD?: string;
+  // km-operator連携: 社内PCの収集スクリプト専用キー（ACCIDENTS_UPLOAD_KEYと同じ方式）
+  KM_PINS_UPLOAD_KEY?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

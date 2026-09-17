@@ -2,7 +2,7 @@
 // 認可台数・隔日勤務・日勤勤務は自動反映、事故休車〜浮きは引き続き手入力。
 // 印刷(A4横1枚)・PNG保存はreport_print.tsと同じパターン（html2canvas, cdn.jsdelivr.net）。
 
-import { escHtml, safeJson } from './layout';
+import { escHtml, safeJson, FAVICON_DATA_URI } from './layout';
 import { ADMIN_PATH } from '../config';
 
 export type UtilizationCapacityRow = { division: string; capacity: number };
@@ -58,6 +58,7 @@ export function renderUtilizationReportPage(
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>稼働台数報告表</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

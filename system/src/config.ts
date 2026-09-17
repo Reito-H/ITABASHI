@@ -29,3 +29,8 @@ export const HIYARI_PATH = '/hh-2738ceac08eac11269d76dc733598ba6';
 // 再生する中身は signage_decks.is_monitor=1 を付けたデッキ（/signage 一覧画面で切替）。
 // 印を別デッキへ付け替えても、このURL自体は今後変更しない。URLの推測困難さ自体をアクセス制御とする。
 export const SIGNAGE_PUBLIC_PATH = '/sg-d8b62011db0a09c2c279a620202d9d45';
+
+// 異常気象警報 周知サイネージ（ログイン不要・完全公開の投影ページ）の秘密パス。
+// 通常の交通安全サイネージ（SIGNAGE_PUBLIC_PATH）とは別画面。異常気象警報が出ている間だけ、
+// モニターの表示先をこのURLへ手動で切り替える運用。どの日に表示するかは管理画面のカレンダーで事前指定する。
+export const WEATHER_NOTICE_PUBLIC_PATH = '/wn-3f6a8d15c9247ee0a25de2fb4c02a19b';

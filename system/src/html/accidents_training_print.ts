@@ -2,7 +2,7 @@
 // 対象者ごとに1枚ずつA4のお知らせを出力する。正式な帳票デザインは後日別途用意されるため、
 // 今回は「印刷できる仕組みの枠」としてプレースホルダーの文面を置き、その場でcontenteditable編集して印刷できるようにする。
 // 正式な帳票デザインが来たら、この .sheet 内のマークアップのみ差し替えればよい（データ受け渡し部分は変更不要）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 
 export interface TrainingNoticeItem {
   name: string;
@@ -63,6 +63,7 @@ export function renderAccidentsTrainingPrintPage(o: AccidentsTrainingPrintOption
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>${escHtml(o.pageTitle)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

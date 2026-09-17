@@ -1,7 +1,7 @@
 // 管理者公休予定表（2026年度版レイアウト）画面・印刷の共通描画
 //   元Excel「2026年度・管理者公休予定表.xlsx」の月度シート＋別シート2枚を再現する。
 //   月度 = 前月11日〜当月10日（固定）。班長シフト(kancho_*)とは無関係の別機能。
-import { escHtml, safeJson, saveToastHtml, saveToastScript } from './layout';
+import { escHtml, safeJson, saveToastHtml, saveToastScript, FAVICON_DATA_URI } from './layout';
 import { ADMIN_PATH } from '../config';
 
 export type KkMember = {
@@ -1060,6 +1060,7 @@ async function kkRunImport(){
 export function kanriKoboPrintPage(d: KkPageData): string {
   const { start, end } = kkPeriodRange(d.year, d.month);
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>課長・職員シフト ${d.year}年${d.month}月度</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   @page { size: A4 landscape; margin: 8mm; }
   * { box-sizing: border-box; }

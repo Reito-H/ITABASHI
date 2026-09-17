@@ -5,7 +5,7 @@
 // 社員名簿(employeesテーブル)を氏名検索して自動入力することもできる。
 // A4縦1枚に自動縮小して収める（report_print.ts系のfitSheetToPage方式を踏襲。
 // 印鑑欄等の絶対配置は使わない構成のため、この仕組みだけで2枚に分かれることはない）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 
 export interface AccidentsRideAlongNoticePrintOptions {
   backHref: string;
@@ -19,6 +19,7 @@ export function renderAccidentsRideAlongNoticePrintPage(o: AccidentsRideAlongNot
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>事故添乗研修のお知らせ（印刷用）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

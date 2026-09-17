@@ -8,6 +8,7 @@ import { logLineActivity } from '../utils/activity_log';
 import { issueCaseNoIfEmpty } from '../utils/report_case_no';
 import { normalizeKana } from '../utils/kana';
 import { computeKanchoAttendance } from '../cron';
+import { FAVICON_DATA_URI } from '../html/layout';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -1184,7 +1185,8 @@ function liffLostItemPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>忘れ物対応</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
@@ -1488,7 +1490,8 @@ function liffAccidentPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>事故報告</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
@@ -1806,7 +1809,8 @@ function liffViolationPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>違反報告</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
@@ -2161,7 +2165,8 @@ function liffGeneralReportPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>報告</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
@@ -2450,7 +2455,8 @@ function liffReport2Page(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>報告</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
@@ -3027,7 +3033,8 @@ function liffStaffLookupPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>社員照会</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
     body { background: #f0f4f8; font-family: 'Hiragino Sans','Meiryo',sans-serif; font-size: 15px; height: 100dvh; overflow: hidden; position: relative; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100dvh; color: #6b7280; font-size: 14px; }
@@ -3484,7 +3491,8 @@ function liffCaseSearchPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>電話検索</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
     body { background: #f0f4f8; font-family: 'Hiragino Sans','Meiryo',sans-serif; font-size: 15px; min-height: 100dvh; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100dvh; color: #6b7280; font-size: 14px; }
@@ -3678,7 +3686,8 @@ function liffStaffLookupPlusPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>社員照会＋</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
     body { background: #f0f4f8; font-family: 'Hiragino Sans','Meiryo',sans-serif; font-size: 15px; height: 100dvh; overflow: hidden; position: relative; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100dvh; color: #6b7280; font-size: 14px; }
@@ -4297,7 +4306,8 @@ function liffOtherFeaturesPage(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>その他機能</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 17px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 15px; }

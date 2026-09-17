@@ -1,7 +1,7 @@
 // 安全運転指導書 印刷ページ（/sales-ai/employee/:id/safety-guidance/print）
 // A4縦1枚に自動縮小して収める（sales_ai_report_print.tsのfitSheetToPage方式を踏襲。CSSは独立してこのファイルに持つ）。
 // 文章は utils/driving_safety_guidance.ts のルールベース生成（外部AI/LLM APIへの通信は一切行わない）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import type { DrivingRiskSummary } from '../utils/driving_risk_analysis';
 import type { DrivingSafetyCategoryBreakdown, DrivingSafetyGuidanceContent } from '../utils/driving_safety_guidance';
 
@@ -221,6 +221,7 @@ export function renderSafetyGuidancePrintPage(o: SafetyGuidanceSheetOptions, bac
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>安全運転指導書（${escHtml(o.name)}）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${SAFETY_GUIDANCE_PRINT_CSS}</style>
 </head>
 <body>

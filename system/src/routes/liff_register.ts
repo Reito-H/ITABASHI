@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { bentenUidFromRequest } from '../liff_common';
 import { registerLiffUser } from '../line_bot';
+import { FAVICON_DATA_URI } from '../html/layout';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -69,7 +70,8 @@ function registerPageHtml(liffId: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>LINE連携登録</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }

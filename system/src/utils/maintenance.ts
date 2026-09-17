@@ -6,6 +6,7 @@
 // ===================================================
 
 import type { Env } from '../auth';
+import { FAVICON_DATA_URI } from '../html/layout';
 
 // フラグ読み取り。DB障害時に全体が誤ってメンテ画面にならないよう、
 // 読み取り失敗はメンテOFF扱い（フェイルオープン）
@@ -131,7 +132,8 @@ export function maintenancePage(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>メンテナンス中 | ホシコン</title>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'Hiragino Sans', 'Meiryo', sans-serif;

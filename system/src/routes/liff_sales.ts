@@ -14,6 +14,7 @@ import { getPeriod, getPeriodRange, getPeriodSettings } from '../auth';
 import { bentenUidFromRequest, loadBentenFont } from '../liff_common';
 import { logLineActivity } from '../utils/activity_log';
 import { buildShiftSalesPdf } from '../utils/shift_sales_pdf';
+import { FAVICON_DATA_URI } from '../html/layout';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -407,7 +408,8 @@ function salesPageHtml(liffId: string): string {
   <title>売上記録</title>
   <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body { margin: 0; padding: 0 0 32px; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
     #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }

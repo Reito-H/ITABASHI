@@ -1,6 +1,6 @@
 // 複数社員分 AI売上分析レポート 一括印刷ページ（/sales-ai/report/print-bulk?ids=1,2,3）
 // 1社員=2枚（分析＋所感記入シート、A4縦）で連続出力。各シートの描画は sales_ai_report_print.ts のシート部品を共用する。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import { renderSalesAiReportSheet, renderSalesAiReportCommentSheet, SALES_AI_REPORT_PRINT_CSS, type SalesAiReportSheetOptions } from './sales_ai_report_print';
 
 export function renderSalesAiReportPrintBulkPage(sheets: SalesAiReportSheetOptions[], backHref: string): string {
@@ -13,6 +13,7 @@ export function renderSalesAiReportPrintBulkPage(sheets: SalesAiReportSheetOptio
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>AI売上分析レポート（一括・${sheets.length}名）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${SALES_AI_REPORT_PRINT_CSS}</style>
 </head>
 <body>

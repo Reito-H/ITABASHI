@@ -1,7 +1,7 @@
 // 売上管理・嫌なこと報告・LINE管理の管理者画面ルート
 
 import { Hono } from 'hono';
-import { layout, escHtml, safeJson } from '../html/layout';
+import { layout, escHtml, safeJson, FAVICON_DATA_URI } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import { salesPage, salesDetailPage } from '../html/sales';
 import { getPeriodRange } from '../auth';
@@ -524,7 +524,8 @@ app.get('/interviews/record/:id/print', async (c) => {
   const html = `<!DOCTYPE html><html lang="ja"><head>
   <meta charset="UTF-8"><meta name="robots" content="noindex">
   <title>面談記録 — ${escHtml(r.name)}</title>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; padding: 16px; background: white; font-size: 12px; }
     .no-print { margin-bottom: 10px; }

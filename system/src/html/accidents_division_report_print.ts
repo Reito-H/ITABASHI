@@ -2,7 +2,7 @@
 // A4縦1枚に自動縮小して収める（report_print.tsのfitSheetToPage方式を踏襲）。
 // ※「事故防止AI」は表示名のみ。中身は utils/accident_trend_analysis.ts の buildRuleBasedTrendAnalysis()
 //   が事故記録データを集計してテンプレート文に流し込んだもので、外部AI/LLM APIは使用しない。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import type { TrendAnalysisContent } from '../utils/accident_trend_analysis';
 
 // 「毎年の傾向」「事故多発注意日」（月×曜日ベース率の統計モデルによる。/utils/accident_forecast.tsの予測カレンダーと同じロジック）
@@ -72,6 +72,7 @@ export function renderAccidentDivisionReportPrintPage(o: AccidentDivisionReportP
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>事故防止AI 傾向分析レポート（${o.division}課）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

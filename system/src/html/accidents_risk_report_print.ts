@@ -1,7 +1,7 @@
 // 課別・安全運転リスクレポート 印刷ページ（/accidents/risk/division/:div/report/print）
 // 安全運転リスクランキング（accidents_risk.ts）を数値条件で絞り込んだ結果を、課長など課の責任者に渡すA4横1枚のレポートとして印刷する。
 // A4横1枚に自動縮小して収める（accidents_division_report_print.tsのfitSheetToPage方式を踏襲。CSSは独立してこのファイルに持つ）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import type { DrivingRiskRankingRow } from '../routes/api/sales_ai';
 
 const RISK_LEVEL_LABELS: Record<DrivingRiskRankingRow['riskLevel'], string> = { low: '低', medium: '中', high: '高' };
@@ -65,6 +65,7 @@ export function renderAccidentsRiskReportPrintPage(o: AccidentsRiskReportPrintOp
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>安全運転リスクレポート（${o.division}課）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

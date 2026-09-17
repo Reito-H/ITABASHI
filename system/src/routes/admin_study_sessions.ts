@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import qrcode from 'qrcode-generator';
 import type { Env } from '../auth';
-import { layout, escHtml } from '../html/layout';
+import { layout, escHtml, FAVICON_DATA_URI } from '../html/layout';
 import { getAdminPermissions } from '../permissions';
 import { ADMIN_PATH, STUDY_SESSION_PATH, HIYARI_PATH } from '../config';
 import {
@@ -1521,6 +1521,7 @@ app.get('/settings/study-sessions/hiyari-poster', async (c) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ポスター - ${escHtml(p.title)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style id="page-rule">@page { size: A3 portrait; margin: 0; }</style>
 <style>
   * { box-sizing: border-box; }
@@ -1671,6 +1672,7 @@ app.get('/settings/study-sessions/:id/poster', async (c) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ポスター - ${escHtml(session.title)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style id="page-rule">@page { size: A3 portrait; margin: 0; }</style>
 <style>
   * { box-sizing: border-box; }
@@ -1928,6 +1930,7 @@ app.get('/settings/study-sessions/:id/roster', async (c) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>参加者名簿 - ${escHtml(session.title)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #1f2937; }
@@ -2868,6 +2871,7 @@ app.get('/settings/study-sessions/survey/:id/qr', async (c) => {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>QR - ${escHtml(s.title)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; }

@@ -1,6 +1,6 @@
 // 課長ミッション: 労共契約アラート / 労供上申書 / 労供契約書作成依頼書 / nojico をまとめた入口。
 import { Hono } from 'hono';
-import { layout, escHtml, safeJson } from '../html/layout';
+import { layout, escHtml, safeJson, FAVICON_DATA_URI } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 import { getPeriod, getPeriodRange, getPeriodSettings } from '../auth';
@@ -1122,6 +1122,7 @@ function nokinboPrintDoc(o: NokinboDoc): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>納金簿 ${o.year}年${nkPad2(o.month)}月分</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; margin: 0; padding: 14px; background: #6b7280; color: #000; }

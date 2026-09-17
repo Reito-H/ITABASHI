@@ -3,7 +3,7 @@
 // 表示中のタブ（全体側4種・個人側3種のいずれか1つ）をそのまま印刷できるようにする。
 // 対象人数が可変（数名〜数百名）のため、単票のような1枚縮小ではなく、
 // 表ヘッダー繰り返し・行の途中改ページ禁止によるナチュラルな複数ページ印刷とする。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import type { FareRevisionOverviewResult, FareRevisionEmployeeResult } from '../routes/api/fare_revision';
 import type { EmployeeComparison } from '../utils/fare_revision_analysis';
 
@@ -83,6 +83,7 @@ function shell(title: string, printedAtLabel: string, headSub: string, condLines
 <head>
 <meta charset="UTF-8">
 <title>${escHtml(title)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${FARE_REVISION_PRINT_CSS}</style>
 </head>
 <body>

@@ -5,7 +5,7 @@
 // API（値の編集・取込・AIレポート保存）は routes/api/kacho_mission.ts 側。
 // 実データは D1 summer_safety_2026_people / _entries / _meta（migration_134）。
 import { Hono } from 'hono';
-import { layout, escHtml, safeJson } from '../html/layout';
+import { layout, escHtml, safeJson, FAVICON_DATA_URI } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
 import { getAdminPermissions } from '../permissions';
@@ -556,6 +556,7 @@ app.get('/kacho-mission/summer-safety-2026/print', async (c) => {
 
   return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
 <title>夏季交通安全2026_集計レポート</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   body{font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;color:#0f172a;margin:0;padding:14mm;background:#f1f5f9;}

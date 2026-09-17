@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { layout, saveToastHtml, saveToastScript } from '../html/layout';
+import { layout, saveToastHtml, saveToastScript, FAVICON_DATA_URI } from '../html/layout';
 import { meterPanelHtml, shakenPanelHtml, vehicleDeadlinesClientScript } from '../html/vehicle_deadlines';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
@@ -936,7 +936,7 @@ async function insPrintImage(){
   document.body.appendChild(f);
   const doc=f.contentDocument;
   doc.open();
-  doc.write('<!DOCTYPE html><html><head><title>点検車検確認表_'+m+'月'+d+'日</title><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:278mm;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
+  doc.write('<!DOCTYPE html><html><head><title>点検車検確認表_'+m+'月'+d+'日</title><link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}"><style>@page{size:A4 landscape;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:278mm;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
   doc.close();
   const img=doc.querySelector('img');
   const doPrint=()=>{f.contentWindow.focus();f.contentWindow.print();};

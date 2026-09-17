@@ -7,6 +7,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { STUDY_SESSION_PATH } from '../config';
+import { FAVICON_DATA_URI } from '../html/layout';
 import {
   normalizeSettings, validateAnswer, isQType, answerForClient,
   type SurveyQType, type QSettings,
@@ -398,7 +399,8 @@ app.get(STUDY_SESSION_PATH, async (c) => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>${officeName}</title>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; }
     body { font-family: 'Hiragino Sans','Meiryo',sans-serif; background:#f5f6f8; margin:0; padding:18px; color:#1f2937; font-size:16px; }
     h1 { font-size:20px; color:#1e3a5f; margin:0 0 6px; }

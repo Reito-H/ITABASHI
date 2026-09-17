@@ -3,7 +3,7 @@
 // 画面で読むことに最適化したカード型レイアウト。編集は帳票と同じ [data-field] + autosave APIを共有し、
 // ステータス変更・削除・対応履歴もこの画面で完結する。印刷したいときだけ「印刷用ページ」へ遷移する。
 
-import { escHtml, safeJson } from './layout';
+import { escHtml, safeJson, FAVICON_DATA_URI } from './layout';
 import type { ReportPrintOptions } from './report_print';
 
 export type ReportDetailOptions = ReportPrintOptions & {
@@ -62,6 +62,7 @@ export function renderReportDetailPage(o: ReportDetailOptions): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>${escHtml(o.pageTitle)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }

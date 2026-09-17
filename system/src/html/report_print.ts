@@ -2,7 +2,7 @@
 // A4横サイズの1枚に「宛先」「詳細内容」「追加備考」をまとめて印刷/PNG保存できる。
 // 宛先・追加備考は contenteditable にして、印刷にもhtml2canvasの画像化にも同じ見た目で反映させる。
 
-import { escHtml, safeJson } from './layout';
+import { escHtml, safeJson, FAVICON_DATA_URI } from './layout';
 
 export interface ReportPrintField {
   label: string;
@@ -89,6 +89,7 @@ export function renderReportPrintPage(o: ReportPrintOptions): string {
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>${escHtml(o.pageTitle)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

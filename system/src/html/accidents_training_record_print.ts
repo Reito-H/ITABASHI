@@ -1,6 +1,6 @@
 // 事故研修記録 個別印刷ページ（/accidents/training-record/:id/print）
 // A4縦1枚に自動縮小して収める（accidents_ride_along_notice_print.ts等と同じfitSheetToPage方式）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 
 export interface TrainingRecordPrintData {
   employee_name: string;
@@ -35,6 +35,7 @@ export function renderAccidentsTrainingRecordPrintPage(o: AccidentsTrainingRecor
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>事故研修記録（印刷用）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

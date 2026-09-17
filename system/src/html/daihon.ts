@@ -1,3 +1,4 @@
+import { FAVICON_DATA_URI } from './layout';
 // 台本（板橋ページ）— スライド＋台本デッキ
 //   - パワポのように「見出し＋箇条書き」のスライドと、読み上げ用の「台本」を1枚ずつ編集
 //   - present : 全画面プレゼン（←→/スペースで送り、F 全画面、N で下部に台本バー）
@@ -317,6 +318,7 @@ export function daihonPresentPage(deck: DaihonDeck, slides: DaihonSlide[]): stri
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(deck.title)}｜プレゼン</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${DAIHON_CSS}</style>
 </head><body>
 <div class="dh-stage-wrap"><div class="dh-stage" id="dh-stage">${sections}</div></div>
@@ -338,6 +340,7 @@ export function daihonPrintPage(deck: DaihonDeck, slides: DaihonSlide[]): string
   }).join('\n');
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
 <title>${esc(deck.title)}｜印刷（台本つき）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${DAIHON_CSS}
   /* --- 印刷は container query を使わず px で組み直す --- */
   html,body{height:auto;background:#fff;color:#1f2937;}

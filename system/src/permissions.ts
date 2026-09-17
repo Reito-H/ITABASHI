@@ -19,7 +19,8 @@
 //              （親 settings.study-sessions を持てば全タブ利用可）
 //   設定サブページ: settings.accounts / settings.liff / settings.line-usage /
 //              settings.notifications / settings.offices / settings.documents / settings.study-notes / settings.tutorial /
-//              settings.status / settings.sr / settings.chosei / settings.announcement-bar / settings.birthday /
+//              settings.status / settings.sales-strategy / settings.chosei / settings.announcement-bar / settings.birthday /
+//              settings.weather-notice /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
 //              settings.lost-items / settings.accidents / settings.violations / settings.general-reports /
 //              settings.handover-memos / settings.violation-types /
@@ -51,8 +52,11 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/notifications/,        'settings.notifications'],
   [/^\/settings\/offices/,              'settings.offices'],
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
-  // SR（S.RIDE迎車注文リスト）分析。ページ権限に加え、開くたび専用パスワードも必要（admin_sr.ts側で判定）
-  [/^\/settings\/sr/,                   'settings.sr'],
+  // 営業戦略（SR分析＋km-operator連携ピンデータ分析を統合。ページ権限に加え、開くたび専用パスワードも必要）
+  [/^\/settings\/sales-strategy/,       'settings.sales-strategy'],
+  // SR分析・乗降ピン分析は営業戦略ページからiframeで埋め込む内部ページ。権限キーは統合済み（旧settings.sr/settings.km-pinsは廃止）
+  [/^\/settings\/sr/,                   'settings.sales-strategy'],
+  [/^\/settings\/km-pins/,              'settings.sales-strategy'],
   // データセンター（資料センター拡張）: 資料/社員CSV/点検写真AI/乗務員シフトPDFの入口。各タブの表示は data-perm-key で個別制御
   [/^\/settings\/documents/,            'settings.documents|staff|inspection|crew-shift'],
   // 学習ノート（管理者本人の私的な学習用ノート教材。タイトルごとにページ保存しPDF出力）
@@ -61,6 +65,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
+  [/^\/settings\/weather-notice/,       'settings.weather-notice'],
   // 板橋ページ本体。親キー settings.study-sessions を持てば全タブ利用可。
   // タブ単位で絞るための子キー（settings.hiyari 等）のいずれかでもページに入れる。
   [/^\/settings\/study-sessions/,       'settings.study-sessions|settings.hiyari|settings.surveys|settings.daihon|settings.office-opinions'],
@@ -92,7 +97,9 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
   [/^\/api\/birthday/,                  'settings.birthday'],
-  [/^\/api\/sr/,                        'settings.sr'],
+  [/^\/api\/weather-notice/,            'settings.weather-notice'],
+  [/^\/api\/sr/,                        'settings.sales-strategy'],
+  [/^\/api\/km-pins/,                   'settings.sales-strategy'],
   // 各ページ
   [/^\/daihon(\/|$)/, 'settings.daihon|settings.study-sessions'],
   [/^\/kancho-shift/, 'kancho-shift'],
@@ -294,13 +301,14 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.offices',       label: '営業所' },
     { key: 'settings.announcement-bar', label: 'アナウンスバー' },
     { key: 'settings.birthday',         label: 'ハッピーバースデーモード' },
+    { key: 'settings.weather-notice',   label: '異常気象警報 周知サイネージ' },
     { key: 'settings.chosei',           label: '調整（日程調整）' },
     { key: 'settings.documents',        label: 'データセンター（資料・社員CSV・点検写真AI・シフトPDF）' },
     { key: 'settings.study-notes',      label: '学習ノート（個人用ノート教材のページ保存・PDF出力）' },
     { key: 'settings.tutorial',         label: 'チュートリアル' },
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
     { key: 'settings.status',           label: 'システムステータス' },
-    { key: 'settings.sr',               label: 'SR（S.RIDE迎車分析）', note: '別途、専用パスワードでも保護' },
+    { key: 'settings.sales-strategy',   label: '営業戦略（SR分析＋乗降ピン分析）', note: '別途、専用パスワードでも保護。実在の顧客氏名等を含む場合あり' },
     { key: 'settings.wage-estimate',    label: '賃金試算設定' },
     { key: 'settings.driving-risk',     label: '運転リスク検証設定' },
     { label: 'シフト関連の設定', children: [

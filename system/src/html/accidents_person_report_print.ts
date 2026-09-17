@@ -2,7 +2,7 @@
 // A4縦1枚に自動縮小して収める（report_print.tsのfitSheetToPage方式を踏襲）。
 // ※「AI」は表示名のみ。中身は utils/accident_trend_analysis.ts の buildRuleBasedTrendAnalysis()
 //   が事故記録データを集計してテンプレート文に流し込んだもので、外部AI/LLM APIは使用しない。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import type { TrendAnalysisContent } from '../utils/accident_trend_analysis';
 
 export type AccidentAiReportContent = TrendAnalysisContent;
@@ -42,6 +42,7 @@ export function renderAccidentPersonReportPrintPage(o: AccidentPersonReportPrint
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>AI事故傾向分析レポート（${escHtml(o.name)}）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

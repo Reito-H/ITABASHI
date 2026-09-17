@@ -19,12 +19,6 @@ import { AIRPORT_MAP_AREAS, AIRPORT_MAP_VIEWBOX } from '../html/airport_map_path
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
-// パスワードはソースに書かず wrangler secret put SR_PASSWORD で設定する（wrangler.toml参照）
-function checkPassword(c: { req: { header: (n: string) => string | undefined }; env: Env }): boolean {
-  const expected = c.env.SR_PASSWORD;
-  return !!expected && c.req.header('X-SR-Password') === expected;
-}
-
 async function adminName(c: { env: Env; get: (k: 'adminId') => number }): Promise<string> {
   const row = await c.env.DB.prepare('SELECT username FROM admins WHERE id = ?')
     .bind(c.get('adminId')).first<{ username: string }>();
@@ -179,18 +173,14 @@ function srWhere(start: string, end: string, opts: { weekday?: number; excludeFa
 }
 
 // ===== ページ =====
+// ?embed=1 で呼ばれた場合はサイドバー等の外枠を省き、営業戦略ページ(admin_sales_strategy.ts)から
+// iframeで埋め込めるようにする。パスワードは営業戦略ページ側で1回だけ確認するため、
+// このページ・配下のAPI自体はもうパスワードを要求しない（旧SR_PASSWORD方式は廃止）。
 app.get('/settings/sr', async (c) => {
-  const html = settingsSubHeader('SR（S.RIDE 迎車注文リスト分析）') + `
+  const embed = c.req.query('embed') === '1';
+  const html = (embed ? '' : settingsSubHeader('SR（S.RIDE 迎車注文リスト分析）')) + `
     <div style="max-width:1180px;">
-      <div id="sr-gate" style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:40px 24px;text-align:center;max-width:360px;margin:60px auto;">
-        <div style="font-size:32px;margin-bottom:10px;">🔒</div>
-        <div style="font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:14px;">SR分析はパスワードが必要です</div>
-        <input type="password" id="sr-pw-input" placeholder="パスワード" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:10px 12px;font-size:15px;text-align:center;letter-spacing:0.1em;box-sizing:border-box;margin-bottom:10px;">
-        <div id="sr-pw-error" style="display:none;color:#dc2626;font-size:12px;margin-bottom:10px;">パスワードが違います</div>
-        <button type="button" id="sr-pw-submit" style="width:100%;padding:10px;background:#1e3a5f;color:white;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">開く</button>
-      </div>
-
-      <div id="sr-main" style="display:none;">
+      <div id="sr-main" style="display:block;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
           <button type="button" class="sr-tab-btn" data-tab="analysis" onclick="srShowTab('analysis')">📊 分析</button>
           <button type="button" class="sr-tab-btn" data-tab="upload" onclick="srShowTab('upload')">📥 データ取込</button>
@@ -532,34 +522,16 @@ app.get('/settings/sr', async (c) => {
     var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
     var MAP_AREAS = ${safeJson(AIRPORT_MAP_AREAS)};
     var MAP_VIEWBOX = ${JSON.stringify(AIRPORT_MAP_VIEWBOX)};
-    var srPassword = '';
-
-    // ===== パスワードゲート =====
-    document.getElementById('sr-pw-submit').addEventListener('click', srTryOpen);
-    document.getElementById('sr-pw-input').addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); srTryOpen(); } });
 
     function srApi(method, path, body) {
       return fetch(ADMIN_PATH + '/api/sr' + path, {
         method: method,
-        headers: { 'Content-Type': 'application/json', 'X-SR-Password': srPassword },
+        headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined,
-      }).then(function(r) {
-        if (r.status === 401) { throw new Error('PASSWORD'); }
-        return r.json();
-      });
+      }).then(function(r) { return r.json(); });
     }
 
-    function srTryOpen() {
-      srPassword = document.getElementById('sr-pw-input').value;
-      srApi('GET', '/summary').then(function() {
-        document.getElementById('sr-gate').style.display = 'none';
-        document.getElementById('sr-main').style.display = 'block';
-        srShowTab('analysis');
-      }).catch(function() {
-        srPassword = '';
-        document.getElementById('sr-pw-error').style.display = 'block';
-      });
-    }
+    srShowTab('analysis');
 
     function srShowTab(id) {
       document.querySelectorAll('.sr-tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === id); });
@@ -1226,13 +1198,12 @@ app.get('/settings/sr', async (c) => {
     }
     </script>
   `;
-  return c.html(layout('SR分析', html, 'settings'));
+  return c.html(layout('SR分析', html, 'settings', '', embed));
 });
 
-// ===== API（すべて X-SR-Password ヘッダー必須） =====
+// ===== API（パスワード不要。営業戦略ページ側で1回だけ確認済みの前提） =====
 
 app.get('/api/sr/summary', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
   const start = isValidDate(c.req.query('start')) ? `${c.req.query('start')} 00:00:00` : '2000-01-01 00:00:00';
   const end = isValidDate(c.req.query('end')) ? `${c.req.query('end')} 23:59:59` : '2999-12-31 23:59:59';
   const weekdayParam = c.req.query('weekday');
@@ -1321,7 +1292,6 @@ app.get('/api/sr/summary', async (c) => {
 // 住所／エリアを算出する。日付範囲・曜日フィルタ・探車失敗の設定（画面上部）とは独立して、
 // 常に全期間・探車失敗除外・実際に支払われた金額(amount_collected>0)のみで集計する。
 app.get('/api/sr/now', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
   const hourParam = c.req.query('hour');
   const hour = hourParam !== undefined && /^\d{1,2}$/.test(hourParam) ? Number(hourParam) % 24 : new Date().getUTCHours();
   const hours = [(hour + 23) % 24, hour, (hour + 1) % 24];
@@ -1362,7 +1332,6 @@ app.get('/api/sr/now', async (c) => {
 });
 
 app.get('/api/sr/customer', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
   const phone = (c.req.query('phone') ?? '').trim();
   if (!phone) return c.json({ error: 'phoneが必要です' }, 400);
   const rows = await c.env.DB.prepare(
@@ -1374,7 +1343,6 @@ app.get('/api/sr/customer', async (c) => {
 });
 
 app.get('/api/sr/uploads', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
   const rows = await c.env.DB.prepare('SELECT * FROM sr_uploads ORDER BY id DESC LIMIT 50').all();
   return c.json({ items: rows.results ?? [] });
 });
@@ -1382,7 +1350,6 @@ app.get('/api/sr/uploads', async (c) => {
 // S.RIDE管理画面に自動ログインして注文リストCSVを取得し、生バイト列（Shift_JIS）をそのまま返す。
 // サーバー側ではパースせず、ブラウザ側の既存ロジック（srParseCsv）にそのまま渡す。
 app.get('/api/sr/fetch_remote', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
 
   const loginId = c.env.SRIDE_LOGIN_ID;
   const loginPw = c.env.SRIDE_PASSWORD;
@@ -1414,7 +1381,6 @@ app.get('/api/sr/fetch_remote', async (c) => {
 });
 
 app.post('/api/sr/import/rows', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
   const body = await c.req.json<{ rows?: Array<Record<string, unknown>> }>().catch(() => ({}) as { rows?: Array<Record<string, unknown>> });
   const rows = body.rows ?? [];
   if (rows.length === 0) return c.json({ ok: true, saved: 0 });
@@ -1442,7 +1408,6 @@ app.post('/api/sr/import/rows', async (c) => {
 });
 
 app.post('/api/sr/import/finish', async (c) => {
-  if (!checkPassword(c)) return c.json({ error: 'パスワードが違います' }, 401);
   const body = await c.req.json<{ file_name?: string; row_count?: number }>().catch(() => ({}) as { file_name?: string; row_count?: number });
   const name = await adminName(c);
   const totalRow = await c.env.DB.prepare('SELECT COUNT(*) AS c FROM sr_orders').first<{ c: number }>();

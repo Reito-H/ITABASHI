@@ -6,7 +6,7 @@
 //   ・印刷は「宛先なし（告知用）」か「参加者を選ぶ」。選ぶと選んだ人数分、宛先ブロックを
 //     「◯課◯班 氏名 様」に差し替えて1人1ページで連続印刷する。
 // データは読み込み時に GET /api/study-sessions/:id/guide-data から取得する（このHTMLには埋め込まない）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 
 export function renderGuideEditor(opts: {
   adminPath: string;
@@ -21,6 +21,7 @@ export function renderGuideEditor(opts: {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>当日のご案内 - ${escHtml(opts.title)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style id="page-size-rule">@page { size: A4 portrait; margin: 0; }</style>
 <style>
   * { box-sizing: border-box; }

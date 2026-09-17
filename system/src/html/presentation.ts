@@ -2,7 +2,7 @@
 // パス /presentation は permissions.ts の PATH_PERMISSIONS に意図的に登録していない。
 // これにより権限制限アカウントは自動的に403となり、permissions=NULLのフル権限adminだけが閲覧できる
 // （src/routes/admin_line_usage.ts と同じ設計パターン）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 
 type Slide = { eyebrow: string; body: string };
 
@@ -148,6 +148,7 @@ export function presentationPage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>ホシコン発表資料</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #111827; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #1f2937; height: 100%; }

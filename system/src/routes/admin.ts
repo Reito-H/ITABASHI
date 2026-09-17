@@ -4,7 +4,7 @@ import {
   isLockedOut, recordFailedLogin, getSessionFromCookie,
   getShiftDisplayRange, getPeriodRange, getPeriodSettings,
 } from '../auth';
-import { layout, loginPage, loginSelectPage, escHtml, formatJst, type LoginMode } from '../html/layout';
+import { layout, loginPage, loginSelectPage, escHtml, formatJst, type LoginMode, FAVICON_DATA_URI } from '../html/layout';
 import { shiftPage } from '../html/shift';
 import type { Env } from '../auth';
 import type {
@@ -162,7 +162,8 @@ app.get('/setup', async (c) => {
   }
 
   return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>初期設定</title>
-  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);width:20rem}h1{font-size:1.1rem;font-weight:700;margin-bottom:1rem}p{font-size:.875rem;color:#6b7280;margin-bottom:1rem}input{width:100%;border:1px solid #e5e7eb;border-radius:.25rem;padding:.5rem .75rem;margin-bottom:.75rem;font-size:.875rem}button,a{display:block;width:100%;background:#2563eb;color:#fff;border:none;border-radius:.25rem;padding:.5rem;font-size:.875rem;text-align:center;cursor:pointer;text-decoration:none}</style></head>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);width:20rem}h1{font-size:1.1rem;font-weight:700;margin-bottom:1rem}p{font-size:.875rem;color:#6b7280;margin-bottom:1rem}input{width:100%;border:1px solid #e5e7eb;border-radius:.25rem;padding:.5rem .75rem;margin-bottom:.75rem;font-size:.875rem}button,a{display:block;width:100%;background:#2563eb;color:#fff;border:none;border-radius:.25rem;padding:.5rem;font-size:.875rem;text-align:center;cursor:pointer;text-decoration:none}</style></head>
   <body><div class="box">
     <h1>管理者パスワード設定</h1>
     <p>8文字以上のパスワードを設定してください。</p>
@@ -195,7 +196,8 @@ app.post('/setup', async (c) => {
     'UPDATE admins SET password = ? WHERE username = ?'
   ).bind(hash, 'admin').run();
   return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>設定完了</title>
-  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);width:20rem;text-align:center}.emo{font-size:2.25rem;margin-bottom:1rem}h1{font-size:1.1rem;font-weight:700;margin-bottom:.5rem}p{font-size:.875rem;color:#6b7280;margin-bottom:1rem}a{display:block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem;font-size:.875rem;text-align:center;text-decoration:none}</style></head>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f3f4f6;display:flex;align-items:center;justify-content:center;min-height:100vh}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);width:20rem;text-align:center}.emo{font-size:2.25rem;margin-bottom:1rem}h1{font-size:1.1rem;font-weight:700;margin-bottom:.5rem}p{font-size:.875rem;color:#6b7280;margin-bottom:1rem}a{display:block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem;font-size:.875rem;text-align:center;text-decoration:none}</style></head>
   <body><div class="box">
     <div class="emo">✅</div>
     <h1>パスワード設定完了</h1>
@@ -844,7 +846,8 @@ app.get('/shift/print/:empId', async (c) => {
   <meta charset="UTF-8">
   <meta name="robots" content="noindex">
   <title>${escHtml(emp.name)} 勤務予定表</title>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Hiragino Sans', 'MS Gothic', 'Meiryo', sans-serif; background: white; padding: 16px; font-size: 12px; }
     .print-btn { margin-bottom: 12px; padding: 8px 20px; background: #1a3a5c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
@@ -916,6 +919,7 @@ app.get('/settings', async (c) => {
     { heading: 'アナウンス', cards: [
       { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー' },
       { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード' },
+      { href: `${ADMIN}/settings/weather-notice`,    perm: 'settings.weather-notice',   title: '異常気象警報 周知サイネージ' },
     ]},
     { heading: 'シフト関連の設定', cards: [
       { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', highlight: true },
@@ -931,9 +935,7 @@ app.get('/settings', async (c) => {
       { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金' },
       { href: `${ADMIN}/cc-list`,                  perm: 'cc-list',                  title: 'CC名簿' },
     ]},
-    { heading: '迎車データ分析', cards: [
-      { href: `${ADMIN}/settings/sr`, perm: 'settings.sr', title: 'SR（S.RIDE 迎車分析）' },
-    ]},
+    // 営業戦略（SR分析＋乗降ピン分析）は左サイドバーに専用項目があるため、設定一覧からは削除
     { heading: '調整', cards: [
       { href: `${ADMIN}/settings/chosei`, perm: 'settings.chosei', title: '調整' },
     ]},

@@ -2,7 +2,7 @@
 // A4縦を連続配置し、各シートを report_print.ts 系と同じ fitSheetToPage 方式で自動縮小して収める。
 // 枚数は対象者の有無で変動する（renderMaterialSheetsInner()参照）。
 // ページ内容は accidents_material_render.ts の renderMaterialSheetsInner() で組み立てる（Web版と共通）。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import { MATERIAL_PAGE_CSS, FIT_ALL_SHEETS_SCRIPT, renderMaterialSheetsInner } from './accidents_material_render';
 import type { MaterialStats, PersonalStats } from '../utils/accident_material_stats';
 
@@ -29,6 +29,7 @@ export function renderAccidentsMaterialPrintPage(o: AccidentsMaterialPrintOption
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>事故防止研修教材（印刷用）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #e5e7eb; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; color: #111827; }

@@ -89,22 +89,28 @@ import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import adminChoseiRoutes from './routes/admin_chosei';
 import adminSignageRoutes from './routes/admin_signage';
+import adminWeatherNoticeRoutes from './routes/admin_weather_notice';
 import adminDaihonRoutes from './routes/admin_daihon';
 import adminSrRoutes from './routes/admin_sr';
+import adminKmPinsRoutes from './routes/admin_km_pins';
+import adminSalesStrategyRoutes from './routes/admin_sales_strategy';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
 import publicAccidentsMonitorRoutes from './routes/public_accidents_monitor';
 import publicAccidentsUploadRoutes from './routes/public_accidents_upload';
+import publicKmPinsUploadRoutes from './routes/public_km_pins_upload';
 import publicStudyNotesUploadRoutes from './routes/public_study_notes_upload';
 import publicStudySessionsRoutes from './routes/public_study_sessions';
 import publicChoseiRoutes from './routes/public_chosei';
 import publicHiyariRoutes from './routes/public_hiyari';
 import publicSignageRoutes from './routes/public_signage';
+import publicWeatherNoticeRoutes from './routes/public_weather_notice';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
 import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH } from './config';
+import { FAVICON_DATA_URI } from './html/layout';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -149,6 +155,10 @@ app.use('*', async (c, next) => {
   // やることリスト: 引き継ぎシートのフローティングパネルにiframe埋め込みするため、
   // embed=1指定時のみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
   const isTodoEmbed = pathname === `/${SECRET}/admin/todo` && reqUrl.searchParams.get('embed') === '1';
+  // 営業戦略ページがSR分析・乗降ピン分析を同一オリジンでiframe埋め込みするため、
+  // embed=1指定時のみこの2ページのフレーム表示を許可する（他ページは引き続き全面禁止）
+  const isSalesStrategyEmbed = (pathname === `/${SECRET}/admin/settings/sr` || pathname === `/${SECRET}/admin/settings/km-pins`)
+    && reqUrl.searchParams.get('embed') === '1';
   // 事故防止AI: 引き継ぎシートのポップアップに課別傾向分析レポートをiframe埋め込みするため、
   // このレポートページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
   const isAccidentAiEmbed = pathname.startsWith(`/${SECRET}/admin/accidents/division/`) && pathname.endsWith('/report/print');
@@ -206,7 +216,7 @@ app.use('*', async (c, next) => {
   } else {
     // やることリスト・事故防止AIレポートのembedページのみ、引き継ぎシートのフローティングパネル/ポップアップから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAutumnTefudaPrint;
+    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAutumnTefudaPrint || isSalesStrategyEmbed;
     c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -296,7 +306,8 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
     return c.html(`<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>アクセス権限がありません</title>
-    <style>body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center}h1{font-size:1.05rem;margin:0 0 .5rem}p{font-size:.85rem;color:#6b7280;margin:0 0 1rem}a{display:inline-block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem 1.25rem;font-size:.85rem;text-decoration:none}</style></head>
+    <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>body{font-family:'Hiragino Sans','Meiryo',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.box{background:#fff;padding:2rem;border-radius:.75rem;box-shadow:0 1px 3px rgba(0,0,0,.1);text-align:center}h1{font-size:1.05rem;margin:0 0 .5rem}p{font-size:.85rem;color:#6b7280;margin:0 0 1rem}a{display:inline-block;background:#2563eb;color:#fff;border-radius:.25rem;padding:.5rem 1.25rem;font-size:.85rem;text-decoration:none}</style></head>
     <body><div class="box"><h1>アクセス権限がありません</h1><p>このページを表示する権限がこのアカウントにはありません。</p><a href="${ADMIN_PATH}">ホームに戻る</a></div></body></html>`, 403);
   };
 
@@ -349,6 +360,8 @@ app.route(`/${SECRET}/admin`, adminCrewShiftRoutes);
 app.route(`/${SECRET}/admin`, adminAttendanceBoardRoutes);
 app.route(`/${SECRET}/admin`, adminDispatchRoutes);
 app.route(`/${SECRET}/admin`, adminSrRoutes);
+app.route(`/${SECRET}/admin`, adminKmPinsRoutes);
+app.route(`/${SECRET}/admin`, adminSalesStrategyRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminAnnouncementBarRoutes);
@@ -374,6 +387,7 @@ app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 app.route(`/${SECRET}/admin`, adminChoseiRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
+app.route(`/${SECRET}/admin`, adminWeatherNoticeRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
 
 // =====================
@@ -486,11 +500,13 @@ app.route('', liffKanchoRoutes);
 app.route('', publicKanchoWishRoutes);
 app.route('', publicAccidentsMonitorRoutes);
 app.route('', publicAccidentsUploadRoutes);
+app.route('', publicKmPinsUploadRoutes);
 app.route('', publicStudyNotesUploadRoutes);
 app.route('', publicStudySessionsRoutes);
 app.route('', publicChoseiRoutes);
 app.route('', publicHiyariRoutes);
 app.route('', publicSignageRoutes);
+app.route('', publicWeatherNoticeRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

@@ -1,3 +1,4 @@
+import { FAVICON_DATA_URI } from './layout';
 // 事故モニター表示（ログイン不要・常時表示用）
 // かつて「無事故キロ数計算」を印刷して時計下に掲示していた運用の置き換え。
 // 事故の総数・課別件数（0件の課も含め1〜4課すべて）・時間帯を表示し、モニターに映しっぱなしにする想定。
@@ -11,6 +12,7 @@ export function accidentsMonitorPage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>事故モニター表示</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   * { box-sizing: border-box; }
   html, body {

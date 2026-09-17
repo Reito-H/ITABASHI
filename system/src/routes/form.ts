@@ -3,6 +3,7 @@
 
 import { Hono } from 'hono';
 import type { Env } from '../auth';
+import { FAVICON_DATA_URI } from '../html/layout';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -237,6 +238,7 @@ function expiredPage(): string {
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>リンク期限切れ</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>body{font-family:'Hiragino Sans',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f0f4f8;}
 .box{text-align:center;padding:32px;background:white;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.1);max-width:320px;}
 .icon{font-size:48px;margin-bottom:16px;}
@@ -257,7 +259,8 @@ function lostItemFormPage(token: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
   <title>忘れ物対応</title>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
     body{margin:0;padding:0;background:#f0f4f8;font-family:'Hiragino Sans','Meiryo',sans-serif;font-size:15px;}
     .page{max-width:520px;margin:0 auto;padding:16px 16px 40px;}
@@ -516,7 +519,8 @@ function accidentFormPage(token: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
   <title>事故報告</title>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
     body{margin:0;padding:0;background:#f0f4f8;font-family:'Hiragino Sans','Meiryo',sans-serif;font-size:15px;}
     .page{max-width:520px;margin:0 auto;padding:16px 16px 40px;}

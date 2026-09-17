@@ -2,7 +2,7 @@
 // A4縦1枚に自動縮小して収める（report_print.tsのfitSheetToPage方式を踏襲）。
 // ※「AI」は表示名のみ。中身は utils/sales_trend_analysis.ts の buildRuleBasedSalesAnalysis()
 //   が売上データを集計してテンプレート文に流し込んだもので、外部AI/LLM APIは使用しない。
-import { escHtml } from './layout';
+import { escHtml, FAVICON_DATA_URI } from './layout';
 import type { SalesAnalysisContent } from '../utils/sales_trend_analysis';
 import type { DrivingRiskSummary } from '../utils/driving_risk_analysis';
 
@@ -270,6 +270,7 @@ export function renderSalesAiReportPrintPage(o: SalesAiReportSheetOptions, backH
 <meta charset="UTF-8">
 <meta name="robots" content="noindex, nofollow">
 <title>AI売上分析レポート（${escHtml(o.name)}）</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>${SALES_AI_REPORT_PRINT_CSS}</style>
 </head>
 <body>

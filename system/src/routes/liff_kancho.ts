@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { getPeriodSettings, getPeriodRange, getShiftDisplayRange, getPeriod } from '../auth';
 import { logLineActivity } from '../utils/activity_log';
+import { FAVICON_DATA_URI } from '../html/layout';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -72,7 +73,8 @@ app.get('/liff/kancho-shift', (c) => {
   <meta name="robots" content="noindex, nofollow">
   <title>班長シフト</title>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-  <style>
+  <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; background: #f5f6f8; padding: 10px; }
     .hd { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }

@@ -10,7 +10,7 @@
 //  PowerPoint 書き出し: ブラウザ側で pptx(zip) を生成（fflate）。テキスト＝図形、記入表＝表、
 //    オービス/紅葉＝PNG化して画像で貼り付け。
 
-import { escHtml, safeJson } from './layout';
+import { escHtml, safeJson, FAVICON_DATA_URI } from './layout';
 
 // ============================================================ 型
 
@@ -403,6 +403,7 @@ export function autumnTefudaPrintDoc(
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>秋の全国交通安全運動 手札</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
   *{box-sizing:border-box;}
   body{margin:0;padding:14px;background:#5b4a3a;
