@@ -325,7 +325,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     </nav>
     <div style="padding:12px 0;border-top:1px solid rgba(255,255,255,0.1);">
       <form method="POST" action="${ADMIN_PATH}/logout" style="margin:0;">
-        <button type="submit" class="nav-item" style="color:#fca5a5;background:none;border:none;width:100%;text-align:left;font:inherit;cursor:pointer;">ログアウト</button>
+        <button type="submit" class="nav-item" style="color:#fca5a5;background:none;border:none;width:calc(100% - 20px);text-align:left;font:inherit;cursor:pointer;">ログアウト</button>
       </form>
     </div>
   </div>
