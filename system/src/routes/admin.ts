@@ -254,7 +254,7 @@ app.get('/', async (c) => {
     { href: `${ADMIN_PATH}/staff`,                   nav: 'staff',         label: '社員管理' },
     { href: `${ADMIN_PATH}/handover`,                nav: 'handover',      label: '引き継ぎ' },
     { href: `${ADMIN_PATH}/tenko`,                   nav: 'tenko',         label: '点呼' },
-    { href: `${ADMIN_PATH}/settings/reports`,        perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos', label: '報告センター' },
+    { href: `${ADMIN_PATH}/settings/reports`,        perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports', label: '報告センター' },
     { href: `${ADMIN_PATH}/kancho-shift`,            nav: 'kancho-shift',  label: '班長シフト' },
     { href: `${ADMIN_PATH}/kacho-mission`,           perm: 'kacho-mission staff', label: '課長ミッション' },
     { href: `${ADMIN_PATH}/sales-ai`,                nav: 'sales-ai',      label: 'AI売上分析' },
@@ -341,7 +341,7 @@ app.get('/', async (c) => {
   const opsHtml = [
     opRow({ label: '当直・出勤班長', badge: kanchoBadge, sub: kanchoSub, goLabel: '班長シフト', href: `${ADMIN_PATH}/kancho-shift`, nav: 'kancho-shift' }),
     opRow({ label: '引き継ぎシート', badge: '<span class="op-badge op-muted">確認</span>', sub: '課の申し送り事項', goLabel: '開く', href: `${ADMIN_PATH}/handover`, nav: 'handover' }),
-    opRow({ label: '対応中の報告', badge: reportsBadge, sub: reportsSub, goLabel: '報告センター', href: `${ADMIN_PATH}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos' }),
+    opRow({ label: '対応中の報告', badge: reportsBadge, sub: reportsSub, goLabel: '報告センター', href: `${ADMIN_PATH}/settings/reports`, perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports' }),
     opRow({ label: '今日のイベント', badge: eventsBadge, sub: eventsSub, goLabel: '板橋ページ', href: `${ADMIN_PATH}/settings/study-sessions`, perm: 'settings.study-sessions' }),
   ].join('');
 
@@ -380,21 +380,37 @@ app.get('/', async (c) => {
 
   const content = `
 <style>
-  .hm { font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; }
+  .hm {
+    font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; position:relative;
+    padding:22px 22px 28px; margin:-16px -16px 0; border-radius:0 0 22px 22px;
+    background:
+      radial-gradient(900px 420px at 12% -8%, rgba(86,102,255,0.12), transparent 62%),
+      radial-gradient(760px 360px at 100% -6%, rgba(244,166,33,0.10), transparent 58%),
+      var(--color-bg, #f5f8fd);
+  }
   .hm-sec-title { font-size:14px; font-weight:700; color:#64748b; letter-spacing:.06em; margin:0 2px 10px; }
   /* ===== 今日オペレーション画面（新ホーム） ===== */
   .today-head { display:flex; align-items:baseline; gap:12px; margin:2px 2px 16px; flex-wrap:wrap; }
   .today-date { font-size:22px; font-weight:800; color:var(--color-text, #141d2c); letter-spacing:.02em; }
   .today-sub { font-size:12px; color:#94a3b8; }
   /* 横断検索バー（社員名・車番・案件ID・ページ名を1本で） */
-  .today-search { display:flex; gap:8px; align-items:center; background:#fff; border:1px solid var(--color-border, #e4eaf5); border-radius:12px; padding:12px 14px; margin-bottom:22px; }
+  .today-search {
+    display:flex; gap:8px; align-items:center; margin-bottom:22px; padding:12px 14px; border-radius:16px;
+    background:rgba(255,255,255,0.6); backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%);
+    border:1px solid rgba(255,255,255,0.7); box-shadow:0 4px 18px rgba(20,29,44,0.05);
+  }
   .today-search svg { flex:none; color:#94a3b8; }
   .today-search input { flex:1; min-width:0; border:none; outline:none; font-size:15px; padding:2px 0; background:transparent; color:var(--color-text, #141d2c); }
   .today-search input::placeholder { color:#9aa6ba; }
   /* オペレーション行 */
   .op-list { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
-  .op-row { display:grid; grid-template-columns:150px 1fr auto; align-items:center; gap:14px; background:#fff; border:1px solid var(--color-border, #e4eaf5); border-radius:12px; padding:15px 18px; text-decoration:none; transition:border-color .15s, box-shadow .15s, transform .05s; }
-  .op-row:hover { border-color:var(--color-action, #5666ff); box-shadow:0 4px 16px rgba(86,102,255,.10); }
+  .op-row {
+    display:grid; grid-template-columns:150px 1fr auto; align-items:center; gap:14px; padding:15px 18px; border-radius:16px; text-decoration:none;
+    background:rgba(255,255,255,0.58); backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%);
+    border:1px solid rgba(255,255,255,0.7); box-shadow:0 4px 18px rgba(20,29,44,0.05);
+    transition:background .15s, border-color .15s, box-shadow .15s, transform .08s;
+  }
+  .op-row:hover { background:rgba(255,255,255,0.8); border-color:rgba(86,102,255,0.35); box-shadow:0 10px 26px rgba(86,102,255,.16); transform:translateY(-1px); }
   .op-row:active { transform:translateY(1px); }
   .op-label { font-size:15px; font-weight:800; color:var(--color-text, #141d2c); }
   .op-status { display:flex; flex-direction:column; gap:3px; min-width:0; }
@@ -409,8 +425,13 @@ app.get('/', async (c) => {
   .op-go { font-size:13px; font-weight:800; color:var(--color-action, #5666ff); white-space:nowrap; border:1px solid var(--color-border, #e4eaf5); border-radius:8px; padding:6px 11px; }
   .op-go-primary { background:var(--color-action, #5666ff); color:#fff; border-color:var(--color-action, #5666ff); box-shadow:0 0 0 4px rgba(86,102,255,.20); }
   /* シャトルバス運行ブロック */
-  .shuttle-block { display:block; background:#fff; border:1px solid var(--color-border, #e4eaf5); border-radius:12px; padding:14px 18px 12px; margin-bottom:26px; text-decoration:none; color:var(--color-text, #141d2c); transition:border-color .15s, box-shadow .15s; }
-  .shuttle-block:hover { border-color:var(--color-action, #5666ff); box-shadow:0 4px 16px rgba(86,102,255,.10); }
+  .shuttle-block {
+    display:block; padding:14px 18px 12px; margin-bottom:26px; border-radius:16px; text-decoration:none; color:var(--color-text, #141d2c);
+    background:rgba(255,255,255,0.58); backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%);
+    border:1px solid rgba(255,255,255,0.7); box-shadow:0 4px 18px rgba(20,29,44,0.05);
+    transition:background .15s, border-color .15s, box-shadow .15s;
+  }
+  .shuttle-block:hover { background:rgba(255,255,255,0.8); border-color:rgba(86,102,255,0.35); box-shadow:0 10px 26px rgba(86,102,255,.16); }
   .sb-head { display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#475569; margin-bottom:14px; }
   .sb-line { position:relative; height:4px; background:#e4ecf8; border-radius:999px; margin:0 6px 8px; }
   .sb-stop { position:absolute; top:50%; width:8px; height:8px; border-radius:50%; background:#ccd6ea; transform:translate(-50%,-50%); }
@@ -421,8 +442,13 @@ app.get('/', async (c) => {
   .sb-recent b { font-weight:700; color:var(--color-text, #141d2c); white-space:nowrap; }
   /* 小ランチャー（よく使う機能・左アイリス罫のタイル） */
   .today-launch { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:8px; }
-  .today-launch a { font-size:12px; font-weight:700; color:#475569; text-decoration:none; background:#f7f9fd; border:1px solid var(--color-border, #e4eaf5); border-left:3px solid var(--color-action, #5666ff); border-radius:8px; padding:11px 10px; text-align:center; }
-  .today-launch a:hover { background:var(--color-action-soft, #ecefff); color:var(--color-action, #5666ff); }
+  .today-launch a {
+    font-size:12px; font-weight:700; color:#475569; text-decoration:none; text-align:center; padding:11px 10px; border-radius:12px;
+    background:rgba(255,255,255,0.55); backdrop-filter:blur(16px) saturate(150%); -webkit-backdrop-filter:blur(16px) saturate(150%);
+    border:1px solid rgba(255,255,255,0.65); border-left:3px solid var(--color-action, #5666ff);
+    transition:background .15s, color .15s, transform .08s;
+  }
+  .today-launch a:hover { background:rgba(236,239,255,0.85); color:var(--color-action, #5666ff); transform:translateY(-1px); }
   @media (max-width: 900px) { .today-launch { grid-template-columns:repeat(3,1fr); } }
   @media (max-width: 560px) { .today-launch { grid-template-columns:repeat(2,1fr); } }
   /* 折りたたみ（月次の統計） */
@@ -457,7 +483,11 @@ app.get('/', async (c) => {
   /* 分析カード */
   .hm-ana { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
   .hm-ana4 { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; margin-bottom:26px; }
-  .hm-card { background:#fff; border:1px solid #e8edf3; border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+  .hm-card {
+    border-radius:16px; overflow:hidden; display:flex; flex-direction:column;
+    background:rgba(255,255,255,0.6); backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%);
+    border:1px solid rgba(255,255,255,0.7); box-shadow:0 4px 18px rgba(20,29,44,0.05);
+  }
   .hm-card-link { text-decoration:none; transition:border-color .15s, box-shadow .15s; }
   .hm-card-link:hover { border-color:#c3d3e4; box-shadow:0 4px 14px rgba(26,58,92,.08); }
   .hm-card-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:13px 16px; border-bottom:1px solid #f1f5f9; }
@@ -1709,7 +1739,7 @@ app.get('/settings/tutorial', (c) => {
     <a href="#staff-search" data-perm-key="staff">1-13. 社員絞り込み検索 — 条件を組み合わせた検索</a>
     <a href="#inspection" data-perm-key="inspection">1-14. 点検管理 — 車両点検スケジュール</a>
     <a href="#document-center" data-perm-key="settings.documents">1-15. 資料センター — マニュアル・就業規則の保管</a>
-    <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">1-16. 報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</a>
+    <a href="#report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">1-16. 報告センター — 忘れ物・事故・違反・一般報告</a>
     <a href="#line-usage" data-perm-key="settings.line-usage">1-17. LINE利用状況 — 操作ログの確認</a>
     <a href="#handover" data-perm-key="handover">1-18. 引き継ぎシート — 課の申し送り事項</a>
     <a href="#crew-portal" data-perm-key="crew-portal">1-19. 個人データ参照・乗務員シフト・売上分析・担当車表</a>
@@ -1950,7 +1980,7 @@ app.get('/settings/tutorial', (c) => {
     <p style="font-size:13px;font-weight:700;margin-bottom:4px;margin-top:14px;">▍日々の運用</p>
     <table class="tut-table">
       <tr><th>項目</th><th>内容</th></tr>
-      <tr><td>報告センター</td><td>忘れ物・事故・違反・一般報告・引き継ぎメモをタブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
+      <tr><td>報告センター</td><td>忘れ物・事故・違反・一般報告をタブで切り替えて履歴・進捗を管理（詳細は 1-17）</td></tr>
       <tr><td>要望欄</td><td>ホシコンについての要望・意見・欲しい機能などを自由に投稿</td></tr>
     </table>
 
@@ -2058,18 +2088,13 @@ app.get('/settings/tutorial', (c) => {
   </div>
 
   <!-- 1-16 報告センター -->
-  <div class="tut-section" id="report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos">
-    <h3><span class="num">16</span>報告センター — 忘れ物・事故・違反・一般報告・引き継ぎメモ</h3>
-    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF「報告」）から送った報告を、設定 → 報告センター（忘れ物/事故/違反/一般報告/引き継ぎメモタブ）で確認・管理します。</p>
+  <div class="tut-section" id="report-center" data-perm-key="settings.lost-items settings.accidents settings.violations settings.general-reports">
+    <h3><span class="num">16</span>報告センター — 忘れ物・事故・違反・一般報告</h3>
+    <p style="font-size:13px;">乗務員や管理者がLINE（LIFF「報告」）から送った報告を、設定 → 報告センターで確認・管理します。</p>
     <ol class="tut-steps">
       <li>設定 → 「忘れ物報告」「事故報告」「違反報告」「一般報告」のいずれかを開く（上部タブで切り替え）</li>
       <li>「対応中」「解決済」ボタンで絞り込み</li>
       <li>対応が終わったら「解決済にする」— ログイン中のアカウント名と日時が「対応者」列に自動で記録されます</li>
-    </ol>
-    <p style="font-size:13px;margin-top:10px;">「引き継ぎメモ」タブは、忘れ物・事故等のような定型項目を持たず、Excel風のセル単位で自由に文字を入力できるメモです。LINEからは投稿できず、管理画面のみで作成・編集します。</p>
-    <ol class="tut-steps">
-      <li>「＋ 新規メモを作成」でメモを作り、セルをクリック（ドラッグで複数選択も可）してツールバーから文字サイズ・文字色・背景色・太字を設定</li>
-      <li>タイトルを入力し「保存」を押すと、作成者・最終更新者・更新日時が自動で記録されます</li>
     </ol>
     <table class="tut-table">
       <tr><th>列</th><th>内容</th></tr>

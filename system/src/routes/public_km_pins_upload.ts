@@ -50,10 +50,11 @@ app.post('/api/public/km-pins/upload', async (c) => {
   const stmts: ReturnType<typeof c.env.DB.prepare>[] = [];
   let saved = 0;
   for (const v of vehicles) {
-    if (typeof v.radioNo !== 'number' || !Array.isArray(v.trips)) continue;
+    // radioNoは無線番号が分からない過去分バックフィル（ticket_searches/search経由）ではnull許容
+    if ((v.radioNo != null && typeof v.radioNo !== 'number') || !Array.isArray(v.trips)) continue;
     const validTrips = v.trips.filter(isValidTrip).slice(0, 200);
     if (validTrips.length === 0) continue;
-    stmts.push(...saveTripsStmts(c.env.DB, v.radioNo, v.driverName ?? null, validTrips));
+    stmts.push(...saveTripsStmts(c.env.DB, v.radioNo ?? null, v.driverName ?? null, validTrips));
     saved += validTrips.length;
   }
   if (stmts.length > 0) await c.env.DB.batch(stmts);

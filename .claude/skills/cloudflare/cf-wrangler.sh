@@ -28,5 +28,9 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
   exit 1
 fi
 
+if [ "${1:-}" = "deploy" ]; then
+  node "$ROOT_DIR/scripts/bump_version.mjs"
+fi
+
 cd "$ROOT_DIR/system"
 exec npx wrangler "$@"

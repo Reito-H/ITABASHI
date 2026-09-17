@@ -27,6 +27,8 @@ async function adminName(c: { env: Env; get: (k: 'adminId') => number }): Promis
 app.get('/settings/km-pins', async (c) => {
   const embed = c.req.query('embed') === '1';
   const html = (embed ? '' : settingsSubHeader('乗降ピンデータ収集（km-operator連携）')) + `
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <div style="max-width:960px;">
       <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:16px 20px;margin-bottom:16px;font-size:13px;color:#374151;line-height:1.7;">
         国際自動車グループの配車システム（km-operator）の「営業情報」データから、板橋営業所の車両が
@@ -203,40 +205,41 @@ app.get('/settings/km-pins', async (c) => {
         kmLoadMap();
       }
 
+      var kmMap = null;
+      var kmMapLayer = null;
+      // ページを開いた瞬間に生の全件データを送るのではなく、サーバー側で約100m四方にまとめた
+      // 集計結果（最大300点）だけを取得する。地図タイルはOpenStreetMapを使い、必要な分だけ読み込む。
       async function kmLoadMap() {
         const res = await fetch(location.pathname.replace('/settings/km-pins', '/api/km-pins/heatmap') + '?kind=' + kmMapKind);
         const data = await res.json();
-        const box = document.getElementById('km-map');
         const points = data.points || [];
-        if (points.length === 0) {
-          box.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#9ca3af;font-size:13px;">データがまだありません</div>';
-          return;
+
+        if (!kmMap) {
+          kmMap = L.map('km-map').setView([35.75, 139.65], 12);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19,
+          }).addTo(kmMap);
         }
-        const lats = points.map(function(p) { return p.lat; });
-        const lngs = points.map(function(p) { return p.lng; });
-        const minLat = Math.min.apply(null, lats), maxLat = Math.max.apply(null, lats);
-        const minLng = Math.min.apply(null, lngs), maxLng = Math.max.apply(null, lngs);
-        const padLat = Math.max((maxLat - minLat) * 0.1, 0.003);
-        const padLng = Math.max((maxLng - minLng) * 0.1, 0.003);
-        const lat0 = minLat - padLat, lat1 = maxLat + padLat;
-        const lng0 = minLng - padLng, lng1 = maxLng + padLng;
+        if (kmMapLayer) { kmMap.removeLayer(kmMapLayer); }
+        kmMapLayer = L.layerGroup().addTo(kmMap);
+
+        if (points.length === 0) return;
         const maxCount = Math.max.apply(null, points.map(function(p) { return p.count; }));
-        box.style.position = 'relative';
-        box.style.overflow = 'hidden';
-        box.style.background = '#eef2f7';
-        var html = '';
+        const color = kmMapKind === 'on' ? '#e53935' : '#1e40af';
+        const bounds = [];
         points.forEach(function(p) {
-          const x = ((p.lng - lng0) / (lng1 - lng0)) * 100;
-          const y = (1 - (p.lat - lat0) / (lat1 - lat0)) * 100;
           const ratio = p.count / maxCount;
-          const size = 8 + ratio * 32;
-          const alpha = 0.35 + ratio * 0.55;
-          const color = kmMapKind === 'on' ? '229,57,53' : '30,64,175';
-          html += '<div title="' + p.count + '件" style="position:absolute;left:' + x + '%;top:' + y + '%;' +
-            'width:' + size + 'px;height:' + size + 'px;margin-left:-' + (size / 2) + 'px;margin-top:-' + (size / 2) + 'px;' +
-            'border-radius:50%;background:rgba(' + color + ',' + alpha + ');border:1px solid rgba(' + color + ',0.9);cursor:default;"></div>';
+          L.circleMarker([p.lat, p.lng], {
+            radius: 4 + ratio * 16,
+            color: color,
+            weight: 1,
+            fillColor: color,
+            fillOpacity: 0.25 + ratio * 0.5,
+          }).bindTooltip(p.count + '件').addTo(kmMapLayer);
+          bounds.push([p.lat, p.lng]);
         });
-        box.innerHTML = html;
+        kmMap.fitBounds(bounds, { padding: [20, 20] });
       }
 
       async function kmLoadTimePattern() {

@@ -23,7 +23,7 @@
 //              settings.weather-notice /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
 //              settings.lost-items / settings.accidents / settings.violations / settings.general-reports /
-//              settings.handover-memos / settings.violation-types /
+//              settings.violation-types /
 //              settings.schedule-types / settings.dia / settings.coaches / settings.instructors /
 //              settings.periods /
 //              settings.kancho / settings.kancho-roster / settings.kancho-wish / settings.kancho-logic
@@ -31,8 +31,8 @@
 // 管理画面パス（/{SECRET}/admin 以降）→ 必要権限キー。先頭一致で最初にマッチした行を採用
 // キーは '|' 区切りで複数指定可（いずれか1つでも権限があればOK）。例: 'a|b|c'
 const PATH_PERMISSIONS: Array<[RegExp, string]> = [
-  // 報告センター入口（5種の報告タブいずれかの権限があれば入れる。各タブ自体の制御は個別エントリで行う）
-  [/^\/settings\/reports/,              'settings.lost-items|settings.accidents|settings.violations|settings.general-reports|settings.handover-memos'],
+  // 報告センター入口（4種の報告タブいずれかの権限があれば入れる。各タブ自体の制御は個別エントリで行う）
+  [/^\/settings\/reports/,              'settings.lost-items|settings.accidents|settings.violations|settings.general-reports'],
   // 設定サブページ
   [/^\/settings\/accounts/,             'settings.accounts'],
   [/^\/settings\/liff/,                 'settings.liff'],
@@ -41,7 +41,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/violation-types/,      'settings.violation-types'],
   [/^\/settings\/violations/,           'settings.violations'],
   [/^\/settings\/general-reports/,      'settings.general-reports'],
-  [/^\/settings\/handover-memos/,       'settings.handover-memos'],
   [/^\/settings\/schedule-types/,       'settings.schedule-types'],
   [/^\/settings\/dia/,                  'settings.dia'],
   [/^\/settings\/coaches/,              'settings.coaches'],
@@ -84,7 +83,10 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/liff\/accident-reports/,    'settings.accidents'],
   [/^\/api\/liff\/violation-reports/,   'settings.violations'],
   [/^\/api\/liff\/general-reports/,     'settings.general-reports'],
-  [/^\/api\/handover-memos/,            'settings.handover-memos'],
+  [/^\/api\/report-preview\/lost-items/,      'settings.lost-items'],
+  [/^\/api\/report-preview\/accidents/,       'settings.accidents'],
+  [/^\/api\/report-preview\/violations/,      'settings.violations'],
+  [/^\/api\/report-preview\/general-reports/, 'settings.general-reports'],
   [/^\/api\/violation-types/,           'settings.violation-types'],
   [/^\/api\/study-sessions/,            'settings.study-sessions'],
   [/^\/api\/office-opinions/,           'settings.office-opinions|settings.study-sessions'],
@@ -252,7 +254,6 @@ export const PERMISSION_TREE: PermNode[] = [
       { key: 'settings.accidents',       label: '事故報告一覧' },
       { key: 'settings.violations',      label: '違反報告一覧' },
       { key: 'settings.general-reports', label: '一般報告一覧' },
-      { key: 'settings.handover-memos',  label: '引き継ぎメモ一覧' },
       { key: 'settings.violation-types', label: '違反種類・点数/反則金' },
     ]},
     { key: 'kancho-shift', label: '班長シフト' },

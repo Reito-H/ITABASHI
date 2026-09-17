@@ -159,6 +159,9 @@ app.use('*', async (c, next) => {
   // embed=1指定時のみこの2ページのフレーム表示を許可する（他ページは引き続き全面禁止）
   const isSalesStrategyEmbed = (pathname === `/${SECRET}/admin/settings/sr` || pathname === `/${SECRET}/admin/settings/km-pins`)
     && reqUrl.searchParams.get('embed') === '1';
+  // 乗降ピン分析ページ（営業戦略からのiframe埋め込み時も含む）は、頻出地点マップにLeaflet+OpenStreetMapタイルを
+  // 使うため、このページだけCSPのstyle-src/img-srcを緩める
+  const isKmPinsPage = pathname === `/${SECRET}/admin/settings/km-pins`;
   // 事故防止AI: 引き継ぎシートのポップアップに課別傾向分析レポートをiframe埋め込みするため、
   // このレポートページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
   const isAccidentAiEmbed = pathname.startsWith(`/${SECRET}/admin/accidents/division/`) && pathname.endsWith('/report/print');
@@ -223,8 +226,12 @@ app.use('*', async (c, next) => {
     // nojicoページのみ、アプリ内ブラウザとして外部サイト(app.no-jico.com)をiframe表示できるようframe-srcを追加で許可する
     const frameSrc = isNojicoPage ? ' frame-src https://app.no-jico.com;' : '';
     const frameAncestors = allowSameOriginFrame ? "frame-ancestors 'self';" : "frame-ancestors 'none';";
+    const kmPinsMapCsp = isKmPinsPage ? ' https://cdn.jsdelivr.net' : '';
+    const kmPinsTileCsp = isKmPinsPage ? ' https://*.tile.openstreetmap.org' : '';
     c.res.headers.set('Content-Security-Policy',
-      "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; " + frameAncestors + frameSrc
+      "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; " +
+      "style-src 'self' 'unsafe-inline'" + kmPinsMapCsp + "; img-src 'self' data:" + kmPinsTileCsp + "; " +
+      "connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net; " + frameAncestors + frameSrc
     );
   }
 });

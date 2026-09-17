@@ -67,7 +67,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   const showReportFab = !hideReportFab && !REPORT_FAB_HIDDEN_PAGES.has(activePage);
   // permKey省略時は id をそのまま権限キーとして使う（filterHtmlByPermissionsのdata-nav-id判定用）。
   // 報告センターは専用の権限キーを持たず、既存の5つの報告権限のいずれかで表示する（スペース区切り＝OR）
-  const REPORT_CENTER_PERM = 'settings.lost-items settings.accidents settings.violations settings.general-reports settings.handover-memos';
+  const REPORT_CENTER_PERM = 'settings.lost-items settings.accidents settings.violations settings.general-reports';
   // public:true の項目は data-nav-id を出さず、全アカウントで常に表示する（権限フィルタの対象外）
   const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean; public?: boolean; large?: boolean }> = [
     { href: `${ADMIN_PATH}`,               label: 'ホーム',          id: 'home' },
@@ -384,8 +384,6 @@ export function layout(title: string, content: string, activePage: string = '', 
 
   ${showReportFab ? `
   <div id="report-fab-wrap" style="position:fixed;right:20px;bottom:20px;z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:10px;">
-    <a href="javascript:void(0)" id="report-fab-memo-btn" onclick="createHandoverMemoFromFab();return false;" data-perm-key="settings.handover-memos" aria-label="引き継ぎメモを新規作成" title="引き継ぎメモを新規作成"
-      style="width:40px;height:40px;border-radius:50%;background:#fff;color:#1e3a5f;border:2px solid #1e3a5f;box-shadow:0 4px 10px rgba(0,0,0,0.2);font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none;">メモ</a>
     <button id="report-fab-btn" onclick="openQrModal()" aria-label="新規報告" title="新規報告"
       style="width:54px;height:54px;border-radius:50%;background:#1e3a5f;color:#fff;border:none;box-shadow:0 4px 14px rgba(0,0,0,0.3);font-size:26px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;">＋</button>
   </div>
@@ -604,24 +602,13 @@ export function layout(title: string, content: string, activePage: string = '', 
     loadBellUnreadCount();
     ${announcementBarScript()}
     ${birthdayPopupScript()}
-    function createHandoverMemoFromFab() {
-      fetch('${ADMIN_PATH}/api/handover-memos', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.ok) { location.href = '${ADMIN_PATH}/settings/handover-memos/' + data.id; }
-        else { alert('作成に失敗しました'); }
-      })
-      .catch(function() { alert('通信エラーが発生しました'); });
-    }
     (function () {
       // 権限フィルタでタブが1つも残らなかった場合は「＋」ボタンごと非表示にする
       const wrap = document.getElementById('report-fab-wrap');
       const reportBtn = document.getElementById('report-fab-btn');
       const hasAnyTab = ['lost', 'accident', 'violation', 'general'].some(function (t) { return !!document.getElementById('qr-tab-' + t); });
       if (reportBtn && !hasAnyTab) reportBtn.style.display = 'none';
-      if (wrap && !hasAnyTab && !document.getElementById('report-fab-memo-btn')) wrap.style.display = 'none';
+      if (wrap && !hasAnyTab) wrap.style.display = 'none';
     })();
     function escPhoneSearchHtml(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {

@@ -90,7 +90,7 @@ function inspectionPage(adminPath: string): string {
 
 <div class="ins-tab-bar">
   <button class="ins-tab active" onclick="insShowTab('input')">月次入力（定期点検表）</button>
-  <button class="ins-tab" onclick="insShowTab('output')">日次出力・過去データ（点検車検確認表）</button>
+  <button class="ins-tab" onclick="insShowTab('output')">点検車検確認表</button>
   <button class="ins-tab" onclick="insShowTab('meter')">メーター検査</button>
   <button class="ins-tab" onclick="insShowTab('shaken')">車検管理</button>
 </div>
@@ -98,21 +98,7 @@ function inspectionPage(adminPath: string): string {
 <!-- ===== 月次入力 ===== -->
 <div id="ins-panel-input" class="ins-panel active">
   <div class="ins-controls">
-    <label>年月：</label>
-    <select id="ins-year-in" onchange="insOnYMChange()"></select>年
-    <select id="ins-month-in" onchange="insOnYMChange()"></select>月
-    <span style="color:#bbb">｜</span>
-    <label>課：</label>
-    <div class="dept-tabs">
-      <button class="dept-btn active" onclick="insSelDept(1)" id="ins-dept-1">1課</button>
-      <button class="dept-btn" onclick="insSelDept(2)" id="ins-dept-2">2課</button>
-      <button class="dept-btn" onclick="insSelDept(3)" id="ins-dept-3">3課</button>
-      <button class="dept-btn" onclick="insSelDept(4)" id="ins-dept-4">4課</button>
-    </div>
-    <span style="color:#bbb">｜</span>
-    <a class="btn-p" style="text-decoration:none;display:inline-block;" href="${adminPath}/settings/documents?tab=inspection-photo">📷 写真からAI取込はデータセンターへ</a>
-    <button class="btn-p" onclick="insDownloadMonthImage(this)">🖼 画像で保存</button>
-    <button class="btn-p" onclick="insDownloadMonthExcel(this)">📊 Excelで保存</button>
+    <button class="btn-t" onclick="insOpenUnavailModal()">🚧 使用不可期間を追加</button>
     <span id="ins-save-badge" class="ins-save-badge"></span>
   </div>
 
@@ -136,7 +122,8 @@ function inspectionPage(adminPath: string): string {
 
   <div class="ins-data-tools">
     <label style="font-size:12px;color:#666;font-weight:600">この月・課のデータ：</label>
-    <button class="btn-t" onclick="insOpenUnavailModal()">🚧 使用不可期間を追加</button>
+    <button class="btn-p" onclick="insDownloadMonthImage(this)">🖼 画像で保存</button>
+    <button class="btn-xl" onclick="insPrintMonthImage(this)">🖨 印刷</button>
     <button class="btn-t red" onclick="insClearMonth()">🗑 全削除</button>
   </div>
 </div>
@@ -231,7 +218,6 @@ ${saveToastHtml()}
 </div>
 
 
-<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" integrity="sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz" crossorigin="anonymous"></script>
 <script>
 const INS_PATH = '';
 
@@ -264,6 +250,13 @@ let insSelTypeCur = 'inspect';
   const dayEl=document.getElementById('ins-day-out');
   dayEl.value=Math.min(d,parseInt(dayEl.options[dayEl.options.length-1].value));
   IS.year=y; IS.month=m;
+  try{
+    const savedDept=parseInt(localStorage.getItem('ins_last_dept'),10);
+    if(savedDept>=1&&savedDept<=4){
+      IS.dept=savedDept;
+      for(let i=1;i<=4;i++) document.getElementById('ins-dept-'+i).classList.toggle('active',i===savedDept);
+    }
+  }catch(e){}
   insRefreshTable();
 })();
 
@@ -286,6 +279,8 @@ function insShowTab(tab){
     document.getElementById('ins-panel-'+t).classList.toggle('active',t===tab);
   });
   document.querySelectorAll('.ins-tab').forEach((b,i)=>b.classList.toggle('active',i===idx));
+  const hdr=document.getElementById('ins-header-ym-dept');
+  if(hdr) hdr.style.display=(tab==='input')?'flex':'none';
   if(tab==='output') insRenderCanvas();
   if(tab==='meter') vdRefresh('meter');
   if(tab==='shaken') vdRefresh('shaken');
@@ -295,6 +290,7 @@ function insShowTab(tab){
 function insSelDept(d){
   IS.dept=d;
   for(let i=1;i<=4;i++) document.getElementById('ins-dept-'+i).classList.toggle('active',i===d);
+  try{localStorage.setItem('ins_last_dept',String(d));}catch(e){}
   insRefreshTable();
 }
 
@@ -697,113 +693,23 @@ async function insDownloadMonthImage(btn){
   }
 }
 
-// ===== 月次表 Excel保存（実物のフォント・配色を再現） =====
-const INS_XFONT='HGP創英角ポップ体';
-const INS_XCOL={inspect:'FF000000',shaken:'FFFF0000',bomb:'FFFFFF00',sub:'FF800080',recall:'FF000000'};
-const INS_T1COLS=['E','D','C','B','A'];
-const INS_T2COLS=['H','I','J','K','L'];
-const INS_XFILL_T1='FF99CC00';
-const INS_XFILL_DATE='FFFFFF99';
-const INS_XFILL_T2='FF99CCFF';
-
-function insSetCellVehicles(ws,row,cols,vehicles){
-  const n=cols.length;
-  vehicles.forEach((v,i)=>{
-    const idx=Math.min(i,n-1);
-    const addr=cols[idx]+row;
-    const cell=ws.getCell(addr);
-    const text=v.vehicle_num+(v.dep_time?'('+v.dep_time+')':'');
-    cell.value=cell.value?cell.value+'/'+text:text;
-    cell.font={name:INS_XFONT,size:14,color:{argb:INS_XCOL[v.type]||'FF000000'}};
-    cell.alignment={horizontal:'center',vertical:'middle',wrapText:true};
-    if(v.type==='recall'){
-      cell.border={top:{style:'thin'},bottom:{style:'thin'},left:{style:'thin'},right:{style:'thin'}};
-    }
-  });
-}
-
-async function insBuildMonthWorkbook(){
-  const ym=insGetYM();
-  const data=await insFetchData(ym,IS.dept);
-  const days=insDIM(IS.year,IS.month);
-  const wb=new ExcelJS.Workbook();
-  const ws=wb.addWorksheet(IS.dept+'課'+IS.month+'月');
-  ['A','B','C','D','E'].forEach(c=>ws.getColumn(c).width=9);
-  ['F','G'].forEach(c=>ws.getColumn(c).width=3);
-  ['H','I','J','K','L'].forEach(c=>ws.getColumn(c).width=9);
-
-  ws.mergeCells('A1:L1');
-  ws.getCell('A1').value=IS.dept+'課　定期点検表（'+IS.month+'月）';
-  ws.getCell('A1').font={name:INS_XFONT,size:32};
-  ws.getCell('A1').alignment={horizontal:'center',vertical:'middle'};
-  ws.getRow(1).height=46;
-
-  ws.mergeCells('A2:L2');
-  ws.getCell('A2').value='担当車両の点検車検日を確認願います';
-  ws.getCell('A2').font={name:INS_XFONT,size:20,color:{argb:'FFFF0000'}};
-  ws.getCell('A2').alignment={horizontal:'center',vertical:'middle'};
-  ws.getRow(2).height=30;
-
-  ws.mergeCells('A3:E3');
-  ws.getCell('A3').value='《'+insTeamNum(IS.dept,1)+'班》';
-  ws.mergeCells('F3:G3');
-  ws.getCell('F3').value='日付';
-  ws.mergeCells('H3:L3');
-  ws.getCell('H3').value='《'+insTeamNum(IS.dept,2)+'班》';
-  ws.getCell('A3').fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T1}};
-  ws.getCell('F3').fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_DATE}};
-  ws.getCell('H3').fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T2}};
-  ['A3','F3','H3'].forEach((a,i)=>{
-    const cell=ws.getCell(a);
-    cell.font={name:INS_XFONT,size:i===1?14:18};
-    cell.alignment={horizontal:'center',vertical:'middle'};
-  });
-  ws.getRow(3).height=27;
-
-  for(let day=1;day<=days;day++){
-    const row=3+day;
-    const {h1,h2}=insGetDayVehicles(data,day);
-    const dow=new Date(IS.year,IS.month-1,day).getDay();
-    ['A','B','C','D','E'].forEach(c=>{ws.getCell(c+row).fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T1}};});
-    ['H','I','J','K','L'].forEach(c=>{ws.getCell(c+row).fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_T2}};});
-    ws.mergeCells('F'+row+':G'+row);
-    const dCell=ws.getCell('F'+row);
-    dCell.value=day;
-    dCell.alignment={horizontal:'center',vertical:'middle'};
-    dCell.fill={type:'pattern',pattern:'solid',fgColor:{argb:INS_XFILL_DATE}};
-    const dColor=dow===6?'FF00CCFF':dow===0?'FFFF0000':'FF000000';
-    dCell.font={name:INS_XFONT,size:14,color:{argb:dColor}};
-    insSetCellVehicles(ws,row,INS_T1COLS,h1);
-    insSetCellVehicles(ws,row,INS_T2COLS,h2);
-    ws.getRow(row).eachCell({includeEmpty:true},cell=>{
-      cell.border={...cell.border,top:{style:'hair',color:{argb:'FFBBBBBB'}},bottom:{style:'hair',color:{argb:'FFBBBBBB'}}};
-    });
-  }
-
-  const legendRow=4+days;
-  ws.mergeCells('A'+legendRow+':L'+legendRow);
-  const legendCell=ws.getCell('A'+legendRow);
-  legendCell.value='黒字は点検　赤字は車検　紫字は代替　黄字はボンベ交換　白枠黒字はリコール作業';
-  legendCell.font={name:INS_XFONT,size:11,color:{argb:'FF0000FF'}};
-  legendCell.alignment={horizontal:'center',vertical:'middle'};
-
-  ws.pageSetup={paperSize:9,orientation:'portrait',fitToPage:true,fitToWidth:1,fitToHeight:1};
-  return wb;
-}
-
-async function insDownloadMonthExcel(btn){
+async function insPrintMonthImage(btn){
   if(btn){btn.disabled=true;}
   try{
-    const wb=await insBuildMonthWorkbook();
-    const buf=await wb.xlsx.writeBuffer();
-    const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const a=document.createElement('a');
-    a.download=IS.dept+'課_定期点検表_'+IS.year+'年'+IS.month+'月.xlsx';
-    a.href=URL.createObjectURL(blob);
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href),10000);
-  }catch(e){
-    alert('Excel生成に失敗しました: '+e.message);
+    const canvas=await insRenderMonthCanvas();
+    const dataUrl=canvas.toDataURL('image/png');
+    document.getElementById('ins-print-frame')?.remove();
+    const f=document.createElement('iframe');
+    f.id='ins-print-frame';
+    f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(f);
+    const doc=f.contentDocument;
+    doc.open();
+    doc.write('<!DOCTYPE html><html><head><title>'+IS.dept+'課_定期点検表_'+IS.year+'年'+IS.month+'月</title><link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}"><style>@page{size:A4 portrait;margin:8mm}html,body{margin:0;padding:0}img{display:block;width:194mm;height:auto}</style></head><body><img src="'+dataUrl+'"></body></html>');
+    doc.close();
+    const img=doc.querySelector('img');
+    const doPrint=()=>{f.contentWindow.focus();f.contentWindow.print();};
+    if(img.complete) doPrint(); else img.onload=doPrint;
   }finally{
     if(btn){btn.disabled=false;}
   }
@@ -959,8 +865,26 @@ ${vehicleDeadlinesClientScript(adminPath)}
 </script>`;
 }
 
+// ヘッダーの「点検管理」タイトル右横に置く、月次入力タブ専用の年月・課切り替え（他タブ表示中はJS側で隠す）
+function inspectionHeaderExtra(): string {
+  return `
+  <div id="ins-header-ym-dept" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span style="font-size:12px;color:#555;font-weight:600;">年月：</span>
+    <select id="ins-year-in" onchange="insOnYMChange()" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;font-family:inherit;background:#fff;cursor:pointer"></select>年
+    <select id="ins-month-in" onchange="insOnYMChange()" style="padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;font-family:inherit;background:#fff;cursor:pointer"></select>月
+    <span style="color:#bbb">｜</span>
+    <span style="font-size:12px;color:#555;font-weight:600;">課：</span>
+    <div class="dept-tabs">
+      <button class="dept-btn active" onclick="insSelDept(1)" id="ins-dept-1">1課</button>
+      <button class="dept-btn" onclick="insSelDept(2)" id="ins-dept-2">2課</button>
+      <button class="dept-btn" onclick="insSelDept(3)" id="ins-dept-3">3課</button>
+      <button class="dept-btn" onclick="insSelDept(4)" id="ins-dept-4">4課</button>
+    </div>
+  </div>`;
+}
+
 app.get('/inspection', (c) => {
-  return c.html(layout('点検管理', inspectionPage(ADMIN_PATH), 'inspection'));
+  return c.html(layout('点検管理', inspectionPage(ADMIN_PATH), 'inspection', inspectionHeaderExtra()));
 });
 
 export default app;

@@ -17,7 +17,7 @@ export async function getItabashiRadioNumbers(db: D1Database): Promise<number[]>
     .map((r) => r.radio_no);
 }
 
-export function saveTripsStmts(db: D1Database, radioNo: number, driverName: string | null, trips: KmTripInfo[]) {
+export function saveTripsStmts(db: D1Database, radioNo: number | null, driverName: string | null, trips: KmTripInfo[]) {
   return trips.map((t) =>
     db.prepare(`
       INSERT OR IGNORE INTO km_trip_pins (

@@ -10,7 +10,6 @@ import { getAdminPermissions } from '../permissions';
 import { renderReportPrintPage, type ReportPrintField, type ReportPrintOptions } from '../html/report_print';
 import { renderReportDetailPage } from '../html/report_detail';
 import { renderReportPrintBulkPage, type ReportPrintBulkItem } from '../html/report_print_bulk';
-import { saveToastHtml, saveToastScript } from '../html/layout';
 import { issueCaseNoIfEmpty } from '../utils/report_case_no';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -42,11 +41,6 @@ function subHeader(title: string, backHref: string = `${ADMIN_PATH}/settings`, b
   </div>`;
 }
 
-// 報告センター配下（忘れ物・事故・違反・一般報告・引き継ぎメモ）の見出し。設定ではなく報告センターに戻る
-function reportSubHeader(title: string): string {
-  return subHeader(title, `${ADMIN_PATH}/settings/reports`, '報告センターに戻る');
-}
-
 // ログイン中の管理者名を取得（報告の「対応者」記録用）
 async function getAdminName(c: { req: { header: (n: string) => string | undefined }; env: Env }): Promise<string> {
   const cookie = c.req.header('Cookie') ?? null;
@@ -58,18 +52,6 @@ async function getAdminName(c: { req: { header: (n: string) => string | undefine
   return adminRow?.username ?? '管理者';
 }
 
-// 報告センター・引き継ぎメモの簡易ナビ（旧5タブreportTabs()の後継。権限のない項目はdata-perm-keyで自動非表示）
-function reportCenterNav(active: 'reports' | 'memo'): string {
-  const items: Array<{ key: string; href: string; perm: string; label: string }> = [
-    { key: 'reports', href: `${ADMIN_PATH}/settings/reports`,        perm: 'settings.lost-items settings.accidents settings.violations settings.general-reports', label: '報告一覧' },
-    { key: 'memo',    href: `${ADMIN_PATH}/settings/handover-memos`, perm: 'settings.handover-memos', label: '引き継ぎメモ' },
-  ];
-  return `<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e5e7eb;">
-    ${items.map(t => `<a href="${t.href}" data-perm-key="${t.perm}" style="padding:8px 20px;font-size:14px;text-decoration:none;font-weight:600;margin-bottom:-2px;${t.key === active
-      ? 'color:#1e3a5f;border-bottom:2px solid #1e3a5f;'
-      : 'color:#9ca3af;border-bottom:2px solid transparent;'}">${escHtml(t.label)}</a>`).join('')}
-  </div>`;
-}
 
 // 統合報告一覧が扱う4種別のマスタ（URLスラッグ⇔種別キー⇔権限キー⇔ラベル⇔印刷URL）
 const REPORT_LIST_KINDS: Array<{
@@ -178,13 +160,15 @@ app.get('/settings/reports', async (c) => {
     lastYear = year;
     const viewHref = `${ADMIN_PATH}/settings/${info.slug}/view/${r.id}`;
     const printHref = `${ADMIN_PATH}${info.printPath}/${r.id}`;
-    return `${yearSep}<tr onclick="location.href='${viewHref}'" style="cursor:pointer;" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+    const previewUrl = `${ADMIN_PATH}/api/report-preview/${info.slug}/${r.id}`;
+    return `${yearSep}<tr onclick="location.href='${viewHref}'" style="cursor:pointer;" data-preview-url="${previewUrl}"
+      onmouseover="this.style.background='#f9fafb';showReportPreview(event,this)" onmousemove="moveReportPreview(event)" onmouseout="this.style.background='';hideReportPreview()">
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap;">${escHtml(formatDateNoYear(r.created_at))}</td>
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;white-space:nowrap;">${caseIdDisplay(r.vehicle_no, r.case_no)}</td>
       <td style="padding:12px 16px;border-bottom:1px solid #f3f4f6;font-size:15px;font-weight:700;color:#111827;line-height:1.5;">${unifiedCustomerCellHtml(r)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;max-width:320px;">${contentCellHtml(r.content_text)}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;">${statusCellHtml(r.status === 'resolved', info.resolvedLabel)}</td>
-      <td style="padding:10px 8px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;"><a href="${printHref}" onclick="event.stopPropagation()" style="font-size:11px;color:#6b7280;text-decoration:none;border:1px solid #d1d5db;border-radius:6px;padding:4px 9px;background:#fff;">印刷</a></td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f3f4f6;text-align:right;white-space:nowrap;"><a href="${printHref}" onclick="event.stopPropagation()" onmouseover="event.stopPropagation()" style="font-size:11px;color:#6b7280;text-decoration:none;border:1px solid #d1d5db;border-radius:6px;padding:4px 9px;background:#fff;">印刷</a></td>
     </tr>`;
   }).join('');
 
@@ -208,8 +192,6 @@ app.get('/settings/reports', async (c) => {
   </div>` : '';
 
   const content = `
-    ${reportCenterNav('reports')}
-
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
       ${typeChip('すべて', '')}
       ${allowed.map(k => typeChip(k.label, k.slug)).join('')}
@@ -242,6 +224,10 @@ app.get('/settings/reports', async (c) => {
       ${pager}
     </div>
 
+    <div id="report-preview-panel" style="display:none;position:fixed;z-index:500;max-width:340px;padding:14px 16px;border-radius:14px;
+      background:rgba(255,255,255,0.85);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+      border:1px solid rgba(255,255,255,0.7);box-shadow:0 12px 30px rgba(20,29,44,0.18);font-size:13px;color:#111827;line-height:1.6;pointer-events:none;"></div>
+
     ${unifiedNewReportModalHtml(allowed)}
     <script>
       function toggleReportContent(btn) {
@@ -249,6 +235,70 @@ app.get('/settings/reports', async (c) => {
         var expanded = box.style.maxHeight === 'none';
         box.style.maxHeight = expanded ? '2.6em' : 'none';
         btn.textContent = expanded ? '続きを見る' : '閉じる';
+      }
+
+      // 報告一覧の行にカーソルをかざすと、一覧にはまだ出ていない詳細項目だけをフローティング表示する（クリック不要）
+      var reportPreviewPanel = document.getElementById('report-preview-panel');
+      var reportPreviewTimer = null;
+      var reportPreviewCache = {};
+      var reportPreviewSeq = 0;
+      function escReportPreview(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+      function renderReportPreview(data) {
+        var fields = (data && data.fields) || [];
+        if (!fields.length) { reportPreviewPanel.innerHTML = '<div style="color:#9ca3af;">追加の詳細情報はありません</div>'; return; }
+        reportPreviewPanel.innerHTML = fields.map(function (f) {
+          return '<div style="margin-bottom:5px;"><b>' + escReportPreview(f.label) + ': </b>'
+            + '<span style="white-space:pre-wrap;word-break:break-word;">' + escReportPreview(f.value) + '</span></div>';
+        }).join('');
+      }
+      function showReportPreview(ev, tr) {
+        clearTimeout(reportPreviewTimer);
+        var url = tr.getAttribute('data-preview-url');
+        if (!url) return;
+        var mySeq = ++reportPreviewSeq;
+        reportPreviewTimer = setTimeout(function () {
+          if (reportPreviewCache[url]) {
+            renderReportPreview(reportPreviewCache[url]);
+            reportPreviewPanel.style.display = 'block';
+            positionReportPreview(ev);
+            return;
+          }
+          reportPreviewPanel.innerHTML = '<div style="color:#9ca3af;">読み込み中…</div>';
+          reportPreviewPanel.style.display = 'block';
+          positionReportPreview(ev);
+          fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+            if (mySeq !== reportPreviewSeq) return;
+            reportPreviewCache[url] = data;
+            renderReportPreview(data);
+            positionReportPreview(ev);
+          }).catch(function () {
+            if (mySeq !== reportPreviewSeq) return;
+            reportPreviewPanel.innerHTML = '<div style="color:#dc2626;">読み込みに失敗しました</div>';
+          });
+        }, 180);
+      }
+      function moveReportPreview(ev) {
+        if (reportPreviewPanel.style.display === 'block') positionReportPreview(ev);
+      }
+      function positionReportPreview(ev) {
+        var pad = 18;
+        var x = ev.clientX + pad;
+        var y = ev.clientY + pad;
+        var panelW = reportPreviewPanel.offsetWidth || 340;
+        var panelH = reportPreviewPanel.offsetHeight || 100;
+        if (x + panelW > window.innerWidth - 8) x = ev.clientX - panelW - pad;
+        if (y + panelH > window.innerHeight - 8) y = window.innerHeight - panelH - 8;
+        reportPreviewPanel.style.left = Math.max(8, x) + 'px';
+        reportPreviewPanel.style.top = Math.max(8, y) + 'px';
+      }
+      function hideReportPreview() {
+        clearTimeout(reportPreviewTimer);
+        reportPreviewSeq++;
+        reportPreviewPanel.style.display = 'none';
       }
       ${unifiedNewReportScript(allowed)}
     </script>
@@ -1257,7 +1307,7 @@ app.get('/settings/liff', async (c) => {
 
 // ===================================================
 // 忘れ物/事故/違反/一般報告の一覧ページは統合一覧 GET /settings/reports に一本化した。
-// 旧URL（ブックマーク・引き継ぎメモに貼られたリンク等）は常に「すべて」（種別絞り込みなし）へ遷移する
+// 旧URL（ブックマーク等）は常に「すべて」（種別絞り込みなし）へ遷移する
 // （種別の絞り込みはユーザーが一覧上で手動でチップを選んだ時だけかかるようにするため、自動セットはしない）。
 // print/print-bulk・/api/liff/* のパスは変更していないため無傷。
 // ===================================================
@@ -1265,495 +1315,6 @@ app.get('/settings/lost-items', (c) => c.redirect(`${ADMIN_PATH}/settings/report
 app.get('/settings/accidents', (c) => c.redirect(`${ADMIN_PATH}/settings/reports`));
 app.get('/settings/violations', (c) => c.redirect(`${ADMIN_PATH}/settings/reports`));
 app.get('/settings/general-reports', (c) => c.redirect(`${ADMIN_PATH}/settings/reports`));
-
-// ===================================================
-// 引き継ぎメモ（報告センターの5つ目のタブ）
-//   ワード風の自由記述メモ帳（contenteditable）。LINEからは投稿できず、管理画面でのみ作成・編集する。
-//   grid_data列（歴史的な列名）に編集後のHTML本文をそのまま文字列で保存する
-// ===================================================
-
-function sanitizeMemoContent(raw: unknown): string {
-  return typeof raw === 'string' ? raw : '';
-}
-
-// 引き継ぎメモ 編集画面ツールバー・本文エディタの共通スクリプト
-function memoEditorScript(id: number, content: string): string {
-  return `
-    var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
-    var MEMO_ID = ${id};
-    var dirty = false;
-    var PRESET_COLORS = ['#111827','#dc2626','#2563eb','#059669','#d97706','#7c3aed','#6b7280'];
-    var PRESET_BGS = ['#fef3c7','#fee2e2','#dbeafe','#dcfce7','#ede9fe','#f3f4f6'];
-
-    var editor = document.getElementById('memo-editor');
-    var initialMemoContent = ${safeJson(content)};
-    if (initialMemoContent) {
-      editor.innerHTML = initialMemoContent;
-    } else {
-      var memoStartedAt = new Date().toLocaleString('ja-JP', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-      editor.innerHTML = '<p style="color:#9ca3af;font-size:13px;">開始: ' + memoStartedAt + '</p><p><br></p>';
-    }
-    editor.addEventListener('input', function() { markDirty(); });
-
-    function markDirty() { dirty = true; }
-    function focusEditor() { editor.focus(); }
-    function escMemo(s) {
-      return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-      });
-    }
-
-    var memoSavedRange = null;
-    function saveMemoSelection() {
-      var sel = window.getSelection();
-      if (sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode)) {
-        memoSavedRange = sel.getRangeAt(0).cloneRange();
-      }
-    }
-    editor.addEventListener('mouseup', saveMemoSelection);
-    editor.addEventListener('keyup', saveMemoSelection);
-    editor.addEventListener('blur', saveMemoSelection);
-
-    function insertTextIntoMemo(text) {
-      editor.focus();
-      var sel = window.getSelection();
-      sel.removeAllRanges();
-      if (memoSavedRange && editor.contains(memoSavedRange.startContainer)) {
-        sel.addRange(memoSavedRange);
-      } else {
-        var r = document.createRange();
-        r.selectNodeContents(editor);
-        r.collapse(false);
-        sel.addRange(r);
-      }
-      document.execCommand('insertText', false, text);
-      saveMemoSelection();
-      markDirty();
-    }
-
-    var memoEmpSearchTimer = null;
-    var memoCarSearchTimer = null;
-    var memoLastCarResults = [];
-    var memoLastEmpResults = [];
-
-    function memoCarSearchDebounce() {
-      clearTimeout(memoCarSearchTimer);
-      memoCarSearchTimer = setTimeout(memoDoCarSearch, 300);
-    }
-    function memoDoCarSearch() {
-      var q = document.getElementById('memo-car-search').value.trim();
-      var sug = document.getElementById('memo-car-suggestions');
-      if (!q) { sug.style.display = 'none'; return; }
-      fetch(ADMIN_PATH + '/api/handover-memos/employee-by-car?car_no=' + encodeURIComponent(q))
-        .then(function(r) { return r.json(); })
-        .then(function(data) { memoRenderCarSuggestions(data && data.results, q); })
-        .catch(function() { sug.style.display = 'none'; });
-    }
-    function memoRenderCarSuggestions(list, carNo) {
-      memoLastCarResults = list || [];
-      var sug = document.getElementById('memo-car-suggestions');
-      if (!memoLastCarResults.length) { sug.style.display = 'none'; return; }
-      sug.innerHTML = memoLastCarResults.map(function(e, i) {
-        var div = e.division ? e.division + '課' : '';
-        var team = e.team ? e.team + '班' : '';
-        return '<div class="memo-search-item" data-idx="' + i + '">'
-          + '<div>' + escMemo(e.name) + '（車番' + escMemo(carNo) + '）</div>'
-          + '<div class="memo-search-meta">' + escMemo(div + team) + ' / ' + escMemo(e.emp_no) + '</div></div>';
-      }).join('');
-      sug.style.display = 'block';
-    }
-
-    function memoEmpSearchDebounce() {
-      clearTimeout(memoEmpSearchTimer);
-      memoEmpSearchTimer = setTimeout(memoDoEmpSearch, 300);
-    }
-    function memoDoEmpSearch() {
-      var q = document.getElementById('memo-emp-search').value.trim();
-      var sug = document.getElementById('memo-emp-suggestions');
-      if (!q) { sug.style.display = 'none'; return; }
-      fetch(ADMIN_PATH + '/api/handover-memos/employee-search?q=' + encodeURIComponent(q))
-        .then(function(r) { return r.json(); })
-        .then(function(data) { memoRenderEmpSuggestions(data && data.results); })
-        .catch(function() { sug.style.display = 'none'; });
-    }
-    function memoRenderEmpSuggestions(list) {
-      memoLastEmpResults = list || [];
-      var sug = document.getElementById('memo-emp-suggestions');
-      if (!memoLastEmpResults.length) { sug.style.display = 'none'; return; }
-      sug.innerHTML = memoLastEmpResults.map(function(e, i) {
-        var div = e.division ? e.division + '課' : '';
-        var team = e.team ? e.team + '班' : '';
-        var car = e.car_no ? '（車番' + escMemo(e.car_no) + '）' : '';
-        return '<div class="memo-search-item" data-idx="' + i + '">'
-          + '<div>' + escMemo(e.name) + car + '</div>'
-          + '<div class="memo-search-meta">' + escMemo(div + team) + ' / ' + escMemo(e.emp_no) + '</div></div>';
-      }).join('');
-      sug.style.display = 'block';
-    }
-
-    function memoInsertEmp(e, carNo) {
-      var text = carNo ? (carNo + ' ' + e.name) : e.name;
-      insertTextIntoMemo(text);
-      document.getElementById('memo-car-suggestions').style.display = 'none';
-      document.getElementById('memo-emp-suggestions').style.display = 'none';
-      document.getElementById('memo-car-search').value = '';
-      document.getElementById('memo-emp-search').value = '';
-    }
-
-    document.getElementById('memo-car-suggestions').addEventListener('click', function(e) {
-      var item = e.target.closest('.memo-search-item');
-      if (!item) return;
-      var r = memoLastCarResults[parseInt(item.getAttribute('data-idx'), 10)];
-      if (r) memoInsertEmp(r, document.getElementById('memo-car-search').value.trim());
-    });
-    document.getElementById('memo-emp-suggestions').addEventListener('click', function(e) {
-      var item = e.target.closest('.memo-search-item');
-      if (!item) return;
-      var r = memoLastEmpResults[parseInt(item.getAttribute('data-idx'), 10)];
-      if (r) memoInsertEmp(r, r.car_no);
-    });
-    document.addEventListener('click', function(e) {
-      var carSug = document.getElementById('memo-car-suggestions');
-      var carInput = document.getElementById('memo-car-search');
-      if (carSug && carInput && !carInput.contains(e.target) && !carSug.contains(e.target)) carSug.style.display = 'none';
-      var empSug = document.getElementById('memo-emp-suggestions');
-      var empInput = document.getElementById('memo-emp-search');
-      if (empSug && empInput && !empInput.contains(e.target) && !empSug.contains(e.target)) empSug.style.display = 'none';
-    });
-
-    function applyFormatBlock(tag) {
-      focusEditor();
-      document.execCommand('formatBlock', false, tag);
-      markDirty();
-    }
-    function toggleBold() {
-      focusEditor();
-      document.execCommand('bold', false, null);
-      markDirty();
-    }
-    function toggleList() {
-      focusEditor();
-      document.execCommand('insertUnorderedList', false, null);
-      markDirty();
-    }
-    function applyColor(color) {
-      focusEditor();
-      document.execCommand('foreColor', false, color);
-      markDirty();
-    }
-    function applyBg(color) {
-      focusEditor();
-      document.execCommand('hiliteColor', false, color) || document.execCommand('backColor', false, color);
-      markDirty();
-    }
-    function clearFormat() {
-      focusEditor();
-      document.execCommand('removeFormat', false, null);
-      document.execCommand('formatBlock', false, 'p');
-      markDirty();
-    }
-
-    function buildSwatches(containerId, colors, applyFn) {
-      var el = document.getElementById(containerId);
-      colors.forEach(function(col) {
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.title = col;
-        btn.style.cssText = 'width:20px;height:20px;border-radius:4px;border:1px solid #d1d5db;background:' + col + ';cursor:pointer;padding:0;';
-        btn.onmousedown = function(e) { e.preventDefault(); applyFn(col); };
-        el.appendChild(btn);
-      });
-    }
-
-    function saveMemo() {
-      var btn = document.getElementById('memo-save-btn');
-      btn.disabled = true;
-      var payload = { title: document.getElementById('memo-title').value.trim() || '無題のメモ', content: editor.innerHTML };
-      fetch(ADMIN_PATH + '/api/handover-memos/' + MEMO_ID, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        btn.disabled = false;
-        if (data.ok) { dirty = false; showToast('保存しました'); }
-        else { alert('保存に失敗しました'); }
-      })
-      .catch(function() { btn.disabled = false; alert('通信エラーが発生しました'); });
-    }
-
-    async function copyMemoContent() {
-      var html = editor.innerHTML;
-      var plain = editor.innerText;
-      var btn = document.getElementById('memo-copy-btn');
-      try {
-        if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
-          await navigator.clipboard.write([new ClipboardItem({
-            'text/html': new Blob([html], { type: 'text/html' }),
-            'text/plain': new Blob([plain], { type: 'text/plain' }),
-          })]);
-        } else {
-          await navigator.clipboard.writeText(plain);
-        }
-        var orig = btn.textContent;
-        btn.textContent = 'コピーしました';
-        btn.disabled = true;
-        setTimeout(function () { btn.textContent = orig; btn.disabled = false; }, 1500);
-      } catch (e) {
-        alert('コピーに失敗しました（ブラウザの設定をご確認ください）');
-      }
-    }
-
-    function saveMemoAsImage() {
-      if (typeof html2canvas === 'undefined') { alert('画像化ライブラリの読み込みに失敗しました。通信環境を確認してください。'); return; }
-      html2canvas(editor, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
-        var title = document.getElementById('memo-title').value.trim() || '無題のメモ';
-        var link = document.createElement('a');
-        link.download = title + '.png';
-        link.href = canvas.toDataURL('image/png');
-        link.click();
-      }).catch(function() {
-        alert('画像の生成に失敗しました');
-      });
-    }
-
-    window.addEventListener('beforeunload', function(e) {
-      if (!dirty) return;
-      e.preventDefault();
-      e.returnValue = '';
-    });
-
-    buildSwatches('tb-color-swatches', PRESET_COLORS, applyColor);
-    buildSwatches('tb-bg-swatches', PRESET_BGS, applyBg);
-  `;
-}
-
-app.get('/settings/handover-memos', async (c) => {
-  const memos = await c.env.DB.prepare(
-    'SELECT id, title, created_by_admin, updated_by_admin, created_at, updated_at FROM handover_memos ORDER BY updated_at DESC, id DESC LIMIT 200'
-  ).all<{
-    id: number; title: string; created_by_admin: string | null; updated_by_admin: string | null;
-    created_at: string; updated_at: string;
-  }>();
-  const all = memos.results ?? [];
-
-  const rows = all.map(m => `<tr id="memo-row-${m.id}">
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:13px;font-weight:600;">
-        <a href="${ADMIN_PATH}/settings/handover-memos/${m.id}" style="color:#1e3a5f;text-decoration:none;">${escHtml(m.title || '無題のメモ')}</a>
-      </td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(m.created_by_admin ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#374151;">${escHtml(m.updated_by_admin ?? '—')}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #f3f4f6;font-size:12px;color:#6b7280;white-space:nowrap;">${escHtml(m.updated_at.slice(0, 16))}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">
-        <a href="${ADMIN_PATH}/settings/handover-memos/${m.id}" style="padding:3px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;font-size:11px;cursor:pointer;text-decoration:none;display:inline-block;">開く</a>
-        <button onclick="deleteMemo(${m.id},'${escHtml((m.title || '無題のメモ').replace(/'/g, ''))}')"
-          style="padding:3px 8px;background:#fee2e2;color:#991b1b;border:none;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;">削除</button>
-      </td>
-    </tr>`).join('');
-
-  const content = `
-    ${reportSubHeader('報告センター')}
-    ${reportCenterNav('memo')}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
-      <button onclick="createMemo()" style="padding:7px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;">＋ 新規メモを作成</button>
-    </div>
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span id="memo-count" style="font-size:15px;font-weight:700;color:#1e3a5f;">メモ ${all.length}件</span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:600px;">
-          <thead style="background:#f9fafb;">
-            <tr>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">タイトル</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">作成者</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">最終更新者</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">更新日時</th>
-              <th style="padding:8px 12px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:#9ca3af;">メモがありません</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-    <script>
-    var ADMIN_PATH = ${safeJson(ADMIN_PATH)};
-    function createMemo() {
-      fetch(ADMIN_PATH + '/api/handover-memos', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.ok) { location.href = ADMIN_PATH + '/settings/handover-memos/' + data.id; }
-        else { alert('作成に失敗しました'); }
-      })
-      .catch(function() { alert('通信エラーが発生しました'); });
-    }
-    async function deleteMemo(id, title) {
-      if (!confirm('このメモを削除しますか？\\n「' + title + '」')) return;
-      var res = await fetch(ADMIN_PATH + '/api/handover-memos/' + id, { method: 'DELETE' });
-      if (!res.ok) { alert('削除に失敗しました'); return; }
-      var row = document.getElementById('memo-row-' + id);
-      if (row) row.remove();
-      var cnt = document.getElementById('memo-count');
-      if (cnt) cnt.textContent = 'メモ ' + Math.max(0, parseInt(cnt.textContent.replace(/[^0-9]/g, '') || '1') - 1) + '件';
-    }
-    </script>
-  `;
-
-  return c.html(layout('引き継ぎメモ一覧', content, 'report-center'));
-});
-
-app.get('/settings/handover-memos/:id', async (c) => {
-  const id = parseInt(c.req.param('id') ?? '');
-  if (!Number.isInteger(id)) return c.text('invalid id', 400);
-  const memo = await c.env.DB.prepare(
-    'SELECT id, title, grid_data, created_by_admin, updated_by_admin, created_at, updated_at FROM handover_memos WHERE id = ?'
-  ).bind(id).first<{
-    id: number; title: string; grid_data: string; created_by_admin: string | null; updated_by_admin: string | null;
-    created_at: string; updated_at: string;
-  }>();
-  if (!memo) return c.text('メモが見つかりません', 404);
-
-  const memoContent = sanitizeMemoContent(memo.grid_data);
-
-  const content = `
-    ${reportSubHeader('報告センター')}
-    ${reportCenterNav('memo')}
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
-      <a href="${ADMIN_PATH}/settings/handover-memos" style="color:#6b7280;font-size:13px;text-decoration:none;white-space:nowrap;">← メモ一覧に戻る</a>
-      <input type="text" id="memo-title" oninput="markDirty()" value="${escHtml(memo.title)}" placeholder="メモのタイトル"
-        style="flex:1;min-width:200px;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:15px;font-weight:700;color:#1e3a5f;">
-    </div>
-    <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">
-      作成: ${escHtml(memo.created_by_admin ?? '—')}（${escHtml(memo.created_at.slice(0, 16))}） ／
-      最終更新: ${escHtml(memo.updated_by_admin ?? '—')}（${escHtml(memo.updated_at.slice(0, 16))}）
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
-      <select onchange="applyFormatBlock(this.value)" style="padding:5px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:13px;">
-        <option value="p">本文</option>
-        <option value="h2">見出し1</option>
-        <option value="h3">見出し2</option>
-      </select>
-      <button type="button" onclick="toggleBold()" title="太字" style="width:32px;height:32px;font-weight:700;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">B</button>
-      <button type="button" onclick="toggleList()" title="箇条書き" style="padding:5px 10px;font-size:13px;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">• 箇条書き</button>
-      <span style="font-size:12px;color:#6b7280;">文字色</span>
-      <div id="tb-color-swatches" style="display:flex;gap:4px;"></div>
-      <input type="color" onchange="applyColor(this.value)" value="#111827" title="文字色を選ぶ" style="width:28px;height:28px;padding:0;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
-      <span style="font-size:12px;color:#6b7280;margin-left:8px;">マーカー</span>
-      <div id="tb-bg-swatches" style="display:flex;gap:4px;"></div>
-      <input type="color" onchange="applyBg(this.value)" value="#fef3c7" title="マーカー色を選ぶ" style="width:28px;height:28px;padding:0;border:1px solid #d1d5db;border-radius:4px;cursor:pointer;">
-      <button type="button" onclick="clearFormat()" style="padding:5px 10px;font-size:12px;border:1px solid #d1d5db;border-radius:4px;background:white;cursor:pointer;">書式クリア</button>
-      <div style="flex:1;"></div>
-      <button type="button" onclick="copyMemoContent()" id="memo-copy-btn" style="padding:7px 14px;background:white;color:#1e3a5f;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">コピー</button>
-      <button type="button" onclick="saveMemoAsImage()" style="padding:7px 14px;background:white;color:#1e3a5f;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">画像保存</button>
-      <button type="button" onclick="saveMemo()" id="memo-save-btn" style="padding:7px 18px;background:#1e3a5f;color:white;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">保存</button>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;background:white;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
-      <div style="position:relative;">
-        <label style="display:block;font-size:11px;color:#6b7280;margin-bottom:3px;">車番から乗務員を検索</label>
-        <input type="text" id="memo-car-search" placeholder="例: 5232" inputmode="numeric" autocomplete="off" oninput="memoCarSearchDebounce()"
-          style="width:130px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-        <div id="memo-car-suggestions" class="memo-search-suggestions"></div>
-      </div>
-      <div style="position:relative;">
-        <label style="display:block;font-size:11px;color:#6b7280;margin-bottom:3px;">乗務員名で検索</label>
-        <input type="text" id="memo-emp-search" placeholder="氏名・社員番号で検索" autocomplete="off" oninput="memoEmpSearchDebounce()"
-          style="width:200px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;">
-        <div id="memo-emp-suggestions" class="memo-search-suggestions"></div>
-      </div>
-      <div style="font-size:11px;color:#9ca3af;padding-bottom:7px;">候補をクリックするとカーソル位置にメモへ挿入されます</div>
-    </div>
-    <div id="memo-editor" contenteditable="true" style="min-height:60vh;padding:24px 28px;border:1px solid #e5e7eb;border-radius:8px;background:white;font-size:15px;line-height:1.9;color:#111827;outline:none;"></div>
-    <style>
-      #memo-editor h2 { font-size: 22px; font-weight: 800; color: #1e3a5f; margin: 0.6em 0 0.3em; }
-      #memo-editor h3 { font-size: 18px; font-weight: 700; color: #1e3a5f; margin: 0.6em 0 0.3em; }
-      #memo-editor p { margin: 0 0 0.6em; }
-      #memo-editor ul { margin: 0 0 0.6em; padding-left: 1.4em; }
-      .memo-search-suggestions { display:none; position:absolute; top:100%; left:0; min-width:220px; background:white; border:1px solid #d1d5db; border-radius:6px; z-index:20; box-shadow:0 4px 12px rgba(0,0,0,0.12); max-height:220px; overflow-y:auto; margin-top:2px; }
-      .memo-search-item { padding:8px 10px; font-size:13px; cursor:pointer; border-bottom:1px solid #f3f4f6; }
-      .memo-search-item:last-child { border-bottom:none; }
-      .memo-search-item:hover { background:#f0f9ff; }
-      .memo-search-meta { font-size:11px; color:#6b7280; }
-    </style>
-    ${saveToastHtml()}
-    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
-    <script>
-    ${saveToastScript()}
-    ${memoEditorScript(id, memoContent)}
-    </script>
-  `;
-
-  return c.html(layout(`引き継ぎメモ: ${memo.title}`, content, 'report-center'));
-});
-
-app.post('/api/handover-memos', async (c) => {
-  const adminName = await getAdminName(c);
-  const body = await c.req.json<{ title?: string }>().catch(() => ({} as { title?: string }));
-  const title = (body.title ?? '').trim() || '無題のメモ';
-
-  const result = await c.env.DB.prepare(
-    'INSERT INTO handover_memos (title, grid_data, created_by_admin, updated_by_admin) VALUES (?, ?, ?, ?)'
-  ).bind(title, '', adminName, adminName).run();
-  const id = result.meta.last_row_id as number;
-
-  await logReportAction(c.env.DB, 'handover_memo', id, 'created', adminName, title);
-  return c.json({ ok: true, id });
-});
-
-app.put('/api/handover-memos/:id', async (c) => {
-  const id = parseInt(c.req.param('id') ?? '');
-  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
-  const exists = await c.env.DB.prepare('SELECT id FROM handover_memos WHERE id = ?').bind(id).first();
-  if (!exists) return c.json({ error: 'not found' }, 404);
-
-  const adminName = await getAdminName(c);
-  const body = await c.req.json<{ title?: string; content?: string }>();
-  const title = (body.title ?? '').trim() || '無題のメモ';
-  const memoContent = sanitizeMemoContent(body.content);
-
-  await c.env.DB.prepare(
-    "UPDATE handover_memos SET title = ?, grid_data = ?, updated_by_admin = ?, updated_at = datetime('now','localtime') WHERE id = ?"
-  ).bind(title, memoContent, adminName, id).run();
-  return c.json({ ok: true });
-});
-
-app.delete('/api/handover-memos/:id', async (c) => {
-  const id = parseInt(c.req.param('id') ?? '');
-  if (!Number.isInteger(id)) return c.json({ error: 'invalid id' }, 400);
-  const row = await c.env.DB.prepare('SELECT title FROM handover_memos WHERE id = ?').bind(id).first<{ title: string }>();
-  if (!row) return c.json({ error: 'not found' }, 404);
-
-  const adminName = await getAdminName(c);
-  await c.env.DB.prepare('DELETE FROM handover_memos WHERE id = ?').bind(id).run();
-  await logReportAction(c.env.DB, 'handover_memo', id, 'deleted', adminName, row.title);
-  return c.json({ ok: true });
-});
-
-// 引き継ぎメモ編集画面の乗務員検索（氏名・社員番号 / 車番）。本文への挿入用に car_no も返す
-app.get('/api/handover-memos/employee-search', async (c) => {
-  const q = (c.req.query('q') ?? '').trim();
-  if (!q) return c.json({ results: [] });
-  const like = `%${q}%`;
-  const results = await c.env.DB.prepare(
-    `SELECT id, emp_no, name, division, team, car_no FROM employees
-     WHERE is_active = 1 AND (name LIKE ? OR emp_no LIKE ?)
-     ORDER BY name LIMIT 20`
-  ).bind(like, like).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null; car_no: string | null }>();
-  return c.json({ results: results.results ?? [] });
-});
-app.get('/api/handover-memos/employee-by-car', async (c) => {
-  const carNo = (c.req.query('car_no') ?? '').trim();
-  if (!carNo) return c.json({ results: [] });
-  const results = await c.env.DB.prepare(
-    `SELECT id, emp_no, name, division, team, car_no FROM employees
-     WHERE is_active = 1 AND car_no = ?
-     ORDER BY name LIMIT 10`
-  ).bind(carNo).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null; car_no: string | null }>();
-  return c.json({ results: results.results ?? [] });
-});
-
 // ===================================================
 // 報告の個別ページ（忘れ物/事故/違反/一般報告 共通）
 //   /settings/{種別}/view/:id  … 画面で読むための詳細ビュー（一覧の行クリックの遷移先）
@@ -2013,6 +1574,31 @@ for (const [slug, def] of Object.entries(REPORT_PAGE_BUILDERS)) {
     return c.html(renderReportDetailPage({ ...o, printHref: `${ADMIN_PATH}${def.printPath}/${id}` }));
   });
 }
+
+// 報告一覧のホバープレビュー用: 一覧の列に既に出ている項目（内容欄・お客様/相手方の氏名・電話番号・車番）は
+// 重複表示しないよう除外し、それ以外の詳細項目だけを返す
+const REPORT_PREVIEW_EXCLUDE_FIELD: Record<string, string[]> = {
+  'lost-items':      ['item_description', 'customer_name', 'customer_phone', 'vehicle_no'],
+  'accidents':       ['accident_type', 'customer_name', 'customer_phone', 'other_party_name', 'other_party_phone', 'vehicle_no'],
+  'violations':      ['violation_type_name', 'vehicle_no'],
+  'general-reports': ['title', 'customer_name', 'customer_phone', 'vehicle_no'],
+};
+
+app.get('/api/report-preview/:slug/:id', async (c) => {
+  const slug = c.req.param('slug');
+  const def = REPORT_PAGE_BUILDERS[slug];
+  if (!def) return c.json({ fields: [] }, 404);
+  const id = parseInt(c.req.param('id') ?? '');
+  if (!Number.isInteger(id)) return c.json({ fields: [] }, 400);
+  const o = await def.build(c, id);
+  if (!o) return c.json({ fields: [] }, 404);
+  const exclude = new Set(REPORT_PREVIEW_EXCLUDE_FIELD[slug] ?? []);
+  const fields = o.fields
+    .filter(f => !f.field || !exclude.has(f.field))
+    .filter(f => f.input === 'checkbox' ? !!f.checked : !!(f.value && String(f.value).trim()))
+    .map(f => ({ label: f.label, value: f.value }));
+  return c.json({ fields });
+});
 
 // ===================================================
 // まとめ帳票印刷ページ（忘れ物/事故/違反/一般報告 共通・複数件をA4横1枚に一覧表でまとめる）

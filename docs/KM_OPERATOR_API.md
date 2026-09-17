@@ -308,6 +308,43 @@ Cloudflare側からkm-operatorへ直接アクセスするのをやめ、**常時
 - **時間帯×曜日ヒートマップ**（`GET /api/km-pins/time-pattern`）: `on_service_at`が`"YYYY/MM/DD HH:mm"`形式でSQLiteのdate関数が使えないため、全件取得してJS側（`new Date(str.replace(/\\//g,'-'))`）で曜日・時刻を集計
 - **サマリー統計**（`GET /api/km-pins/summary`）: 件数・平均料金・平均距離・配車/流し比率
 
+## 14. 流し営業（配車を介さない乗車）の過去データ再現（2026-09-17）
+
+ユーザーからの指摘で、「走行軌跡」画面のAPI（`running_paths/search`）を調べ直したところ、**過去の日付でも車両の生GPSログ（5秒おき、ステータス付き）が取得できる**ことが判明した。ticket_searches/search（9-2章・13章）が配車依頼分のみだったのに対し、こちらは流し営業も含めた全乗降を過去に遡って再現できる、より強力な情報源。
+
+### 車両ステータスコード（`ctlib.js`の`VEHICLE_STATUS`定数より）
+```
+EMPTY=0(空車) SERVICE=1(実車) MEET_CUSTOMER=2(迎車) NOT_IN_SERVICE=3(回送)
+PAID=4(支払) STACK=6 TERMINAL_NATHING=10 NO_DRIVER=20 BREAK_TIME=30
+ON_DISPATCHING=90 UNKNOWN=99 DOUBLE_DISPATCHED=9999
+```
+`status`が「1以外→1」に変わった瞬間＝乗車、「1→1以外」に変わった瞬間＝降車、として抽出する。
+
+### API仕様
+```
+GET /kmx/api/v1/running_paths/search?wirelessLineNumber=<無線番号>&dateFrom=<YYYY/MM/DD HH:mm>&dateTo=<YYYY/MM/DD HH:mm>&time=10
+```
+`dateFrom`/`dateTo`/`time`はいずれも必須（`time`は整数のみ・具体的な意味は未確認だが`10`で正常動作を確認）。応答の`runningPathList`は5秒間隔の生ログで、車両1台・1日で1万件超になることもある（実機確認: 14,855件/日）。
+
+### 実装（`scripts/km_pins_collector/running_paths_collector.py`）
+- 生ログはこのスクリプトの実行マシン上だけで処理し、**乗車・降車の変化点だけ**をホシコンへ送る（通信量対策）
+- `running_paths_progress.json`に処理済み(車両, 日付)を記録し、再実行時は続きから処理（同じ範囲を取り直さない）
+- `--max`で1回の実行件数に上限を設け、km-operator側への短時間集中アクセスを回避（過去に大量アクセスで一時ブロックされた実績があるため）
+- launchd（`com.benten.runningpathscollector`、30分おき・1回40件）で自動的に少しずつ過去分を埋めていく
+- `trip_id`は`path-<無線番号>-<乗車日時>`形式。配車由来のデータ（`ticket-*`・trip_infos由来の生の数字ID）と同じ`km_trip_pins`テーブルに入るため、配車分と流し分が二重にカウントされる可能性がある点は既知の制限（乗車・降車の「場所の傾向」を見る用途では実害小さいと判断し許容）
+
+## 15. 地図表示の改善（Leaflet + OpenStreetMap、2026-09-17）
+
+当初の「相対座標に点をプロットするだけ」の簡易地図から、実際の地図（道路・地名が見える）に変更した。
+
+- `admin_km_pins.ts`: Leaflet（`cdn.jsdelivr.net`から読込）＋OpenStreetMapタイルで実地図上に頻出地点をプロット（円の大小・濃淡が頻度）
+- `index.ts`: `/settings/km-pins`ページのみCSPの`style-src`に`cdn.jsdelivr.net`、`img-src`に`*.tile.openstreetmap.org`を追加（他ページのCSPは変更なし）
+- サーバー側は引き続き約100m四方に集計した最大300点だけを返す設計（9-2章で決めた通信量対策を踏襲）。生の位置ログをブラウザに送ることはない
+
+## 16. ZENRIN認証情報の転用について（判断・不使用）
+
+km-operator側の`zntUid`/`zntPassword`/`zdcCgiKy`（6章）を、ホシコン側のルート検索機能に転用できないか質問があったが、**使わない方針とした**。理由: これは国際自動車グループがZENRINと契約して発行された、km-operator専用の認証情報であり、別会社・別システムであるホシコンで転用するのは利用規約違反・契約トラブルのリスクがあるため。将来「流し方最適化ルート」機能を作る場合は、別途正規のルーティングサービス（OSRM等）を検討する。
+
 ## 12. 注意事項
 
 - **このAPIは非公式**。km-operator側が外部連携用として公開しているものではなく、画面が内部的に呼んでいるエンドポイントを観測しただけの調査結果。ベンダー（スマートタクシーセンター運営元）の利用規約を確認しないまま本番の自動収集バッチ化はしない。

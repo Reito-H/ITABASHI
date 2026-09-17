@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.benten.runningpathscollector</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/reito/NC/ITABASHI/scripts/km_pins_collector/running_paths_collector.py</string>
+    <string>--days</string>
+    <string>30</string>
+    <string>--max</string>
+    <string>40</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/reito/NC/ITABASHI/scripts/km_pins_collector</string>
+  <key>StartInterval</key>
+  <integer>1800</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>/Users/reito/NC/ITABASHI/scripts/km_pins_collector/running_paths_launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/reito/NC/ITABASHI/scripts/km_pins_collector/running_paths_launchd.log</string>
+</dict>
+</plist>
