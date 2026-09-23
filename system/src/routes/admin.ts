@@ -933,37 +933,66 @@ app.get('/shift/print/:empId', async (c) => {
 
 // ===== 設定：スケジュール区分管理 =====
 // ===== 設定トップ（カード一覧）=====
+type SettingCard = { href: string; perm: string; title: string; desc?: string; highlight?: boolean; newTab?: boolean };
+
+// 設定カード1件のHTML（設定トップ・管理者項目ハブなど複数ページで共用）
+function settingCardHtml(card: SettingCard): string {
+  const linkTag = `
+        <a href="${card.href}" ${card.newTab ? 'target="_blank" rel="noopener"' : ''} ${card.href === MONITOR_ACCIDENTS_PATH ? '' : `data-perm-key="${card.perm}"`} style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:${card.desc ? '18px 20px' : '14px 20px'};box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
+          onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
+          <div>
+            <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};${card.desc ? 'margin-bottom:3px;' : ''}">${card.title}</div>
+            ${card.desc ? `<div style="font-size:12px;color:#6b7280;">${card.desc}</div>` : ''}
+          </div>
+          <div style="margin-left:auto;color:#9ca3af;font-size:18px;">›</div>
+        </a>`;
+  if (card.href !== MONITOR_ACCIDENTS_PATH) return linkTag;
+  return `
+        <div data-perm-key="${card.perm}" style="display:flex;flex-direction:column;gap:8px;">
+          ${linkTag}
+          <button type="button" id="monitor-force-refresh-btn" onclick="forceRefreshAccidentsMonitor(this)"
+            style="align-self:flex-start;font-size:12px;font-weight:700;color:#b45309;background:#fef3c7;border:1px solid #f4d35e;border-radius:8px;padding:8px 14px;cursor:pointer;">
+            【強制更新】表示中のモニター画面を今すぐリロード
+          </button>
+        </div>`;
+}
+
+// 設定カードのグループをカラム状に並べたHTML（設定トップ・管理者項目ハブで共用）
+function settingGroupsHtml(groups: Array<{ heading: string; cards: SettingCard[] }>): string {
+  return `
+    <style>
+      .settings-cols { column-gap: 28px; }
+      @media (min-width: 1024px) { .settings-cols { column-count: 3; } }
+      @media (min-width: 700px) and (max-width: 1023px) { .settings-cols { column-count: 2; } }
+      .settings-group { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; }
+    </style>
+    <div class="settings-cols" style="max-width:1160px;">
+      ${groups.map(g => `
+      <div class="settings-group" style="margin-bottom:24px;">
+        <div style="font-size:12px;font-weight:700;color:#9ca3af;letter-spacing:0.08em;margin-bottom:10px;">${g.heading}</div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          ${g.cards.map(settingCardHtml).join('')}
+        </div>
+      </div>`).join('')}
+    </div>`;
+}
+
 app.get('/settings', async (c) => {
   const ADMIN = ADMIN_PATH;
-  type SettingCard = { href: string; perm: string; title: string; desc?: string; highlight?: boolean; newTab?: boolean };
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[]; extraHtml?: string }> = [
     { heading: '日々の運用', cards: [
       // 報告センター・便利（車庫を含む）は左サイドバーに独立項目として配置したため、ここには表示しない
       { href: `${ADMIN}/requests`,         perm: 'requests',       title: '要望欄' },
     ]},
-    { heading: '権限・アカウント', cards: [
-      { href: `${ADMIN}/settings/accounts`,    perm: 'settings.accounts',   title: 'アカウント権限管理', highlight: true },
-      { href: `${ADMIN}/settings/liff`,        perm: 'settings.liff',       title: 'LINE連携', highlight: true },
+    { heading: '管理者項目', cards: [
+      { href: `${ADMIN}/settings/admin-tools`, perm: 'settings', title: '管理者項目', desc: 'アカウント権限・LINE連携・マスタ管理・データセンターなど', highlight: true },
     ]},
     { heading: 'アナウンス', cards: [
-      { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー' },
-      { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード' },
       { href: `${ADMIN}/settings/weather-notice`,    perm: 'settings.weather-notice',   title: '異常気象警報 周知サイネージ' },
     ]},
     { heading: 'シフト関連の設定', cards: [
       { href: `${ADMIN}/settings/shift`, perm: 'settings', title: 'シフト関連の設定', highlight: true },
-    ]},
-    { heading: 'LINE関連', cards: [
-      { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理' },
-      { href: `${ADMIN}/announcements`,          perm: 'announcements',         title: 'お知らせ配信' },
-      { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定' },
-      { href: `${ADMIN}/usage`,                  perm: 'settings.line-usage',    title: 'LINE利用状況' },
-    ]},
-    { heading: 'マスタ管理', cards: [
-      { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所' },
-      { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金' },
-      { href: `${ADMIN}/cc-list`,                  perm: 'cc-list',                  title: 'CC名簿' },
     ]},
     // 営業戦略（SR分析＋乗降ピン分析）は左サイドバーに専用項目があるため、設定一覧からは削除
     { heading: '調整', cards: [
@@ -981,54 +1010,15 @@ app.get('/settings', async (c) => {
       { href: MONITOR_ACCIDENTS_PATH, perm: 'accidents', title: '事故モニター表示', newTab: true },
       { href: `${ADMIN}/signage`, perm: 'signage', title: 'デジタルサイネージ' },
     ]},
-    { heading: 'ガイド・システム', cards: [
-      { href: `${ADMIN}/settings/documents`,            perm: 'settings.documents',            title: 'データセンター' },
+    { heading: 'ガイド', cards: [
       { href: `${ADMIN}/settings/study-notes`,          perm: 'settings.study-notes',          title: '学習ノート' },
       { href: `${ADMIN}/settings/tutorial`,             perm: 'settings.tutorial',             title: 'チュートリアル' },
       { href: `${ADMIN}/settings/vehicle-search-guide`, perm: 'settings.vehicle-search-guide', title: '車番検索ガイド' },
-      { href: `${ADMIN}/settings/status`,               perm: 'settings.status',               title: 'システムステータス' },
-      { href: `${ADMIN}/request-review`,                perm: 'settings.requests-admin',       title: '要望欄（収集一覧）' },
     ]},
   ];
-  const cardHtml = (card: SettingCard) => {
-    const linkTag = `
-          <a href="${card.href}" ${card.newTab ? 'target="_blank" rel="noopener"' : ''} ${card.href === MONITOR_ACCIDENTS_PATH ? '' : `data-perm-key="${card.perm}"`} style="display:flex;align-items:center;gap:16px;background:${card.highlight ? '#eff6ff' : 'white'};border-radius:12px;padding:${card.desc ? '18px 20px' : '14px 20px'};box-shadow:0 1px 4px rgba(0,0,0,0.08);text-decoration:none;color:inherit;border:1px solid ${card.highlight ? '#bfdbfe' : '#e5e7eb'};transition:box-shadow 0.15s;"
-            onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.12)'" onmouseout="this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'">
-            <div>
-              <div style="font-size:15px;font-weight:700;color:${card.highlight ? '#1d4ed8' : '#1e3a5f'};${card.desc ? 'margin-bottom:3px;' : ''}">${card.title}</div>
-              ${card.desc ? `<div style="font-size:12px;color:#6b7280;">${card.desc}</div>` : ''}
-            </div>
-            <div style="margin-left:auto;color:#9ca3af;font-size:18px;">›</div>
-          </a>`;
-    if (card.href !== MONITOR_ACCIDENTS_PATH) return linkTag;
-    return `
-          <div data-perm-key="${card.perm}" style="display:flex;flex-direction:column;gap:8px;">
-            ${linkTag}
-            <button type="button" id="monitor-force-refresh-btn" onclick="forceRefreshAccidentsMonitor(this)"
-              style="align-self:flex-start;font-size:12px;font-weight:700;color:#b45309;background:#fef3c7;border:1px solid #f4d35e;border-radius:8px;padding:8px 14px;cursor:pointer;">
-              【強制更新】表示中のモニター画面を今すぐリロード
-            </button>
-          </div>`;
-  };
   const html = `
-    <style>
-      /* PC版は設定カードを横3列（新聞レイアウト）で表示。狭い画面では1列に戻る */
-      .settings-cols { column-gap: 28px; }
-      @media (min-width: 1024px) { .settings-cols { column-count: 3; } }
-      @media (min-width: 700px) and (max-width: 1023px) { .settings-cols { column-count: 2; } }
-      .settings-group { break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid; }
-    </style>
     <h2 style="font-size:18px;font-weight:700;color:#1e3a5f;margin-bottom:20px;">設定</h2>
-    <div class="settings-cols" style="max-width:1160px;">
-      ${groups.map(g => `
-      <div class="settings-group" style="margin-bottom:24px;">
-        <div style="font-size:12px;font-weight:700;color:#9ca3af;letter-spacing:0.08em;margin-bottom:10px;">${g.heading}</div>
-        <div style="display:flex;flex-direction:column;gap:12px;">
-          ${g.cards.map(cardHtml).join('')}
-        </div>
-        ${g.extraHtml || ''}
-      </div>`).join('')}
-    </div>
+    ${settingGroupsHtml(groups)}
     <script>
       var ADMIN_PATH = ${JSON.stringify(ADMIN_PATH)};
       function forceRefreshAccidentsMonitor(btn) {
@@ -1067,6 +1057,40 @@ export function settingsSubHeader(title: string): string {
     <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">${title}</h2>
   </div>`;
 }
+
+// ===== 管理者項目 ハブページ（アカウント権限・LINE連携・マスタ管理等をまとめて格納） =====
+app.get('/settings/admin-tools', (c) => {
+  const ADMIN = ADMIN_PATH;
+  const groups: Array<{ heading: string; cards: SettingCard[] }> = [
+    { heading: '権限・アカウント', cards: [
+      { href: `${ADMIN}/settings/accounts`, perm: 'settings.accounts', title: 'アカウント権限管理', highlight: true },
+      { href: `${ADMIN}/settings/liff`,     perm: 'settings.liff',     title: 'LINE連携', highlight: true },
+    ]},
+    { heading: 'アナウンス', cards: [
+      { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー' },
+      { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード' },
+      { href: `${ADMIN}/settings/seasonal`,          perm: 'settings.seasonal',         title: 'シーズナル演出' },
+    ]},
+    { heading: 'LINE関連機能', cards: [
+      { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理' },
+      { href: `${ADMIN}/announcements`,          perm: 'announcements',         title: 'お知らせ配信' },
+      { href: `${ADMIN}/settings/notifications`, perm: 'settings.notifications', title: 'LINE通知設定' },
+      { href: `${ADMIN}/usage`,                  perm: 'settings.line-usage',    title: 'LINE利用状況' },
+    ]},
+    { heading: 'マスタ管理', cards: [
+      { href: `${ADMIN}/settings/offices`,         perm: 'settings.offices',         title: '営業所' },
+      { href: `${ADMIN}/settings/violation-types`, perm: 'settings.violation-types', title: '違反種類・点数/反則金' },
+      { href: `${ADMIN}/cc-list`,                  perm: 'cc-list',                  title: 'CC名簿' },
+    ]},
+    { heading: 'システム', cards: [
+      { href: `${ADMIN}/settings/documents`, perm: 'settings.documents',      title: 'データセンター' },
+      { href: `${ADMIN}/settings/status`,    perm: 'settings.status',         title: 'システムステータス' },
+      { href: `${ADMIN}/request-review`,     perm: 'settings.requests-admin', title: '要望欄（収集一覧）' },
+    ]},
+  ];
+  const html = settingsSubHeader('管理者項目') + settingGroupsHtml(groups);
+  return c.html(layout('管理者項目', html, 'settings'));
+});
 
 // ===== シフト関連の設定 ハブページ =====
 app.get('/settings/shift', (c) => {

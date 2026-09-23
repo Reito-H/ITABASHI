@@ -92,7 +92,6 @@ app.get('/liff/kancho-shift', (c) => {
     .memo { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; margin-top: 10px; font-size: 12px; }
     .memo b { color: #1e3a5f; display: block; margin-bottom: 4px; }
     #msg { text-align: center; padding: 40px 12px; color: #6b7280; font-size: 14px; }
-    .sub-title { font-size: 12px; font-weight: 700; color: #1e3a5f; margin: 12px 0 4px; }
   </style>
 </head>
 <body>
@@ -105,7 +104,6 @@ app.get('/liff/kancho-shift', (c) => {
     </div>
     <div class="legend" id="legend"></div>
     <div class="wrap"><table id="main-table"></table></div>
-    <div id="sub-tables"></div>
     <div class="memo" id="memo-tokki" style="display:none;"></div>
     <div class="memo" id="memo-kibou" style="display:none;"></div>
   </div>
@@ -209,14 +207,6 @@ function render(d) {
     html += rowsFor([m]);
   });
   document.getElementById('main-table').innerHTML = html;
-
-  var subHtml = '';
-  [['s1', '① 表'], ['s2', '② 表']].forEach(function(sec) {
-    var list = d.members.filter(function(m) { return m.section === sec[0]; });
-    if (list.length === 0) return;
-    subHtml += '<div class="sub-title">' + sec[1] + '</div><div class="wrap"><table>' + dateHead() + rowsFor(list) + '</table></div>';
-  });
-  document.getElementById('sub-tables').innerHTML = subHtml;
 
   var tokki = d.memos.filter(function(m) { return m.kind === 'tokki'; });
   var kibou = d.memos.filter(function(m) { return m.kind === 'kibou'; });

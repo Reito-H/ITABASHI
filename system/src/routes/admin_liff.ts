@@ -162,7 +162,7 @@ app.get('/settings/reports', async (c) => {
     const printHref = `${ADMIN_PATH}${info.printPath}/${r.id}`;
     const previewUrl = `${ADMIN_PATH}/api/report-preview/${info.slug}/${r.id}`;
     return `${yearSep}<tr onclick="location.href='${viewHref}'" style="cursor:pointer;" data-preview-url="${previewUrl}"
-      onmouseover="this.style.background='#f9fafb';showReportPreview(event,this)" onmousemove="moveReportPreview(event)" onmouseout="this.style.background='';hideReportPreview()">
+      onmouseover="this.style.background='rgba(86,102,255,0.06)';showReportPreview(event,this)" onmousemove="moveReportPreview(event)" onmouseout="this.style.background='';hideReportPreview()">
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap;">${escHtml(formatDateNoYear(r.created_at))}</td>
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;white-space:nowrap;">${caseIdDisplay(r.vehicle_no, r.case_no)}</td>
       <td style="padding:12px 16px;border-bottom:1px solid #f3f4f6;font-size:15px;font-weight:700;color:#111827;line-height:1.5;">${unifiedCustomerCellHtml(r)}</td>
@@ -175,53 +175,83 @@ app.get('/settings/reports', async (c) => {
   const buildUrl = (t: string, s: string) => `${ADMIN_PATH}/settings/reports?type=${t}&status=${s}`;
   const typeChip = (label: string, slug: string) => {
     const active = typeFilter === slug;
-    return `<a href="${buildUrl(slug, statusFilter)}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
-      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
+    return `<a href="${buildUrl(slug, statusFilter)}" class="rc-chip${active ? ' active' : ''}">${escHtml(label)}</a>`;
   };
   const statusChip = (label: string, s: string) => {
     const active = statusFilter === s;
-    return `<a href="${buildUrl(typeFilter, s)}" style="padding:6px 14px;border-radius:20px;font-size:13px;text-decoration:none;font-weight:600;
-      ${active ? 'background:#1e3a5f;color:white;' : 'background:white;color:#374151;border:1px solid #d1d5db;'}">${escHtml(label)}</a>`;
+    return `<a href="${buildUrl(typeFilter, s)}" class="rc-chip${active ? ' active' : ''}">${escHtml(label)}</a>`;
   };
 
   const totalPages = Math.max(1, Math.ceil(total / REPORT_PAGE_SIZE));
   const pager = totalPages > 1 ? `<div style="display:flex;gap:8px;align-items:center;justify-content:center;padding:14px;">
-    ${page > 1 ? `<a href="${ADMIN_PATH}/settings/reports?type=${typeFilter}&status=${statusFilter}&page=${page - 1}" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;font-size:13px;text-decoration:none;">← 前へ</a>` : ''}
+    ${page > 1 ? `<a href="${ADMIN_PATH}/settings/reports?type=${typeFilter}&status=${statusFilter}&page=${page - 1}" class="rc-page-btn">← 前へ</a>` : ''}
     <span style="font-size:13px;color:#6b7280;">${page} / ${totalPages}ページ</span>
-    ${page < totalPages ? `<a href="${ADMIN_PATH}/settings/reports?type=${typeFilter}&status=${statusFilter}&page=${page + 1}" style="padding:6px 14px;border-radius:6px;border:1px solid #d1d5db;background:white;color:#374151;font-size:13px;text-decoration:none;">次へ →</a>` : ''}
+    ${page < totalPages ? `<a href="${ADMIN_PATH}/settings/reports?type=${typeFilter}&status=${statusFilter}&page=${page + 1}" class="rc-page-btn">次へ →</a>` : ''}
   </div>` : '';
 
   const content = `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
-      ${typeChip('すべて', '')}
-      ${allowed.map(k => typeChip(k.label, k.slug)).join('')}
-      ${statusChip('対応中', 'open')}
-      ${statusChip('解決済み', 'resolved')}
-      ${unifiedNewReportButtonsHtml(allowed)}
-    </div>
+    <style>
+      .rc-wrap {
+        position:relative; padding:20px 20px 26px; margin:-16px -16px 0; border-radius:0 0 22px 22px;
+        background:
+          radial-gradient(900px 420px at 12% -8%, rgba(86,102,255,0.12), transparent 62%),
+          radial-gradient(760px 360px at 100% -6%, rgba(244,166,33,0.10), transparent 58%),
+          var(--color-bg, #f5f8fd);
+      }
+      .rc-chip {
+        padding:6px 14px; border-radius:20px; font-size:13px; text-decoration:none; font-weight:600; color:#374151;
+        background:rgba(255,255,255,0.55); backdrop-filter:blur(16px) saturate(150%); -webkit-backdrop-filter:blur(16px) saturate(150%);
+        border:1px solid rgba(255,255,255,0.65); transition:background .15s ease,border-color .15s ease,color .15s ease;
+      }
+      .rc-chip:hover { background:rgba(255,255,255,0.85); }
+      .rc-chip.active {
+        background:linear-gradient(135deg, rgba(30,58,95,0.92), rgba(45,74,138,0.88)); color:#fff;
+        border-color:rgba(30,58,95,0.5); box-shadow:0 4px 14px rgba(30,58,95,0.25);
+      }
+      .rc-card {
+        border-radius:16px; overflow:hidden;
+        background:rgba(255,255,255,0.6); backdrop-filter:blur(20px) saturate(160%); -webkit-backdrop-filter:blur(20px) saturate(160%);
+        border:1px solid rgba(255,255,255,0.7); box-shadow:0 4px 18px rgba(20,29,44,0.05);
+      }
+      .rc-page-btn {
+        padding:6px 14px; border-radius:8px; font-size:13px; text-decoration:none; color:#374151;
+        background:rgba(255,255,255,0.6); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+        border:1px solid rgba(255,255,255,0.7);
+      }
+      .rc-page-btn:hover { background:rgba(255,255,255,0.85); }
+    </style>
+    <div class="rc-wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;align-items:center;">
+        ${typeChip('すべて', '')}
+        ${allowed.map(k => typeChip(k.label, k.slug)).join('')}
+        ${statusChip('対応中', 'open')}
+        ${statusChip('解決済み', 'resolved')}
+        ${unifiedNewReportButtonsHtml(allowed)}
+      </div>
 
-    <div style="background:white;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);overflow:hidden;">
-      <div style="padding:14px 20px;border-bottom:1px solid #f3f4f6;">
-        <span style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${total}件</span>
+      <div class="rc-card">
+        <div style="padding:14px 20px;border-bottom:1px solid rgba(20,29,44,0.06);">
+          <span style="font-size:15px;font-weight:700;color:#1e3a5f;">報告 ${total}件</span>
+        </div>
+        <div style="overflow-x:auto;">
+          <table style="width:100%;border-collapse:collapse;min-width:700px;">
+            <thead style="background:rgba(255,255,255,0.35);">
+              <tr>
+                <th style="padding:8px 6px;text-align:left;font-size:10px;color:#9ca3af;font-weight:600;">日付</th>
+                <th style="padding:8px 6px;text-align:left;font-size:10px;color:#9ca3af;font-weight:600;">案件ID</th>
+                <th style="padding:8px 16px;text-align:left;font-size:13px;color:#4b5563;font-weight:700;">お客様TEL・お客様名</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">内容</th>
+                <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
+                <th style="padding:8px 8px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+        ${pager}
       </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;min-width:700px;">
-          <thead style="background:#f9fafb;">
-            <tr>
-              <th style="padding:8px 6px;text-align:left;font-size:10px;color:#9ca3af;font-weight:600;">日付</th>
-              <th style="padding:8px 6px;text-align:left;font-size:10px;color:#9ca3af;font-weight:600;">案件ID</th>
-              <th style="padding:8px 16px;text-align:left;font-size:13px;color:#4b5563;font-weight:700;">お客様TEL・お客様名</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">内容</th>
-              <th style="padding:8px 12px;text-align:left;font-size:12px;color:#6b7280;font-weight:600;">状態</th>
-              <th style="padding:8px 8px;"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml || '<tr><td colspan="6" style="padding:24px;text-align:center;color:#9ca3af;">報告がありません</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-      ${pager}
     </div>
 
     <div id="report-preview-panel" style="display:none;position:fixed;z-index:500;max-width:340px;padding:14px 16px;border-radius:14px;

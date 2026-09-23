@@ -11,7 +11,7 @@ export type KanchoMember = {
   id: number;
   name: string;
   role: string | null;
-  section: string;          // 'main' | 's1' | 's2'
+  section: string;          // 常に'main'（旧's1'/'s2'の①②表区分は2026-09-17に廃止）
   sort_order: number;
   is_active: number;
   team_color: string | null; // 班色(#rrggbb)
@@ -28,7 +28,7 @@ export type KanchoShiftType = {
   code: string;
   label: string;
   color: string;
-  section: string;          // 'main' | 'sub' | 'all'
+  section: string;          // 常に'main'（旧'sub'/'all'は①②表廃止に伴い2026-09-17に廃止）
   daily_required: number;
   count_in_summary: number; // 旧集計フラグ（未使用・互換のため残置）
   sort_order: number;
@@ -185,8 +185,6 @@ export function kanchoShiftPage(
 
   // メイン表は内勤班長のみ表示（乗務中の班長は名簿に残るが非表示）
   const mainMembers = sortMainMembers(members.filter(m => m.section === 'main' && m.is_indoor === 1));
-  const s1Members = members.filter(m => m.section === 's1').sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-  const s2Members = members.filter(m => m.section === 's2').sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
 
   const STICKY = 'position:sticky;z-index:2;';
   const HDR_BG = 'background:#1e3a5f;color:white;';
@@ -200,7 +198,7 @@ export function kanchoShiftPage(
       const isWeekend = dow === 0 || dow === 6;
       const inPeriod = d >= periodStart && d <= periodEnd;
       const bg = !inPeriod ? '#f3f4f6' : isWeekend ? '#fef2f2' : '#eff6ff';
-      return `<th style="min-width:38px;max-width:38px;text-align:center;font-size:11px;padding:3px 1px;border:1px solid #d1d5db;background:${bg};${!inPeriod ? 'opacity:0.55;' : ''}">
+      return `<th style="min-width:30px;max-width:30px;text-align:center;font-size:11px;padding:3px 1px;border:1px solid #d1d5db;background:${bg};${!inPeriod ? 'opacity:0.55;' : ''}">
         <div>${day}</div>
         <div style="color:${dow === 0 ? '#ef4444' : dow === 6 ? '#3b82f6' : '#374151'};">${WEEKDAY_JA[dow]}</div>
       </th>`;
@@ -235,12 +233,12 @@ export function kanchoShiftPage(
       const cells = dates.map(d => cell(m, d, 'main')).join('');
       const counts = COUNT_COLS.map(cc =>
         `<td class="kcount" data-member="${m.id}" data-kind="${cc.key}"
-          style="min-width:30px;text-align:center;font-size:11px;font-weight:600;border:1px solid #d1d5db;background:${cc.color};padding:2px;"></td>`
+          style="min-width:24px;text-align:center;font-size:11px;font-weight:600;border:1px solid #d1d5db;background:${cc.color};padding:2px;"></td>`
       ).join('');
       const nameBg = m.team_color ? `background:linear-gradient(to right, ${m.team_color} 6px, #f8fafc 6px);` : FIX_BG;
       const linkBadge = (canEdit && !m.emp_no) ? '<span title="社員番号が未紐付け" style="color:#dc2626;margin-left:3px;">🔗</span>' : '';
       html += `<tr data-sec="main" data-role="${escHtml(role)}">
-        <td class="${canEdit ? 'kc-name kc-name-cell' : ''}" data-mid="${m.id}" data-name="${escHtml(m.name)}" style="min-width:92px;max-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px 3px 10px;${STICKY}left:0;${nameBg}white-space:nowrap;overflow:hidden;${canEdit ? 'cursor:pointer;' : ''}">${nameLabel(m)}${linkBadge}</td>
+        <td class="${canEdit ? 'kc-name kc-name-cell' : ''}" data-mid="${m.id}" data-name="${escHtml(m.name)}" style="min-width:76px;max-width:76px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 4px 3px 8px;${STICKY}left:0;${nameBg}white-space:nowrap;overflow:hidden;${canEdit ? 'cursor:pointer;' : ''}">${nameLabel(m)}${linkBadge}</td>
         ${cells}${counts}
       </tr>`;
     }
@@ -249,7 +247,7 @@ export function kanchoShiftPage(
       const cells = dates.map(d => {
         const inPeriod = d >= periodStart && d <= periodEnd;
         return `<td class="kreq" data-code="${escHtml(t.code)}" data-date="${d}" data-req="${t.daily_required}"
-          style="min-width:38px;text-align:center;font-size:10px;border:1px solid #d1d5db;padding:2px 1px;${inPeriod ? '' : 'opacity:0.45;'}"></td>`;
+          style="min-width:30px;text-align:center;font-size:10px;border:1px solid #d1d5db;padding:2px 1px;${inPeriod ? '' : 'opacity:0.45;'}"></td>`;
       }).join('');
       html += `<tr>
         <td style="font-size:10px;font-weight:600;border:1px solid #d1d5db;padding:2px 6px;${STICKY}left:0;background:${t.color};white-space:nowrap;">${escHtml(t.code)} 必要${t.daily_required}</td>
@@ -257,32 +255,6 @@ export function kanchoShiftPage(
       </tr>`;
     }
     return html;
-  }
-
-  function subTable(title: string, list: KanchoMember[], secGroup: string): string {
-    if (list.length === 0) return '';
-    const rows = list.map(m => `<tr data-sec="${secGroup}">
-      <td class="${canEdit ? 'kc-name-cell' : ''}" data-mid="${m.id}" style="min-width:92px;font-size:12px;font-weight:600;border:1px solid #d1d5db;padding:3px 6px;${STICKY}left:0;${FIX_BG}white-space:nowrap;">${nameLabel(m)}</td>
-      ${dates.map(d => cell(m, d, secGroup)).join('')}
-    </tr>`).join('');
-    return `
-    <div class="ksub-header" onclick="toggleSubTable('${secGroup}')" style="cursor:pointer;display:flex;align-items:center;gap:5px;margin:18px 0 6px;user-select:none;">
-      <span id="${secGroup}-arrow" style="font-size:10px;color:#6b7280;">▼</span>
-      <h3 style="font-size:13px;font-weight:700;color:#1e3a5f;margin:0;">${escHtml(title)}</h3>
-    </div>
-    <div id="${secGroup}-body">
-      <div style="overflow-x:auto;border:1px solid #d1d5db;border-radius:8px;-webkit-overflow-scrolling:touch;">
-        <table style="border-collapse:collapse;table-layout:fixed;">
-          <thead style="position:sticky;top:0;z-index:10;background:white;">
-            <tr>
-              <th style="min-width:92px;${STICKY}left:0;z-index:20;${HDR_BG}font-size:11px;padding:4px;border:1px solid #4b6cb7;">氏名</th>
-              ${dateHeaders()}
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    </div>`;
   }
 
   const tokki = memos.find(mm => mm.kind === 'tokki')?.content ?? '';
@@ -382,23 +354,21 @@ export function kanchoShiftPage(
     <table style="border-collapse:collapse;table-layout:fixed;">
       <thead style="position:sticky;top:0;z-index:10;background:white;">
         <tr>
-          <th style="min-width:92px;${STICKY}left:0;z-index:20;${HDR_BG}font-size:11px;padding:4px;border:1px solid #4b6cb7;">氏名</th>
+          <th style="min-width:76px;${STICKY}left:0;z-index:20;${HDR_BG}font-size:11px;padding:4px;border:1px solid #4b6cb7;">氏名</th>
           ${dateHeaders()}
-          ${COUNT_COLS.map(cc => `<th style="min-width:30px;${HDR_BG}font-size:10px;padding:4px 2px;border:1px solid #4b6cb7;">${cc.label}</th>`).join('')}
+          ${COUNT_COLS.map(cc => `<th style="min-width:24px;${HDR_BG}font-size:10px;padding:4px 2px;border:1px solid #4b6cb7;">${cc.label}</th>`).join('')}
         </tr>
       </thead>
       <tbody>${mainRows()}</tbody>
     </table>
   </div>
 
-  ${subTable('① 表', s1Members, 's1')}
-  ${subTable('② 表', s2Members, 's2')}
   ${memoSection}
 </div>
 
 <!-- セル編集モーダル -->
 <div id="cell-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:90vh;overflow-y:auto;">
+  <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:20px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:90vh;overflow-y:auto;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;">
       <div>
         <div id="modal-name" style="font-size:15px;font-weight:700;color:#1e3a5f;"></div>
@@ -448,7 +418,7 @@ export function kanchoShiftPage(
 
 <!-- 担当者変更モーダル -->
 <div id="link-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1002;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+  <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:20px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">この枠の担当者を変更</h3>
       <button onclick="closeLinkModal()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
@@ -465,7 +435,7 @@ export function kanchoShiftPage(
 
 <!-- 履歴モーダル -->
 <div id="history-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+  <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:20px;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">編集履歴（最新200件）</h3>
       <button onclick="sel('#history-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
@@ -476,7 +446,7 @@ export function kanchoShiftPage(
 
 <!-- 警告チェックモーダル -->
 <div id="warnings-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+  <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:20px;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">警告チェック（${year}年${month}月度）</h3>
       <button onclick="sel('#warnings-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
@@ -507,7 +477,7 @@ export function kanchoShiftPage(
       <div class="ktable-wrap">
         <table class="ktable">
           <thead><tr>
-            <th>記号</th><th>説明</th><th>色</th><th>表</th><th>必要人数</th><th>班色</th><th>出勤</th><th>公休</th><th>入力</th><th>順</th><th></th>
+            <th>記号</th><th>説明</th><th>色</th><th>必要人数</th><th>班色</th><th>出勤</th><th>公休</th><th>入力</th><th>順</th><th></th>
           </tr></thead>
           <tbody id="types-body"></tbody>
         </table>
@@ -519,9 +489,6 @@ export function kanchoShiftPage(
           <input id="new-type-code" type="text" placeholder="記号" style="width:56px;">
           <input id="new-type-label" type="text" placeholder="説明" style="width:160px;">
           <input id="new-type-color" type="color" value="#e5e7eb">
-          <select id="new-type-section">
-            <option value="main">班長表</option><option value="sub">①②表</option><option value="all">両方</option>
-          </select>
           <input id="new-type-req" type="number" placeholder="必要人数" title="日別必要人数" style="width:76px;">
           <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-teamcolor" type="checkbox">班色</label>
           <label style="font-size:12px;display:flex;align-items:center;gap:3px;"><input id="new-type-work" type="checkbox">出勤</label>
@@ -551,7 +518,7 @@ export function kanchoShiftPage(
       <div class="ktable-wrap">
         <table class="ktable">
           <thead><tr>
-            <th></th><th>現在の担当</th><th>役割</th><th>表</th><th>班色</th><th>内勤</th><th>新人</th><th></th>
+            <th></th><th>現在の担当</th><th>役割</th><th>班色</th><th>内勤</th><th>新人</th><th></th>
           </tr></thead>
           <tbody id="slots-body"></tbody>
         </table>
@@ -561,10 +528,7 @@ export function kanchoShiftPage(
         <div class="ksection-title">＋ 枠を追加</div>
         <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">追加直後は空き枠として作成されます。担当者は表の名前タップから割り当ててください。</div>
         <div class="kadd-row">
-          <input id="new-slot-role" type="text" list="slot-role-list" placeholder="役割（班長表のみ）" style="width:130px;">
-          <select id="new-slot-section">
-            <option value="main">班長シフト表</option><option value="s1">①表</option><option value="s2">②表</option>
-          </select>
+          <input id="new-slot-role" type="text" list="slot-role-list" placeholder="役割" style="width:130px;">
           <select id="new-slot-color">
             <option value="">班色なし</option><option value="#00ff00">黄緑</option><option value="#ffff00">黄色</option>
             <option value="#00ffff">水色</option><option value="#ff99cc">ピンク</option>
@@ -595,7 +559,7 @@ export function kanchoShiftPage(
 
 <!-- 社員管理との照合モーダル（枠編集の「現在の担当」名クリックで開く）-->
 <div id="emp-match-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1002;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:88vh;overflow-y:auto;">
+  <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:20px;width:100%;max-width:440px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:88vh;overflow-y:auto;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">社員管理と照合</h3>
       <button onclick="closeEmployeeMatch()" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
@@ -608,7 +572,7 @@ export function kanchoShiftPage(
 
 <!-- 希望休モーダル -->
 <div id="wishes-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:680px;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+  <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:20px;width:100%;max-width:680px;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">希望休入力（${year}年${month}月度）</h3>
       <button onclick="sel('#wishes-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
@@ -626,7 +590,7 @@ export function kanchoShiftPage(
 
 <!-- 通知設定モーダル -->
 <div id="notify-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1001;align-items:center;justify-content:center;padding:12px;">
-  <div style="background:white;border-radius:12px;padding:20px;width:100%;max-width:520px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+  <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:20px;width:100%;max-width:520px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <h3 style="font-size:15px;font-weight:700;color:#1e3a5f;">0時LINE通知設定</h3>
       <button onclick="sel('#notify-modal').style.display='none'" style="color:#9ca3af;font-size:22px;background:none;border:none;cursor:pointer;">✕</button>
@@ -651,9 +615,11 @@ ${saveToastHtml()}
   .btn-nav-sm { display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:36px;padding:0 6px;background:#4b6cb7;color:white;border-radius:8px;text-decoration:none;font-size:18px;font-weight:700;flex-shrink:0;touch-action:manipulation; }
   .btn-nav-sm:hover { background:#3b5aa3; }
   .btn-secondary { padding:6px 14px;background:#6b7280;color:white;border-radius:6px;text-decoration:none;font-size:13px; }
-  .gear-menu { display:none;position:absolute;right:0;top:calc(100% + 6px);background:white;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,0.18);min-width:150px;z-index:100;overflow:hidden; }
+  .gear-menu { display:none;position:absolute;right:0;top:calc(100% + 6px);
+    background:rgba(255,255,255,.9);backdrop-filter:blur(16px) saturate(150%);-webkit-backdrop-filter:blur(16px) saturate(150%);
+    border:1px solid rgba(255,255,255,.6);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.18);min-width:150px;z-index:100;overflow:hidden; }
   .gear-menu.open { display:block; }
-  .gear-item { display:block;width:100%;text-align:left;padding:10px 16px;background:white;border:none;border-bottom:1px solid #f1f5f9;font-size:13px;color:#374151;cursor:pointer; }
+  .gear-item { display:block;width:100%;text-align:left;padding:10px 16px;background:transparent;border:none;border-bottom:1px solid rgba(0,0,0,.06);font-size:13px;color:#374151;cursor:pointer; }
   .gear-item:last-child { border-bottom:none; }
   .gear-item:hover { background:#f8fafc; }
   .kc:active { opacity:0.6; }
@@ -663,7 +629,7 @@ ${saveToastHtml()}
   .kreq-ng { background:#fee2e2 !important; color:#dc2626; font-weight:700; }
   .kreq-ok { background:#f0fdf4 !important; color:#166534; }
   /* セル毎にインラインstyleを繰り返さず、data-*属性から導出できる見た目はCSSに任せる（HTML転送量・DOM生成コストの削減） */
-  .kc { position:relative;min-width:38px;max-width:38px;width:38px;text-align:center;font-size:11px;padding:5px 1px;border:1px solid #d1d5db;overflow:hidden;white-space:nowrap;touch-action:manipulation; }
+  .kc { position:relative;min-width:30px;max-width:30px;width:30px;text-align:center;font-size:11px;padding:6px 1px;border:1px solid #d1d5db;overflow:hidden;white-space:nowrap;touch-action:manipulation; }
   .kc[data-inp="0"] { opacity:0.45; }
   .kc[data-lk="1"] { box-shadow: inset 0 0 0 2px ${LOCK_BORDER}; }
   .kc[data-ws="1"] { color:#dc2626;font-weight:700; }
@@ -671,7 +637,6 @@ ${saveToastHtml()}
   .kc-name-cell[draggable="true"] { cursor:grab; }
   .kc-name-cell[draggable="true"]:active { cursor:grabbing; }
   .kc-name-cell.kc-dragover { outline:2px dashed #2563eb !important; outline-offset:-2px; }
-  .ksub-header:hover h3 { text-decoration:underline; }
 
   /* 記号管理モーダル（表形式＋常に見えるsticky保存フッター） */
   .kmodal-box { background:white;border-radius:14px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);display:flex;flex-direction:column;max-height:88vh;overflow:hidden; }
@@ -716,7 +681,6 @@ var _allTypes = ${safeJson(types.map(t => ({ id: t.id, code: t.code, label: t.la
 var _allMembers = ${safeJson(allMembers.map(m => ({ id: m.id, name: m.name, role: m.role, section: m.section, sort_order: m.sort_order, is_active: m.is_active, team_color: m.team_color, is_indoor: m.is_indoor, is_rookie: m.is_rookie, emp_no: m.emp_no })))};
 var _forbiddenPairs = ${safeJson(forbiddenPairs)};  // [{id, member_id_a, member_id_b, reason}]
 var VACANT_LABEL = ${safeJson(VACANT_SLOT_LABEL)};
-var SLOT_SECTION_LABEL = { main: '班長シフト表', s1: '①表', s2: '②表' };
 var SLOT_COLOR_OPTIONS = [['', '班色なし'], ['#00ff00', '黄緑'], ['#ffff00', '黄色'], ['#00ffff', '水色'], ['#ff99cc', 'ピンク']];
 var colorMap = {};
 var teamColorCodes = {};
@@ -984,30 +948,6 @@ async function _saveNameOrder(row) {
   }
 }
 
-// ===== ①②表の開閉（自分のブラウザだけ記憶）=====
-function toggleSubTable(sec) {
-  var body = sel('#' + sec + '-body');
-  var arrow = sel('#' + sec + '-arrow');
-  if (!body) return;
-  var collapsed = body.style.display !== 'none';
-  body.style.display = collapsed ? 'none' : '';
-  if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
-  try { localStorage.setItem('kancho_' + sec + '_collapsed', collapsed ? '1' : '0'); } catch (e) {}
-}
-function _restoreSubTableState() {
-  ['s1', 's2'].forEach(function(sec) {
-    var body = sel('#' + sec + '-body');
-    if (!body) return;
-    var collapsed = false;
-    try { collapsed = localStorage.getItem('kancho_' + sec + '_collapsed') === '1'; } catch (e) {}
-    if (collapsed) {
-      body.style.display = 'none';
-      var arrow = sel('#' + sec + '-arrow');
-      if (arrow) arrow.textContent = '▶';
-    }
-  });
-}
-_restoreSubTableState();
 function cancelEdit() {
   var n = Object.keys(_pending).length;
   if (n > 0 && !confirm(n + '件の未保存変更を破棄しますか？')) return;
@@ -1118,11 +1058,9 @@ document.addEventListener('click', function(e) {
 });
 
 // ===== セル編集 =====
-function _presetsFor(sec) {
+function _presetsFor() {
   return _types.filter(function(t) {
-    if (!t.inp) return false;  // 入力ボタン表示オフの記号は出さない（記号管理で設定）
-    return sec === 'main' ? (t.section === 'main' || t.section === 'all')
-                          : (t.section === 'sub' || t.section === 'all');
+    return t.inp;  // 入力ボタン表示オフの記号は出さない（記号管理で設定）
   });
 }
 // 直の入力時: 翌日が白（未入力）なら非を自動セット（直＋非で2日ワンセット。斜め直の翌日は斜体の非）
@@ -1176,7 +1114,7 @@ function openCell(td) {
   sel('#modal-name').textContent = td.dataset.name;
   var dow = ['日','月','火','水','木','金','土'][new Date(td.dataset.date).getUTCDay()];
   sel('#modal-date-label').textContent = td.dataset.date + '（' + dow + '）';
-  sel('#preset-buttons').innerHTML = _presetsFor(td.dataset.sec).map(function(t) {
+  sel('#preset-buttons').innerHTML = _presetsFor().map(function(t) {
     var btn = '<button data-code="' + escH(t.code) + '" onclick="selectPreset(this.dataset.code, 0)" style="padding:6px 11px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;cursor:pointer;background:' + t.color + ';touch-action:manipulation;">' + escH(t.code) + '</button>';
     // 直の隣に斜め直ボタンを並べる（記号は同じ「直」で斜体フラグ付き）
     if (t.code === '直') {
@@ -1334,7 +1272,7 @@ function computeWarnings() {
   var headcountWarnings = [], pairWarnings = [], coverageWarnings = [], coverageNotes = [], gapWarnings = [], streakWarnings = [];
 
   function _requiredOf(code) {
-    var t = _allTypes.filter(function(x) { return x.code === code && x.is_active === 1 && (x.section === 'main' || x.section === 'all'); })[0];
+    var t = _allTypes.filter(function(x) { return x.code === code && x.is_active === 1; })[0];
     return t ? t.daily_required : 0;
   }
   var chokuRequired = _requiredOf('直');
@@ -1465,40 +1403,32 @@ function openSlots() {
   sel('#slots-modal').style.display = 'flex';
 }
 function renderSlots() {
-  var bySec = { main: [], s1: [], s2: [] };
-  _allMembers.forEach(function(m) { (bySec[m.section] || bySec.main).push(m); });
-  var html = '';
-  ['main', 's1', 's2'].forEach(function(secKey) {
-    var list = bySec[secKey];
-    if (list.length === 0 && secKey !== 'main') return;
-    html += '<tr><td colspan="8" style="background:#eff6ff;color:#1e3a5f;font-weight:700;font-size:11px;padding:4px 8px;">' + SLOT_SECTION_LABEL[secKey] + '</td></tr>';
-    html += list.slice().sort(function(a, b) { return a.sort_order - b.sort_order || a.id - b.id; }).map(function(m) {
-      var colorSel = '<select class="slot-color"' + (CAN_EDIT ? '' : ' disabled') + ' style="background:' + (m.team_color || 'white') + ';border:1px solid #d1d5db;border-radius:6px;padding:2px 5px;font-size:12.5px;">'
-        + SLOT_COLOR_OPTIONS.map(function(co) { return '<option value="' + co[0] + '"' + ((m.team_color || '') === co[0] ? ' selected' : '') + '>' + co[1] + '</option>'; }).join('')
-        + '</select>';
-      var occupant;
-      if (m.name === VACANT_LABEL) {
-        occupant = '<span style="color:#9ca3af;">' + escH(VACANT_LABEL) + '</span>';
-      } else {
-        var nameHtml = '<b>' + escH(m.name) + '</b>' + (m.emp_no ? '<span style="color:#9ca3af;"> (' + escH(m.emp_no) + ')</span>' : ' <span style="color:#dc2626;font-size:10px;">未紐付け</span>');
-        occupant = CAN_EDIT
-          ? '<span onclick="openEmployeeMatch(' + m.id + ')" style="cursor:pointer;border-bottom:1px dotted #93c5fd;" title="社員管理と照合">' + nameHtml + '</span>'
-          : nameHtml;
-      }
-      var dragHandle = CAN_EDIT ? '<span class="drag-handle" draggable="true" title="ドラッグで並び替え">⠿</span>' : '';
-      return '<tr style="' + (m.is_active ? '' : 'opacity:0.45;') + '" data-mid="' + m.id + '" data-section="' + secKey + '">'
-        + '<td style="padding:3px 6px;border-bottom:1px solid #f1f5f9;text-align:center;color:#9ca3af;">' + dragHandle + '</td>'
-        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + occupant + '</td>'
-        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="text" class="slot-role" list="slot-role-list"' + (CAN_EDIT ? '' : ' disabled') + ' value="' + escH(m.role || '') + '" style="width:100px;border:1px solid #d1d5db;border-radius:6px;padding:2px 6px;font-size:12.5px;"></td>'
-        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;"><select class="slot-section"' + (CAN_EDIT ? '' : ' disabled') + ' style="border:1px solid #d1d5db;border-radius:6px;padding:2px 5px;font-size:12.5px;">' + ['main','s1','s2'].map(function(s) { return '<option value="' + s + '"' + (m.section === s ? ' selected' : '') + '>' + SLOT_SECTION_LABEL[s] + '</option>'; }).join('') + '</select></td>'
-        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + colorSel + '</td>'
-        + '<td style="text-align:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="checkbox" class="slot-indoor"' + (CAN_EDIT ? '' : ' disabled') + (m.is_indoor ? ' checked' : '') + '></td>'
-        + '<td style="text-align:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="checkbox" class="slot-rookie"' + (CAN_EDIT ? '' : ' disabled') + (m.is_rookie ? ' checked' : '') + '></td>'
-        + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + (CAN_EDIT ? '<button class="kchip-btn' + (m.is_active ? ' danger' : ' ok') + '" onclick="toggleSlot(' + m.id + ', ' + (m.is_active ? 0 : 1) + ')">' + (m.is_active ? '削除' : '復元') + '</button>' : '') + '</td>'
-        + '</tr>';
-    }).join('');
-  });
-  sel('#slots-body').innerHTML = html || '<tr><td colspan="8" style="color:#9ca3af;padding:12px;">枠がありません</td></tr>';
+  var list = _allMembers.filter(function(m) { return m.section === 'main'; });
+  var html = list.slice().sort(function(a, b) { return a.sort_order - b.sort_order || a.id - b.id; }).map(function(m) {
+    var colorSel = '<select class="slot-color"' + (CAN_EDIT ? '' : ' disabled') + ' style="background:' + (m.team_color || 'white') + ';border:1px solid #d1d5db;border-radius:6px;padding:2px 5px;font-size:12.5px;">'
+      + SLOT_COLOR_OPTIONS.map(function(co) { return '<option value="' + co[0] + '"' + ((m.team_color || '') === co[0] ? ' selected' : '') + '>' + co[1] + '</option>'; }).join('')
+      + '</select>';
+    var occupant;
+    if (m.name === VACANT_LABEL) {
+      occupant = '<span style="color:#9ca3af;">' + escH(VACANT_LABEL) + '</span>';
+    } else {
+      var nameHtml = '<b>' + escH(m.name) + '</b>' + (m.emp_no ? '<span style="color:#9ca3af;"> (' + escH(m.emp_no) + ')</span>' : ' <span style="color:#dc2626;font-size:10px;">未紐付け</span>');
+      occupant = CAN_EDIT
+        ? '<span onclick="openEmployeeMatch(' + m.id + ')" style="cursor:pointer;border-bottom:1px dotted #93c5fd;" title="社員管理と照合">' + nameHtml + '</span>'
+        : nameHtml;
+    }
+    var dragHandle = CAN_EDIT ? '<span class="drag-handle" draggable="true" title="ドラッグで並び替え">⠿</span>' : '';
+    return '<tr style="' + (m.is_active ? '' : 'opacity:0.45;') + '" data-mid="' + m.id + '" data-section="main">'
+      + '<td style="padding:3px 6px;border-bottom:1px solid #f1f5f9;text-align:center;color:#9ca3af;">' + dragHandle + '</td>'
+      + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + occupant + '</td>'
+      + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="text" class="slot-role" list="slot-role-list"' + (CAN_EDIT ? '' : ' disabled') + ' value="' + escH(m.role || '') + '" style="width:100px;border:1px solid #d1d5db;border-radius:6px;padding:2px 6px;font-size:12.5px;"></td>'
+      + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + colorSel + '</td>'
+      + '<td style="text-align:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="checkbox" class="slot-indoor"' + (CAN_EDIT ? '' : ' disabled') + (m.is_indoor ? ' checked' : '') + '></td>'
+      + '<td style="text-align:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;"><input type="checkbox" class="slot-rookie"' + (CAN_EDIT ? '' : ' disabled') + (m.is_rookie ? ' checked' : '') + '></td>'
+      + '<td style="padding:3px 8px;border-bottom:1px solid #f1f5f9;">' + (CAN_EDIT ? '<button class="kchip-btn' + (m.is_active ? ' danger' : ' ok') + '" onclick="toggleSlot(' + m.id + ', ' + (m.is_active ? 0 : 1) + ')">' + (m.is_active ? '削除' : '復元') + '</button>' : '') + '</td>'
+      + '</tr>';
+  }).join('');
+  sel('#slots-body').innerHTML = html || '<tr><td colspan="7" style="color:#9ca3af;padding:12px;">枠がありません</td></tr>';
   renderForbiddenPairs();
   attachSlotDragHandlers();
 }
@@ -1543,18 +1473,16 @@ function renderForbiddenPairs() {
 async function saveAllSlots() {
   var btn = sel('#slots-save-btn');
   var entries = [];
-  var counters = {};
+  var counter = 0;
   document.querySelectorAll('#slots-body tr[data-mid]').forEach(function(row) {
-    var sec = row.dataset.section;
-    counters[sec] = (counters[sec] || 0) + 1;
+    counter++;
     entries.push({
       id: parseInt(row.dataset.mid),
       role: row.querySelector('.slot-role').value,
-      section: row.querySelector('.slot-section').value,
       team_color: row.querySelector('.slot-color').value || null,
       is_indoor: row.querySelector('.slot-indoor').checked ? 1 : 0,
       is_rookie: row.querySelector('.slot-rookie').checked ? 1 : 0,
-      sort_order: counters[sec] * 10
+      sort_order: counter * 10
     });
   });
   btn.disabled = true; btn.textContent = '保存中...';
@@ -1583,7 +1511,6 @@ async function addSlot() {
   var body = {
     name: VACANT_LABEL,
     role: sel('#new-slot-role').value,
-    section: sel('#new-slot-section').value,
     team_color: sel('#new-slot-color').value || null,
     is_indoor: sel('#new-slot-indoor').checked ? 1 : 0,
     is_rookie: sel('#new-slot-rookie').checked ? 1 : 0,
@@ -1682,14 +1609,12 @@ async function registerNewEmployee() {
 }
 
 // ===== 記号管理 =====
-var TYPE_SECTION_LABEL = { main: '班長表', sub: '①②表', all: '両方' };
 function openTypes() {
   sel('#types-body').innerHTML = _allTypes.map(function(t) {
     return '<tr class="' + (t.is_active ? '' : 'inactive') + '" data-tid="' + t.id + '">'
       + '<td><input type="text" class="type-code" value="' + escH(t.code) + '" style="width:48px;"></td>'
       + '<td><input type="text" class="type-label" value="' + escH(t.label) + '" style="width:150px;"></td>'
       + '<td><input type="color" class="type-color" value="' + escH(t.color) + '"></td>'
-      + '<td><select class="type-section">' + ['main','sub','all'].map(function(s) { return '<option value="' + s + '"' + (t.section === s ? ' selected' : '') + '>' + TYPE_SECTION_LABEL[s] + '</option>'; }).join('') + '</select></td>'
       + '<td><input type="number" class="type-req" value="' + t.daily_required + '" style="width:48px;"></td>'
       + '<td style="text-align:center;"><input type="checkbox" class="type-teamcolor"' + (t.use_team_color ? ' checked' : '') + '></td>'
       + '<td style="text-align:center;"><input type="checkbox" class="type-work"' + (t.counts_as_work ? ' checked' : '') + '></td>'
@@ -1713,7 +1638,6 @@ async function saveAllTypes() {
       code: row.querySelector('.type-code').value,
       label: row.querySelector('.type-label').value,
       color: row.querySelector('.type-color').value,
-      section: row.querySelector('.type-section').value,
       daily_required: parseInt(row.querySelector('.type-req').value) || 0,
       use_team_color: row.querySelector('.type-teamcolor').checked ? 1 : 0,
       counts_as_work: row.querySelector('.type-work').checked ? 1 : 0,
@@ -1759,7 +1683,6 @@ async function addType() {
     code: sel('#new-type-code').value,
     label: sel('#new-type-label').value,
     color: sel('#new-type-color').value,
-    section: sel('#new-type-section').value,
     daily_required: parseInt(sel('#new-type-req').value) || 0,
     use_team_color: sel('#new-type-teamcolor').checked ? 1 : 0,
     counts_as_work: sel('#new-type-work').checked ? 1 : 0,
@@ -2025,8 +1948,6 @@ export function kanchoPrintPage(
   const requiredTypes = activeTypes.filter(t => t.daily_required > 0);
 
   const mainMembers = sortMainMembers(members.filter(m => m.section === 'main' && m.is_indoor === 1));
-  const s1Members = members.filter(m => m.section === 's1').sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
-  const s2Members = members.filter(m => m.section === 's2').sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
 
   const dateHead = dates.map(d => {
     const dt = new Date(d);
@@ -2068,12 +1989,6 @@ export function kanchoPrintPage(
       + `<td colspan="${COUNT_COLS.length}"></td></tr>`;
   }
 
-  function subRows(list: KanchoMember[]): string {
-    return list.map(m => `<tr><td class="nm">${escHtml(m.name)}</td>`
-      + dates.map(d => printCell(m, d)).join('')
-      + '</tr>').join('');
-  }
-
   const tokki = memos.find(mm => mm.kind === 'tokki')?.content ?? '';
   const kibou = memos.filter(mm => mm.kind === 'kibou');
 
@@ -2089,10 +2004,11 @@ export function kanchoPrintPage(
     body { font-family: 'Hiragino Sans', 'Meiryo', sans-serif; padding: 10px; }
     .print-btn { position: fixed; top: 10px; right: 10px; padding: 10px 22px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; }
     h1 { font-size: 15px; margin: 0 0 6px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #9ca3af; text-align: center; font-size: 9px; padding: 2px 1px; overflow: hidden; white-space: nowrap; }
+    table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+    th, td { border: 1px solid #9ca3af; text-align: center; font-size: 9px; padding: 3px 1px; overflow: hidden; white-space: nowrap; }
     th { font-size: 8px; }
-    .nm { text-align: left; font-weight: 700; padding-left: 4px; min-width: 56px; }
+    .nm { text-align: left; font-weight: 700; padding-left: 4px; width: 56px; }
+    .cnt { width: 26px; }
     .grp { text-align: left; background: #e0e7ff; font-weight: 700; font-size: 8px; padding-left: 4px; }
     .legend { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; font-size: 9px; }
     .legend span { border: 1px solid #9ca3af; border-radius: 3px; padding: 1px 6px; }
@@ -2112,15 +2028,13 @@ export function kanchoPrintPage(
   <h1>管理者公休予定表　${year}年${month}月度（${periodStart} 〜 ${periodEnd}）</h1>
   <div style="font-size:9px;color:#6b7280;margin-bottom:4px;">薄く表示している日付は前月度・次月度の参考表示です（終業班長の締め日ずれ等の確認用）</div>
   <table>
-    <thead><tr><th>氏名</th>${dateHead}${COUNT_COLS.map(cc => `<th>${cc.label}</th>`).join('')}</tr></thead>
+    <thead><tr><th class="nm">氏名</th>${dateHead}${COUNT_COLS.map(cc => `<th class="cnt">${cc.label}</th>`).join('')}</tr></thead>
     <tbody>${mainRows}</tbody>
   </table>
   <div class="legend">
     ${activeTypes.map(t => `<span style="background:${t.color};">${escHtml(t.code)}${t.label ? ` ${escHtml(t.label)}` : ''}</span>`).join('')}
     <span>色マス(記号なし)=早日勤 7:30〜16:30</span><span><span style="display:inline-block;transform:skewX(-14deg);">直</span>(斜体)=斜め直 14:00〜翌8:00</span><span>終業班長 3:00〜12:00</span><span style="color:#dc2626;font-weight:700;">赤文字=希望休</span>
   </div>
-  ${s1Members.length ? `<h2>① 表</h2><table><thead><tr><th>氏名</th>${dateHead}</tr></thead><tbody>${subRows(s1Members)}</tbody></table>` : ''}
-  ${s2Members.length ? `<h2>② 表</h2><table><thead><tr><th>氏名</th>${dateHead}</tr></thead><tbody>${subRows(s2Members)}</tbody></table>` : ''}
   <div class="memos">
     <div class="memo-box"><div class="memo-title">・特記事項</div><div style="white-space:pre-wrap;">${escHtml(tokki)}</div></div>
     <div class="memo-box"><div class="memo-title">・希望休</div>

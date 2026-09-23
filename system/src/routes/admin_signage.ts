@@ -62,16 +62,16 @@ app.get('/signage', async (c) => {
     canEdit(c),
     c.env.DB.prepare('SELECT * FROM signage_decks ORDER BY sort_order, id').all<SignageDeck>(),
   ]);
-  return c.html(layout('デジタルサイネージ', signageListPage(r.results ?? [], editable, ADMIN_PATH, SIGNAGE_PUBLIC_PATH), 'settings'));
+  return c.html(layout('デジタルサイネージ', signageListPage(r.results ?? [], editable, ADMIN_PATH, SIGNAGE_PUBLIC_PATH), 'settings', '', false, false, true));
 });
 
 app.get('/signage/:id', async (c) => {
   if (!(await canEdit(c))) return c.redirect(`${ADMIN_PATH}/signage`);
   const id = parseInt(c.req.param('id'), 10);
   const deck = await loadDeck(c.env.DB, id);
-  if (!deck) return c.html(layout('デジタルサイネージ', '<p style="padding:20px;">デッキが見つかりません。</p>', 'settings'), 404);
+  if (!deck) return c.html(layout('デジタルサイネージ', '<p style="padding:20px;">デッキが見つかりません。</p>', 'settings', '', false, false, true), 404);
   const slides = await loadSlides(c.env.DB, id);
-  return c.html(layout(`${deck.title} ― 編集`, signageEditPage(deck, slides, ADMIN_PATH), 'settings'));
+  return c.html(layout(`${deck.title} ― 編集`, signageEditPage(deck, slides, ADMIN_PATH), 'settings', '', false, false, true));
 });
 
 app.get('/signage/:id/present', async (c) => {

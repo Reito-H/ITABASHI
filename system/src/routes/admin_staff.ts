@@ -390,7 +390,7 @@ app.get('/staff', async (c) => {
   ${retirementBanner}
 
   <!-- フィルター -->
-  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:14px 16px;margin-bottom:16px;">
+  <div style="background:rgba(255,255,255,.6);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 4px 18px rgba(20,29,44,.05);padding:14px 16px;margin-bottom:16px;">
     <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
       <input type="hidden" name="div" value="${escHtml(filterDiv)}">
       <input type="hidden" name="enrollment" value="${escHtml(filterStatus)}">
@@ -517,7 +517,7 @@ app.get('/staff', async (c) => {
         <button onclick="toggleSelMenu()" id="sel-menu-btn" style="padding:5px 10px;background:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px;">
           条件選択 <span style="font-size:10px;">▼</span>
         </button>
-        <div id="sel-menu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:white;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:200;white-space:nowrap;overflow:hidden;min-width:180px;">
+        <div id="sel-menu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:rgba(255,255,255,.92);backdrop-filter:blur(16px) saturate(150%);-webkit-backdrop-filter:blur(16px) saturate(150%);border:1px solid rgba(255,255,255,.6);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.15);z-index:200;white-space:nowrap;overflow:hidden;min-width:180px;">
           <div style="padding:6px 0;">
             <div style="font-size:10px;color:#9ca3af;padding:4px 14px;font-weight:700;letter-spacing:0.05em;">表示中から選択</div>
             <button onclick="selectByCond('all')" class="sel-opt">表示中全員</button>
@@ -541,7 +541,7 @@ app.get('/staff', async (c) => {
   </div>
 
   <!-- テーブル（スマホ幅ではCSSでカード表示に切り替え。data-label属性はスマホ表示用） -->
-  <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow-x:auto;">
+  <div style="background:rgba(255,255,255,.6);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 4px 18px rgba(20,29,44,.05);overflow-x:auto;">
     <table id="staff-table" style="width:100%;border-collapse:collapse;min-width:900px;">
       <caption class="sr-only">社員一覧（${totalCount}名中 ${offset + 1}〜${Math.min(offset + PAGE_SIZE, totalCount)}件目を表示）。行をクリックすると詳細を表示します。</caption>
       <thead style="background:#f9fafb;">
@@ -571,7 +571,7 @@ app.get('/staff', async (c) => {
   <div id="staff-drawer-overlay" onclick="closeStaffDrawer()"
     style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.35);z-index:400;"></div>
   <aside id="staff-drawer"
-    style="display:none;position:fixed;top:0;right:0;bottom:0;width:min(92vw,380px);background:white;z-index:401;box-shadow:-8px 0 32px rgba(15,23,42,0.18);padding:20px;overflow-y:auto;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+    style="display:none;position:fixed;top:0;right:0;bottom:0;width:min(92vw,380px);background:rgba(255,255,255,.92);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);z-index:401;box-shadow:-8px 0 32px rgba(15,23,42,0.18);padding:20px;overflow-y:auto;font-family:'Hiragino Sans','Meiryo',sans-serif;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <div style="display:flex;align-items:center;gap:10px;">
         <div id="sd-avatar" style="width:44px;height:44px;border-radius:12px;flex:none;background:linear-gradient(150deg,#1a3a5c,#2563eb);color:white;display:grid;place-items:center;font-size:18px;font-weight:700;"></div>
@@ -591,7 +591,7 @@ app.get('/staff', async (c) => {
 
   <!-- ページング -->
   ${totalPages > 1 ? `
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:10px 16px;margin-top:10px;margin-bottom:80px;flex-wrap:wrap;">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:rgba(255,255,255,.6);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 4px 18px rgba(20,29,44,.05);padding:10px 16px;margin-top:10px;margin-bottom:80px;flex-wrap:wrap;">
     <span style="font-size:12px;color:#6b7280;">${offset + 1}-${Math.min(offset + PAGE_SIZE, totalCount)} / ${totalCount}名</span>
     <div style="display:flex;align-items:center;gap:10px;">
       ${page > 1
@@ -1213,7 +1213,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
   <form id="staff-form">
 
     <!-- セクション: 基本情報 -->
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
+    <div style="background:rgba(255,255,255,.6);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 4px 18px rgba(20,29,44,.05);padding:20px 24px;margin-bottom:16px;">
       <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">基本情報</h2>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
 
@@ -1282,7 +1282,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
     </div>
 
     <!-- セクション: 勤務情報 -->
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
+    <div style="background:rgba(255,255,255,.6);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 4px 18px rgba(20,29,44,.05);padding:20px 24px;margin-bottom:16px;">
       <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">勤務情報</h2>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
 
@@ -1332,7 +1332,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
     </div>
 
     <!-- セクション: フラグ -->
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
+    <div style="background:rgba(255,255,255,.6);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 4px 18px rgba(20,29,44,.05);padding:20px 24px;margin-bottom:16px;">
       <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 16px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">フラグ設定</h2>
       <div style="display:flex;gap:24px;flex-wrap:wrap;">
 
@@ -1358,7 +1358,7 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
     </div>
 
     <!-- セクション: 問題行動記録 -->
-    <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;margin-bottom:16px;">
+    <div style="background:rgba(255,255,255,.6);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid rgba(255,255,255,.7);border-radius:16px;box-shadow:0 4px 18px rgba(20,29,44,.05);padding:20px 24px;margin-bottom:16px;">
       <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">問題行動記録</h2>
       ${problemNotesHtml}
       <div style="display:flex;gap:8px;align-items:flex-start;">

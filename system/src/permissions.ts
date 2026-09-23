@@ -20,6 +20,7 @@
 //   設定サブページ: settings.accounts / settings.liff / settings.line-usage /
 //              settings.notifications / settings.offices / settings.documents / settings.study-notes / settings.tutorial /
 //              settings.status / settings.sales-strategy / settings.chosei / settings.announcement-bar / settings.birthday /
+//              settings.seasonal /
 //              settings.weather-notice /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
 //              settings.lost-items / settings.accidents / settings.violations / settings.general-reports /
@@ -64,6 +65,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/status/,               'settings.status'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
+  [/^\/settings\/seasonal/,             'settings.seasonal'],
   [/^\/settings\/weather-notice/,       'settings.weather-notice'],
   // 板橋ページ本体。親キー settings.study-sessions を持てば全タブ利用可。
   // タブ単位で絞るための子キー（settings.hiyari 等）のいずれかでもページに入れる。
@@ -99,6 +101,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
   [/^\/api\/birthday/,                  'settings.birthday'],
+  [/^\/api\/seasonal/,                  'settings.seasonal'],
   [/^\/api\/weather-notice/,            'settings.weather-notice'],
   [/^\/api\/sr/,                        'settings.sales-strategy'],
   [/^\/api\/km-pins/,                   'settings.sales-strategy'],
@@ -302,6 +305,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.offices',       label: '営業所' },
     { key: 'settings.announcement-bar', label: 'アナウンスバー' },
     { key: 'settings.birthday',         label: 'ハッピーバースデーモード' },
+    { key: 'settings.seasonal',         label: 'シーズナル演出' },
     { key: 'settings.weather-notice',   label: '異常気象警報 周知サイネージ' },
     { key: 'settings.chosei',           label: '調整（日程調整）' },
     { key: 'settings.documents',        label: 'データセンター（資料・社員CSV・点検写真AI・シフトPDF）' },

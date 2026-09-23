@@ -503,7 +503,8 @@ ${saveToastHtml()}
   .kk-cell[data-pending="1"] { outline:2px dashed #f59e0b; outline-offset:-2px; }
   .kk-modal { display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;padding:12px; }
   .kk-modal.open { display:flex; }
-  .kk-modal-box { background:#fff;border-radius:12px;padding:18px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-height:90vh;overflow:auto; }
+  .kk-modal-box { background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+    border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:18px;width:100%;box-shadow:0 20px 50px rgba(15,23,42,.3);max-height:90vh;overflow:auto; }
   .kk-modal-head { display:flex;justify-content:space-between;align-items:center;font-size:15px;font-weight:700;color:#1e3a5f;margin-bottom:12px; }
   .kk-modal-foot { display:flex;justify-content:flex-end;margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb; }
   .kk-x { background:none;border:none;font-size:20px;color:#9ca3af;cursor:pointer;line-height:1; }

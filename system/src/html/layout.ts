@@ -3,6 +3,7 @@ import { ADMIN_PATH, APP_VERSION } from '../config';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
 import { announcementBarHtml, announcementBarScript } from './announcement_bar';
 import { birthdayPopupHtml, birthdayPopupScript } from './birthday_popup';
+import { seasonalFxHtml, seasonalFxScript } from './seasonal_fx';
 
 export function safeJson(value: unknown): string {
   return JSON.stringify(value)
@@ -34,7 +35,7 @@ const REPORT_FAB_HIDDEN_PAGES = new Set(['settings', 'inspection', 'kancho-shift
 // 引き継ぎシートのフローティングパネル（やることリスト）のようにiframeへ埋め込む用途専用。
 // hideReportFab=true: activePage単位ではなく、このページ1枚だけフローティング新規報告ボタンを消す
 // （例: 乗務員証証明写真＝画面右下をカメラ操作等で使うため。同じactivePageの他ページには影響しない）。
-export function layout(title: string, content: string, activePage: string = '', headerExtra: string = '', embed: boolean = false, hideReportFab: boolean = false): string {
+export function layout(title: string, content: string, activePage: string = '', headerExtra: string = '', embed: boolean = false, hideReportFab: boolean = false, hideSeasonalFx: boolean = false): string {
   if (embed) {
     return `<!DOCTYPE html>
 <html lang="ja">
@@ -69,7 +70,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   // 報告センターは専用の権限キーを持たず、既存の5つの報告権限のいずれかで表示する（スペース区切り＝OR）
   const REPORT_CENTER_PERM = 'settings.lost-items settings.accidents settings.violations settings.general-reports';
   // public:true の項目は data-nav-id を出さず、全アカウントで常に表示する（権限フィルタの対象外）
-  const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean; public?: boolean; large?: boolean }> = [
+  const navItems: Array<{ href: string; label: string; id: string; permKey?: string; highlight?: boolean; public?: boolean; large?: boolean; portal?: boolean; newTab?: boolean }> = [
     { href: `${ADMIN_PATH}`,               label: 'ホーム',          id: 'home' },
     { href: `${ADMIN_PATH}/handover`,      label: '引き継ぎシート',  id: 'handover', large: true },
     { href: `${ADMIN_PATH}/settings/reports`, label: '報告センター', id: 'report-center', permKey: REPORT_CENTER_PERM, highlight: true, large: true },
@@ -78,17 +79,23 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/kanri-kobo`,    label: '課長・職員シフト',    id: 'kanri-kobo' },
     { href: `${ADMIN_PATH}/staff`,         label: '社員管理',        id: 'staff' },
     { href: `${ADMIN_PATH}/newcomers`,     label: '総合新人管理',    id: 'newcomers' },
-    { href: `${ADMIN_PATH}/attendance-board`, label: '出勤者ボード',   id: 'attendance-board', permKey: 'crew-shift' },
+    { href: '#',                           label: 'ポータル',        id: 'portal', portal: true },
     { href: `${ADMIN_PATH}/kacho-mission`, label: '課長ミッション',  id: 'kacho-mission', permKey: 'kacho-mission staff' },
-    { href: `${ADMIN_PATH}/settings/study-sessions`, label: '板橋ページ', id: 'office-page', permKey: 'settings.study-sessions settings.office-opinions settings.hiyari settings.surveys settings.daihon' },
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
     { href: `${ADMIN_PATH}/settings/sales-strategy`, label: '営業戦略', id: 'sales-strategy', permKey: 'settings.sales-strategy' },
+    { href: 'https://km-operator.smartaxicenter.com/kmx/HS/HSHS/HSHS0199.do', label: 'スマタク', id: 'km-operator-external', public: true, newTab: true },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
     // 車両検索はサイドバーから廃止（ホームの横断検索バーへ一本化）。/vehicles ルートと vehicles 権限は存置。
-    { href: `${ADMIN_PATH}/benri`,         label: '便利',            id: 'benri', permKey: 'benri' },
-    { href: `${ADMIN_PATH}/shuttle`,       label: 'シャトルバス',    id: 'shuttle', permKey: 'shuttle' },
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
   ];
+  // サイドバーが項目過多になったため、以下4つは「ポータル」1項目に集約し、ホバー時にフライアウト表示する
+  const portalItems: Array<{ href: string; label: string; id: string; permKey: string }> = [
+    { href: `${ADMIN_PATH}/settings/study-sessions`, label: '板橋ページ',   id: 'office-page',       permKey: 'settings.study-sessions settings.office-opinions settings.hiyari settings.surveys settings.daihon' },
+    { href: `${ADMIN_PATH}/attendance-board`,        label: '出勤者ボード', id: 'attendance-board',  permKey: 'crew-shift' },
+    { href: `${ADMIN_PATH}/benri`,                   label: '便利',         id: 'benri',              permKey: 'benri' },
+    { href: `${ADMIN_PATH}/shuttle`,                 label: 'シャトルバス', id: 'shuttle',            permKey: 'shuttle' },
+  ];
+  const portalPerm = portalItems.map(p => p.permKey).join(' ');
 
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -202,6 +209,45 @@ export function layout(title: string, content: string, activePage: string = '', 
       border-radius: 14px;
       letter-spacing: 0.02em;
     }
+    /* ポータル：項目過多になったサイドバーの一部（板橋ページ/出勤者ボード/便利/シャトルバス）を
+       1項目に集約し、ホバー（PC）またはタップ（モバイル）でフライアウト表示する。
+       フライアウト本体はsidebar内のnav（overflow-y:auto）の外に置き、position:fixedでJSがtriggerに
+       追従させる（overflow:autoの祖先の内側だと、はみ出す表示がクリップされてしまうため）。
+       開閉は常にJS（#nav-portal-trigger のイベント）が付与する.openクラスで行う。 */
+    .nav-portal-trigger { display: flex; align-items: center; justify-content: space-between; }
+    .nav-portal-caret { flex-shrink: 0; opacity: .55; transition: transform .25s ease, opacity .25s ease; }
+    .nav-portal-trigger.open .nav-portal-caret,
+    .nav-portal-trigger:hover .nav-portal-caret { transform: translateX(2px); opacity: 1; }
+    .nav-portal-flyout {
+      position: fixed; min-width: 190px; padding: 8px; border-radius: 16px;
+      background: rgba(35,42,107,0.75);
+      backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.14);
+      box-shadow: 0 20px 50px rgba(10,15,40,0.45);
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transform-origin: left center;
+      transform: scaleX(0.4) translateX(-14px);
+      transition: opacity 0.18s ease, transform 0.32s cubic-bezier(.22,1,.36,1), visibility 0.32s;
+      z-index: 90;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .nav-portal-flyout.open {
+      opacity: 1; visibility: visible; pointer-events: auto;
+      transform: scaleX(1) translateX(0);
+    }
+    .nav-portal-item {
+      display: block; padding: 9px 14px; border-radius: 10px;
+      color: #dbe4f3; font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap;
+      opacity: 0; transform: translateX(-6px);
+      transition: background 0.15s ease, color 0.15s ease, opacity 0.28s ease, transform 0.28s ease;
+    }
+    .nav-portal-flyout.open .nav-portal-item { opacity: 1; transform: translateX(0); }
+    .nav-portal-item:hover { background: rgba(255,255,255,0.16); color: #fff; }
+    .nav-portal-item.active { background: rgba(86,102,255,0.4); color: #fff; }
+    @media (max-width: 768px) {
+      .nav-portal-flyout { transform-origin: top center; transform: scaleY(0.5) translateY(-8px); }
+      .nav-portal-flyout.open { transform: scaleY(1) translateY(0); }
+    }
     /* ビルドタグ: 以前は目立つゴールドのピルだったが、情報量に対して主張が強すぎたため
        控えめなモノスペースのタグへ格下げ（デザイン刷新 Phase 1）。 */
     .version-pill {
@@ -283,6 +329,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   </style>
 </head>
 <body>
+  ${hideSeasonalFx ? '' : seasonalFxHtml()}
   ${announcementBarHtml()}
   ${birthdayPopupHtml()}
   <script>
@@ -316,11 +363,22 @@ export function layout(title: string, content: string, activePage: string = '', 
       <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" aria-label="サイドバーを折りたたむ" title="折りたたむ">«</button>
     </div>
     <nav style="flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 0;">
-      ${navItems.map(item => `
-        <a href="${item.href}"${item.public ? '' : ` data-nav-id="${item.permKey ?? item.id}"`} class="nav-item${item.large ? ' nav-item-large' : ''}${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
+      ${navItems.map(item => {
+        if (item.portal) {
+          const portalActive = portalItems.some(p => p.id === activePage);
+          return `
+        <div class="nav-portal-wrap" data-perm-key="${portalPerm}">
+          <a href="javascript:void(0)" id="nav-portal-trigger" class="nav-item nav-portal-trigger${portalActive ? ' active' : ''}">
+            <span>${escHtml(item.label)}</span>
+            <svg class="nav-portal-caret" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M9 18l6-6-6-6"/></svg>
+          </a>
+        </div>`;
+        }
+        return `
+        <a href="${item.href}"${item.public ? '' : ` data-nav-id="${item.permKey ?? item.id}"`}${item.newTab ? ' target="_blank" rel="noopener noreferrer"' : ''} class="nav-item${item.large ? ' nav-item-large' : ''}${item.highlight ? ' nav-item-highlight' : ''}${activePage === item.id ? ' active' : ''}" onclick="closeSidebar()">
           ${escHtml(item.label)}
-        </a>
-      `).join('')}
+        </a>`;
+      }).join('')}
       <!-- nojico は「課長ミッション」内へ移設したためサイドバー直下のリンクは廃止（ルート自体は残存） -->
     </nav>
     <div style="padding:12px 0;border-top:1px solid rgba(255,255,255,0.1);">
@@ -328,6 +386,14 @@ export function layout(title: string, content: string, activePage: string = '', 
         <button type="submit" class="nav-item" style="color:#fca5a5;background:none;border:none;width:calc(100% - 20px);text-align:left;font:inherit;cursor:pointer;">ログアウト</button>
       </form>
     </div>
+  </div>
+
+  <!-- ポータルのフライアウト本体。sidebar内のnav（overflow-y:auto）の外に置くことで、
+       サイドバーの外へはみ出す表示がクリップされないようにする。位置はJSでtriggerに追従させる。 -->
+  <div class="nav-portal-flyout" id="nav-portal-flyout" data-perm-key="${portalPerm}">
+    ${portalItems.map((p, i) => `
+    <a href="${p.href}" data-nav-id="${p.permKey}" class="nav-portal-item${activePage === p.id ? ' active' : ''}" style="transition-delay:${i * 30}ms" onclick="closeSidebar()">${escHtml(p.label)}</a>
+    `).join('')}
   </div>
 
   <!-- メインコンテンツ -->
@@ -416,6 +482,56 @@ export function layout(title: string, content: string, activePage: string = '', 
       const collapsed = document.body.classList.toggle('sidebar-collapsed');
       try { localStorage.setItem('ho_sidebar_collapsed', collapsed ? '1' : '0'); } catch {}
     }
+    // ポータル（板橋ページ/出勤者ボード/便利/シャトルバスの集約項目）：
+    // フライアウト本体はsidebar内のnav（overflow-y:auto）の外に固定配置し、位置をtriggerに追従させる。
+    // PCはホバーで開閉、タッチデバイスはホバーが効かないためタップでも開閉できるようにする。
+    (function () {
+      const trigger = document.getElementById('nav-portal-trigger');
+      const flyout = document.getElementById('nav-portal-flyout');
+      if (!trigger || !flyout) return;
+      let hideTimer = null;
+      function positionFlyout() {
+        const r = trigger.getBoundingClientRect();
+        if (window.innerWidth <= 768) {
+          flyout.style.top = (r.bottom + 6) + 'px';
+          flyout.style.left = '8px';
+          flyout.style.right = '8px';
+        } else {
+          flyout.style.top = r.top + 'px';
+          flyout.style.left = (r.right + 10) + 'px';
+          flyout.style.right = 'auto';
+        }
+      }
+      function openFlyout() {
+        clearTimeout(hideTimer);
+        positionFlyout();
+        flyout.classList.add('open');
+        trigger.classList.add('open');
+      }
+      function scheduleClose() {
+        hideTimer = setTimeout(function () {
+          flyout.classList.remove('open');
+          trigger.classList.remove('open');
+        }, 180);
+      }
+      trigger.addEventListener('mouseenter', openFlyout);
+      trigger.addEventListener('mouseleave', scheduleClose);
+      flyout.addEventListener('mouseenter', function () { clearTimeout(hideTimer); });
+      flyout.addEventListener('mouseleave', scheduleClose);
+      trigger.addEventListener('click', function (e) {
+        e.preventDefault();
+        if (flyout.classList.contains('open')) { flyout.classList.remove('open'); trigger.classList.remove('open'); }
+        else { openFlyout(); }
+      });
+      document.addEventListener('click', function (e) {
+        if (e.target === trigger || trigger.contains(e.target) || flyout.contains(e.target)) return;
+        flyout.classList.remove('open');
+        trigger.classList.remove('open');
+      });
+      window.addEventListener('resize', function () {
+        if (flyout.classList.contains('open')) positionFlyout();
+      });
+    })();
     function updateTime() {
       const s = new Date().toLocaleString('ja-JP', {year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
       const el  = document.getElementById('current-time');
@@ -600,6 +716,7 @@ export function layout(title: string, content: string, activePage: string = '', 
       document.getElementById('bell-overlay').style.display = 'none';
     }
     loadBellUnreadCount();
+    ${hideSeasonalFx ? '' : seasonalFxScript()}
     ${announcementBarScript()}
     ${birthdayPopupScript()}
     (function () {

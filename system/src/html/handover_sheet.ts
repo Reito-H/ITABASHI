@@ -22,7 +22,12 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 <style>
 *,*::before,*::after{box-sizing:border-box;}
 :root{--navy:#1e2a3a;--yellow:#f0c040;--red:#e53935;--border:#1e2a3a;--muted:#666;}
-#ho-root{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Noto Sans JP',sans-serif;}
+#ho-root{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Noto Sans JP',sans-serif;
+  position:relative;padding:16px;margin:-16px;border-radius:0 0 22px 22px;
+  background:
+    radial-gradient(900px 420px at 12% -8%, rgba(86,102,255,0.10), transparent 62%),
+    radial-gradient(760px 360px at 100% -6%, rgba(244,166,33,0.08), transparent 58%),
+    var(--color-bg, #f5f8fd);}
 
 /* タイトル行の高さがフォントの行間で膨らまないよう明示的に固定する（このstyleは
    /handoverページにしか出力されないため他ページのヘッダーには影響しない） */
@@ -39,8 +44,10 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
           border-radius:12px;border:1px solid var(--navy);background:var(--navy);cursor:pointer;font-size:12px;
           font-weight:700;color:#fff;white-space:nowrap;line-height:1;}
 .ho-tab-arrow{font-size:9px;}
-.ho-tab-menu{display:none;position:absolute;top:28px;left:0;background:#fff;border:1px solid #d1d5db;
-          border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.18);min-width:96px;z-index:500;overflow:hidden;}
+.ho-tab-menu{display:none;position:absolute;top:28px;left:0;
+          background:rgba(255,255,255,.85);backdrop-filter:blur(16px) saturate(160%);-webkit-backdrop-filter:blur(16px) saturate(160%);
+          border:1px solid rgba(255,255,255,.6);
+          border-radius:12px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:96px;z-index:500;overflow:hidden;}
 .ho-tab-menu.open{display:block;}
 .ho-tab-opt{padding:7px 14px;font-size:12px;font-weight:700;color:#374151;cursor:pointer;white-space:nowrap;}
 .ho-tab-opt:hover{background:#f3f4f6;}
@@ -52,17 +59,18 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
   #ho-tabs-m{display:flex;margin-bottom:8px;}
 }
 
-.ho-date-bar{background:#fff;border:1px solid #e5e7eb;border-radius:8px;display:flex;align-items:center;gap:5px;
-             padding:6px 8px;overflow-x:auto;white-space:nowrap;margin-bottom:10px;}
+.ho-date-bar{background:rgba(255,255,255,.6);backdrop-filter:blur(16px) saturate(150%);-webkit-backdrop-filter:blur(16px) saturate(150%);
+             border:1px solid rgba(255,255,255,.7);border-radius:12px;display:flex;align-items:center;gap:5px;
+             padding:6px 8px;overflow-x:auto;white-space:nowrap;margin-bottom:10px;box-shadow:0 4px 14px rgba(20,29,44,.05);}
 .ho-date-sep{width:1px;height:18px;background:#ddd;flex-shrink:0;}
-.ho-date-tab{flex-shrink:0;padding:5px 11px;border-radius:16px;border:1px solid #ccc;font-size:12px;font-weight:600;
-             cursor:pointer;background:#fff;color:#333;user-select:none;}
+.ho-date-tab{flex-shrink:0;padding:5px 11px;border-radius:16px;border:1px solid rgba(0,0,0,.12);font-size:12px;font-weight:600;
+             cursor:pointer;background:rgba(255,255,255,.55);color:#333;user-select:none;transition:background .15s;}
 .ho-date-tab.active{background:var(--navy);color:#fff;border-color:var(--navy);}
 .ho-date-tab.is-today{border-color:var(--yellow);}
 .ho-today-chip{font-size:9px;background:var(--yellow);color:var(--navy);border-radius:8px;padding:1px 5px;margin-left:3px;font-weight:800;}
-.ho-btn-add{flex-shrink:0;padding:5px 10px;border-radius:16px;border:1px dashed #bbb;font-size:12px;color:#666;background:#fff;cursor:pointer;}
+.ho-btn-add{flex-shrink:0;padding:5px 10px;border-radius:16px;border:1px dashed rgba(0,0,0,.25);font-size:12px;color:#666;background:rgba(255,255,255,.55);cursor:pointer;}
 
-.ho-doc{background:#fff;border:2px solid var(--border);}
+.ho-doc{background:#fff;border:2px solid var(--border);box-shadow:0 10px 30px rgba(20,29,44,.08);}
 .ho-grid{display:flex;flex-direction:column;}
 .ho-col-left,.ho-col-right{display:flex;flex-direction:column;}
 .ho-divider{display:none;}
@@ -91,9 +99,10 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-douta-btn:disabled{cursor:default;}
 .ho-del-btn{background:none;border:none;font-size:15px;cursor:pointer;color:#ccc;padding:2px 4px;}
 .ho-del-btn:hover{color:var(--red);}
-.ho-limit-btn{margin-left:auto;border:1px solid #ccc;background:#fff;color:#374151;border-radius:14px;
-              padding:3px 11px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
-.ho-limit-btn:hover{border-color:#999;}
+.ho-limit-btn{margin-left:auto;border:1px solid rgba(0,0,0,.15);background:rgba(255,255,255,.55);color:#374151;border-radius:14px;
+              padding:3px 11px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;
+              backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:background .15s;}
+.ho-limit-btn:hover{background:rgba(255,255,255,.85);}
 
 /* やることリスト起動ボタン（動態欄の右隣）とフローティングパネル */
 .ho-todo-float-btn{display:inline-flex;align-items:center;gap:5px;border:1px solid #c7d2fe;background:#eef2ff;
@@ -133,8 +142,9 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-limit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                   align-items:center;justify-content:center;}
 #ho-limit-overlay.show{display:flex;}
-#ho-limit-modal{background:#fff;border-radius:10px;padding:18px 20px;width:400px;max-width:92vw;
-                max-height:82vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+#ho-limit-modal{background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+                border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:18px 20px;width:400px;max-width:92vw;
+                max-height:82vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(15,23,42,.3);}
 .ho-limit-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
                color:var(--navy);margin-bottom:4px;flex-shrink:0;}
 #ho-limit-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
@@ -166,8 +176,10 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-ce{width:100%;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;word-break:break-all;white-space:pre-wrap;color:#111;flex:1;}
 .ho-ce[contenteditable="false"]{color:#555;}
 
-#ho-toolbar{position:fixed;z-index:600;display:none;align-items:center;gap:6px;background:#1e2a3a;border-radius:10px;
-            padding:7px 9px;box-shadow:0 6px 20px rgba(0,0,0,.35);}
+#ho-toolbar{position:fixed;z-index:600;display:none;align-items:center;gap:6px;
+            background:rgba(30,42,58,.88);backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);
+            border:1px solid rgba(255,255,255,.1);border-radius:12px;
+            padding:7px 9px;box-shadow:0 10px 26px rgba(0,0,0,.35);}
 .ho-cbtn{border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;}
 .ho-cbtn-k{background:#fff;color:#111;}
 .ho-cbtn-r{background:var(--red);color:#fff;}
@@ -197,12 +209,14 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-accident-alert .ho-aa-close{border:none;background:none;color:#991b1b;font-size:18px;line-height:1;cursor:pointer;padding:0 0 0 4px;flex:none;}
 @media (max-width:768px){ #ho-accident-alert{top:auto;bottom:110px;right:12px;} }
 
-#ho-suggest{position:fixed;z-index:650;background:#fff;border:1px solid #ccc;border-radius:6px;
-            box-shadow:0 6px 18px rgba(0,0,0,.18);max-height:180px;overflow-y:auto;display:none;min-width:110px;}
+#ho-suggest{position:fixed;z-index:650;background:rgba(255,255,255,.92);backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);
+            border:1px solid rgba(0,0,0,.08);border-radius:10px;
+            box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:180px;overflow-y:auto;display:none;min-width:110px;}
 .ho-suggest-item{padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap;color:#111;}
 .ho-suggest-item:hover{background:#f0c04033;}
-#ho-numpick{position:fixed;z-index:650;display:none;gap:6px;background:#1e2a3a;border-radius:8px;padding:6px;
-            box-shadow:0 6px 18px rgba(0,0,0,.3);}
+#ho-numpick{position:fixed;z-index:650;display:none;gap:6px;background:rgba(30,42,58,.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+            border-radius:10px;padding:6px;
+            box-shadow:0 8px 24px rgba(0,0,0,.3);}
 .ho-num-btn{border:none;border-radius:5px;padding:6px 10px;font-size:12px;font-weight:800;cursor:pointer;}
 .ho-num-btn.minus{background:#ffe1e1;color:#c62828;}
 .ho-num-btn.plus{background:#e3f5e6;color:#2e7d32;}
@@ -210,8 +224,9 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-fontset-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                     align-items:center;justify-content:center;}
 #ho-fontset-overlay.show{display:flex;}
-#ho-fontset-modal{background:#fff;border-radius:10px;padding:18px 20px;width:420px;max-width:92vw;
-                  max-height:85vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+#ho-fontset-modal{background:rgba(255,255,255,.88);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+                  border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:18px 20px;width:420px;max-width:92vw;
+                  max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(15,23,42,.3);}
 .ho-fontset-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
                  color:var(--navy);margin-bottom:4px;flex-shrink:0;}
 #ho-fontset-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}

@@ -364,7 +364,7 @@ app.post('/api/kancho/members', async (c) => {
   const nm = (b.name ?? '').trim();
   if (!nm) return c.json({ error: '名前を入力してください' }, 400);
   if (!b.year || !b.month) return c.json({ error: 'year/month が必要です' }, 400);
-  const section = ['main', 's1', 's2'].includes(b.section ?? '') ? b.section : 'main';
+  const section = 'main';
   const color = (b.team_color && /^#[0-9a-fA-F]{6}$/.test(b.team_color)) ? b.team_color.toLowerCase() : null;
   const { id: adminId, name } = await adminName(c);
   const slotKey = crypto.randomUUID();
@@ -395,7 +395,7 @@ app.put('/api/kancho/members/:id', async (c) => {
   if (!old) return c.json({ error: 'メンバーが見つかりません' }, 404);
   const nm = (b.name ?? old.name).trim();
   if (!nm) return c.json({ error: '名前を入力してください' }, 400);
-  const section = ['main', 's1', 's2'].includes(b.section ?? '') ? b.section! : old.section;
+  const section = 'main';
   let color = old.team_color;
   if (b.team_color !== undefined) {
     color = (b.team_color && /^#[0-9a-fA-F]{6}$/.test(b.team_color)) ? b.team_color.toLowerCase() : null;
@@ -439,7 +439,7 @@ app.post('/api/kancho/members/batch', async (c) => {
     if (!old) continue;
     const nm = (e.name ?? old.name).trim();
     if (!nm) continue;
-    const section = ['main', 's1', 's2'].includes(e.section ?? '') ? e.section! : old.section;
+    const section = 'main';
     let color = old.team_color;
     if (e.team_color !== undefined) {
       color = (e.team_color && /^#[0-9a-fA-F]{6}$/.test(e.team_color)) ? e.team_color.toLowerCase() : null;
@@ -513,7 +513,7 @@ app.post('/api/kancho/types', async (c) => {
   const code = (b.code ?? '').trim();
   if (!code) return c.json({ error: '記号を入力してください' }, 400);
   if (!b.year || !b.month) return c.json({ error: 'year/month が必要です' }, 400);
-  const section = ['main', 'sub', 'all'].includes(b.section ?? '') ? b.section : 'main';
+  const section = 'main';
   const { id: adminId, name } = await adminName(c);
   try {
     await c.env.DB.prepare(
@@ -536,7 +536,7 @@ app.put('/api/kancho/types/:id', async (c) => {
   if (!old) return c.json({ error: '記号が見つかりません' }, 404);
   const code = (b.code ?? old.code).trim();
   if (!code) return c.json({ error: '記号を入力してください' }, 400);
-  const section = ['main', 'sub', 'all'].includes(b.section ?? '') ? b.section! : old.section;
+  const section = 'main';
   const { id: adminId, name } = await adminName(c);
   try {
     await c.env.DB.prepare(
@@ -591,7 +591,7 @@ app.post('/api/kancho/types/batch', async (c) => {
     if (!old) continue;
     const code = (e.code ?? old.code).trim();
     if (!code) continue;
-    const section = ['main', 'sub', 'all'].includes(e.section ?? '') ? e.section! : old.section;
+    const section = 'main';
     const label = e.label ?? old.label;
     const color = e.color ?? old.color;
     const dailyRequired = e.daily_required ?? old.daily_required;
