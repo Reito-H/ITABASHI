@@ -324,6 +324,24 @@ function vehicleStatusJson(r: VehicleStatusRow) {
   };
 }
 
+// 代替（点検管理表 inspection_schedules の type='sub' を自動反映するだけの読み取り専用リスト。
+// 手動追加・削除は無く、編集は点検管理表側で行う）。本日以降の予定のみ、日付の早い順に返す。
+async function loadUpcomingSubstitutes(db: Env['DB'], divNum: number): Promise<{ car_no: string; date: string }[]> {
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const todayStr = nowJST.toISOString().split('T')[0];
+  const rows = await db.prepare(`
+    SELECT vehicle_num, year_month, day
+    FROM inspection_schedules
+    WHERE ka = ? AND type = 'sub'
+      AND (substr(year_month,1,4) || '-' || substr(year_month,5,2) || '-' || substr('00' || day, -2)) >= ?
+    ORDER BY year_month, day
+  `).bind(divNum, todayStr).all<{ vehicle_num: string; year_month: string; day: number }>();
+  return (rows.results ?? []).map(r => ({
+    car_no: r.vehicle_num,
+    date: `${r.year_month.slice(0, 4)}-${r.year_month.slice(4, 6)}-${String(r.day).padStart(2, '0')}`,
+  }));
+}
+
 app.get('/api/handover/:division/vehicle-status', async (c) => {
   const division = c.req.param('division');
   if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
@@ -343,7 +361,8 @@ app.get('/api/handover/:division/vehicle-status', async (c) => {
   for (const r of rows.results ?? []) {
     (r.category === 'breakdown' ? breakdown : accident).push(vehicleStatusJson(r));
   }
-  return c.json({ accident, breakdown });
+  const substitute = await loadUpcomingSubstitutes(c.env.DB, divNum);
+  return c.json({ accident, breakdown, substitute });
 });
 
 app.post('/api/handover/:division/vehicle-status', async (c) => {

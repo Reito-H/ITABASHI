@@ -161,7 +161,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 
 /* フローティングパネル本体は「やることリスト」と同じ非モーダルの浮遊カード方式
    （背景クリックでは閉じない・×ボタンでのみ閉じる・ヘッダードラッグで移動・右下ハンドルでリサイズ）を踏襲。 */
-.ho-vs-float{position:fixed;z-index:955;width:760px;height:600px;min-width:600px;min-height:380px;
+.ho-vs-float{position:fixed;z-index:955;width:860px;height:600px;min-width:680px;min-height:380px;
              max-width:96vw;max-height:92vh;background:rgba(255,255,255,.92);
              backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
              border:1px solid rgba(255,255,255,.6);border-radius:16px;
@@ -185,13 +185,16 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-vs-float.dragging,.ho-vs-float.resizing{box-shadow:0 30px 70px rgba(15,23,42,.36);}
 .ho-vs-float.dragging .ho-vs-float-body,.ho-vs-float.resizing .ho-vs-float-body{pointer-events:none;}
 
-.ho-vs-col{flex:1 1 320px;min-width:300px;display:flex;flex-direction:column;}
+.ho-vs-col{flex:1 1 230px;min-width:210px;display:flex;flex-direction:column;}
 .ho-vs-col-head{font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px;}
 .ho-vs-table{border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;flex-shrink:0;}
-.ho-vs-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid #f0f0f0;flex-wrap:wrap;}
+.ho-vs-row{display:flex;align-items:center;gap:5px;padding:6px 7px;border-bottom:1px solid #f0f0f0;flex-wrap:wrap;}
 .ho-vs-row:last-child{border-bottom:none;}
-.ho-vs-carno{width:76px;border:1px solid #d1d5db;border-radius:6px;padding:5px 6px;font-size:13px;font-weight:700;flex-shrink:0;}
-.ho-vs-date{width:112px;border:1px solid #d1d5db;border-radius:6px;padding:5px 6px;font-size:12px;flex-shrink:0;}
+.ho-vs-carno{width:58px;border:1px solid #d1d5db;border-radius:6px;padding:5px 4px;font-size:13px;font-weight:700;flex-shrink:0;}
+/* 日付inputはクリック（タップ）しやすいよう、フィールド全体をクリックでネイティブの
+   カレンダーピッカーが開くようJS側でshowPicker()を呼ぶ（小さいカレンダーアイコンを
+   正確にクリックしなくてもよいようにする＝「日付の登録がしづらい」への対応）。 */
+.ho-vs-date{width:100px;border:1px solid #d1d5db;border-radius:6px;padding:5px 4px;font-size:12px;flex-shrink:0;cursor:pointer;}
 .ho-vs-spacer{flex:1;min-width:4px;}
 .ho-vs-link-btn{border:1px solid #c7d2fe;background:#eef2ff;color:#3730a3;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;white-space:nowrap;}
 .ho-vs-link-btn:hover{background:#e0e7ff;}
@@ -212,6 +215,12 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-vs-cand-info{flex:1;min-width:0;color:#374151;}
 .ho-vs-cand-pick{border:none;background:#1a3a5c;color:#fff;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;flex-shrink:0;}
 .ho-vs-cand-empty{color:#9ca3af;padding:4px 0;}
+/* 代替列（点検管理表のtype='sub'を自動反映する読み取り専用リスト。手入力欄は置かない） */
+.ho-vs-sub-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:12.5px;}
+.ho-vs-sub-row:last-child{border-bottom:none;}
+.ho-vs-sub-carno{font-weight:700;color:#111;flex-shrink:0;}
+.ho-vs-sub-date{color:#555;margin-left:auto;white-space:nowrap;}
+.ho-vs-sub-empty{padding:16px 8px;color:#9ca3af;font-size:12px;text-align:center;}
 
 #ho-limit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                   align-items:center;justify-content:center;}
@@ -2189,7 +2198,7 @@ function toggleTodoFloat(){
 // 閉じず、×ボタンでのみ閉じる）。データは課ごと（H.division）にサーバーへ保存する常設の表で、
 // 復活予定日を過ぎても行は自動で消えない（紙の管理表の運用に合わせ、削除は必ず手動）。
 const ACCIDENT_PRINT_PATH = ${safeJson(`${ADMIN_PATH}/settings/accidents/print`)};
-let VS_DATA = { accident: [], breakdown: [] };
+let VS_DATA = { accident: [], breakdown: [], substitute: [] };
 function isVsFloatOpen(){
   const el = document.getElementById('ho-vs-float');
   return !!el && !el.hidden;
@@ -2201,9 +2210,9 @@ function loadVsFloatGeom(){
 function saveVsFloatGeom(g){ try { localStorage.setItem('ho_vs_float_geom', JSON.stringify(g)); } catch(e){} }
 function clampVsFloatGeom(g){
   const margin = 8;
-  const maxW = Math.max(600, window.innerWidth - margin * 2);
+  const maxW = Math.max(680, window.innerWidth - margin * 2);
   const maxH = Math.max(380, window.innerHeight - margin * 2);
-  const width = Math.min(Math.max(g.width, 600), maxW);
+  const width = Math.min(Math.max(g.width, 680), maxW);
   const height = Math.min(Math.max(g.height, 380), maxH);
   const left = Math.min(Math.max(g.left, margin), Math.max(margin, window.innerWidth - width - margin));
   const top = Math.min(Math.max(g.top, margin), Math.max(margin, window.innerHeight - height - margin));
@@ -2215,7 +2224,7 @@ function applyVsFloatGeom(g){
   panel.style.width = g.width + 'px'; panel.style.height = g.height + 'px';
 }
 function defaultVsFloatGeom(){
-  const width = Math.min(760, window.innerWidth - 16);
+  const width = Math.min(860, window.innerWidth - 16);
   const height = Math.min(600, window.innerHeight - 16);
   const btn = document.getElementById('ho-vs-btn');
   let left = window.innerWidth - width - 24;
@@ -2283,10 +2292,24 @@ function vsColumnHtml(category, label, rows){
     + '<div class="ho-vs-total">合計：<b>'+rows.length+'</b>台</div>'
     + '</div></div>';
 }
+// 代替列：点検管理表（inspection_schedules）のtype='sub'を自動反映するだけの読み取り専用表示。
+// 手入力欄・削除ボタンは置かない（編集は点検管理表側で行う想定のため）。
+function vsSubstituteColumnHtml(rows){
+  const rowsHtml = rows.length
+    ? rows.map(r => '<div class="ho-vs-sub-row"><span class="ho-vs-sub-carno">'+esc(r.car_no)+'</span><span class="ho-vs-sub-date">'+esc(fmtMd(r.date))+'</span></div>').join('')
+    : '<div class="ho-vs-sub-empty">今後の代替予定はありません</div>';
+  return '<div class="ho-vs-col">'
+    + '<div class="ho-vs-col-head">代替／予定日<span style="font-weight:400;color:var(--muted);font-size:11px;"> （点検管理表から自動反映）</span></div>'
+    + '<div class="ho-vs-table">'
+    + rowsHtml
+    + '<div class="ho-vs-total">合計：<b>'+rows.length+'</b>台</div>'
+    + '</div></div>';
+}
 function renderVsPanel(){
   const body = document.getElementById('ho-vs-float-body');
   body.innerHTML = vsColumnHtml('accident', '事故車', VS_DATA.accident || [])
-    + vsColumnHtml('breakdown', '故障車', VS_DATA.breakdown || []);
+    + vsColumnHtml('breakdown', '故障車', VS_DATA.breakdown || [])
+    + vsSubstituteColumnHtml(VS_DATA.substitute || []);
   wireVsPanel();
 }
 async function vsPatchField(id, field, value){
@@ -2343,6 +2366,9 @@ function wireVsPanel(){
   });
   body.querySelectorAll('.ho-vs-date').forEach(el => {
     el.addEventListener('change', () => vsPatchField(el.closest('.ho-vs-row').dataset.id, 'expected_return_date', el.value));
+    // フィールドのどこをクリックしてもネイティブのカレンダーピッカーが開くようにする
+    // （小さいカレンダーアイコンだけがクリック対象だと押しづらいという指摘への対応）
+    el.addEventListener('click', () => { try { el.showPicker && el.showPicker(); } catch(e){} });
   });
   body.querySelectorAll('.ho-vs-del').forEach(el => el.addEventListener('click', () => vsDeleteRow(el.dataset.id)));
   body.querySelectorAll('[data-action="link"]').forEach(el => el.addEventListener('click', () => vsOpenLinkPicker(el.closest('.ho-vs-row'), el.dataset.id)));
