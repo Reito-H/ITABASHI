@@ -80,15 +80,16 @@ export function birthdayPopupHtml(): string {
       0%   { opacity: 0; transform: translateY(24px) scale(0.92); }
       100% { opacity: 1; transform: translateY(0) scale(1); }
     }
-    #bday-photo-wrap { flex-shrink: 0; }
-    #bday-photo {
+    #bday-photo-wrap {
+      flex-shrink: 0; position: relative; overflow: hidden;
       display: flex; align-items: center; justify-content: center;
       width: min(34vw, 40vh); height: min(34vw, 40vh); max-width: 420px; max-height: 420px;
-      border-radius: 50%; object-fit: cover; border: 7px solid #fbbf24;
+      border-radius: 50%; border: 7px solid #fbbf24;
       background: #fef3c7; color: #b45309; font-weight: 900; font-size: min(14vw, 16vh);
       box-shadow: 0 10px 40px rgba(0,0,0,0.35);
       animation: bdayPersonWiggle 1.3s ease-in-out infinite;
     }
+    #bday-photo { display: block; width: 100%; height: 100%; object-fit: cover; }
     @keyframes bdayPersonWiggle {
       0%, 100% { transform: translateY(0) rotate(0deg); }
       25%      { transform: translateY(-10px) rotate(-6deg); }
@@ -140,9 +141,14 @@ export function birthdayPopupScript(): string {
     }
     function renderBdaySlide(person, num, total) {
       var photoWrap = document.getElementById('bday-photo-wrap');
-      photoWrap.innerHTML = person.hasPhoto
-        ? '<img id="bday-photo" src="/api/birthday/photo/' + person.id + '">'
-        : '<div id="bday-photo">' + escBdayText((person.name || '?').slice(0, 1)) + '</div>';
+      if (person.hasPhoto) {
+        var ox = (typeof person.photoOffsetX === 'number') ? person.photoOffsetX : 50;
+        var oy = (typeof person.photoOffsetY === 'number') ? person.photoOffsetY : 50;
+        var sc = (typeof person.photoScale === 'number') ? person.photoScale : 1;
+        photoWrap.innerHTML = '<img id="bday-photo" src="/api/birthday/photo/' + person.id + '" style="object-position:' + ox + '% ' + oy + '%;transform:scale(' + sc + ');">';
+      } else {
+        photoWrap.innerHTML = '<div id="bday-photo" style="display:flex;align-items:center;justify-content:center;">' + escBdayText((person.name || '?').slice(0, 1)) + '</div>';
+      }
       document.getElementById('bday-name-big').textContent = person.name || '';
       document.getElementById('bday-counter').textContent = total > 1 ? (num + ' / ' + total) : '';
       var slide = document.getElementById('bday-slide');

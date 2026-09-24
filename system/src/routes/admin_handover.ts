@@ -274,16 +274,61 @@ app.get('/api/handover/:division/toka-detail', async (c) => {
   return c.json({ name, monthly, weekday, reasons, entries });
 });
 
-// 当欠欄オートコンプリート用: 課内の在籍社員名を部分一致検索
+// 当欠欄オートコンプリート用: 課内の在籍社員名を部分一致検索。
+// 同姓同名・読みが紛らわしい等で誤って選ばれる人は handover_name_suggest_exclusions で
+// 課ごとに手動除外できる（除外リストの管理は下のCRUD、設定は「課の設定」モーダルから行う）。
 app.get('/api/handover/:division/employee-suggest', async (c) => {
   const division = c.req.param('division');
   if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
   const q = (c.req.query('q') || '').trim();
   if (!q) return c.json({ names: [] });
+  const divNum = parseInt(division, 10);
   const rows = await c.env.DB.prepare(
-    `SELECT name FROM employees WHERE division = ? AND is_active = 1 AND (name LIKE ? OR name_kana LIKE ?) ORDER BY name LIMIT 8`
-  ).bind(parseInt(division, 10), `%${q}%`, `%${q}%`).all<{ name: string }>();
+    `SELECT name FROM employees
+     WHERE division = ? AND is_active = 1 AND (name LIKE ? OR name_kana LIKE ?)
+       AND name NOT IN (SELECT name FROM handover_name_suggest_exclusions WHERE division = ?)
+     ORDER BY name LIMIT 8`
+  ).bind(divNum, `%${q}%`, `%${q}%`, divNum).all<{ name: string }>();
   return c.json({ names: (rows.results ?? []).map(r => r.name) });
+});
+
+// ===== 名前候補の除外リスト（当欠・乗務希望のオートコンプリートから除外する人を課ごとに管理） =====
+app.get('/api/handover/:division/name-exclusions', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const rows = await c.env.DB.prepare(
+    'SELECT id, name FROM handover_name_suggest_exclusions WHERE division = ? ORDER BY name'
+  ).bind(parseInt(division, 10)).all<{ id: number; name: string }>();
+  return c.json({ exclusions: rows.results ?? [] });
+});
+
+app.post('/api/handover/:division/name-exclusions', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ name?: string }>().catch(() => ({}) as { name?: string });
+  const name = (b.name || '').trim();
+  if (!name) return c.json({ error: '名前を入力してください' }, 400);
+
+  const divNum = parseInt(division, 10);
+  const admin = await adminName(c);
+  const r = await c.env.DB.prepare(
+    `INSERT INTO handover_name_suggest_exclusions (division, name, created_by) VALUES (?, ?, ?)
+     ON CONFLICT(division, name) DO NOTHING`
+  ).bind(divNum, name, admin.name).run();
+  return c.json({ ok: true, id: r.meta.last_row_id });
+});
+
+app.delete('/api/handover/:division/name-exclusions/:id', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const r = await c.env.DB.prepare(
+    'DELETE FROM handover_name_suggest_exclusions WHERE id = ? AND division = ?'
+  ).bind(id, parseInt(division, 10)).run();
+  if (r.meta.changes === 0) return c.json({ error: 'データが存在しません' }, 404);
+  return c.json({ ok: true });
 });
 
 // 点検・車検・車両異常欄オートコンプリート用: 課内の車番を前方一致検索

@@ -1,5 +1,7 @@
 // ハッピーバースデーモード: 一部の人だけを対象に、誕生日当日の設定時刻に全ページへお祝いポップアップを表示する
 // ページ: /settings/birthday（対象者の名前・誕生日・顔写真の管理、発火時刻の設定、表示対象アカウント、テスト発火）
+// 顔写真は円形プレビュー上でドラッグして表示位置を、スライダーで拡大率を調整できる（migration_164の
+// photo_offset_x/y・photo_scale に保存。object-position(%) + transform:scale() で表示に反映する）
 // 管理API: /api/birthday/celebrants・/api/birthday/fire-times・/api/birthday/enabled-admins・/api/birthday/test-fire・/api/birthday/force-fire
 //   （書き込みは settings.birthday.edit 必須）
 // 表示用API: /api/birthday/active・/api/birthday/photo/:id
@@ -30,6 +32,9 @@ type CelebrantRow = {
   photo_r2_key: string | null;
   photo_mime_type: string | null;
   is_active: number;
+  photo_offset_x: number;
+  photo_offset_y: number;
+  photo_scale: number;
 };
 
 function r2KeyFor(ext: string): string {
@@ -39,6 +44,21 @@ function r2KeyFor(ext: string): string {
 async function canEdit(c: { env: Env; get: (k: 'adminId') => number }): Promise<boolean> {
   const perms = await getAdminPermissions(c.env.DB, c.get('adminId'));
   return perms === null || perms.includes('settings.birthday.edit');
+}
+
+// 写真の表示位置(%)・拡大率をフォーム値から検証つきで取り出す。範囲外や非数値はデフォルト値にフォールバックする
+function parsePhotoAdjust(form: FormData): { offsetX: number; offsetY: number; scale: number } {
+  const clamp = (v: number, min: number, max: number, fallback: number) => (Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
+  return {
+    offsetX: clamp(parseFloat(String(form.get('photo_offset_x') ?? '')), 0, 100, 50),
+    offsetY: clamp(parseFloat(String(form.get('photo_offset_y') ?? '')), 0, 100, 50),
+    scale: clamp(parseFloat(String(form.get('photo_scale') ?? '')), 1, 3, 1),
+  };
+}
+
+type CelebrantPhotoRow = { id: number; name: string; photo_r2_key: string | null; photo_offset_x: number; photo_offset_y: number; photo_scale: number };
+function celebrantToPayload(r: CelebrantPhotoRow) {
+  return { id: r.id, name: r.name, hasPhoto: !!r.photo_r2_key, photoOffsetX: r.photo_offset_x, photoOffsetY: r.photo_offset_y, photoScale: r.photo_scale };
 }
 
 // 実在する日付かどうか（うるう年を含む2024年で判定。4/31のような不正な組み合わせを弾く）
@@ -54,7 +74,7 @@ app.get('/settings/birthday', async (c) => {
   const editable = await canEdit(c);
   const [rows, hourRows, adminRows, enabledRows] = await Promise.all([
     c.env.DB.prepare(
-      'SELECT id, name, birth_month, birth_day, photo_r2_key, photo_mime_type, is_active FROM birthday_celebrants ORDER BY birth_month ASC, birth_day ASC, id ASC'
+      'SELECT id, name, birth_month, birth_day, photo_r2_key, photo_mime_type, is_active, photo_offset_x, photo_offset_y, photo_scale FROM birthday_celebrants ORDER BY birth_month ASC, birth_day ASC, id ASC'
     ).all<CelebrantRow>(),
     c.env.DB.prepare('SELECT hour, minute FROM birthday_fire_times ORDER BY hour ASC, minute ASC').all<{ hour: number; minute: number }>(),
     c.env.DB.prepare('SELECT id, username FROM admins ORDER BY username ASC').all<{ id: number; username: string }>(),
@@ -63,6 +83,7 @@ app.get('/settings/birthday', async (c) => {
   const celebrants = (rows.results ?? []).map(r => ({
     id: r.id, name: r.name, birthMonth: r.birth_month, birthDay: r.birth_day,
     hasPhoto: !!r.photo_r2_key, isActive: !!r.is_active,
+    photoOffsetX: r.photo_offset_x, photoOffsetY: r.photo_offset_y, photoScale: r.photo_scale,
   }));
   const fireTimes = (hourRows.results ?? []).map(r => ({ hour: r.hour, minute: r.minute }));
   const admins = (adminRows.results ?? []).map(r => ({ id: r.id, username: r.username }));
@@ -165,6 +186,19 @@ app.get('/settings/birthday', async (c) => {
             <input type="file" id="f-photo" accept="image/jpeg,image/png,image/gif,image/webp" style="width:100%;font-size:13px;">
           </label>
           <div id="cel-photo-current" style="font-size:11px;color:#6b7280;"></div>
+          <div id="cel-photo-adjust" style="display:none;">
+            <div style="font-size:11px;color:#374151;margin-bottom:6px;">表示位置の調整（ドラッグで移動）</div>
+            <div style="display:flex;gap:16px;align-items:center;">
+              <div id="cel-photo-preview" style="position:relative;width:130px;height:130px;border-radius:50%;overflow:hidden;background:#f3f4f6;border:2px solid #d1d5db;cursor:grab;flex-shrink:0;touch-action:none;">
+                <img id="cel-photo-preview-img" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;">
+              </div>
+              <div style="flex:1;min-width:0;">
+                <label style="font-size:11px;color:#374151;display:block;margin-bottom:4px;">拡大率</label>
+                <input type="range" id="f-photo-zoom" min="100" max="250" step="5" value="100" style="width:100%;">
+                <button type="button" onclick="resetPhotoAdjust()" style="margin-top:8px;padding:5px 12px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:6px;font-size:11px;cursor:pointer;">中央に戻す</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="cel-form-msg" style="font-size:12px;color:#dc2626;margin-top:10px;"></div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;">
@@ -194,7 +228,7 @@ app.get('/settings/birthday', async (c) => {
       }
       wrap.innerHTML = CELEBRANTS.map(function(r) {
         var photoCell = r.hasPhoto
-          ? '<img src="' + PHOTO_API + '/' + r.id + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;">'
+          ? '<div style="width:48px;height:48px;border-radius:50%;overflow:hidden;flex-shrink:0;"><img src="' + PHOTO_API + '/' + r.id + '" style="width:100%;height:100%;object-fit:cover;object-position:' + r.photoOffsetX + '% ' + r.photoOffsetY + '%;transform:scale(' + r.photoScale + ');"></div>'
           : '<div style="width:48px;height:48px;border-radius:50%;background:#f3f4f6;color:#9ca3af;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;">写真なし</div>';
         var actions = EDITABLE
           ? '<button onclick="openEdit(' + r.id + ')" style="padding:5px 12px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:4px;font-size:12px;cursor:pointer;">編集</button>'
@@ -210,7 +244,61 @@ app.get('/settings/birthday', async (c) => {
       }).join('');
     }
 
+    // 写真の表示位置調整（ドラッグでobject-position、スライダーでtransform:scaleを操作するプレビュー）
+    var photoOffsetX = 50, photoOffsetY = 50, photoScale = 1;
+    var photoDragging = false, photoDragStartX = 0, photoDragStartY = 0, photoDragStartOffX = 50, photoDragStartOffY = 50;
+    var photoPreviewEl = null, photoPreviewImgEl = null, photoZoomEl = null;
+
+    function clampPct(v) { return Math.max(0, Math.min(100, v)); }
+    function applyPhotoAdjustStyle() {
+      if (!photoPreviewImgEl) return;
+      photoPreviewImgEl.style.objectPosition = photoOffsetX + '% ' + photoOffsetY + '%';
+      photoPreviewImgEl.style.transform = 'scale(' + photoScale + ')';
+    }
+    function setPhotoAdjust(offsetX, offsetY, scale, previewSrc) {
+      photoOffsetX = offsetX; photoOffsetY = offsetY; photoScale = scale;
+      if (photoZoomEl) photoZoomEl.value = String(Math.round(scale * 100));
+      if (previewSrc && photoPreviewImgEl) photoPreviewImgEl.src = previewSrc;
+      document.getElementById('cel-photo-adjust').style.display = previewSrc ? 'block' : 'none';
+      applyPhotoAdjustStyle();
+    }
+    function resetPhotoAdjust() { setPhotoAdjust(50, 50, 1); }
+    function initPhotoAdjustOnce() {
+      if (photoPreviewEl) return;
+      photoPreviewEl = document.getElementById('cel-photo-preview');
+      photoPreviewImgEl = document.getElementById('cel-photo-preview-img');
+      photoZoomEl = document.getElementById('f-photo-zoom');
+      photoZoomEl.addEventListener('input', function () { photoScale = Number(photoZoomEl.value) / 100; applyPhotoAdjustStyle(); });
+      photoPreviewEl.addEventListener('pointerdown', function (e) {
+        photoDragging = true;
+        photoDragStartX = e.clientX; photoDragStartY = e.clientY;
+        photoDragStartOffX = photoOffsetX; photoDragStartOffY = photoOffsetY;
+        photoPreviewEl.setPointerCapture(e.pointerId);
+        photoPreviewEl.style.cursor = 'grabbing';
+      });
+      photoPreviewEl.addEventListener('pointermove', function (e) {
+        if (!photoDragging) return;
+        var rect = photoPreviewEl.getBoundingClientRect();
+        // 指/カーソルを動かした方向に写真がついてくるように、object-positionは逆方向へ動かす
+        var dx = (e.clientX - photoDragStartX) / rect.width * 100;
+        var dy = (e.clientY - photoDragStartY) / rect.height * 100;
+        photoOffsetX = clampPct(photoDragStartOffX - dx);
+        photoOffsetY = clampPct(photoDragStartOffY - dy);
+        applyPhotoAdjustStyle();
+      });
+      photoPreviewEl.addEventListener('pointerup', function () { photoDragging = false; photoPreviewEl.style.cursor = 'grab'; });
+      photoPreviewEl.addEventListener('pointercancel', function () { photoDragging = false; photoPreviewEl.style.cursor = 'grab'; });
+      document.getElementById('f-photo').addEventListener('change', function (e) {
+        var file = e.target.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function () { setPhotoAdjust(50, 50, 1, reader.result); };
+        reader.readAsDataURL(file);
+      });
+    }
+
     function openAdd() {
+      initPhotoAdjustOnce();
       editingId = 0;
       document.getElementById('cel-modal-title').textContent = 'お祝い対象者を追加';
       document.getElementById('f-name').value = '';
@@ -219,12 +307,14 @@ app.get('/settings/birthday', async (c) => {
       document.getElementById('f-active').checked = true;
       document.getElementById('f-photo').value = '';
       document.getElementById('cel-photo-current').textContent = '';
+      setPhotoAdjust(50, 50, 1, null);
       document.getElementById('cel-form-msg').textContent = '';
       document.getElementById('cel-modal').style.display = 'block';
     }
     function openEdit(id) {
       var r = CELEBRANTS.find(function(x) { return x.id === id; });
       if (!r) return;
+      initPhotoAdjustOnce();
       editingId = id;
       document.getElementById('cel-modal-title').textContent = '対象者の編集: ' + r.name;
       document.getElementById('f-name').value = r.name;
@@ -233,6 +323,7 @@ app.get('/settings/birthday', async (c) => {
       document.getElementById('f-active').checked = r.isActive;
       document.getElementById('f-photo').value = '';
       document.getElementById('cel-photo-current').textContent = r.hasPhoto ? '現在の写真があります（新しい写真を選ぶと差し替わります）' : '写真は未登録です';
+      setPhotoAdjust(r.photoOffsetX, r.photoOffsetY, r.photoScale, r.hasPhoto ? (PHOTO_API + '/' + r.id) : null);
       document.getElementById('cel-form-msg').textContent = '';
       document.getElementById('cel-modal').style.display = 'block';
     }
@@ -251,6 +342,9 @@ app.get('/settings/birthday', async (c) => {
         fd.append('birth_month', document.getElementById('f-month').value);
         fd.append('birth_day', document.getElementById('f-day').value);
         fd.append('is_active', document.getElementById('f-active').checked ? '1' : '0');
+        fd.append('photo_offset_x', String(photoOffsetX));
+        fd.append('photo_offset_y', String(photoOffsetY));
+        fd.append('photo_scale', String(photoScale));
         var file = document.getElementById('f-photo').files[0];
         if (file) fd.append('photo', file);
 
@@ -416,11 +510,12 @@ app.post('/api/birthday/celebrants', async (c) => {
     photoMimeType = photo.type || 'application/octet-stream';
     await c.env.DOCUMENTS_BUCKET.put(photoR2Key, photo.stream(), { httpMetadata: { contentType: photoMimeType } });
   }
+  const { offsetX, offsetY, scale } = parsePhotoAdjust(form);
 
   const r = await c.env.DB.prepare(`
-    INSERT INTO birthday_celebrants (name, birth_month, birth_day, photo_r2_key, photo_mime_type, is_active)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(name, birthMonth, birthDay, photoR2Key, photoMimeType, isActive).run();
+    INSERT INTO birthday_celebrants (name, birth_month, birth_day, photo_r2_key, photo_mime_type, is_active, photo_offset_x, photo_offset_y, photo_scale)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(name, birthMonth, birthDay, photoR2Key, photoMimeType, isActive, offsetX, offsetY, scale).run();
   return c.json({ ok: true, id: r.meta.last_row_id });
 });
 
@@ -457,15 +552,16 @@ app.post('/api/birthday/celebrants/:id', async (c) => {
     if (existing.photo_r2_key) await c.env.DOCUMENTS_BUCKET.delete(existing.photo_r2_key).catch(() => {});
     photoR2Key = newKey;
   }
+  const { offsetX, offsetY, scale } = parsePhotoAdjust(form);
 
   if (photoMimeType) {
     await c.env.DB.prepare(`
-      UPDATE birthday_celebrants SET name = ?, birth_month = ?, birth_day = ?, photo_r2_key = ?, photo_mime_type = ?, is_active = ?, updated_at = datetime('now','localtime') WHERE id = ?
-    `).bind(name, birthMonth, birthDay, photoR2Key, photoMimeType, isActive, id).run();
+      UPDATE birthday_celebrants SET name = ?, birth_month = ?, birth_day = ?, photo_r2_key = ?, photo_mime_type = ?, is_active = ?, photo_offset_x = ?, photo_offset_y = ?, photo_scale = ?, updated_at = datetime('now','localtime') WHERE id = ?
+    `).bind(name, birthMonth, birthDay, photoR2Key, photoMimeType, isActive, offsetX, offsetY, scale, id).run();
   } else {
     await c.env.DB.prepare(`
-      UPDATE birthday_celebrants SET name = ?, birth_month = ?, birth_day = ?, is_active = ?, updated_at = datetime('now','localtime') WHERE id = ?
-    `).bind(name, birthMonth, birthDay, isActive, id).run();
+      UPDATE birthday_celebrants SET name = ?, birth_month = ?, birth_day = ?, is_active = ?, photo_offset_x = ?, photo_offset_y = ?, photo_scale = ?, updated_at = datetime('now','localtime') WHERE id = ?
+    `).bind(name, birthMonth, birthDay, isActive, offsetX, offsetY, scale, id).run();
   }
   return c.json({ ok: true });
 });
@@ -611,17 +707,17 @@ birthdayPublicApi.get('/active', async (c) => {
 
       const celebrants = testIds.length
         ? await c.env.DB.prepare(
-            `SELECT id, name, photo_r2_key FROM birthday_celebrants WHERE id IN (${testIds.map(() => '?').join(',')}) ORDER BY birth_month ASC, birth_day ASC, id ASC`
-          ).bind(...testIds).all<{ id: number; name: string; photo_r2_key: string | null }>()
+            `SELECT id, name, photo_r2_key, photo_offset_x, photo_offset_y, photo_scale FROM birthday_celebrants WHERE id IN (${testIds.map(() => '?').join(',')}) ORDER BY birth_month ASC, birth_day ASC, id ASC`
+          ).bind(...testIds).all<CelebrantPhotoRow>()
         : await c.env.DB.prepare(
-            'SELECT id, name, photo_r2_key FROM birthday_celebrants WHERE is_active = 1 ORDER BY birth_month ASC, birth_day ASC, id ASC'
-          ).all<{ id: number; name: string; photo_r2_key: string | null }>();
+            'SELECT id, name, photo_r2_key, photo_offset_x, photo_offset_y, photo_scale FROM birthday_celebrants WHERE is_active = 1 ORDER BY birth_month ASC, birth_day ASC, id ASC'
+          ).all<CelebrantPhotoRow>();
       const list = celebrants.results ?? [];
       if (list.length) {
         return c.json({
           event: {
             id: `test-${Date.now()}`,
-            celebrants: list.map(r => ({ id: r.id, name: r.name, hasPhoto: !!r.photo_r2_key })),
+            celebrants: list.map(celebrantToPayload),
           },
         });
       }
@@ -645,8 +741,8 @@ birthdayPublicApi.get('/active', async (c) => {
 
   // 本日誕生日の有効な対象者
   const celebrants = await c.env.DB.prepare(
-    'SELECT id, name, photo_r2_key FROM birthday_celebrants WHERE is_active = 1 AND birth_month = ? AND birth_day = ? ORDER BY id ASC'
-  ).bind(bMonth, bDay).all<{ id: number; name: string; photo_r2_key: string | null }>();
+    'SELECT id, name, photo_r2_key, photo_offset_x, photo_offset_y, photo_scale FROM birthday_celebrants WHERE is_active = 1 AND birth_month = ? AND birth_day = ? ORDER BY id ASC'
+  ).bind(bMonth, bDay).all<CelebrantPhotoRow>();
   const list = celebrants.results ?? [];
   if (!list.length) return c.json({ event: null });
 
@@ -666,7 +762,7 @@ birthdayPublicApi.get('/active', async (c) => {
   return c.json({
     event: {
       id: `${todayStr}-${hh}:${mm}`,
-      celebrants: list.map(r => ({ id: r.id, name: r.name, hasPhoto: !!r.photo_r2_key })),
+      celebrants: list.map(celebrantToPayload),
     },
   });
 });

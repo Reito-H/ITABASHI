@@ -574,6 +574,13 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
         <input type="text" id="ho-sec-add-inp" placeholder="新しいセクション名" maxlength="30">
         <button type="button" id="ho-sec-add-btn">＋ 追加</button>
       </div>
+      <div class="ho-fontset-subhead">名前候補の除外</div>
+      <div class="ho-fontset-desc">当欠・乗務希望欄で名前を入力した際の候補（社員名簿）から、同姓同名・読みが紛らわしい等で誤って選ばれてしまう人をここで除外できます。</div>
+      <div id="ho-excl-rows"></div>
+      <div class="ho-sec-add-row">
+        <input type="text" id="ho-excl-add-inp" placeholder="除外する名前" maxlength="30">
+        <button type="button" id="ho-excl-add-btn">＋ 除外に追加</button>
+      </div>
     </div>
   </div>
 </div>
@@ -665,7 +672,7 @@ const H = {
   division: initialDivision(), date: null, dates: [], updatedAt: null, fieldTimers: {}, savedRange: null,
   numpickApply: null, fontSizes: { 1: 14, 2: 14, 3: 14, 4: 14 }, limits: [],
   sections: [], customContent: [], saveFailCount: 0,
-  tokaEntriesToday: [], tokaAddValue: null,
+  tokaEntriesToday: [], tokaAddValue: null, nameExclusions: [],
 };
 // DOM要素id → DBカラム名（項目単位の部分保存で使用）
 const FIELD_BY_ID = {
@@ -730,6 +737,9 @@ function hideSuggest(){
   const el = document.getElementById('ho-suggest');
   el.style.display = 'none'; el.innerHTML = '';
 }
+// 候補一覧を入力位置の真下ではなく横（右優先、収まらなければ左）にずらして表示する。
+// 真下だとIMEの漢字変換候補ウィンドウと重なって見えなくなるとの指摘への対応。
+const SUGGEST_H_OFFSET = 90;
 function showSuggestList(items, rect, onPick){
   const el = document.getElementById('ho-suggest');
   if (!items || !items.length){ hideSuggest(); return; }
@@ -738,7 +748,10 @@ function showSuggestList(items, rect, onPick){
   const h = Math.min(180, items.length * 30);
   let top = rect.bottom + 4;
   if (top + h > window.innerHeight) top = rect.top - 4 - h;
-  let left = Math.max(4, Math.min(rect.left, window.innerWidth - 130));
+  const w = Math.max(el.offsetWidth || 0, 110);
+  let left = rect.left + SUGGEST_H_OFFSET;
+  if (left + w > window.innerWidth - 4) left = rect.left - SUGGEST_H_OFFSET - w;
+  left = Math.max(4, Math.min(left, window.innerWidth - w - 4));
   el.style.left = left+'px'; el.style.top = top+'px';
   [...el.children].forEach((div, i) => div.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); onPick(items[i]); }));
 }
@@ -1257,10 +1270,53 @@ async function addSection(){
 }
 document.getElementById('ho-sec-add-btn').addEventListener('click', addSection);
 
+// ===== 名前候補の除外リスト（今開いている課のみ）=====
+async function loadNameExclusions(){
+  try {
+    const data = await api('GET', '/'+H.division+'/name-exclusions');
+    H.nameExclusions = data.exclusions || [];
+  } catch(e){ H.nameExclusions = []; }
+  renderNameExclusionRows();
+}
+function renderNameExclusionRows(){
+  const wrap = document.getElementById('ho-excl-rows');
+  const list = H.nameExclusions || [];
+  if (!list.length){
+    wrap.innerHTML = '<div style="font-size:12px;color:#9ca3af;padding:4px 0;">除外中の名前はありません</div>';
+    return;
+  }
+  wrap.innerHTML = list.map(x =>
+    '<div class="ho-sec-row"><span style="flex:1;font-size:13px;color:#111;">'+esc(x.name)+'</span>'
+    + (EDITABLE ? '<button type="button" class="ho-sec-del" data-id="'+x.id+'" title="除外を解除">×</button>' : '')
+    + '</div>'
+  ).join('');
+  wrap.querySelectorAll('.ho-sec-del').forEach(btn => btn.addEventListener('click', () => deleteNameExclusion(parseInt(btn.dataset.id,10))));
+}
+async function deleteNameExclusion(id){
+  try {
+    await api('DELETE', '/'+H.division+'/name-exclusions/'+id);
+    await loadNameExclusions();
+    toast('除外を解除しました');
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+async function addNameExclusion(){
+  const inp = document.getElementById('ho-excl-add-inp');
+  const name = inp.value.trim();
+  if (!name){ toast('名前を入力してください', 2000); return; }
+  try {
+    await api('POST', '/'+H.division+'/name-exclusions', { name });
+    inp.value = '';
+    await loadNameExclusions();
+    toast('除外リストに追加しました');
+  } catch(e){ toast('エラー: '+e.message, 2500); }
+}
+document.getElementById('ho-excl-add-btn').addEventListener('click', addNameExclusion);
+
 function openFontSettings(){
   document.getElementById('ho-fontset-title').textContent = '板橋'+H.division+'課の設定';
   renderFontSettingsRows();
   renderSectionSettingsRows();
+  loadNameExclusions();
   document.getElementById('ho-fontset-overlay').classList.add('show');
 }
 function closeFontSettings(){
