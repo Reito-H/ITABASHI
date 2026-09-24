@@ -150,36 +150,71 @@ function parseTokaLines(content: string): { name: string; value: number; reason:
   return entries;
 }
 
-// 当欠・理由欄の月間集計（記録ページ用）。日別の一覧に加え、当欠回数が多い人のランキングも返す。
+// 「＋」ボタン経由の登録（handover_toka_entries）は本文（toka_content）に理由を書かないため、
+// parseTokaLinesだけでは理由が空になる。同じ日の構造化データを名前・数値が一致する行の
+// 出現順に1件ずつ消費して割り当て、理由を補完する（本文の行が編集・削除されて一致しなくなった
+// 構造化データは、以後どの集計にも登場しなくなる＝本文が唯一の正になる設計）。
+type TokaEntry = { name: string; value: number; reason: string };
+type StructuredTokaRow = { name: string; value: number; reason: string };
+function mergeStructuredReasons(parsed: TokaEntry[], structured: StructuredTokaRow[]): TokaEntry[] {
+  const pool = structured.slice();
+  return parsed.map(e => {
+    const idx = pool.findIndex(s => s.name === e.name && Math.abs(s.value - e.value) < 0.001);
+    if (idx === -1) return e;
+    const [s] = pool.splice(idx, 1);
+    return s.reason ? { ...e, reason: s.reason } : e;
+  });
+}
+async function loadStructuredTokaByDate(db: Env['DB'], divNum: number, dateFrom: string, dateTo: string): Promise<Map<string, StructuredTokaRow[]>> {
+  const rows = await db.prepare(
+    'SELECT date, name, value, reason FROM handover_toka_entries WHERE division = ? AND date >= ? AND date < ? ORDER BY date, id'
+  ).bind(divNum, dateFrom, dateTo).all<{ date: string; name: string; value: number; reason: string }>();
+  const map = new Map<string, StructuredTokaRow[]>();
+  for (const r of rows.results ?? []) {
+    const list = map.get(r.date) ?? [];
+    list.push({ name: r.name, value: r.value, reason: r.reason || '' });
+    map.set(r.date, list);
+  }
+  return map;
+}
+
+// 当欠・理由欄の月間集計（記録ページ用）。日別の一覧・理由別ランキングに加え、当欠回数が多い人のランキングも返す。
 app.get('/api/handover/:division/toka-summary', async (c) => {
   const division = c.req.param('division');
   if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
   const month = c.req.query('month') || '';
   if (!isValidMonth(month)) return c.json({ error: '月の指定が不正です' }, 400);
+  const divNum = parseInt(division, 10);
 
   const rows = await c.env.DB.prepare(
     'SELECT date, toka_content FROM handover_sheets WHERE division = ? AND date LIKE ? ORDER BY date'
-  ).bind(parseInt(division, 10), `${month}%`).all<{ date: string; toka_content: string }>();
+  ).bind(divNum, `${month}%`).all<{ date: string; toka_content: string }>();
+  const structuredByDate = await loadStructuredTokaByDate(c.env.DB, divNum, `${month}-01`, `${month}-32`);
 
-  const entries: { date: string; name: string; value: number }[] = [];
+  const entries: { date: string; name: string; value: number; reason: string }[] = [];
   for (const row of rows.results ?? []) {
-    for (const parsed of parseTokaLines(row.toka_content || '')) {
-      entries.push({ date: row.date, name: parsed.name, value: parsed.value });
-    }
+    const parsed = mergeStructuredReasons(parseTokaLines(row.toka_content || ''), structuredByDate.get(row.date) ?? []);
+    for (const e of parsed) entries.push({ date: row.date, name: e.name, value: e.value, reason: e.reason });
   }
 
   const byName = new Map<string, { count: number; total: number }>();
+  const byReason = new Map<string, number>();
   for (const e of entries) {
     const cur = byName.get(e.name) ?? { count: 0, total: 0 };
     cur.count += 1;
     cur.total += Math.abs(e.value);
     byName.set(e.name, cur);
+    const reasonKey = e.reason || '(理由未記入)';
+    byReason.set(reasonKey, (byReason.get(reasonKey) ?? 0) + 1);
   }
   const ranking = [...byName.entries()]
     .map(([name, v]) => ({ name, count: v.count, total: v.total }))
     .sort((a, b) => b.count - a.count || b.total - a.total);
+  const reasonRanking = [...byReason.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count);
 
-  return c.json({ entries, count: entries.length, ranking });
+  return c.json({ entries, count: entries.length, ranking, reasonRanking });
 });
 
 // 個人別の当欠傾向詳細。指定月を末尾として過去monthsヶ月分を走査し、対象nameに完全一致する
@@ -198,9 +233,11 @@ app.get('/api/handover/:division/toka-detail', async (c) => {
   const startMonthIndex = endMonthIndex - (months - 1);
   const startYm = `${Math.floor(startMonthIndex / 12)}-${String(startMonthIndex % 12 + 1).padStart(2, '0')}`;
 
+  const divNum = parseInt(division, 10);
   const rows = await c.env.DB.prepare(
     'SELECT date, toka_content FROM handover_sheets WHERE division = ? AND date >= ? AND date < ? ORDER BY date'
-  ).bind(parseInt(division, 10), `${startYm}-01`, `${month}-32`).all<{ date: string; toka_content: string }>();
+  ).bind(divNum, `${startYm}-01`, `${month}-32`).all<{ date: string; toka_content: string }>();
+  const structuredByDate = await loadStructuredTokaByDate(c.env.DB, divNum, `${startYm}-01`, `${month}-32`);
 
   const monthlyMap = new Map<string, { count: number; total: number }>();
   const weekday = [0, 0, 0, 0, 0, 0, 0];
@@ -209,7 +246,8 @@ app.get('/api/handover/:division/toka-detail', async (c) => {
 
   for (const row of rows.results ?? []) {
     const ym = row.date.slice(0, 7);
-    for (const parsed of parseTokaLines(row.toka_content || '')) {
+    const dayParsed = mergeStructuredReasons(parseTokaLines(row.toka_content || ''), structuredByDate.get(row.date) ?? []);
+    for (const parsed of dayParsed) {
       if (parsed.name !== name) continue;
       const cur = monthlyMap.get(ym) ?? { count: 0, total: 0 };
       cur.count += 1;
@@ -551,8 +589,52 @@ app.get('/api/handover/:division/:date', async (c) => {
      WHERE s.division = ? AND s.kind = 'custom' AND s.is_active = 1`
   ).bind(date, divNum).all<{ sectionId: number; content: string | null }>();
   const customContent = (customRows.results ?? []).map(r => ({ sectionId: r.sectionId, content: r.content ?? '' }));
+  const tokaEntryRows = await c.env.DB.prepare(
+    'SELECT name, value, reason FROM handover_toka_entries WHERE division = ? AND date = ? ORDER BY id'
+  ).bind(divNum, date).all<{ name: string; value: number; reason: string }>();
   const version = await sheetVersion(c.env.DB, divNum, date);
-  return c.json({ sheet: sheet ?? null, customContent, version });
+  return c.json({ sheet: sheet ?? null, customContent, tokaEntries: tokaEntryRows.results ?? [], version });
+});
+
+// ＋ボタンからの当欠登録。本文（toka_content）には「名前 -1.0」のみを追記し（理由は書かない）、
+// 理由はhandover_toka_entriesに構造化して保存する。フロント側は名前にカーソルを当てると
+// この理由をポップアップ表示する（本文中の行と名前・数値が一致する分だけ紐付ける方式のため、
+// 本文の行が手動で編集・削除されればこの登録も以後の集計・表示から自動的に外れる）。
+const TOKA_ADD_VALUES = new Set([-0.5, -1.0]);
+app.post('/api/handover/:division/:date/toka-entry', async (c) => {
+  const division = c.req.param('division');
+  const date = c.req.param('date');
+  if (!isValidDivision(division) || !isValidDate(date)) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+
+  const b = await c.req.json<{ name?: string; value?: number; reason?: string }>().catch(() => ({}) as { name?: string; value?: number; reason?: string });
+  const name = (b.name || '').trim();
+  const value = Number(b.value);
+  const reason = (b.reason || '').trim().slice(0, 200);
+  if (!name) return c.json({ error: '名前を入力してください' }, 400);
+  if (!TOKA_ADD_VALUES.has(value)) return c.json({ error: '数値の指定が不正です' }, 400);
+
+  const divNum = parseInt(division, 10);
+  const sheet = await c.env.DB.prepare(
+    'SELECT toka_content FROM handover_sheets WHERE division = ? AND date = ?'
+  ).bind(divNum, date).first<{ toka_content: string }>();
+  if (!sheet) return c.json({ error: 'シートが存在しません' }, 404);
+
+  const line = `${name} ${value.toFixed(1)}`;
+  const newContent = sheet.toka_content ? `${sheet.toka_content}\n${line}` : line;
+  const admin = await adminName(c);
+
+  await c.env.DB.prepare(
+    `UPDATE handover_sheets SET toka_content = ?, updated_at = datetime('now','localtime'), updated_by = ? WHERE division = ? AND date = ?`
+  ).bind(newContent, admin.name, divNum, date).run();
+  const r = await c.env.DB.prepare(
+    `INSERT INTO handover_toka_entries (division, date, name, value, reason, created_by) VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(divNum, date, name, value, reason, admin.name).run();
+
+  const saved = await c.env.DB.prepare('SELECT updated_at FROM handover_sheets WHERE division = ? AND date = ?')
+    .bind(divNum, date).first<{ updated_at: string }>();
+  await logAction(c, 'save', divNum, date, admin);
+  return c.json({ ok: true, id: r.meta.last_row_id, toka_content: newContent, updated_at: saved?.updated_at ?? null });
 });
 
 // 他端末での更新検知用の軽量ポーリングエンドポイント（フルデータを含まない）

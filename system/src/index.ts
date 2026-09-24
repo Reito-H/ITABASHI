@@ -164,9 +164,6 @@ app.use('*', async (c, next) => {
   // 乗降ピン分析ページ（営業戦略からのiframe埋め込み時も含む）は、頻出地点マップにLeaflet+OpenStreetMapタイルを
   // 使うため、このページだけCSPのstyle-src/img-srcを緩める
   const isKmPinsPage = pathname === `/${SECRET}/admin/settings/km-pins`;
-  // 事故防止AI: 引き継ぎシートのポップアップに課別傾向分析レポートをiframe埋め込みするため、
-  // このレポートページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続き全面禁止）
-  const isAccidentAiEmbed = pathname.startsWith(`/${SECRET}/admin/accidents/division/`) && pathname.endsWith('/report/print');
   // 秋の全国交通安全運動 手札: 編集ページが印刷イメージを同一オリジンでiframeプレビュー表示するため、
   // この印刷ページのみ同一オリジンからのフレーム表示を許可する（他ページは引き続きDENY）
   const isAutumnTefudaPrint = pathname === `/${SECRET}/admin/kacho-mission/autumn-safety-tefuda/print`;
@@ -219,9 +216,9 @@ app.use('*', async (c, next) => {
       "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self';"
     );
   } else {
-    // やることリスト・事故防止AIレポートのembedページのみ、引き継ぎシートのフローティングパネル/ポップアップから
+    // やることリストのembedページのみ、引き継ぎシートのフローティングパネルから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    const allowSameOriginFrame = isTodoEmbed || isAccidentAiEmbed || isAutumnTefudaPrint || isSalesStrategyEmbed;
+    const allowSameOriginFrame = isTodoEmbed || isAutumnTefudaPrint || isSalesStrategyEmbed;
     c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

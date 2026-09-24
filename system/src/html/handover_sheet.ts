@@ -11,7 +11,6 @@ import { ADMIN_PATH } from '../config';
 export function handoverHeaderTabs(): string {
   return `<div class="ho-hdr-tools">`
     + `<div class="ho-tabs-h" id="ho-tabs"></div>`
-    + `<button type="button" id="ho-accident-ai-btn" class="ho-tokasum-btn">事故防止AI</button>`
     + `<button type="button" id="ho-meter-btn" class="ho-tokasum-btn">メーター検査</button>`
     + `<button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button>`
     + `</div>`;
@@ -164,15 +163,46 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-limit-add-btn{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:13px;
                   font-weight:700;cursor:pointer;margin-left:auto;}
 
+#ho-toka-add-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
+                     align-items:center;justify-content:center;}
+#ho-toka-add-overlay.show{display:flex;}
+#ho-toka-add-modal{background:rgba(255,255,255,.92);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+                   border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:18px 20px;width:320px;max-width:90vw;
+                   box-shadow:0 20px 50px rgba(15,23,42,.3);}
+.ho-toka-add-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
+                  color:var(--navy);margin-bottom:12px;}
+#ho-toka-add-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
+.ho-toka-add-row{margin-bottom:12px;position:relative;}
+.ho-toka-add-row label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px;}
+#ho-toka-add-name{width:100%;border:1px solid #ccc;border-radius:6px;padding:7px 9px;font-size:14px;font-family:inherit;}
+#ho-toka-add-reason{width:100%;border:1px solid #ccc;border-radius:6px;padding:7px 9px;font-size:13px;font-family:inherit;}
+.ho-toka-add-vals{display:flex;gap:8px;}
+.ho-toka-add-vbtn{flex:1;border:1px solid #ccc;background:#fafafa;border-radius:6px;padding:8px 0;font-size:14px;
+                  font-weight:800;color:#333;cursor:pointer;}
+.ho-toka-add-vbtn.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+#ho-toka-add-submit{width:100%;background:var(--navy);color:#fff;border:none;border-radius:6px;padding:9px 0;
+                    font-size:14px;font-weight:700;cursor:pointer;}
+#ho-toka-add-submit:disabled{opacity:.4;cursor:default;}
+
 .ho-sec{padding:8px 10px;border-bottom:1px solid #ddd;display:flex;flex-direction:column;min-height:120px;}
 .ho-sec:last-child{border-bottom:none;}
 /* 右カラム各セクションの高さは設定モーダルの「高さ」設定値がインラインstyleで
    min-heightを指定する（小/標準/大/特大）。内容が増えれば枠ごと下へ伸びる。 */
 .ho-lbl{font-size:var(--ho-fs,14px);font-weight:800;color:var(--navy);text-decoration:underline;text-underline-offset:2px;margin-bottom:4px;flex-shrink:0;}
 .ho-lbl.red{color:var(--red);}
+.ho-lbl-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;}
+.ho-lbl-row .ho-lbl{margin-bottom:4px;}
+.ho-toka-add-btn{border:1px solid #ccc;background:#fff;color:var(--navy);border-radius:50%;width:20px;height:20px;
+                 line-height:1;font-size:14px;font-weight:800;cursor:pointer;flex-shrink:0;margin-bottom:4px;
+                 display:flex;align-items:center;justify-content:center;padding:0;}
+.ho-toka-add-btn:hover{background:#f0f4fb;border-color:var(--navy);}
 .ho-ta{width:100%;border:none;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;resize:none;font-family:inherit;
        background:transparent;color:#111;flex:1 1 auto;min-height:100px;overflow-y:hidden;}
 .ho-ta[readonly]{color:#555;}
+/* 当欠・理由欄：＋ボタンで登録した行の「名前」の上にだけ透明なホットスポットを重ね、
+   ホバー時にtitle属性のブラウザ標準ツールチップで理由を表示する（本文の表示テキスト自体は変えない）。 */
+.ho-toka-hover-layer{position:fixed;z-index:60;pointer-events:none;}
+.ho-toka-hotspot{position:fixed;pointer-events:auto;cursor:help;border-bottom:1px dotted var(--navy);}
 .ho-ce{width:100%;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;word-break:break-all;white-space:pre-wrap;color:#111;flex:1;}
 .ho-ce[contenteditable="false"]{color:#555;}
 
@@ -361,16 +391,6 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
            font-size:12px;cursor:pointer;width:100%;border-top:none;}
 .ho-mtr-add:hover{background:#f7f7f7;}
 
-/* 事故防止AI：課別傾向分析レポートのポップアップ表示（表示専用、iframeで印刷ページをそのまま埋め込む） */
-#ho-accai-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:800;display:none;
-                  align-items:center;justify-content:center;}
-#ho-accai-overlay.show{display:flex;}
-#ho-accai-modal{background:#fff;border-radius:10px;padding:14px;width:900px;max-width:96vw;
-               height:92vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
-.ho-accai-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
-              color:var(--navy);margin-bottom:10px;flex-shrink:0;}
-#ho-accai-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
-#ho-accai-frame{flex:1;width:100%;border:1px solid #e5e7eb;border-radius:8px;}
 </style>
 
 <div id="ho-root">
@@ -453,12 +473,34 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     </div>
   </div>
 </div>
+<div id="ho-toka-add-overlay">
+  <div id="ho-toka-add-modal">
+    <div class="ho-toka-add-head"><span>当欠を追加</span><button type="button" id="ho-toka-add-close">×</button></div>
+    <div class="ho-toka-add-row">
+      <label>名前</label>
+      <input type="text" id="ho-toka-add-name" placeholder="名前" autocomplete="off">
+    </div>
+    <div class="ho-toka-add-row">
+      <label>当欠数</label>
+      <div class="ho-toka-add-vals">
+        <button type="button" class="ho-toka-add-vbtn" data-v="-0.5">-0.5</button>
+        <button type="button" class="ho-toka-add-vbtn" data-v="-1.0">-1.0</button>
+      </div>
+    </div>
+    <div class="ho-toka-add-row">
+      <label>理由</label>
+      <input type="text" id="ho-toka-add-reason" placeholder="理由（任意）" maxlength="200">
+    </div>
+    <button type="button" id="ho-toka-add-submit" disabled>追加</button>
+  </div>
+</div>
 <div id="ho-tokasum-overlay">
   <div id="ho-tokasum-modal">
     <div class="ho-tokasum-head"><span>当欠記録</span><button type="button" id="ho-tokasum-close">×</button></div>
     <div class="ho-tokasum-tabs" id="ho-tokasum-tabs">
       <button type="button" class="ho-tokasum-tab" id="ho-tokasum-tab-list">日別</button>
       <button type="button" class="ho-tokasum-tab" id="ho-tokasum-tab-rank">人別集計</button>
+      <button type="button" class="ho-tokasum-tab" id="ho-tokasum-tab-reason">理由別</button>
     </div>
     <button type="button" class="ho-tokasum-back" id="ho-tokasum-back" style="display:none">‹ 集計に戻る</button>
     <div class="ho-tokasum-monthbar" id="ho-tokasum-monthbar">
@@ -476,18 +518,10 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     <div class="ho-mtr-body" id="ho-mtr-body"></div>
   </div>
 </div>
-<div id="ho-accai-overlay">
-  <div id="ho-accai-modal">
-    <div class="ho-accai-head"><span id="ho-accai-title">事故防止AI 課別傾向分析レポート</span><button type="button" id="ho-accai-close">×</button></div>
-    <iframe id="ho-accai-frame" src="about:blank"></iframe>
-  </div>
-</div>
-
 <script>
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
 const TODO_URL = ${safeJson(`${ADMIN_PATH}/todo`)};
-const ACCIDENT_AI_URL = ${safeJson(`${ADMIN_PATH}/accidents/division`)};
 const EDITABLE = ${editable ? 'true' : 'false'};
 const MY_DIVISION = ${safeJson(myDivision)};
 function lastDivision(){
@@ -502,6 +536,7 @@ const H = {
   division: initialDivision(), date: null, dates: [], updatedAt: null, fieldTimers: {}, savedRange: null,
   numpickApply: null, fontSizes: { 1: 14, 2: 14, 3: 14, 4: 14 }, limits: [],
   sections: [], customContent: [], saveFailCount: 0,
+  tokaEntriesToday: [], tokaAddValue: null,
 };
 // DOM要素id → DBカラム名（項目単位の部分保存で使用）
 const FIELD_BY_ID = {
@@ -597,8 +632,9 @@ document.querySelectorAll('#ho-numpick .ho-num-btn').forEach(b => b.addEventList
   if (H.numpickApply) H.numpickApply(b.dataset.v);
 }));
 
-// テキストエリア内のキャレット位置をミラーdivで算出（座標系はビューポート基準）
-function getTextareaCaretRect(ta){
+// テキストエリア内の任意の文字位置(offset)をミラーdivで算出（座標系はビューポート基準）。
+// offset省略時は現在のキャレット位置（当欠ホバー用ホットスポットの位置計算でも共用する）。
+function getTextareaOffsetRect(ta, offset){
   const div = document.createElement('div');
   const style = getComputedStyle(ta);
   ['boxSizing','width','fontFamily','fontSize','fontWeight','lineHeight','padding',
@@ -606,7 +642,7 @@ function getTextareaCaretRect(ta){
   div.style.position = 'absolute'; div.style.visibility = 'hidden';
   div.style.whiteSpace = 'pre-wrap'; div.style.wordWrap = 'break-word';
   div.style.top = '0'; div.style.left = '-9999px'; div.style.height = 'auto';
-  div.textContent = ta.value.substring(0, ta.selectionStart);
+  div.textContent = ta.value.substring(0, offset === undefined ? ta.selectionStart : offset);
   const span = document.createElement('span');
   span.textContent = '.';
   div.appendChild(span);
@@ -620,6 +656,7 @@ function getTextareaCaretRect(ta){
   document.body.removeChild(div);
   return { top, left, bottom: top + lineH, right: left };
 }
+function getTextareaCaretRect(ta){ return getTextareaOffsetRect(ta); }
 
 // 現在カーソル行の行頭からカーソル位置までのテキストを取得（テキストエリア共通ヘルパー）
 function currentLineText(ta){
@@ -700,6 +737,127 @@ function recalcJisseki(){
   jissekiEl.value = String(Math.round((yotei + delta) * 10) / 10);
   scheduleSave('kabu_jisseki');
 }
+
+// ===== 当欠・理由欄：＋ボタンで登録した行の「名前」に理由のホバーツールチップを重ねる =====
+// ＋ボタン経由の登録は本文に「名前 -1.0」のみを書く（理由は書かない）ため、本文中の
+// 対応行を探し、名前の文字位置の上にだけ透明なホットスポットを重ねてtitle属性で
+// ブラウザ標準のツールチップを出す（本文の見た目・保存内容は一切変えない）。
+const TOKA_HOTSPOT_RE = /^(.+?)\\s+-(0\\.5|1\\.0)(?!\\d)\\s*$/;
+let tokaHotspotTimer;
+function scheduleTokaHotspotRecalc(){
+  clearTimeout(tokaHotspotTimer);
+  tokaHotspotTimer = setTimeout(computeTokaHotspots, 250);
+}
+function computeTokaHotspots(){
+  const ta = document.getElementById('ho-toka-c');
+  const layer = document.getElementById('ho-toka-hover-layer');
+  if (!ta || !layer) return;
+  layer.innerHTML = '';
+  const pool = (H.tokaEntriesToday || []).filter(e => e.reason).slice();
+  if (!pool.length) return;
+  const lines = ta.value.split('\\n');
+  let offset = 0;
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    const m = trimmed.match(TOKA_HOTSPOT_RE);
+    if (m){
+      const name = m[1];
+      const value = -parseFloat(m[2]);
+      const idx = pool.findIndex(e => e.name === name && Math.abs(e.value - value) < 0.001);
+      if (idx !== -1){
+        const entry = pool[idx];
+        pool.splice(idx, 1);
+        const leadWs = line.length - line.replace(/^\\s+/, '').length;
+        const nameStart = offset + leadWs;
+        const nameEnd = nameStart + name.length;
+        const r1 = getTextareaOffsetRect(ta, nameStart);
+        const r2 = getTextareaOffsetRect(ta, nameEnd);
+        if (r1.top === r2.top && entry.reason){
+          const hotspot = document.createElement('span');
+          hotspot.className = 'ho-toka-hotspot';
+          hotspot.title = entry.reason;
+          hotspot.style.left = r1.left+'px';
+          hotspot.style.top = r1.top+'px';
+          hotspot.style.width = Math.max(4, r2.left - r1.left)+'px';
+          hotspot.style.height = (r1.bottom - r1.top)+'px';
+          layer.appendChild(hotspot);
+        }
+      }
+    }
+    offset += line.length + 1;
+  });
+}
+window.addEventListener('resize', scheduleTokaHotspotRecalc);
+
+// ===== 当欠・理由欄：＋ボタン（名前・数値・理由をフォームで登録）=====
+function closeTokaAddModal(){
+  document.getElementById('ho-toka-add-overlay').classList.remove('show');
+  hideSuggest();
+}
+function updateTokaAddSubmitState(){
+  const name = document.getElementById('ho-toka-add-name').value.trim();
+  document.getElementById('ho-toka-add-submit').disabled = !(name && H.tokaAddValue);
+}
+function openTokaAddModal(){
+  const nameEl = document.getElementById('ho-toka-add-name');
+  const reasonEl = document.getElementById('ho-toka-add-reason');
+  nameEl.value = ''; reasonEl.value = ''; H.tokaAddValue = null;
+  document.querySelectorAll('.ho-toka-add-vbtn').forEach(b => b.classList.remove('active'));
+  updateTokaAddSubmitState();
+  document.getElementById('ho-toka-add-overlay').classList.add('show');
+  nameEl.focus();
+}
+document.querySelectorAll('.ho-toka-add-vbtn').forEach(b => b.addEventListener('click', () => {
+  H.tokaAddValue = parseFloat(b.dataset.v);
+  document.querySelectorAll('.ho-toka-add-vbtn').forEach(x => x.classList.toggle('active', x === b));
+  updateTokaAddSubmitState();
+}));
+document.getElementById('ho-toka-add-close').addEventListener('click', closeTokaAddModal);
+document.getElementById('ho-toka-add-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'ho-toka-add-overlay') closeTokaAddModal();
+});
+(function(){
+  const nameEl = document.getElementById('ho-toka-add-name');
+  let timer;
+  nameEl.addEventListener('input', () => {
+    updateTokaAddSubmitState();
+    clearTimeout(timer);
+    const q = nameEl.value.trim();
+    if (!q){ hideSuggest(); return; }
+    timer = setTimeout(async () => {
+      let data;
+      try { data = await api('GET', '/'+H.division+'/employee-suggest?q='+encodeURIComponent(q)); }
+      catch(e){ return; }
+      if (document.activeElement !== nameEl) return;
+      showSuggestList(data.names || [], nameEl.getBoundingClientRect(), (name) => {
+        nameEl.value = name; hideSuggest(); updateTokaAddSubmitState();
+      });
+    }, 280);
+  });
+})();
+async function submitTokaAdd(){
+  const name = document.getElementById('ho-toka-add-name').value.trim();
+  const reason = document.getElementById('ho-toka-add-reason').value.trim();
+  const value = H.tokaAddValue;
+  if (!name || !value || !H.date) return;
+  const btn = document.getElementById('ho-toka-add-submit');
+  btn.disabled = true;
+  try {
+    const res = await api('POST', '/'+H.division+'/'+H.date+'/toka-entry', { name, value, reason });
+    const ta = document.getElementById('ho-toka-c');
+    if (ta) { ta.value = res.toka_content; autoGrowTa(ta); }
+    H.updatedAt = res.updated_at || H.updatedAt;
+    H.tokaEntriesToday.push({ name, value, reason });
+    recalcJisseki();
+    computeTokaHotspots();
+    closeTokaAddModal();
+    toast('当欠を追加しました');
+  } catch(e){
+    toast('エラー: '+e.message, 3000);
+    updateTokaAddSubmitState();
+  }
+}
+document.getElementById('ho-toka-add-submit').addEventListener('click', submitTokaAdd);
 
 // contenteditable内のキャレット直前の「単語」を取得（車番オートコンプリート用）
 function getCaretWord(el){
@@ -1053,11 +1211,11 @@ async function loadTokaSummary(){
     listEl.innerHTML = '<div class="ho-tokasum-empty">読み込みエラー: '+esc(e.message)+'</div>';
   }
 }
-// H.tokaSumView（'list'=日別 / 'ranking'=人別集計）に応じて一覧を描画する
+// H.tokaSumView（'list'=日別 / 'ranking'=人別集計 / 'reason'=理由別）に応じて一覧を描画する
 function renderTokaSumBody(){
   const listEl = document.getElementById('ho-tokasum-list');
   const data = H.tokaSumData;
-  if (!data || H.tokaSumView === 'detail') return;
+  if (!data || H.tokaSumView === 'detail' || H.tokaSumView === 'reason-detail') return;
   if (H.tokaSumView === 'ranking'){
     if (!data.ranking.length){
       listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
@@ -1075,18 +1233,52 @@ function renderTokaSumBody(){
       row.addEventListener('click', () => openTokaDetail(row.dataset.name)));
     return;
   }
+  if (H.tokaSumView === 'reason'){
+    const reasonRanking = data.reasonRanking || [];
+    if (!reasonRanking.length){
+      listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
+      return;
+    }
+    const pieItems = pieItemsFromCounts(reasonRanking, r => r.reason, r => r.count, 6, rest => 'その他（' + rest.length + '）');
+    const pieHtml = buildPieChart(pieItems);
+    const rowsHtml = reasonRanking.map((r, i) =>
+      '<div class="ho-tokasum-rank-row" data-reason="'+esc(r.reason)+'"><span class="ho-tokasum-rank-no">'+(i+1)+'</span>'+
+      '<span class="ho-tokasum-rank-name">'+esc(r.reason)+'</span>'+
+      '<span class="ho-tokasum-rank-count">'+r.count+'件</span></div>'
+    ).join('');
+    listEl.innerHTML = pieHtml + rowsHtml;
+    listEl.querySelectorAll('.ho-tokasum-rank-row').forEach(row =>
+      row.addEventListener('click', () => openTokaReasonDetail(row.dataset.reason)));
+    return;
+  }
   if (!data.entries.length){
     listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
     return;
   }
   listEl.innerHTML = data.entries.map(e =>
-    '<div class="ho-tokasum-row"><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
+    '<div class="ho-tokasum-row"'+(e.reason?' title="'+esc(e.reason)+'"':'')+'><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
     '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'+
     '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span></div>'
   ).join('');
 }
+// 理由をクリックして絞り込んだ、その理由に該当する日付・氏名の一覧
+function openTokaReasonDetail(reason){
+  H.tokaSumBackTo = 'reason';
+  setTokaSumView('reason-detail');
+  const listEl = document.getElementById('ho-tokasum-list');
+  const data = H.tokaSumData;
+  const rows = (data?.entries || []).filter(e => (e.reason || '(理由未記入)') === reason);
+  const rowsHtml = rows.length ? rows.map(e =>
+    '<div class="ho-tokasum-row"><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
+    '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'+
+    '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span></div>'
+  ).join('') : '<div class="ho-tokasum-empty">該当する記録はありません</div>';
+  listEl.innerHTML =
+    '<div class="ho-tokasum-detail-name">'+esc(reason)+'（'+rows.length+'件）</div>' + rowsHtml;
+}
 // 個人別の当欠傾向（曜日別/月推移/理由内訳）を表示する
 async function openTokaDetail(name){
+  H.tokaSumBackTo = 'ranking';
   H.tokaSumPerson = name;
   if (!H.tokaDetailMonths) H.tokaDetailMonths = 6;
   setTokaSumView('detail');
@@ -1137,20 +1329,23 @@ function renderTokaDetailBody(data){
     openTokaDetail(H.tokaSumPerson);
   }));
 }
-// タブ('list'/'ranking')・戻る('detail'→'ranking')で表示を切り替える
+// タブ('list'/'ranking'/'reason')・戻る（'detail'→'ranking' / 'reason-detail'→'reason'）で表示を切り替える
 function setTokaSumView(view){
   H.tokaSumView = view;
+  const isDetail = (view === 'detail' || view === 'reason-detail');
   document.getElementById('ho-tokasum-tab-list').classList.toggle('active', view === 'list');
   document.getElementById('ho-tokasum-tab-rank').classList.toggle('active', view === 'ranking');
-  document.getElementById('ho-tokasum-tabs').style.display = (view === 'detail') ? 'none' : 'flex';
-  document.getElementById('ho-tokasum-back').style.display = (view === 'detail') ? 'block' : 'none';
-  document.getElementById('ho-tokasum-monthbar').style.display = (view === 'detail') ? 'none' : 'flex';
-  document.getElementById('ho-tokasum-count').style.display = (view === 'detail') ? 'none' : 'block';
-  if (view === 'list' || view === 'ranking') renderTokaSumBody();
+  document.getElementById('ho-tokasum-tab-reason').classList.toggle('active', view === 'reason');
+  document.getElementById('ho-tokasum-tabs').style.display = isDetail ? 'none' : 'flex';
+  document.getElementById('ho-tokasum-back').style.display = isDetail ? 'block' : 'none';
+  document.getElementById('ho-tokasum-monthbar').style.display = isDetail ? 'none' : 'flex';
+  document.getElementById('ho-tokasum-count').style.display = isDetail ? 'none' : 'block';
+  if (view === 'list' || view === 'ranking' || view === 'reason') renderTokaSumBody();
 }
 document.getElementById('ho-tokasum-tab-list').addEventListener('click', () => setTokaSumView('list'));
 document.getElementById('ho-tokasum-tab-rank').addEventListener('click', () => setTokaSumView('ranking'));
-document.getElementById('ho-tokasum-back').addEventListener('click', () => setTokaSumView('ranking'));
+document.getElementById('ho-tokasum-tab-reason').addEventListener('click', () => setTokaSumView('reason'));
+document.getElementById('ho-tokasum-back').addEventListener('click', () => setTokaSumView(H.tokaSumBackTo || 'ranking'));
 async function openTokaSummary(){
   if (!H.tokaSumMonth) H.tokaSumMonth = currentYm();
   document.getElementById('ho-tokasum-overlay').classList.add('show');
@@ -1303,21 +1498,6 @@ document.getElementById('ho-tokasum-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'ho-tokasum-overlay') closeTokaSummary();
 });
 document.getElementById('ho-meter-btn').addEventListener('click', openMeterModal);
-function openAccidentAiModal(){
-  var now = new Date();
-  var sinceMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-01';
-  document.getElementById('ho-accai-frame').src = ACCIDENT_AI_URL + '/' + H.division + '/report/print?since=' + sinceMonth + '&forecast=1';
-  document.getElementById('ho-accai-overlay').classList.add('show');
-}
-function closeAccidentAiModal(){
-  document.getElementById('ho-accai-overlay').classList.remove('show');
-  document.getElementById('ho-accai-frame').src = 'about:blank';
-}
-document.getElementById('ho-accident-ai-btn').addEventListener('click', openAccidentAiModal);
-document.getElementById('ho-accai-close').addEventListener('click', closeAccidentAiModal);
-document.getElementById('ho-accai-overlay').addEventListener('click', (e) => {
-  if (e.target.id === 'ho-accai-overlay') closeAccidentAiModal();
-});
 document.getElementById('ho-mtr-close').addEventListener('click', closeMeterModal);
 document.getElementById('ho-mtr-overlay').addEventListener('click', (e) => {
   if (e.target.id === 'ho-mtr-overlay') closeMeterModal();
@@ -1448,6 +1628,7 @@ async function loadSheet(date){
     const data = await api('GET', '/'+H.division+'/'+date);
     H.updatedAt = data.version ?? (data.sheet?.updated_at || null);
     H.customContent = data.customContent || [];
+    H.tokaEntriesToday = data.tokaEntries || [];
     H.saveFailCount = 0;
     renderSheet(data.sheet, date);
     hideStaleBanner();
@@ -1577,7 +1758,13 @@ function buildSpecialSectionHtml(s, sheet, ro, ce){
   const style = ' style="min-height:'+px+'px"';
   switch(s.section_key){
     case 'toka':
-      return '<div class="ho-sec ho-toka"'+style+'><div class="ho-lbl">'+lbl+'</div><textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea></div>';
+      return '<div class="ho-sec ho-toka"'+style+'>'
+        + '<div class="ho-lbl-row"><div class="ho-lbl">'+lbl+'</div>'
+        + (EDITABLE ? '<button type="button" class="ho-toka-add-btn" id="ho-toka-add-btn" title="当欠を追加">＋</button>' : '')
+        + '</div>'
+        + '<textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea>'
+        + '<div class="ho-toka-hover-layer" id="ho-toka-hover-layer"></div>'
+        + '</div>';
     case 'jiko':
       return '<div class="ho-sec ho-jiko"'+style+'><div class="ho-lbl red">'+lbl+'</div><div class="ho-ce" id="ho-jiko-c" contenteditable="'+ce+'">'+safeHtml(sheet?.jiko_content)+'</div></div>';
     case 'tenken':
@@ -1630,6 +1817,9 @@ function wireSpecialSection(s){
     });
     attachHankaku(el);
     attachAutoGrow(el);
+    el.addEventListener('input', scheduleTokaHotspotRecalc);
+    document.getElementById('ho-toka-add-btn')?.addEventListener('click', openTokaAddModal);
+    computeTokaHotspots();
   } else if (s.section_key === 'jomu'){
     attachNameSuggest(el, field);
     attachHankaku(el);
@@ -1720,6 +1910,8 @@ function renderSheet(sheet, date){
     wireRightColumnSections();
     document.getElementById('ho-del-btn')?.addEventListener('click', () => confirmDeleteDate(H.date));
   }
+  // 閲覧のみ権限でも理由のホバーツールチップは見えるようにする（EDITABLEの外で計算）
+  if (!EDITABLE) computeTokaHotspots();
 }
 
 // ===== やることリスト（フローティングパネル）=====
