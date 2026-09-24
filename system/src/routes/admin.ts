@@ -1070,6 +1070,7 @@ app.get('/settings/admin-tools', (c) => {
       { href: `${ADMIN}/settings/announcement-bar`, perm: 'settings.announcement-bar', title: 'アナウンスバー' },
       { href: `${ADMIN}/settings/birthday`,          perm: 'settings.birthday',         title: 'ハッピーバースデーモード' },
       { href: `${ADMIN}/settings/seasonal`,          perm: 'settings.seasonal',         title: 'シーズナル演出' },
+      { href: `${ADMIN}/settings/cm-popup`,          perm: 'settings.cm-popup',         title: '新機能お知らせポップアップ' },
     ]},
     { heading: 'LINE関連機能', cards: [
       { href: `${ADMIN}/line`,                   perm: 'line',                   title: 'LINE管理' },

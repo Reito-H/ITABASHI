@@ -138,6 +138,81 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-todo-float.dragging,.ho-todo-float.resizing{box-shadow:0 30px 70px rgba(15,23,42,.36);}
 .ho-todo-float.dragging .ho-todo-float-body,.ho-todo-float.resizing .ho-todo-float-body{pointer-events:none;}
 
+/* 車両管理: 引き継ぎシートを開いている時だけ、右下の「新規報告」フローティングボタンの左側に
+   横長の赤ボタンとして常設する（引き継ぎシート専用のためlayout.tsの共通FAB群には加えず、この
+   ページのテンプレート内で独立して固定配置する）。金色は視認性が悪いとの指摘で赤系に変更、
+   丸ボタン化は不評だったため元の横長ボタン形状に戻し、一回り大きくした。 */
+.ho-vs-btn{position:fixed;right:144px;bottom:20px;z-index:60;height:58px;padding:0 26px;border-radius:29px;
+          border:none;background:linear-gradient(135deg,#e53935 0%,#c62828 100%);color:#fff;
+          font-size:16px;font-weight:800;letter-spacing:.02em;cursor:pointer;white-space:nowrap;
+          box-shadow:0 4px 14px rgba(198,40,40,.45);display:flex;align-items:center;justify-content:center;
+          transition:transform .12s,box-shadow .12s;}
+.ho-vs-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(198,40,40,.55);}
+.ho-vs-btn:active{transform:translateY(0);}
+
+/* 新機能の告知期間中（9月末まで）だけ、対象ボタンに赤いパルス枠を点滅させて目を引く。
+   期間終了後はJS側でクラスを付けなくなるため、コード上は消し忘れても自然に何も起きなくなる。 */
+@keyframes ho-promo-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.55);}
+  50%{box-shadow:0 0 0 8px rgba(220,38,38,0);}
+}
+.ho-promo-blink{animation:ho-promo-pulse 1.3s ease-in-out infinite;}
+.ho-toka-add-btn.ho-promo-blink{border-color:#dc2626;color:#dc2626;}
+
+/* フローティングパネル本体は「やることリスト」と同じ非モーダルの浮遊カード方式
+   （背景クリックでは閉じない・×ボタンでのみ閉じる・ヘッダードラッグで移動・右下ハンドルでリサイズ）を踏襲。 */
+.ho-vs-float{position:fixed;z-index:955;width:760px;height:600px;min-width:600px;min-height:380px;
+             max-width:96vw;max-height:92vh;background:rgba(255,255,255,.92);
+             backdrop-filter:blur(18px) saturate(160%);-webkit-backdrop-filter:blur(18px) saturate(160%);
+             border:1px solid rgba(255,255,255,.6);border-radius:16px;
+             box-shadow:0 24px 60px rgba(15,23,42,.28),0 2px 8px rgba(15,23,42,.14);
+             display:flex;flex-direction:column;overflow:hidden;}
+.ho-vs-float[hidden]{display:none;}
+.ho-vs-float-head{display:flex;align-items:center;gap:8px;padding:10px 8px 10px 14px;
+                  background:linear-gradient(135deg,#1e2a3a 0%,#334862 55%,#3f7cc9 100%);color:#fff;
+                  cursor:grab;user-select:none;flex-shrink:0;touch-action:none;}
+.ho-vs-float-head:active{cursor:grabbing;}
+.ho-vs-float-drag{display:flex;align-items:center;opacity:.5;flex-shrink:0;}
+.ho-vs-float-title{font-size:13.5px;font-weight:800;letter-spacing:.02em;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ho-vs-float-actions{display:flex;align-items:center;gap:3px;flex-shrink:0;}
+.ho-vs-float-actions button{border:none;background:rgba(255,255,255,.14);color:#fff;width:24px;height:24px;
+                            border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;}
+.ho-vs-float-actions button:hover{background:rgba(255,255,255,.26);}
+.ho-vs-float-body{flex:1;min-height:0;overflow-y:auto;padding:14px 16px;display:flex;gap:16px;flex-wrap:wrap;align-content:flex-start;}
+.ho-vs-float-resize{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;touch-action:none;}
+.ho-vs-float-resize::after{content:'';position:absolute;right:5px;bottom:5px;width:8px;height:8px;
+                           border-right:2px solid rgba(30,42,58,.32);border-bottom:2px solid rgba(30,42,58,.32);border-radius:1px;}
+.ho-vs-float.dragging,.ho-vs-float.resizing{box-shadow:0 30px 70px rgba(15,23,42,.36);}
+.ho-vs-float.dragging .ho-vs-float-body,.ho-vs-float.resizing .ho-vs-float-body{pointer-events:none;}
+
+.ho-vs-col{flex:1 1 320px;min-width:300px;display:flex;flex-direction:column;}
+.ho-vs-col-head{font-size:13px;font-weight:800;color:var(--navy);margin-bottom:6px;}
+.ho-vs-table{border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#fff;flex-shrink:0;}
+.ho-vs-row{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid #f0f0f0;flex-wrap:wrap;}
+.ho-vs-row:last-child{border-bottom:none;}
+.ho-vs-carno{width:76px;border:1px solid #d1d5db;border-radius:6px;padding:5px 6px;font-size:13px;font-weight:700;flex-shrink:0;}
+.ho-vs-date{width:112px;border:1px solid #d1d5db;border-radius:6px;padding:5px 6px;font-size:12px;flex-shrink:0;}
+.ho-vs-spacer{flex:1;min-width:4px;}
+.ho-vs-link-btn{border:1px solid #c7d2fe;background:#eef2ff;color:#3730a3;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;white-space:nowrap;}
+.ho-vs-link-btn:hover{background:#e0e7ff;}
+.ho-vs-link-badge{border:1px solid #bbf7d0;background:#ecfdf5;color:#047857;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;white-space:nowrap;font-weight:700;}
+.ho-vs-link-badge:hover{background:#d1fae5;}
+.ho-vs-openrep{border:none;background:transparent;color:#9ca3af;font-size:11px;cursor:pointer;padding:2px 4px;text-decoration:underline;}
+.ho-vs-del{border:none;background:transparent;color:#ccc;font-size:15px;cursor:pointer;padding:2px 4px;flex-shrink:0;}
+.ho-vs-del:hover{color:var(--red);}
+.ho-vs-add-row{display:flex;gap:6px;padding:8px;position:relative;}
+.ho-vs-add-inp{flex:1;border:1px dashed #c7cdd6;border-radius:6px;padding:6px 8px;font-size:12px;min-width:0;}
+.ho-vs-add-btn{border:1px dashed #9ca3af;background:#fafafa;color:#666;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;flex-shrink:0;}
+.ho-vs-add-btn:hover{background:#f0f0f0;}
+.ho-vs-total{text-align:right;font-size:12px;color:#374151;padding:7px 10px;font-weight:800;background:#f9fafb;border-top:1px solid #eee;}
+.ho-vs-total b{color:var(--red);font-size:14px;margin:0 2px;}
+.ho-vs-candidates{background:#f9fafb;border-top:1px dashed #d1d5db;padding:8px 10px;font-size:11.5px;width:100%;}
+.ho-vs-cand-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #eee;}
+.ho-vs-cand-row:last-child{border-bottom:none;}
+.ho-vs-cand-info{flex:1;min-width:0;color:#374151;}
+.ho-vs-cand-pick{border:none;background:#1a3a5c;color:#fff;border-radius:5px;padding:4px 10px;font-size:11px;cursor:pointer;flex-shrink:0;}
+.ho-vs-cand-empty{color:#9ca3af;padding:4px 0;}
+
 #ho-limit-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
                   align-items:center;justify-content:center;}
 #ho-limit-overlay.show{display:flex;}
@@ -179,7 +254,11 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-toka-add-vals{display:flex;gap:8px;}
 .ho-toka-add-vbtn{flex:1;border:1px solid #ccc;background:#fafafa;border-radius:6px;padding:8px 0;font-size:14px;
                   font-weight:800;color:#333;cursor:pointer;}
-.ho-toka-add-vbtn.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+/* 当欠（マイナス）は赤系、稼働追加（プラス）は青系で色分けし、選んだ数値がひと目で分かるようにする */
+.ho-toka-add-vbtn.minus{border-color:#fca5a5;color:#b91c1c;}
+.ho-toka-add-vbtn.plus{border-color:#93c5fd;color:#1d4ed8;}
+.ho-toka-add-vbtn.minus.active{background:#dc2626;border-color:#dc2626;color:#fff;}
+.ho-toka-add-vbtn.plus.active{background:#2563eb;border-color:#2563eb;color:#fff;}
 #ho-toka-add-submit{width:100%;background:var(--navy);color:#fff;border:none;border-radius:6px;padding:9px 0;
                     font-size:14px;font-weight:700;cursor:pointer;}
 #ho-toka-add-submit:disabled{opacity:.4;cursor:default;}
@@ -238,6 +317,23 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-accident-alert.show{display:flex;}
 #ho-accident-alert .ho-aa-close{border:none;background:none;color:#991b1b;font-size:18px;line-height:1;cursor:pointer;padding:0 0 0 4px;flex:none;}
 @media (max-width:768px){ #ho-accident-alert{top:auto;bottom:110px;right:12px;} }
+
+/* 新機能お知らせポップアップ（通称CM）: 管理者が設定した時刻に固定文面で表示。事故多発日アラートと
+   同じ「閉じるまで消えないカード」型だが、警告ではなく告知なので配色・トーンを分けて左側に置く。 */
+#ho-cm-popup{position:fixed;top:16px;left:16px;z-index:960;display:none;align-items:flex-start;gap:10px;
+             max-width:320px;padding:14px 16px;border-radius:14px;color:#fff;
+             background:linear-gradient(135deg,#1e3a5f 0%,#2a5a8f 55%,#3f7cc9 100%);
+             box-shadow:0 14px 34px rgba(30,58,95,.35);}
+#ho-cm-popup.show{display:flex;}
+#ho-cm-popup .ho-cm-badge{flex:none;background:var(--yellow);color:#1e2a3a;font-size:10px;font-weight:800;
+             letter-spacing:.03em;padding:3px 7px;border-radius:5px;margin-top:1px;}
+#ho-cm-popup .ho-cm-body{flex:1;font-size:12.5px;line-height:1.7;font-weight:600;}
+#ho-cm-popup .ho-cm-line{margin-bottom:4px;}
+#ho-cm-popup .ho-cm-line:last-child{margin-bottom:0;}
+#ho-cm-popup .ho-cm-close{flex:none;border:none;background:rgba(255,255,255,.16);color:#fff;font-size:15px;
+             line-height:1;cursor:pointer;padding:3px 7px;border-radius:6px;}
+#ho-cm-popup .ho-cm-close:hover{background:rgba(255,255,255,.28);}
+@media (max-width:768px){ #ho-cm-popup{top:auto;bottom:110px;left:12px;max-width:calc(100vw - 24px);} }
 
 #ho-suggest{position:fixed;z-index:650;background:rgba(255,255,255,.92);backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);
             border:1px solid rgba(0,0,0,.08);border-radius:10px;
@@ -418,6 +514,16 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
   <span>⚠ 本日は事故多発日です</span>
   <button type="button" class="ho-aa-close" id="ho-accident-alert-close" aria-label="閉じる">×</button>
 </div>
+<div id="ho-cm-popup" role="status">
+  <div class="ho-cm-badge">NEW</div>
+  <div class="ho-cm-body">
+    <div class="ho-cm-line">【車両管理】事故車・故障車をシームレスに管理できます</div>
+    <div class="ho-cm-line">【当欠・理由】「＋」ボタンでサクッと登録できます</div>
+  </div>
+  <button type="button" class="ho-cm-close" id="ho-cm-close" aria-label="閉じる">×</button>
+</div>
+
+<button type="button" id="ho-vs-btn" class="ho-vs-btn" aria-label="車両管理" title="車両管理">車両管理</button>
 
 <div id="ho-todo-float" class="ho-todo-float" hidden>
   <div class="ho-todo-float-head" id="ho-todo-float-head">
@@ -432,6 +538,18 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     <iframe id="ho-todo-float-iframe" title="やることリスト" loading="lazy"></iframe>
   </div>
   <div class="ho-todo-float-resize" id="ho-todo-float-resize" aria-hidden="true"></div>
+</div>
+
+<div id="ho-vs-float" class="ho-vs-float" hidden>
+  <div class="ho-vs-float-head" id="ho-vs-float-head">
+    <span class="ho-vs-float-drag" aria-hidden="true"><svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="2" cy="2" r="1.5"/><circle cx="8" cy="2" r="1.5"/><circle cx="2" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="2" cy="14" r="1.5"/><circle cx="8" cy="14" r="1.5"/></svg></span>
+    <span class="ho-vs-float-title" id="ho-vs-float-title">車両管理</span>
+    <div class="ho-vs-float-actions">
+      <button type="button" id="ho-vs-float-close" aria-label="閉じる" title="閉じる">×</button>
+    </div>
+  </div>
+  <div class="ho-vs-float-body" id="ho-vs-float-body"></div>
+  <div class="ho-vs-float-resize" id="ho-vs-float-resize" aria-hidden="true"></div>
 </div>
 
 <div id="ho-fontset-overlay">
@@ -475,16 +593,18 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 </div>
 <div id="ho-toka-add-overlay">
   <div id="ho-toka-add-modal">
-    <div class="ho-toka-add-head"><span>当欠を追加</span><button type="button" id="ho-toka-add-close">×</button></div>
+    <div class="ho-toka-add-head"><span>当欠・稼働を追加</span><button type="button" id="ho-toka-add-close">×</button></div>
     <div class="ho-toka-add-row">
       <label>名前</label>
       <input type="text" id="ho-toka-add-name" placeholder="名前" autocomplete="off">
     </div>
     <div class="ho-toka-add-row">
-      <label>当欠数</label>
+      <label>数値（赤＝当欠／青＝稼働追加）</label>
       <div class="ho-toka-add-vals">
-        <button type="button" class="ho-toka-add-vbtn" data-v="-0.5">-0.5</button>
-        <button type="button" class="ho-toka-add-vbtn" data-v="-1.0">-1.0</button>
+        <button type="button" class="ho-toka-add-vbtn minus" data-v="-1.0">-1.0</button>
+        <button type="button" class="ho-toka-add-vbtn minus" data-v="-0.5">-0.5</button>
+        <button type="button" class="ho-toka-add-vbtn plus" data-v="+0.5">+0.5</button>
+        <button type="button" class="ho-toka-add-vbtn plus" data-v="+1.0">+1.0</button>
       </div>
     </div>
     <div class="ho-toka-add-row">
@@ -558,6 +678,10 @@ function today(){
   const n = new Date(new Date().toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}));
   return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
 }
+// 新機能告知の点滅演出（車両管理ボタン・当欠＋ボタン）を出す期間。9月中は毎日出し、10月に入ったら
+// 自動的に出なくなる（コード側の消し忘れ対策として日付判定のみで制御し、削除作業は不要にしている）。
+const PROMO_BLINK_UNTIL = '2026-09-30';
+function isPromoActive(){ return today() <= PROMO_BLINK_UNTIL; }
 function fmtDate(s){
   const [,m,d] = s.split('-');
   const w = ['日','月','火','水','木','金','土'][new Date(s+'T00:00:00+09:00').getDay()];
@@ -739,10 +863,11 @@ function recalcJisseki(){
 }
 
 // ===== 当欠・理由欄：＋ボタンで登録した行の「名前」に理由のホバーツールチップを重ねる =====
-// ＋ボタン経由の登録は本文に「名前 -1.0」のみを書く（理由は書かない）ため、本文中の
-// 対応行を探し、名前の文字位置の上にだけ透明なホットスポットを重ねてtitle属性で
-// ブラウザ標準のツールチップを出す（本文の見た目・保存内容は一切変えない）。
-const TOKA_HOTSPOT_RE = /^(.+?)\\s+-(0\\.5|1\\.0)(?!\\d)\\s*$/;
+// ＋ボタン経由の登録は本文に「名前 -1.0」「名前 +0.5」のみを書く（理由は書かない）ため、
+// 本文中の対応行を探し、名前の文字位置の上にだけ透明なホットスポットを重ねてtitle属性で
+// ブラウザ標準のツールチップを出す（本文の見た目・保存内容は一切変えない）。当欠（－）・
+// 稼働追加（＋）どちらの行にも対応する。
+const TOKA_HOTSPOT_RE = /^(.+?)\\s+([+\\-])(0\\.5|1\\.0)(?!\\d)\\s*$/;
 let tokaHotspotTimer;
 function scheduleTokaHotspotRecalc(){
   clearTimeout(tokaHotspotTimer);
@@ -762,7 +887,7 @@ function computeTokaHotspots(){
     const m = trimmed.match(TOKA_HOTSPOT_RE);
     if (m){
       const name = m[1];
-      const value = -parseFloat(m[2]);
+      const value = (m[2] === '-' ? -1 : 1) * parseFloat(m[3]);
       const idx = pool.findIndex(e => e.name === name && Math.abs(e.value - value) < 0.001);
       if (idx !== -1){
         const entry = pool[idx];
@@ -1749,6 +1874,31 @@ async function checkAccidentAlert(){
 // （＝閉じても、次の予定時刻が来ればまた表示される）
 document.getElementById('ho-accident-alert-close').addEventListener('click', aaHidePopup);
 
+// ===== 新機能お知らせポップアップ（通称CM）=====
+// 管理者が /settings/cm-popup で設定した時刻(hh:mm)ごとに1回、固定文面のポップアップを表示する。
+// ハッピーバースデーと同じ「本日すでに過ぎた時刻のうち最新の1件」方式（サーバー側でその場計算）。
+// 表示済みかどうかはevent.id（日付+時刻の文字列）をlocalStorageに保存して判定する。
+const CM_POPUP_API = ${safeJson('/api/cm-popup/active')};
+const CM_POPUP_LAST_KEY = 'ho_cm_popup_last_event_id';
+const CM_POPUP_POLL_INTERVAL_MS = 45000;
+function cmPopupShow(){ document.getElementById('ho-cm-popup').classList.add('show'); }
+function cmPopupHide(){ document.getElementById('ho-cm-popup').classList.remove('show'); }
+async function checkCmPopup(){
+  let data;
+  try {
+    const res = await fetch(CM_POPUP_API);
+    data = await res.json();
+  } catch(e) { return; }
+  const evt = data && data.event;
+  if (!evt) return;
+  let lastId = null;
+  try { lastId = localStorage.getItem(CM_POPUP_LAST_KEY); } catch(e) {}
+  if (lastId === String(evt.id)) return;
+  try { localStorage.setItem(CM_POPUP_LAST_KEY, String(evt.id)); } catch(e) {}
+  cmPopupShow();
+}
+document.getElementById('ho-cm-close').addEventListener('click', cmPopupHide);
+
 // ===== 表示セクション（右カラム）のHTML構築 =====
 // 特別枠5項目（当欠/事故車/点検/車両異常/乗務希望）は既存の入力補助を保つため
 // idやフィールド名を固定のまま、ラベル文言と高さだけH.sectionsの設定値に差し替える。
@@ -1760,7 +1910,7 @@ function buildSpecialSectionHtml(s, sheet, ro, ce){
     case 'toka':
       return '<div class="ho-sec ho-toka"'+style+'>'
         + '<div class="ho-lbl-row"><div class="ho-lbl">'+lbl+'</div>'
-        + (EDITABLE ? '<button type="button" class="ho-toka-add-btn" id="ho-toka-add-btn" title="当欠を追加">＋</button>' : '')
+        + (EDITABLE ? '<button type="button" class="ho-toka-add-btn'+(isPromoActive()?' ho-promo-blink':'')+'" id="ho-toka-add-btn" title="当欠を追加">＋</button>' : '')
         + '</div>'
         + '<textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea>'
         + '<div class="ho-toka-hover-layer" id="ho-toka-hover-layer"></div>'
@@ -2034,6 +2184,233 @@ function toggleTodoFloat(){
   window.addEventListener('resize', () => { if (isTodoFloatOpen()) applyTodoFloatGeom(clampTodoFloatGeom(panel.getBoundingClientRect())); });
 })();
 
+// ===== 車両管理（事故車・故障車の稼働離脱管理表。フローティングパネル）=====
+// 「やることリスト」と同じ非モーダル・ドラッグ移動・リサイズ可能なフロートパネル方式（背景クリックでは
+// 閉じず、×ボタンでのみ閉じる）。データは課ごと（H.division）にサーバーへ保存する常設の表で、
+// 復活予定日を過ぎても行は自動で消えない（紙の管理表の運用に合わせ、削除は必ず手動）。
+const ACCIDENT_PRINT_PATH = ${safeJson(`${ADMIN_PATH}/settings/accidents/print`)};
+let VS_DATA = { accident: [], breakdown: [] };
+function isVsFloatOpen(){
+  const el = document.getElementById('ho-vs-float');
+  return !!el && !el.hidden;
+}
+function loadVsFloatGeom(){
+  try { const raw = localStorage.getItem('ho_vs_float_geom'); if (raw) return JSON.parse(raw); } catch(e){}
+  return null;
+}
+function saveVsFloatGeom(g){ try { localStorage.setItem('ho_vs_float_geom', JSON.stringify(g)); } catch(e){} }
+function clampVsFloatGeom(g){
+  const margin = 8;
+  const maxW = Math.max(600, window.innerWidth - margin * 2);
+  const maxH = Math.max(380, window.innerHeight - margin * 2);
+  const width = Math.min(Math.max(g.width, 600), maxW);
+  const height = Math.min(Math.max(g.height, 380), maxH);
+  const left = Math.min(Math.max(g.left, margin), Math.max(margin, window.innerWidth - width - margin));
+  const top = Math.min(Math.max(g.top, margin), Math.max(margin, window.innerHeight - height - margin));
+  return { left: left, top: top, width: width, height: height };
+}
+function applyVsFloatGeom(g){
+  const panel = document.getElementById('ho-vs-float');
+  panel.style.left = g.left + 'px'; panel.style.top = g.top + 'px';
+  panel.style.width = g.width + 'px'; panel.style.height = g.height + 'px';
+}
+function defaultVsFloatGeom(){
+  const width = Math.min(760, window.innerWidth - 16);
+  const height = Math.min(600, window.innerHeight - 16);
+  const btn = document.getElementById('ho-vs-btn');
+  let left = window.innerWidth - width - 24;
+  let top = 90;
+  if (btn){ const r = btn.getBoundingClientRect(); left = Math.min(r.left, window.innerWidth - width - 8); top = r.bottom + 8; }
+  return clampVsFloatGeom({ left: left, top: top, width: width, height: height });
+}
+function positionVsFloat(){
+  const stored = loadVsFloatGeom();
+  applyVsFloatGeom(stored ? clampVsFloatGeom(stored) : defaultVsFloatGeom());
+}
+
+// 一行テキスト入力用の簡易車番サジェスト（当欠欄のテキストエリア用attachNameSuggestとは別に、
+// input要素向けの軽量版。既存のcar-suggest APIとshowSuggestListポップアップをそのまま再利用する）。
+function attachCarInputSuggest(inputEl, onPick){
+  let timer;
+  inputEl.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = inputEl.value.trim();
+    if (!q){ hideSuggest(); return; }
+    timer = setTimeout(async () => {
+      let data;
+      try { data = await api('GET', '/'+H.division+'/car-suggest?q='+encodeURIComponent(q)); }
+      catch(e){ return; }
+      if (document.activeElement !== inputEl) return;
+      showSuggestList(data.car_nos || [], inputEl.getBoundingClientRect(), (carNo) => {
+        inputEl.value = carNo; hideSuggest(); if (onPick) onPick(carNo);
+      });
+    }, 200);
+  });
+}
+
+async function loadVehicleStatus(){
+  const body = document.getElementById('ho-vs-float-body');
+  body.innerHTML = '<div style="padding:20px;color:#9ca3af;font-size:13px;">読み込み中…</div>';
+  try {
+    VS_DATA = await api('GET', '/'+H.division+'/vehicle-status');
+    renderVsPanel();
+  } catch(e){
+    body.innerHTML = '<div style="padding:20px;color:#dc2626;font-size:13px;">読み込みエラー: '+esc(e.message)+'</div>';
+  }
+}
+function vsRowHtml(category, r){
+  const linkHtml = category !== 'accident' ? '' : (
+    r.accidentSummary
+      ? '<span class="ho-vs-link-badge" data-id="'+r.id+'" data-action="unlink" title="'+esc(r.accidentSummary.date+' '+r.accidentSummary.employeeName+' '+r.accidentSummary.accidentType+' '+r.accidentSummary.location)+'">事故記録あり</span>'
+        + '<button type="button" class="ho-vs-openrep" data-id="'+r.id+'" data-action="open-report">開く</button>'
+      : '<button type="button" class="ho-vs-link-btn" data-id="'+r.id+'" data-action="link">事故紐付け</button>'
+  );
+  return '<div class="ho-vs-row" data-id="'+r.id+'" data-category="'+category+'">'
+    + '<input type="text" class="ho-vs-carno" data-field="car_no" value="'+esc(r.car_no)+'" maxlength="10">'
+    + '<input type="date" class="ho-vs-date" data-field="expected_return_date" value="'+esc(r.expected_return_date||'')+'" title="復活予定日">'
+    + linkHtml
+    + '<span class="ho-vs-spacer"></span>'
+    + '<button type="button" class="ho-vs-del" data-id="'+r.id+'" title="削除">×</button>'
+    + '</div>';
+}
+function vsColumnHtml(category, label, rows){
+  const rowsHtml = rows.map(r => vsRowHtml(category, r)).join('');
+  return '<div class="ho-vs-col">'
+    + '<div class="ho-vs-col-head">'+esc(label)+'／復活予定</div>'
+    + '<div class="ho-vs-table" data-category="'+category+'">'
+    + rowsHtml
+    + '<div class="ho-vs-add-row"><input type="text" class="ho-vs-add-inp" data-category="'+category+'" placeholder="車番を入力して追加"><button type="button" class="ho-vs-add-btn" data-category="'+category+'">＋追加</button></div>'
+    + '<div class="ho-vs-total">合計：<b>'+rows.length+'</b>台</div>'
+    + '</div></div>';
+}
+function renderVsPanel(){
+  const body = document.getElementById('ho-vs-float-body');
+  body.innerHTML = vsColumnHtml('accident', '事故車', VS_DATA.accident || [])
+    + vsColumnHtml('breakdown', '故障車', VS_DATA.breakdown || []);
+  wireVsPanel();
+}
+async function vsPatchField(id, field, value){
+  try { await api('PATCH', '/'+H.division+'/vehicle-status/'+id, { [field]: value }); }
+  catch(e){ toast('保存に失敗しました: '+e.message, 3000); await loadVehicleStatus(); }
+}
+async function vsDeleteRow(id){
+  if (!confirm('この行を削除しますか？')) return;
+  try { await api('DELETE', '/'+H.division+'/vehicle-status/'+id); await loadVehicleStatus(); }
+  catch(e){ toast('削除に失敗しました: '+e.message, 3000); }
+}
+async function vsAddRow(category, carNo){
+  carNo = (carNo || '').trim();
+  if (!carNo) return;
+  try { await api('POST', '/'+H.division+'/vehicle-status', { category: category, car_no: carNo }); await loadVehicleStatus(); }
+  catch(e){ toast('追加に失敗しました: '+e.message, 3000); }
+}
+function vsCandRowHtml(c){
+  return '<div class="ho-vs-cand-row"><span class="ho-vs-cand-info">'+esc(c.date)+' '+esc(c.employeeName)+' '+esc(c.accidentType)+(c.location?'（'+esc(c.location)+'）':'')+'</span>'
+    + '<button type="button" class="ho-vs-cand-pick" data-id="'+c.id+'">この事故と紐づける</button></div>';
+}
+async function vsOpenLinkPicker(rowEl, id){
+  const existing = rowEl.nextElementSibling;
+  if (existing && existing.classList.contains('ho-vs-candidates')){ existing.remove(); return; }
+  rowEl.parentNode.querySelectorAll('.ho-vs-candidates').forEach(el => el.remove());
+  const panel = document.createElement('div');
+  panel.className = 'ho-vs-candidates';
+  panel.innerHTML = '読み込み中…';
+  rowEl.insertAdjacentElement('afterend', panel);
+  try {
+    const data = await api('GET', '/'+H.division+'/vehicle-status/'+id+'/accident-candidates');
+    const list = data.candidates || [];
+    panel.innerHTML = list.length
+      ? ('車番「'+esc(data.car_no)+'」の事故記録候補（新しい順）<br>' + list.map(vsCandRowHtml).join(''))
+      : '<span class="ho-vs-cand-empty">車番「'+esc(data.car_no)+'」に該当する事故記録が見つかりませんでした</span>';
+    panel.querySelectorAll('.ho-vs-cand-pick').forEach(btn => btn.addEventListener('click', async () => {
+      const c = list.find(x => String(x.id) === btn.dataset.id);
+      if (!c) return;
+      if (!confirm('この事故（'+c.date+' '+c.employeeName+' '+c.accidentType+'）と紐づけますか？')) return;
+      try {
+        await api('POST', '/'+H.division+'/vehicle-status/'+id+'/link-accident', { accidentReportId: c.id });
+        await loadVehicleStatus();
+      } catch(e){ toast('紐付けに失敗しました: '+e.message, 3000); }
+    }));
+  } catch(e){
+    panel.innerHTML = '<span class="ho-vs-cand-empty">読み込みエラー: '+esc(e.message)+'</span>';
+  }
+}
+function wireVsPanel(){
+  const body = document.getElementById('ho-vs-float-body');
+  body.querySelectorAll('.ho-vs-carno').forEach(el => {
+    attachCarInputSuggest(el, () => vsPatchField(el.closest('.ho-vs-row').dataset.id, 'car_no', el.value.trim()));
+    el.addEventListener('change', () => vsPatchField(el.closest('.ho-vs-row').dataset.id, 'car_no', el.value.trim()));
+  });
+  body.querySelectorAll('.ho-vs-date').forEach(el => {
+    el.addEventListener('change', () => vsPatchField(el.closest('.ho-vs-row').dataset.id, 'expected_return_date', el.value));
+  });
+  body.querySelectorAll('.ho-vs-del').forEach(el => el.addEventListener('click', () => vsDeleteRow(el.dataset.id)));
+  body.querySelectorAll('[data-action="link"]').forEach(el => el.addEventListener('click', () => vsOpenLinkPicker(el.closest('.ho-vs-row'), el.dataset.id)));
+  body.querySelectorAll('[data-action="unlink"]').forEach(el => el.addEventListener('click', async () => {
+    if (!confirm('この事故記録との紐付けを解除しますか？')) return;
+    try { await api('POST', '/'+H.division+'/vehicle-status/'+el.dataset.id+'/link-accident', { accidentReportId: null }); await loadVehicleStatus(); }
+    catch(e){ toast('解除に失敗しました: '+e.message, 3000); }
+  }));
+  body.querySelectorAll('[data-action="open-report"]').forEach(el => el.addEventListener('click', () => {
+    const row = el.closest('.ho-vs-row');
+    const r = (VS_DATA.accident || []).find(x => String(x.id) === row.dataset.id);
+    if (r && r.accidentReportId) window.open(ACCIDENT_PRINT_PATH + '/' + r.accidentReportId, '_blank');
+  }));
+  body.querySelectorAll('.ho-vs-add-inp').forEach(el => {
+    attachCarInputSuggest(el, () => {});
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter'){ e.preventDefault(); vsAddRow(el.dataset.category, el.value); } });
+  });
+  body.querySelectorAll('.ho-vs-add-btn').forEach(el => el.addEventListener('click', () => {
+    const inp = body.querySelector('.ho-vs-add-inp[data-category="'+el.dataset.category+'"]');
+    vsAddRow(el.dataset.category, inp ? inp.value : '');
+  }));
+}
+function openVsFloat(){
+  document.getElementById('ho-vs-float-title').textContent = '車両管理（'+H.division+'課）';
+  document.getElementById('ho-vs-float').hidden = false;
+  positionVsFloat();
+  loadVehicleStatus();
+}
+function closeVsFloat(){ document.getElementById('ho-vs-float').hidden = true; }
+document.getElementById('ho-vs-btn').addEventListener('click', openVsFloat);
+if (isPromoActive()) document.getElementById('ho-vs-btn').classList.add('ho-promo-blink');
+(function initVsFloatChrome(){
+  const panel = document.getElementById('ho-vs-float');
+  const head = document.getElementById('ho-vs-float-head');
+  const resizeHandle = document.getElementById('ho-vs-float-resize');
+  let mode = null, sx = 0, sy = 0, sg = null;
+  function onDown(e, m){
+    if (e.target.closest('.ho-vs-float-actions')) return;
+    mode = m; sx = e.clientX; sy = e.clientY;
+    const r = panel.getBoundingClientRect();
+    sg = { left: r.left, top: r.top, width: r.width, height: r.height };
+    panel.classList.add(mode === 'drag' ? 'dragging' : 'resizing');
+    if (e.target.setPointerCapture) { try { e.target.setPointerCapture(e.pointerId); } catch(err){} }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp, { once: true });
+    e.preventDefault();
+  }
+  function onMove(e){
+    if (!mode) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    const g = (mode === 'drag')
+      ? { left: sg.left + dx, top: sg.top + dy, width: sg.width, height: sg.height }
+      : { left: sg.left, top: sg.top, width: sg.width + dx, height: sg.height + dy };
+    applyVsFloatGeom(clampVsFloatGeom(g));
+  }
+  function onUp(){
+    document.removeEventListener('pointermove', onMove);
+    panel.classList.remove('dragging', 'resizing');
+    mode = null;
+    const r = panel.getBoundingClientRect();
+    saveVsFloatGeom({ left: r.left, top: r.top, width: r.width, height: r.height });
+  }
+  head.addEventListener('pointerdown', (e) => onDown(e, 'drag'));
+  resizeHandle.addEventListener('pointerdown', (e) => onDown(e, 'resize'));
+  document.getElementById('ho-vs-float-close').addEventListener('click', closeVsFloat);
+  window.addEventListener('resize', () => { if (isVsFloatOpen()) applyVsFloatGeom(clampVsFloatGeom(panel.getBoundingClientRect())); });
+})();
+
 // ===== 色ツールバー =====
 let tbHideTimer;
 document.addEventListener('selectionchange', () => {
@@ -2256,6 +2633,21 @@ startAccidentAlertPolling();
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { stopAccidentAlertPolling(); }
   else { checkAccidentAlert(); startAccidentAlertPolling(); }
+});
+
+let _cmPopupInterval = null;
+function startCmPopupPolling(){
+  if (_cmPopupInterval) return;
+  checkCmPopup();
+  _cmPopupInterval = setInterval(checkCmPopup, CM_POPUP_POLL_INTERVAL_MS);
+}
+function stopCmPopupPolling(){
+  if (_cmPopupInterval) { clearInterval(_cmPopupInterval); _cmPopupInterval = null; }
+}
+startCmPopupPolling();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { stopCmPopupPolling(); }
+  else { checkCmPopup(); startCmPopupPolling(); }
 });
 })();
 </script>

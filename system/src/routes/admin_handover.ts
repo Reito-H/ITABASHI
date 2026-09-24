@@ -305,6 +305,173 @@ app.get('/api/handover/:division/car-suggest', async (c) => {
   return c.json({ car_nos: (rows.results ?? []).map(r => r.car_no) });
 });
 
+// ===== 車両管理（事故車・故障車の稼働離脱管理表。課ごとの表、行の追加・削除は手動） =====
+type VehicleStatusRow = {
+  id: number; car_no: string; expected_return_date: string | null; note: string;
+  accident_report_id: number | null; sort_order: number;
+  acc_created_at: string | null; acc_employee_name: string | null; acc_accident_type: string | null; acc_location: string | null;
+};
+const VEHICLE_STATUS_CATEGORIES = new Set(['accident', 'breakdown']);
+
+function vehicleStatusJson(r: VehicleStatusRow) {
+  return {
+    id: r.id, car_no: r.car_no, expected_return_date: r.expected_return_date, note: r.note,
+    accidentReportId: r.accident_report_id,
+    accidentSummary: r.accident_report_id ? {
+      date: (r.acc_created_at || '').slice(0, 10), employeeName: r.acc_employee_name || '',
+      accidentType: r.acc_accident_type || '', location: r.acc_location || '',
+    } : null,
+  };
+}
+
+app.get('/api/handover/:division/vehicle-status', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const divNum = parseInt(division, 10);
+  const rows = await c.env.DB.prepare(`
+    SELECT v.id, v.category, v.car_no, v.expected_return_date, v.note, v.accident_report_id, v.sort_order,
+           a.created_at AS acc_created_at, a.employee_name AS acc_employee_name,
+           a.accident_type AS acc_accident_type, a.location AS acc_location
+    FROM handover_vehicle_status v
+    LEFT JOIN accident_reports a ON a.id = v.accident_report_id
+    WHERE v.division = ?
+    ORDER BY v.category, v.sort_order, v.id
+  `).bind(divNum).all<VehicleStatusRow & { category: string }>();
+
+  const accident: ReturnType<typeof vehicleStatusJson>[] = [];
+  const breakdown: ReturnType<typeof vehicleStatusJson>[] = [];
+  for (const r of rows.results ?? []) {
+    (r.category === 'breakdown' ? breakdown : accident).push(vehicleStatusJson(r));
+  }
+  return c.json({ accident, breakdown });
+});
+
+app.post('/api/handover/:division/vehicle-status', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ category?: string; car_no?: string }>().catch(() => ({}) as { category?: string; car_no?: string });
+  const category = b.category || '';
+  const carNo = (b.car_no || '').trim();
+  if (!VEHICLE_STATUS_CATEGORIES.has(category)) return c.json({ error: '区分の指定が不正です' }, 400);
+  if (!carNo) return c.json({ error: '車番を入力してください' }, 400);
+
+  const divNum = parseInt(division, 10);
+  const admin = await adminName(c);
+  const maxRow = await c.env.DB.prepare(
+    'SELECT MAX(sort_order) AS m FROM handover_vehicle_status WHERE division = ? AND category = ?'
+  ).bind(divNum, category).first<{ m: number | null }>();
+  const sortOrder = (maxRow?.m ?? -1) + 1;
+
+  const r = await c.env.DB.prepare(
+    `INSERT INTO handover_vehicle_status (division, category, car_no, sort_order, created_by) VALUES (?, ?, ?, ?, ?)`
+  ).bind(divNum, category, carNo, sortOrder, admin.name).run();
+  return c.json({ ok: true, id: r.meta.last_row_id });
+});
+
+app.patch('/api/handover/:division/vehicle-status/:id', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const divNum = parseInt(division, 10);
+  const existing = await c.env.DB.prepare(
+    'SELECT id, car_no FROM handover_vehicle_status WHERE id = ? AND division = ?'
+  ).bind(id, divNum).first<{ id: number; car_no: string }>();
+  if (!existing) return c.json({ error: 'データが存在しません' }, 404);
+
+  const b = await c.req.json<{ car_no?: string; expected_return_date?: string | null; note?: string }>()
+    .catch(() => ({}) as { car_no?: string; expected_return_date?: string | null; note?: string });
+
+  const sets: string[] = [];
+  const values: (string | number | null)[] = [];
+  // 車番を変更した場合、旧車番に紐づけていた事故記録は無関係になるため紐づけを解除する
+  // （紐づけ直しは車両管理パネルの「事故紐付け」から改めて行う想定）
+  if (b.car_no !== undefined) {
+    const carNo = b.car_no.trim();
+    if (!carNo) return c.json({ error: '車番を入力してください' }, 400);
+    sets.push('car_no = ?'); values.push(carNo);
+    if (carNo !== existing.car_no) { sets.push('accident_report_id = NULL'); }
+  }
+  if (b.expected_return_date !== undefined) {
+    const v = b.expected_return_date;
+    if (v !== null && v !== '' && !isValidDate(v)) return c.json({ error: '日付の形式が不正です' }, 400);
+    sets.push('expected_return_date = ?'); values.push(v === '' ? null : v);
+  }
+  if (b.note !== undefined) { sets.push('note = ?'); values.push(b.note.slice(0, 200)); }
+  if (!sets.length) return c.json({ error: '更新項目がありません' }, 400);
+
+  await c.env.DB.prepare(
+    `UPDATE handover_vehicle_status SET ${sets.join(', ')} WHERE id = ?`
+  ).bind(...values, id).run();
+  return c.json({ ok: true });
+});
+
+app.delete('/api/handover/:division/vehicle-status/:id', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const r = await c.env.DB.prepare(
+    'DELETE FROM handover_vehicle_status WHERE id = ? AND division = ?'
+  ).bind(id, parseInt(division, 10)).run();
+  if (r.meta.changes === 0) return c.json({ error: 'データが存在しません' }, 404);
+  return c.json({ ok: true });
+});
+
+// 事故紐付け候補の検索。その行の現在の車番(vehicle_no)で事故記録を新しい順に最大10件返す
+app.get('/api/handover/:division/vehicle-status/:id/accident-candidates', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  const divNum = parseInt(division, 10);
+  const row = await c.env.DB.prepare(
+    `SELECT car_no FROM handover_vehicle_status WHERE id = ? AND division = ? AND category = 'accident'`
+  ).bind(id, divNum).first<{ car_no: string }>();
+  if (!row) return c.json({ error: 'データが存在しません' }, 404);
+
+  const rows = await c.env.DB.prepare(
+    `SELECT id, created_at, employee_name, accident_type, location, status
+     FROM accident_reports WHERE vehicle_no = ? ORDER BY created_at DESC LIMIT 10`
+  ).bind(row.car_no).all<{ id: number; created_at: string; employee_name: string; accident_type: string; location: string; status: string }>();
+  return c.json({
+    car_no: row.car_no,
+    candidates: (rows.results ?? []).map(r => ({
+      id: r.id, date: (r.created_at || '').slice(0, 10), employeeName: r.employee_name || '',
+      accidentType: r.accident_type || '', location: r.location || '', status: r.status,
+    })),
+  });
+});
+
+// 事故紐付けの確定/解除。accidentReportId に null を渡すと解除する
+app.post('/api/handover/:division/vehicle-status/:id/link-accident', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const divNum = parseInt(division, 10);
+  const existing = await c.env.DB.prepare(
+    `SELECT id, car_no FROM handover_vehicle_status WHERE id = ? AND division = ? AND category = 'accident'`
+  ).bind(id, divNum).first<{ id: number; car_no: string }>();
+  if (!existing) return c.json({ error: 'データが存在しません' }, 404);
+
+  const b = await c.req.json<{ accidentReportId?: number | null }>().catch(() => ({}) as { accidentReportId?: number | null });
+  if (b.accidentReportId === null) {
+    await c.env.DB.prepare('UPDATE handover_vehicle_status SET accident_report_id = NULL WHERE id = ?').bind(id).run();
+    return c.json({ ok: true });
+  }
+  const accidentReportId = Number(b.accidentReportId);
+  if (!Number.isInteger(accidentReportId) || accidentReportId <= 0) return c.json({ error: '事故記録の指定が不正です' }, 400);
+  const accident = await c.env.DB.prepare('SELECT id, vehicle_no FROM accident_reports WHERE id = ?')
+    .bind(accidentReportId).first<{ id: number; vehicle_no: string }>();
+  if (!accident) return c.json({ error: '事故記録が見つかりません' }, 404);
+  if (accident.vehicle_no !== existing.car_no) return c.json({ error: '車番が一致しない事故記録です' }, 400);
+
+  await c.env.DB.prepare('UPDATE handover_vehicle_status SET accident_report_id = ? WHERE id = ?')
+    .bind(accidentReportId, id).run();
+  return c.json({ ok: true });
+});
+
 // 課ごとの本文文字サイズ設定（system_settings に handover_font_size_<課番号> で保存）
 const FONT_SIZE_OPTIONS = new Set([12, 14, 16, 18]);
 
@@ -596,11 +763,14 @@ app.get('/api/handover/:division/:date', async (c) => {
   return c.json({ sheet: sheet ?? null, customContent, tokaEntries: tokaEntryRows.results ?? [], version });
 });
 
-// ＋ボタンからの当欠登録。本文（toka_content）には「名前 -1.0」のみを追記し（理由は書かない）、
-// 理由はhandover_toka_entriesに構造化して保存する。フロント側は名前にカーソルを当てると
-// この理由をポップアップ表示する（本文中の行と名前・数値が一致する分だけ紐付ける方式のため、
-// 本文の行が手動で編集・削除されればこの登録も以後の集計・表示から自動的に外れる）。
-const TOKA_ADD_VALUES = new Set([-0.5, -1.0]);
+// ＋ボタンからの当欠・稼働追加登録。本文（toka_content）には「名前 -1.0」「名前 +0.5」のみを
+// 追記し（理由は書かない）、理由はhandover_toka_entriesに構造化して保存する。フロント側は
+// 名前にカーソルを当てるとこの理由をポップアップ表示する（本文中の行と名前・数値が一致する分だけ
+// 紐付ける方式のため、本文の行が手動で編集・削除されればこの登録も以後の集計・表示から自動的に外れる）。
+// プラス（稼働追加・代走等）は既存のparseTokaLines/TOKA_ENTRY_REがマイナス行しか当欠として
+// 拾わない仕様（既存コメント「+の代走行は対象外」）のため、当欠記録の集計には出てこないが、
+// クライアント側の稼働実績自動計算（calcTokaDelta、+/-両対応）には反映される。
+const TOKA_ADD_VALUES = new Set([-1.0, -0.5, 0.5, 1.0]);
 app.post('/api/handover/:division/:date/toka-entry', async (c) => {
   const division = c.req.param('division');
   const date = c.req.param('date');
@@ -620,7 +790,8 @@ app.post('/api/handover/:division/:date/toka-entry', async (c) => {
   ).bind(divNum, date).first<{ toka_content: string }>();
   if (!sheet) return c.json({ error: 'シートが存在しません' }, 404);
 
-  const line = `${name} ${value.toFixed(1)}`;
+  const signStr = value >= 0 ? '+' : '';
+  const line = `${name} ${signStr}${value.toFixed(1)}`;
   const newContent = sheet.toka_content ? `${sheet.toka_content}\n${line}` : line;
   const admin = await adminName(c);
 
