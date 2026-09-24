@@ -4,7 +4,7 @@ export const ADMIN_PATH = `/${SECRET}/admin`;
 
 // アプリバージョン表示（右上ベル横のバッジ）。大きめの変更をデプロイするたびに手動で更新する。
 // 更新ルールは docs/SPECIFICATION.md 6.3 を参照
-export const APP_VERSION = '0.0.30';
+export const APP_VERSION = '0.0.36';
 
 // 希望休フォーム（ログイン不要の公開ページ）の秘密パス。推測されないよう複雑な文字列にする
 export const KANCHO_WISH_PATH = '/kw-dea54792603559b9bb0e74ebb70188b4';
@@ -29,6 +29,10 @@ export const HIYARI_PATH = '/hh-2738ceac08eac11269d76dc733598ba6';
 // 再生する中身は signage_decks.is_monitor=1 を付けたデッキ（/signage 一覧画面で切替）。
 // 印を別デッキへ付け替えても、このURL自体は今後変更しない。URLの推測困難さ自体をアクセス制御とする。
 export const SIGNAGE_PUBLIC_PATH = '/sg-d8b62011db0a09c2c279a620202d9d45';
+
+// 羽田空港 到着便一覧（ログイン不要・完全公開ページ）の秘密パス。
+// タクシー乗務員が付け待ち中にタブレット等で開いてブックマークする想定。国内線・国際線の到着状況を一覧表示する。
+export const HANEDA_ARRIVALS_PATH = '/hn-55ab0e5aa8fb480119a216d3bc702650';
 
 // 異常気象警報 周知サイネージ（ログイン不要・完全公開の投影ページ）の秘密パス。
 // 通常の交通安全サイネージ（SIGNAGE_PUBLIC_PATH）とは別画面。異常気象警報が出ている間だけ、

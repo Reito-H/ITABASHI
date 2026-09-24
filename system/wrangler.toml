@@ -124,6 +124,11 @@ zone_name = "bentenclub.com"
 pattern = "bentenclub.com/wn-3f6a8d15c9247ee0a25de2fb4c02a19b*"
 zone_name = "bentenclub.com"
 
+# 羽田空港 到着便一覧（ログイン不要の固定URL・HANEDA_ARRIVALS_PATH）
+[[routes]]
+pattern = "bentenclub.com/hn-55ab0e5aa8fb480119a216d3bc702650*"
+zone_name = "bentenclub.com"
+
 [[routes]]
 pattern = "bentenclub.com/robots.txt"
 zone_name = "bentenclub.com"

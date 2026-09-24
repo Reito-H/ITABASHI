@@ -105,6 +105,7 @@ import publicStudyNotesUploadRoutes from './routes/public_study_notes_upload';
 import publicStudySessionsRoutes from './routes/public_study_sessions';
 import publicChoseiRoutes from './routes/public_chosei';
 import publicHiyariRoutes from './routes/public_hiyari';
+import publicHanedaFlightsRoutes from './routes/public_haneda_flights';
 import publicSignageRoutes from './routes/public_signage';
 import publicWeatherNoticeRoutes from './routes/public_weather_notice';
 import type { Env } from './auth';
@@ -515,6 +516,7 @@ app.route('', publicStudyNotesUploadRoutes);
 app.route('', publicStudySessionsRoutes);
 app.route('', publicChoseiRoutes);
 app.route('', publicHiyariRoutes);
+app.route('', publicHanedaFlightsRoutes);
 app.route('', publicSignageRoutes);
 app.route('', publicWeatherNoticeRoutes);
 
