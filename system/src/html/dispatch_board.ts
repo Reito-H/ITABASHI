@@ -4,6 +4,7 @@
 // このビューでは車番ごとに最大2枠へpivotして表示する（H818.pdfの日勤A/B別行と一致する粒度）。
 import { escHtml, safeJson, saveToastHtml, saveToastScript } from './layout';
 import { ADMIN_PATH } from '../config';
+import { PDF_PARSERS_CLIENT_VERSION } from '../assets/pdf_parsers_client_version';
 
 export type DispatchVehicleRow = { car_no: string; team: number };
 export type DispatchAssignmentRow = { car_no: string; team: number; shift_code: string; emp_code: string | null; member_name: string | null; note: string };
@@ -406,7 +407,7 @@ function loadDispatchPdfParser() {
   if (_dispatchPdfParserLoadPromise) return _dispatchPdfParserLoadPromise;
   _dispatchPdfParserLoadPromise = new Promise(function(resolve, reject) {
     var s = document.createElement('script');
-    s.src = API + '/pdf-parser.js';
+    s.src = API + '/pdf-parser.js?v=${PDF_PARSERS_CLIENT_VERSION}';
     s.onload = function() { resolve(); };
     s.onerror = function() { reject(new Error('解析ライブラリの読込に失敗しました')); };
     document.head.appendChild(s);

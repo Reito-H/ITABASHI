@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import { layout, safeJson } from '../html/layout';
 import { ADMIN_PATH } from '../config';
 import type { Env } from '../auth';
+import { PDF_PARSERS_CLIENT_VERSION } from '../assets/pdf_parsers_client_version';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -114,6 +115,12 @@ app.get('/settings/documents', async (c) => {
 
       <!-- ===== 社員CSV ===== -->
       <div class="dc-tab-panel" data-tab="staff-csv" data-perm-key="staff" style="display:none;">
+        <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:16px 24px;margin-bottom:14px;">
+          <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 10px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
+            売上CSVの取込状況（全社）
+          </h2>
+          <div id="dc-csv-coverage" style="font-size:13px;color:#374151;line-height:1.8;">読み込み中…</div>
+        </div>
         <div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.08);padding:20px 24px;">
           <h2 style="font-size:14px;font-weight:700;color:#1a3a5c;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;">
             CSV インポート
@@ -267,6 +274,32 @@ app.get('/settings/documents', async (c) => {
       });
       document.querySelectorAll('.dc-tab-panel').forEach(function(p) {
         p.style.display = (p.dataset.tab === id) ? 'block' : 'none';
+      });
+      if (id === 'staff-csv') dcLoadCsvCoverage();
+    }
+
+    // 売上CSV（ホシコン収集データ）がいつからいつまで入っているか＋取込漏れの疑いがある日
+    // 記録が1件もない日／件数が普段（1日あたりの中央値）の3割未満の日を「取込漏れの可能性」として表示する
+    function dcLoadCsvCoverage() {
+      var box = document.getElementById('dc-csv-coverage');
+      if (!box) return;
+      fetch('/api/sales-ai/csv-coverage').then(function(res) {
+        return res.json().then(function(c) { if (!res.ok) throw new Error(c.error || '読み込みに失敗しました'); return c; });
+      }).then(function(c) {
+        var sl = function(d) { return d ? d.replace(/-/g, '/') : ''; };
+        var esc = function(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; };
+        if (!c.first) { box.textContent = '売上CSVのデータはまだありません'; return; }
+        var html = '<div><b>' + sl(c.first) + ' 〜 ' + sl(c.last) + '</b>（' + c.days + '日分・1日あたり約' + c.medianCount + '件）'
+          + (c.lastUpdated ? '　最終更新 ' + sl(c.lastUpdated) : '') + '</div>';
+        var warns = [];
+        if (c.missing.length) warns.push('記録が1件もない日：' + c.missing.slice(0, 20).map(sl).join('、') + (c.missing.length > 20 ? ' ほか' + (c.missing.length - 20) + '日' : ''));
+        if (c.sparse.length) warns.push('件数が極端に少ない日：' + c.sparse.slice(0, 20).map(function(x) { return sl(x.date) + '（' + x.n + '件）'; }).join('、') + (c.sparse.length > 20 ? ' ほか' + (c.sparse.length - 20) + '日' : ''));
+        html += warns.length
+          ? '<div style="color:#b45309;">【取込漏れの可能性】' + warns.map(esc).join('／') + '　該当日のCSVを取り込み直してください。</div>'
+          : '<div style="color:#166534;">期間内に取込漏れの疑いがある日はありません</div>';
+        box.innerHTML = html;
+      }).catch(function(e) {
+        box.textContent = '取込状況を読み込めませんでした（' + e.message + '）';
       });
     }
     (function dcInit() {
@@ -860,6 +893,7 @@ app.get('/settings/documents', async (c) => {
           (allErrors.length?'<div style="margin-top:8px;color:#dc2626;font-size:12px;">エラー: '+allErrors.join('、')+'</div>':'')+
           '<div style="margin-top:10px;"><a href="'+ADMIN_PATH+'/staff" style="color:#1d4ed8;font-size:13px;">→ 社員一覧を確認する</a></div></div>';
         resultDiv.style.display='block';
+        dcLoadCsvCoverage();
         document.getElementById('csv-preview').style.display='none';
       } catch (err) {
         alert('通信エラーが発生しました: ' + err.message);
@@ -1034,7 +1068,7 @@ app.get('/settings/documents', async (c) => {
       if (_csPdfParserLoadPromise) return _csPdfParserLoadPromise;
       _csPdfParserLoadPromise = new Promise(function(resolve, reject) {
         var s = document.createElement('script');
-        s.src = CREW_API + '/pdf-parser.js';
+        s.src = CREW_API + '/pdf-parser.js?v=${PDF_PARSERS_CLIENT_VERSION}';
         s.onload = function() { resolve(); };
         s.onerror = function() { reject(new Error('解析ライブラリの読込に失敗しました')); };
         document.head.appendChild(s);

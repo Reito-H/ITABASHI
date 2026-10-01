@@ -328,6 +328,25 @@ export function layout(title: string, content: string, activePage: string = '', 
       .limit-alert-item button { font-size: 13px; padding: 8px 14px; }
     }
   </style>
+  <!-- ページ先読み: リンクにマウスを乗せた（スマホは触れた）瞬間に、次のページのHTMLだけを裏で取得しておき、
+       クリック時に待たずに表示する。取得したHTMLはブラウザのメモリに数分置かれるだけで、PCのディスクには保存されない
+       （サーバー側の Cache-Control: no-store はそのまま）。ページ内のプログラムは実行されないので、動線記録や通知には影響しない。
+       開いただけで何かが起きるリンク（ログアウト）・印刷/書き出し/ダウンロード・別タブで開くリンクは対象外。
+       非対応ブラウザ（Safari等）では単に無視される。 -->
+  <script type="speculationrules">
+  {"prefetch":[{"where":{"and":[
+    {"href_matches":"${ADMIN_PATH}/*"},
+    {"not":{"href_matches":"${ADMIN_PATH}/logout*"}},
+    {"not":{"href_matches":"${ADMIN_PATH}/*print*"}},
+    {"not":{"href_matches":"${ADMIN_PATH}/*export*"}},
+    {"not":{"href_matches":"${ADMIN_PATH}/*download*"}},
+    {"not":{"href_matches":"${ADMIN_PATH}/*.csv*"}},
+    {"not":{"href_matches":"${ADMIN_PATH}/*.xlsx*"}},
+    {"not":{"href_matches":"${ADMIN_PATH}/*.pdf*"}},
+    {"not":{"href_matches":"${ADMIN_PATH}/*.pptx*"}},
+    {"not":{"selector_matches":"[download], [target=_blank], [data-no-prefetch]"}}
+  ]},"eagerness":"moderate"}]}
+  </script>
 </head>
 <body>
   ${hideSeasonalFx ? '' : seasonalFxHtml()}

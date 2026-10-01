@@ -11,6 +11,8 @@ import { renderSalesAiReportPrintBulkPage } from '../html/sales_ai_report_print_
 import { renderSafetyGuidancePrintPage, type SafetyGuidanceSheetOptions } from '../html/safety_guidance_print';
 import { summarizeDrivingRiskByCategory, buildDrivingSafetyGuidance } from '../utils/driving_safety_guidance';
 import { summarizeDrivingRisk, type DrivingSafetyRow } from '../utils/driving_risk_analysis';
+import { loadSalesDetailInput, analyzeSalesDetail, loadCsvCoverage } from '../utils/sales_detail_report';
+import { renderSalesDetailReportPage, renderSalesDailyListPage, type SalesDetailPageMeta } from '../html/sales_detail_report_print';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -1072,6 +1074,52 @@ app.get('/sales-ai/employee/:id/report/print', async (c) => {
 
   const sheet = buildSheetOptions(data, months);
   return c.html(renderSalesAiReportPrintPage(sheet, `${ADMIN_PATH}/crew-portal/employee/${id}?tab=insights`));
+});
+
+// ===================================================
+// 詳細分析レポート（A4縦・複数ページ）／日別売上 全データ一覧（A4横）。期間は月度で指定可（未指定＝全期間）
+// 本人の全売上記録を対象に、月度推移・同僚比較・回数/単価の分解・条件別傾向・勤務実態を集計する
+// ===================================================
+// ?from=YYYY-MM&to=YYYY-MM（月度）で対象期間を絞り込める。未指定なら全期間
+function parseMonthParam(v: string | undefined): { str: string; key: number } | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(v ?? '');
+  if (!m) return null;
+  const mo = Number(m[2]);
+  return mo >= 1 && mo <= 12 ? { str: `${m[1]}-${m[2]}`, key: Number(m[1]) * 100 + mo } : null;
+}
+
+async function loadSalesDetailPage(db: D1Database, idParam: string, fromParam?: string, toParam?: string) {
+  const id = parseInt(idParam);
+  if (isNaN(id)) return null;
+  let from = parseMonthParam(fromParam), to = parseMonthParam(toParam);
+  if (from && to && from.key > to.key) [from, to] = [to, from];
+  const [input, coverage] = await Promise.all([
+    loadSalesDetailInput(db, id, { from: from?.key ?? null, to: to?.key ?? null }),
+    loadCsvCoverage(db, null),
+  ]);
+  if (!input) return { ok: false as const, error: '社員が見つかりません' };
+  const analysis = analyzeSalesDetail(input);
+  if (!analysis) return { ok: false as const, error: from || to ? '指定した期間の売上データがありません' : '売上データがありません' };
+  const meta: SalesDetailPageMeta = {
+    name: input.emp.name, empNo: input.emp.emp_no, division: input.emp.division, team: input.emp.team,
+    issuedDateLabel: formatIssuedDateLabel(), backHref: `${ADMIN_PATH}/crew-portal/employee/${id}?tab=insights`,
+    coverage, rangeFrom: from?.str ?? null, rangeTo: to?.str ?? null,
+  };
+  return { ok: true as const, meta, analysis };
+}
+
+app.get('/sales-ai/employee/:id/detail-report/print', async (c) => {
+  const r = await loadSalesDetailPage(c.env.DB, c.req.param('id'), c.req.query('from'), c.req.query('to'));
+  if (!r) return c.notFound();
+  if (!r.ok) return c.text(r.error, 404);
+  return c.html(renderSalesDetailReportPage(r.meta, r.analysis));
+});
+
+app.get('/sales-ai/employee/:id/daily-list/print', async (c) => {
+  const r = await loadSalesDetailPage(c.env.DB, c.req.param('id'), c.req.query('from'), c.req.query('to'));
+  if (!r) return c.notFound();
+  if (!r.ok) return c.text(r.error, 404);
+  return c.html(renderSalesDailyListPage(r.meta, r.analysis));
 });
 
 // ===================================================

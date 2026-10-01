@@ -178,9 +178,9 @@ export function renderFareRevisionOverviewPrintPage(
         return (a.salesGrowthPct ?? -Infinity) - (b.salesGrowthPct ?? -Infinity);
       });
     body += `<div class="fp-section-title">目標未達の社員一覧（帰る時間が早くなった人を上に表示）</div>`;
-    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>${escHtml(data.periods.before.label)}の帰る時刻</th><th>${escHtml(data.periods.after.label)}の帰る時刻</th></tr></thead><tbody>${
+    body += `<table class="fp-table"><thead><tr><th>No.</th><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>${escHtml(data.periods.before.label)}の帰る時刻</th><th>${escHtml(data.periods.after.label)}の帰る時刻</th></tr></thead><tbody>${
       honbunList.length
-        ? honbunList.map(e => {
+        ? honbunList.map((e, i) => {
             const d = returnTimeDiffMin(e);
             const early = d !== null && d <= -5;
             const afterTd = early
@@ -189,9 +189,9 @@ export function renderFareRevisionOverviewPrintPage(
             const growthTd = e.achievementCategory === 'below'
               ? `<td class="fp-down">${pct(e.salesGrowthPct)} 減少</td>`
               : `<td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td>`;
-            return `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.wageCategoryLabel ? escHtml(e.wageCategoryLabel) : '—'}</td>${growthTd}<td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${e.before.avgReturnTime ?? '—'}</td>${afterTd}</tr>`;
+            return `<tr><td>${i + 1}</td><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.repDutyCode ? escHtml(e.repDutyCode) : '—'}</td>${growthTd}<td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${e.before.avgReturnTime ?? '—'}</td>${afterTd}</tr>`;
           }).join('')
-        : `<tr><td colspan="8" style="color:#9ca3af;">該当する人はいません。</td></tr>`
+        : `<tr><td colspan="9" style="color:#9ca3af;">該当する人はいません。</td></tr>`
     }</tbody></table>`;
   } else if (section === 'breakdown') {
     sectionLabel = '課・班・勤務別';
@@ -210,19 +210,19 @@ export function renderFareRevisionOverviewPrintPage(
   } else if (section === 'flagged') {
     sectionLabel = '早めに切り上げていそうな人';
     body += `<div style="font-size:10.5px;color:#6b7280;margin-bottom:8px;">売上はほぼ変わっていないのに、働いた時間がはっきり短くなっている人です。</div>`;
-    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>${escHtml(data.periods.before.label)}の1日平均売上</th><th>${escHtml(data.periods.after.label)}の1日平均売上</th><th>1日あたり売上の伸び</th><th>単価の伸び</th><th>1乗務あたり労働時間の伸び</th><th>確からしさ</th></tr></thead><tbody>${
+    body += `<table class="fp-table"><thead><tr><th>No.</th><th>氏名</th><th>課/班</th><th>${escHtml(data.periods.before.label)}の1日平均売上</th><th>${escHtml(data.periods.after.label)}の1日平均売上</th><th>1日あたり売上の伸び</th><th>単価の伸び</th><th>1乗務あたり労働時間の伸び</th><th>確からしさ</th></tr></thead><tbody>${
       data.flagged.length
-        ? data.flagged.map(e => `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${pct(e.hourlyRateGrowthPct)}</td><td>${pct(e.laborHoursGrowthPct)}</td><td>${e.earlyLeaveConfidence === 'high' ? '高' : '中'}</td></tr>`).join('')
-        : `<tr><td colspan="8" style="color:#9ca3af;">該当する人はいません。</td></tr>`
+        ? data.flagged.map((e, i) => `<tr><td>${i + 1}</td><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${pct(e.hourlyRateGrowthPct)}</td><td>${pct(e.laborHoursGrowthPct)}</td><td>${e.earlyLeaveConfidence === 'high' ? '高' : '中'}</td></tr>`).join('')
+        : `<tr><td colspan="9" style="color:#9ca3af;">該当する人はいません。</td></tr>`
     }</tbody></table>`;
   } else {
     const cat = category ?? 'above';
     sectionLabel = `社員ごとの一覧（${CATEGORY_LABELS[cat]}）`;
     const list = data.employees.filter(e => e.achievementCategory === cat);
-    body += `<table class="fp-table"><thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>1乗務あたり労働時間の伸び</th></tr></thead><tbody>${
+    body += `<table class="fp-table"><thead><tr><th>No.</th><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th>${escHtml(data.periods.before.label)}の売上</th><th>${escHtml(data.periods.after.label)}の売上</th><th>1乗務あたり労働時間の伸び</th></tr></thead><tbody>${
       list.length
-        ? list.map(e => `<tr><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.wageCategoryLabel ? escHtml(e.wageCategoryLabel) : '—'}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${pct(e.laborHoursGrowthPct)}</td></tr>`).join('')
-        : `<tr><td colspan="7" style="color:#9ca3af;">該当する人はいません。</td></tr>`
+        ? list.map((e, i) => `<tr><td>${i + 1}</td><td>${escHtml(e.empName)}</td><td>${e.division ?? '—'}課${e.team ?? '—'}班</td><td>${e.repDutyCode ? escHtml(e.repDutyCode) : '—'}</td><td class="${pctClass(e.salesGrowthPct)}">${pct(e.salesGrowthPct)}</td><td>${yen(e.before.avgPerDuty)}</td><td>${yen(e.after.avgPerDuty)}</td><td>${pct(e.laborHoursGrowthPct)}</td></tr>`).join('')
+        : `<tr><td colspan="8" style="color:#9ca3af;">該当する人はいません。</td></tr>`
     }</tbody></table>`;
   }
 

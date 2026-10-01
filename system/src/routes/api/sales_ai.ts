@@ -7,6 +7,7 @@ import { importJmaMonthlyWeather } from '../../utils/weather_jma';
 import { buildForecastCalendar, type DailyAggregate } from '../../utils/sales_forecast_calendar';
 import { buildShiftSalesPdf } from '../../utils/shift_sales_pdf';
 import { buildRuleBasedSalesAnalysis, type SalesAnalysisInput } from '../../utils/sales_trend_analysis';
+import { loadCsvCoverage } from '../../utils/sales_detail_report';
 import {
   estimateCommissionPay, estimateExtraRideImpact, estimateNightAndOvertimeAllowance, checkMinimumWage,
   wageCategoryOfDuty, WAGE_CATEGORY_LABELS,
@@ -410,6 +411,13 @@ export async function computeEmployeeAnalytics(db: D1Database, empId: number, mo
 // ===================================================
 // 社員別: 直近N月の日次データ＋暦要因別・曜日別・トレンド・相対評価・帰庫時間
 // ===================================================
+// 売上CSVの取込状況（全社の取込期間・抜け/件数が少ない日・最終更新、?emp= 指定時はその社員の期間も）
+app.get('/csv-coverage', async (c) => {
+  const empParam = c.req.query('emp');
+  const empId = empParam ? parseInt(empParam) : null;
+  return c.json(await loadCsvCoverage(c.env.DB, empId != null && !isNaN(empId) ? empId : null));
+});
+
 app.get('/employee/:empId', async (c) => {
   const empId = parseInt(c.req.param('empId'));
   if (isNaN(empId)) return c.json({ error: '不正な社員IDです' }, 400);

@@ -356,7 +356,13 @@ app.get('/crew-portal/employee/:id', async (c) => {
         <h4 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">労働需要の背景</h4>
         <div id="insight-labor-demand-box" style="margin-bottom:24px;font-size:12px;color:#374151;background:#f9fafb;border-radius:8px;padding:10px 14px;line-height:1.7;"></div>
 
-        <div style="display:flex;justify-content:flex-end;margin-bottom:16px;">
+        <div style="display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+          <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#374151;">期間
+            <input type="month" id="detail-range-from" style="font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;">〜<input type="month" id="detail-range-to" style="font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;">月度
+            <span style="font-size:11px;color:#9ca3af;">（空欄＝全期間）</span>
+          </span>
+          <a href="#" onclick="return openDetailPrint('daily-list')" style="padding:7px 16px;background:#fff;color:#1a3a5c;border:1px solid #1a3a5c;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">日別売上 全データ一覧</a>
+          <a href="#" onclick="return openDetailPrint('detail-report')" style="padding:7px 16px;background:#fff;color:#1a3a5c;border:1px solid #1a3a5c;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">詳細分析レポート</a>
           <a href="${ADMIN_PATH}/sales-ai/employee/${emp.id}/report/print" target="_blank" style="padding:7px 16px;background:#1a3a5c;color:white;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">🖨️ AI分析レポートを印刷</a>
         </div>
 
@@ -639,6 +645,17 @@ function renderDailyDetail() {
 
 ${canViewInsights ? `
 // ===== 売上インサイトタブ =====
+// 日別売上 全データ一覧／詳細分析レポートを、指定した月度の範囲で別タブに開く
+function openDetailPrint(kind) {
+  const q = new URLSearchParams();
+  const f = document.getElementById('detail-range-from').value, t = document.getElementById('detail-range-to').value;
+  if (f) q.set('from', f);
+  if (t) q.set('to', t);
+  const qs = q.toString();
+  window.open(ADMIN_PATH + '/sales-ai/employee/' + STAFF_ID + '/' + kind + '/print' + (qs ? '?' + qs : ''), '_blank');
+  return false;
+}
+
 async function renderInsightsTab() {
   document.getElementById('insight-loading').style.display = '';
   document.getElementById('insight-content').style.display = 'none';

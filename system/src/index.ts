@@ -183,7 +183,10 @@ app.use('*', async (c, next) => {
   const isWasmCameraPage = isIdPhotosPage;
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
-  c.res.headers.set('Cache-Control', 'no-store');
+  // 中身が変わらない配信物（URLにバージョンを含むPDF解析バンドル・ログイン背景画像）は、
+  // ルート側で付けた immutable キャッシュ指定を残してブラウザに覚えさせる（個人データは含まない）。
+  // それ以外（画面・API）は従来どおり一切保存させない。
+  if (!/immutable/.test(c.res.headers.get('Cache-Control') ?? '')) c.res.headers.set('Cache-Control', 'no-store');
   c.res.headers.set('Permissions-Policy',
     (isWasmCameraPage ? 'camera=(self)' : 'camera=()') + ', microphone=(), geolocation=(), payment=()');
   if (isWasmCameraPage) {

@@ -8,6 +8,7 @@ import { escHtml, safeJson, saveToastHtml, saveToastScript } from './layout';
 import { ADMIN_PATH } from '../config';
 import type { CrewShiftMember, CrewShiftType, CrewShiftCell } from './crew_shift';
 import { getHolidayName } from '../utils/taxi_calendar';
+import { PDF_PARSERS_CLIENT_VERSION } from '../assets/pdf_parsers_client_version';
 
 export function personalShiftPage(
   members: CrewShiftMember[],
@@ -260,7 +261,7 @@ function psLoadPdfParser() {
   if (_psPdfParserLoadPromise) return _psPdfParserLoadPromise;
   _psPdfParserLoadPromise = new Promise(function(resolve, reject) {
     var s = document.createElement('script');
-    s.src = PS_API + '/pdf-parser.js';
+    s.src = PS_API + '/pdf-parser.js?v=${PDF_PARSERS_CLIENT_VERSION}';
     s.onload = function() { resolve(); };
     s.onerror = function() { reject(new Error('解析ライブラリの読込に失敗しました')); };
     document.head.appendChild(s);

@@ -45,7 +45,8 @@ app.get('/parser.js', async (c) => {
   return new Response(bytes, {
     headers: {
       'Content-Type': 'application/javascript; charset=utf-8',
-      'Cache-Control': 'public, max-age=604800, immutable',
+      // URLに ?v=<バンドルのハッシュ> が付くので長期キャッシュしてよい（バンドル更新時はURLが変わる）
+      'Cache-Control': 'private, max-age=31536000, immutable',
     },
   });
 });

@@ -1,6 +1,7 @@
 // 退職者リスト（乗務員退職者名簿PDFの取込＋確定済み退職者一覧）
 import { escHtml } from './layout';
 import { ADMIN_PATH } from '../config';
+import { PDF_PARSERS_CLIENT_VERSION } from '../assets/pdf_parsers_client_version';
 
 export type RetireeRow = {
   id: number;
@@ -135,7 +136,7 @@ export function staffRetireesPage(params: {
     if (_retPdfParserLoadPromise) return _retPdfParserLoadPromise;
     _retPdfParserLoadPromise = new Promise(function(resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/api/employees/retiree-pdf/parser.js';
+      s.src = '/api/employees/retiree-pdf/parser.js?v=${PDF_PARSERS_CLIENT_VERSION}';
       s.onload = function() { resolve(); };
       s.onerror = function() { reject(new Error('解析ライブラリの読込に失敗しました')); };
       document.head.appendChild(s);

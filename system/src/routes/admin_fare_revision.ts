@@ -21,129 +21,257 @@ app.get('/sales-ai/fare-revision', async (c) => {
   const content = `
 <style>
   ${SALES_AI_TABNAV_CSS}
-  .frv-card { background:white; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.08); padding:18px 20px; margin-bottom:14px; }
-  .frv-kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
-  .frv-kpi { background:white; border-radius:10px; box-shadow:0 1px 3px rgba(0,0,0,0.08); padding:12px 14px; }
-  .frv-kpi-label { font-size:10.5px; color:#9ca3af; margin-bottom:4px; }
-  .frv-kpi-val { font-size:19px; font-weight:700; color:#1a3a5c; }
-  .frv-kpi-sub { font-size:10.5px; color:#6b7280; margin-top:2px; }
-  .frv-toolbar { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
-  .frv-field { display:flex; flex-direction:column; gap:3px; }
+  .frv-root { max-width:1180px; font-family:'Hiragino Sans','Meiryo',sans-serif; color:#1f2937; }
+  .frv-hero { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  .frv-hero h2 { font-size:18px; font-weight:800; color:var(--color-primary,#17495f); margin:0; letter-spacing:.02em; }
+  .frv-hero-desc { font-size:11.5px; color:#6b7280; margin-top:4px; line-height:1.6; max-width:720px; }
+  .frv-period-chip { display:none; align-items:center; gap:8px; background:#fff; border:1px solid var(--color-border,#dcefe7); border-radius:999px; padding:6px 14px; font-size:11.5px; color:#374151; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .frv-period-chip b { color:var(--color-primary,#17495f); }
+  .frv-period-chip .sep { color:#cbd5e1; }
+
+  .frv-card { background:#fff; border-radius:12px; box-shadow:0 1px 3px rgba(15,23,42,.07); border:1px solid #eef2f6; padding:18px 20px; margin-bottom:14px; }
+  .frv-card-title { font-size:13.5px; font-weight:700; color:#1f2937; margin:0 0 4px; }
+  .frv-card-sub { font-size:11px; color:#9ca3af; margin-bottom:10px; line-height:1.6; }
+
+  /* 条件パネル */
+  .frv-filter { padding:0; overflow:hidden; }
+  .frv-filter-body { display:flex; gap:0; flex-wrap:wrap; }
+  .frv-filter-group { padding:14px 18px; display:flex; flex-direction:column; gap:8px; }
+  .frv-filter-group + .frv-filter-group { border-left:1px solid #f1f5f9; }
+  .frv-group-label { font-size:10.5px; font-weight:800; color:var(--color-primary,#17495f); letter-spacing:.08em; }
+  .frv-group-fields { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .frv-field { display:flex; flex-direction:column; gap:4px; }
   .frv-field label { font-size:10.5px; color:#6b7280; font-weight:700; }
-  .frv-field input, .frv-field select { border:1px solid #d1d5db; border-radius:6px; padding:6px 8px; font-size:12px; }
-  .frv-field input[disabled] { background:#f3f4f6; color:#9ca3af; }
-  .frv-btn { border:none; border-radius:6px; padding:7px 16px; font-size:12px; font-weight:700; cursor:pointer; }
-  .frv-btn-primary { background:#1a3a5c; color:#fff; }
-  .frv-btn-ghost { background:#fff; border:1px solid #d1d5db; color:#374151; }
-  .frv-view-toggle { display:flex; gap:6px; margin:14px 0; justify-content:space-between; align-items:center; flex-wrap:wrap; }
-  .frv-view-toggle-left { display:flex; gap:6px; }
-  .frv-view-btn { padding:8px 18px; border-radius:8px; border:1px solid #d1d5db; background:#fff; color:#374151; font-size:12.5px; font-weight:700; cursor:pointer; }
-  .frv-view-btn.active { background:#1a3a5c; color:#fff; border-color:#1a3a5c; }
-  .frv-subtabnav { display:flex; gap:4px; margin-bottom:14px; border-bottom:1px solid #e5e7eb; flex-wrap:wrap; }
-  .frv-subtab-btn { padding:8px 14px; font-size:12.5px; font-weight:600; color:#64748b; background:none; border:none; border-bottom:2px solid transparent; margin-bottom:-1px; cursor:pointer; }
-  .frv-subtab-btn:hover { color:#1a3a5c; }
-  .frv-subtab-btn.active { color:#1a3a5c; border-bottom-color:#1a3a5c; }
+  .frv-field input, .frv-field select { border:1px solid #d1d5db; border-radius:8px; padding:7px 10px; font-size:12.5px; background:#fff; color:#1f2937; transition:border-color .15s, box-shadow .15s; }
+  .frv-field input:focus, .frv-field select:focus { outline:none; border-color:var(--color-action,#0f8567); box-shadow:0 0 0 3px rgba(15,133,103,.15); }
+  .frv-filter-actions { margin-left:auto; padding:14px 18px; display:flex; flex-direction:column; justify-content:flex-end; align-items:flex-end; gap:6px; }
+  .frv-search-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:150px; background:var(--color-action,#0f8567); color:#fff; border:none; border-radius:10px; padding:11px 26px; font-size:14px; font-weight:800; letter-spacing:.1em; cursor:pointer; box-shadow:0 2px 6px rgba(15,133,103,.3); transition:transform .1s, box-shadow .15s, background .15s; }
+  .frv-search-btn:hover { background:#0c7058; box-shadow:0 4px 12px rgba(15,133,103,.35); }
+  .frv-search-btn:active { transform:translateY(1px); }
+  .frv-search-btn.frv-dirty { animation:frvPulse 1.6s ease-in-out infinite; }
+  .frv-search-btn .frv-spin { display:none; }
+  .frv-search-btn.frv-busy .frv-spin { display:inline-block; }
+  .frv-search-btn.frv-busy .frv-search-ico { display:none; }
+  .frv-dirty-hint { font-size:10.5px; color:#b45309; font-weight:700; visibility:hidden; }
+  .frv-dirty-hint.show { visibility:visible; }
+  @keyframes frvPulse { 0%,100% { box-shadow:0 0 0 0 rgba(15,133,103,.45); } 50% { box-shadow:0 0 0 7px rgba(15,133,103,0); } }
+  .frv-link-btn { background:none; border:none; color:#6b7280; font-size:11.5px; font-weight:700; cursor:pointer; padding:2px 0; }
+  .frv-link-btn:hover { color:var(--color-primary,#17495f); }
+  .frv-advanced { display:none; padding:12px 18px 14px; border-top:1px dashed #e5e7eb; background:#fafbfc; }
+  .frv-advanced.open { display:flex; flex-wrap:wrap; gap:12px; }
+  .frv-notes { padding:0 18px 12px; }
   .frv-period-note { font-size:11px; color:#6b7280; margin-top:8px; }
-  .frv-table { width:100%; border-collapse:collapse; font-size:12px; }
-  .frv-table th { padding:6px 8px; text-align:left; color:#6b7280; border-bottom:1px solid #e5e7eb; white-space:nowrap; }
-  .frv-table td { padding:7px 8px; border-bottom:1px solid #f3f4f6; }
+
+  /* 全体／個人 切替 */
+  .frv-view-toggle { display:flex; margin:16px 0 12px; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
+  .frv-seg { display:inline-flex; background:#e9eef3; border-radius:10px; padding:3px; }
+  .frv-view-btn { padding:7px 22px; border-radius:8px; border:none; background:transparent; color:#475569; font-size:12.5px; font-weight:700; cursor:pointer; transition:background .15s, color .15s; }
+  .frv-view-btn.active { background:#fff; color:var(--color-primary,#17495f); box-shadow:0 1px 3px rgba(0,0,0,.12); }
+  .frv-btn { border:none; border-radius:8px; padding:7px 16px; font-size:12px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .frv-btn-ghost { background:#fff; border:1px solid #d1d5db; color:#374151; }
+  .frv-btn-ghost:hover { border-color:#9ca3af; }
+
+  /* サブタブ（ピル型） */
+  .frv-subtabnav { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  .frv-subtab-btn { padding:7px 14px; font-size:12.5px; font-weight:700; color:#475569; background:#fff; border:1px solid #e2e8f0; border-radius:999px; cursor:pointer; transition:all .15s; }
+  .frv-subtab-btn:hover { border-color:#94a3b8; color:#1f2937; }
+  .frv-subtab-btn.active { background:var(--color-primary,#17495f); border-color:var(--color-primary,#17495f); color:#fff; }
+  .frv-subtab-btn span { opacity:.75; font-weight:600; }
+
+  /* KPI */
+  .frv-kpi-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:14px; }
+  .frv-kpi { position:relative; background:#fff; border-radius:12px; border:1px solid #eef2f6; box-shadow:0 1px 3px rgba(15,23,42,.06); padding:13px 15px 12px 17px; overflow:hidden; }
+  .frv-kpi::before { content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background:#cbd5e1; }
+  .frv-kpi.tone-ok::before { background:#16a34a; }
+  .frv-kpi.tone-warn::before { background:#f59e0b; }
+  .frv-kpi.tone-bad::before { background:#dc2626; }
+  .frv-kpi.tone-main::before { background:var(--color-primary,#17495f); }
+  .frv-kpi.tone-flag::before { background:#ea580c; }
+  .frv-kpi-label { font-size:10.5px; color:#6b7280; margin-bottom:5px; font-weight:600; line-height:1.4; }
+  .frv-kpi-val { font-size:22px; font-weight:800; color:#1f2937; line-height:1.15; letter-spacing:.01em; }
+  .frv-kpi.tone-ok .frv-kpi-val { color:#15803d; }
+  .frv-kpi.tone-warn .frv-kpi-val { color:#b45309; }
+  .frv-kpi.tone-bad .frv-kpi-val { color:#b91c1c; }
+  .frv-kpi.tone-flag .frv-kpi-val { color:#c2410c; }
+  .frv-kpi-sub { font-size:10.5px; color:#6b7280; margin-top:3px; }
+  .frv-kpi-bar { height:4px; background:#f1f5f9; border-radius:2px; margin-top:7px; overflow:hidden; }
+  .frv-kpi-bar i { display:block; height:100%; border-radius:2px; background:currentColor; }
+
+  /* 表 */
+  .frv-table-wrap { overflow-x:auto; }
+  .frv-table { width:100%; border-collapse:separate; border-spacing:0; font-size:12.5px; }
+  .frv-table th { padding:8px 10px; text-align:left; color:#64748b; font-size:11px; font-weight:700; background:#f8fafc; border-bottom:1px solid #e5e7eb; white-space:nowrap; }
+  .frv-table th:first-child { border-top-left-radius:8px; }
+  .frv-table th:last-child { border-top-right-radius:8px; }
+  .frv-table td { padding:8px 10px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+  .frv-table tbody tr:nth-child(even) td { background:#fcfdfe; }
   .frv-table tr.frv-row-clickable { cursor:pointer; }
-  .frv-table tr.frv-row-clickable:hover { background:#f8fafc; }
-  .frv-advanced { display:none; margin-top:10px; padding-top:10px; border-top:1px dashed #e5e7eb; }
-  .frv-advanced.open { display:flex; flex-wrap:wrap; gap:10px; }
+  .frv-table tr.frv-row-clickable:hover td { background:#eef8f4; }
+  .frv-table td.frv-no, .frv-table th.frv-no { width:38px; text-align:right; color:#94a3b8; font-variant-numeric:tabular-nums; }
+  .frv-table td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .frv-name { font-weight:700; color:#1f2937; }
+  .frv-duty { display:inline-block; min-width:22px; text-align:center; padding:1px 7px; border-radius:6px; font-weight:800; font-size:12px; background:#eef2f7; color:#334155; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .frv-pill { display:inline-block; padding:2px 9px; border-radius:999px; font-weight:800; font-size:12px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .frv-pill.ok { background:#dcfce7; color:#15803d; }
+  .frv-pill.warn { background:#fef3c7; color:#b45309; }
+  .frv-pill.bad { background:#fee2e2; color:#b91c1c; }
+  .frv-pill.none { background:#f1f5f9; color:#64748b; }
+  .frv-pill small { font-weight:600; font-size:10.5px; margin-left:3px; }
+  .frv-table-tools { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px; }
+  .frv-table-tools select, .frv-table-tools input { border:1px solid #d1d5db; border-radius:8px; padding:6px 10px; font-size:12px; background:#fff; }
+  .frv-empty { font-size:12px; color:#9ca3af; padding:14px 0; text-align:center; }
+
   .frv-coverage { font-size:11px; color:#6b7280; margin-top:6px; }
   .frv-reasoning { list-style:none; padding:0; margin:10px 0 0; font-size:12.5px; line-height:1.7; color:#374151; }
-  .frv-reasoning li { padding:6px 10px; background:#f8fafc; border-radius:6px; margin-bottom:6px; }
-  .frv-reasoning li.frv-flag { background:#fff7ed; color:#9a3412; font-weight:600; }
-  .frv-search-wrap { position:relative; max-width:320px; }
+  .frv-reasoning li { padding:8px 12px; background:#f8fafc; border-radius:8px; margin-bottom:6px; border-left:3px solid #cbd5e1; }
+  .frv-reasoning li.frv-flag { background:#fff7ed; color:#9a3412; font-weight:600; border-left-color:#ea580c; }
+  .frv-search-wrap { position:relative; max-width:360px; }
+  .frv-search-wrap svg { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:#94a3b8; }
+  .frv-search-wrap input { width:100%; border:1px solid #d1d5db; border-radius:10px; padding:10px 12px 10px 34px; font-size:13px; }
+  .frv-search-wrap input:focus { outline:none; border-color:var(--color-action,#0f8567); box-shadow:0 0 0 3px rgba(15,133,103,.15); }
+
+  /* 読み込み中の表示（骨組み表示＋上部バー） */
+  .frv-progress { position:fixed; left:0; right:0; top:0; height:3px; z-index:200; pointer-events:none; opacity:0; transition:opacity .2s; }
+  .frv-progress.on { opacity:1; }
+  .frv-progress i { position:absolute; top:0; bottom:0; width:35%; background:linear-gradient(90deg,transparent,var(--color-action,#0f8567),transparent); animation:frvSlide 1s linear infinite; }
+  @keyframes frvSlide { from { left:-35%; } to { left:100%; } }
+  .sk { background:linear-gradient(90deg,#eef2f6 25%,#f8fafc 50%,#eef2f6 75%); background-size:200% 100%; animation:frvShimmer 1.2s linear infinite; border-radius:6px; }
+  @keyframes frvShimmer { from { background-position:200% 0; } to { background-position:-200% 0; } }
+  .sk-kpi { height:76px; border-radius:12px; }
+  .sk-line { height:12px; margin:10px 0; }
+  .sk-block { height:180px; border-radius:12px; }
+  .frv-refreshing { opacity:.45; pointer-events:none; transition:opacity .2s; }
+  .frv-spin { width:14px; height:14px; border:2px solid rgba(255,255,255,.4); border-top-color:#fff; border-radius:50%; animation:frvRot .7s linear infinite; }
+  @keyframes frvRot { to { transform:rotate(360deg); } }
+  .frv-error { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:10px; padding:12px 16px; font-size:12.5px; font-weight:600; }
+  .frv-fade { animation:frvFade .25s ease-out; }
+  @keyframes frvFade { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+
+  @media (max-width:760px) {
+    .frv-filter-group + .frv-filter-group { border-left:none; border-top:1px solid #f1f5f9; }
+    .frv-filter-actions { margin-left:0; width:100%; align-items:stretch; }
+    .frv-search-btn { width:100%; }
+  }
 </style>
-<div style="max-width:1180px;font-family:'Hiragino Sans','Meiryo',sans-serif;">
+<div class="frv-progress" id="frv-progress"><i></i></div>
+<div class="frv-root">
   ${salesAiTabNav('fare-revision')}
-  <div style="margin-bottom:10px;">
-    <h2 style="font-size:16px;font-weight:700;color:#1a3a5c;margin:0;">運賃改定影響分析</h2>
-    <div style="font-size:11.5px;color:#6b7280;margin-top:4px;line-height:1.6;">2026年4月からの運賃値上げ（約10%）で、売上や働いた時間がどのように変わったかを自動で分かりやすく分析します。外部のAIサービスには一切接続していません。</div>
+  <div class="frv-hero">
+    <div>
+      <h2>運賃改定影響分析</h2>
+      <div class="frv-hero-desc">2026年4月からの運賃値上げ（約10%）で、売上や働いた時間がどのように変わったかを自動で分かりやすく分析します。外部のAIサービスには一切接続していません。</div>
+    </div>
+    <div class="frv-period-chip" id="period-chip"></div>
   </div>
 
-  <div class="frv-card">
-    <div class="frv-toolbar">
-      <div class="frv-field">
-        <label>比較のしかた</label>
-        <select id="compare-mode" onchange="onCompareModeChange()">
-          <option value="revision">運賃改定の前後で比較</option>
-          <option value="yoyMonth" selected>前年の同じ月と比較</option>
-        </select>
+  <div class="frv-card frv-filter" id="filter-card">
+    <div class="frv-filter-body">
+      <div class="frv-filter-group">
+        <div class="frv-group-label">比べる期間</div>
+        <div class="frv-group-fields">
+          <div class="frv-field">
+            <label>比較のしかた</label>
+            <select id="compare-mode" onchange="onCompareModeChange()">
+              <option value="revision">運賃改定の前後で比較</option>
+              <option value="yoyMonth" selected>前年の同じ月と比較</option>
+            </select>
+          </div>
+          <div class="frv-field" id="revision-field-start">
+            <label>改定後の期間（開始）</label>
+            <input type="date" id="after-start">
+          </div>
+          <div class="frv-field" id="revision-field-end">
+            <label>改定後の期間（終了）</label>
+            <input type="date" id="after-end">
+          </div>
+          <div class="frv-field" id="yoy-field-year" style="display:none;">
+            <label>比較する年（後の年）</label>
+            <select id="yoy-year"></select>
+          </div>
+          <div class="frv-field" id="yoy-field-month" style="display:none;">
+            <label>比較する月</label>
+            <select id="yoy-month">
+              <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
+              <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
+              <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
+              <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
+            </select>
+          </div>
+        </div>
       </div>
-      <div class="frv-field" id="revision-field-start">
-        <label>運賃改定後の期間（開始）</label>
-        <input type="date" id="after-start">
+      <div class="frv-filter-group">
+        <div class="frv-group-label">絞り込み</div>
+        <div class="frv-group-fields">
+          <div class="frv-field">
+            <label>課</label>
+            <select id="division-filter"><option value="">全課</option><option value="1">1課</option><option value="2">2課</option><option value="3">3課</option><option value="4">4課</option></select>
+          </div>
+          <div class="frv-field">
+            <label>班</label>
+            <select id="team-filter"><option value="">全班</option><option value="1">1班</option><option value="2">2班</option><option value="3">3班</option><option value="4">4班</option><option value="5">5班</option><option value="6">6班</option><option value="7">7班</option><option value="8">8班</option></select>
+          </div>
+          <div class="frv-field">
+            <label>勤務区分</label>
+            <select id="duty-filter"><option value="">全区分</option><option value="a">昼日(a)</option><option value="b">夜日(b)</option><option value="B">隔日(B)</option><option value="D">隔日(D)</option><option value="H">隔日(H)</option></select>
+          </div>
+        </div>
       </div>
-      <div class="frv-field" id="revision-field-end">
-        <label>運賃改定後の期間（終了）</label>
-        <input type="date" id="after-end">
+      <div class="frv-filter-actions">
+        <span class="frv-dirty-hint" id="dirty-hint">条件が変わりました</span>
+        <button type="button" class="frv-search-btn" id="search-btn" onclick="applyFilters()">
+          <svg class="frv-search-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <span class="frv-spin"></span>
+          検索
+        </button>
+        <button type="button" class="frv-link-btn" id="advanced-toggle" onclick="toggleAdvanced()">くわしい設定 ▾</button>
       </div>
-      <div class="frv-field" id="yoy-field-year" style="display:none;">
-        <label>比較する年（後の年）</label>
-        <select id="yoy-year"></select>
-      </div>
-      <div class="frv-field" id="yoy-field-month" style="display:none;">
-        <label>比較する月</label>
-        <select id="yoy-month">
-          <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
-          <option value="4">4月</option><option value="5">5月</option><option value="6">6月</option>
-          <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
-          <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
-        </select>
-      </div>
-      <div class="frv-field">
-        <label>課</label>
-        <select id="division-filter"><option value="">全課</option><option value="1">1課</option><option value="2">2課</option><option value="3">3課</option><option value="4">4課</option></select>
-      </div>
-      <div class="frv-field">
-        <label>班</label>
-        <select id="team-filter"><option value="">全班</option><option value="1">1班</option><option value="2">2班</option><option value="3">3班</option><option value="4">4班</option><option value="5">5班</option><option value="6">6班</option><option value="7">7班</option><option value="8">8班</option></select>
-      </div>
-      <div class="frv-field">
-        <label>勤務区分</label>
-        <select id="duty-filter"><option value="">全区分</option><option value="a">昼日(a)</option><option value="b">夜日(b)</option><option value="B">隔日(B)</option><option value="D">隔日(D)</option><option value="H">隔日(H)</option></select>
-      </div>
-      <button type="button" class="frv-btn frv-btn-primary" onclick="applyFilters()">この条件で見る</button>
-      <button type="button" class="frv-btn frv-btn-ghost" onclick="toggleAdvanced()">くわしい設定 ▾</button>
     </div>
     <div id="advanced-panel" class="frv-advanced">
-      <div class="frv-field"><label>目標にする達成率(%)</label><input type="number" id="achievement-threshold" value="110" style="width:70px;"></div>
-      <div class="frv-field"><label>売上がこの範囲なら「ほぼ変わらない」とみなす(100±%)</label><input type="number" id="sales-flat-band" value="8" style="width:60px;"></div>
-      <div class="frv-field"><label>働いた時間がこれより減ったら「減った」と判定(%)</label><input type="number" id="labor-hours-drop" value="97" style="width:70px;"></div>
-      <div class="frv-field"><label>判定に必要な最低の乗務日数（各期間）</label><input type="number" id="min-duty-days" value="5" style="width:60px;"></div>
-      <div class="frv-field"><label>労働時間データが必要な最低の割合(%)</label><input type="number" id="min-labor-coverage-pct" value="50" style="width:60px;"></div>
+      <div class="frv-field"><label>目標にする達成率(%)</label><input type="number" id="achievement-threshold" value="110" style="width:80px;"></div>
+      <div class="frv-field"><label>売上がこの範囲なら「ほぼ変わらない」とみなす(100±%)</label><input type="number" id="sales-flat-band" value="8" style="width:70px;"></div>
+      <div class="frv-field"><label>働いた時間がこれより減ったら「減った」と判定(%)</label><input type="number" id="labor-hours-drop" value="97" style="width:80px;"></div>
+      <div class="frv-field"><label>判定に必要な最低の乗務日数（各期間）</label><input type="number" id="min-duty-days" value="5" style="width:70px;"></div>
+      <div class="frv-field"><label>労働時間データが必要な最低の割合(%)</label><input type="number" id="min-labor-coverage-pct" value="50" style="width:70px;"></div>
     </div>
-    <div id="period-note" class="frv-period-note"></div>
-    <div id="yoy-note" class="frv-period-note" style="display:none;">「前年の同じ月と比較」は、去年と今年の同じ月同士（例: 2025年4月度と2026年4月度）を比べるモードです。曜日構成や季節行事の影響をそろえた比較ができます。運賃改定の前後で日数をそろえた比較をしたいときは「運賃改定の前後で比較」を選んでください。</div>
+    <div class="frv-notes">
+      <div id="period-note" class="frv-period-note"></div>
+      <div id="yoy-note" class="frv-period-note" style="display:none;">「前年の同じ月と比較」は、去年と今年の同じ月同士（例: 2025年4月度と2026年4月度）を比べるモードです。曜日構成や季節行事の影響をそろえた比較ができます。運賃改定の前後で日数をそろえた比較をしたいときは「運賃改定の前後で比較」を選んでください。</div>
+    </div>
   </div>
 
   <div class="frv-view-toggle frv-no-print">
-    <div class="frv-view-toggle-left">
+    <div class="frv-seg">
       <button type="button" id="btn-view-overview" class="frv-view-btn active" onclick="switchView('overview')">全体</button>
       <button type="button" id="btn-view-individual" class="frv-view-btn" onclick="switchView('individual')">個人</button>
     </div>
-    <button type="button" class="frv-btn frv-btn-ghost" onclick="printCurrentView()">🖨 今の画面を印刷</button>
+    <button type="button" class="frv-btn frv-btn-ghost" onclick="printCurrentView()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      今の画面を印刷
+    </button>
   </div>
 
-  <div id="loading" style="color:#9ca3af;font-size:13px;">読み込み中…</div>
+  <div id="loading">
+    <div class="frv-kpi-row">
+      <div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div>
+    </div>
+    <div class="frv-card"><div class="sk sk-line" style="width:30%;"></div><div class="sk sk-block"></div></div>
+  </div>
+  <div id="load-error" class="frv-error" style="display:none;"></div>
 
   <div id="view-overview" style="display:none;">
     <div class="frv-subtabnav frv-no-print" id="ov-subtabnav">
       <button type="button" class="frv-subtab-btn active" data-sub="summary" onclick="switchOverviewSub('summary')">サマリー</button>
       <button type="button" class="frv-subtab-btn" data-sub="honbun" onclick="switchOverviewSub('honbun')">本分析結果</button>
       <button type="button" class="frv-subtab-btn" data-sub="breakdown" onclick="switchOverviewSub('breakdown')">課・班・勤務別</button>
-      <button type="button" class="frv-subtab-btn" data-sub="flagged" onclick="switchOverviewSub('flagged')">早めに切り上げていそうな人</button>
+      <button type="button" class="frv-subtab-btn" data-sub="flagged" onclick="switchOverviewSub('flagged')">早めに切り上げていそうな人 <span id="flagged-count"></span></button>
       <button type="button" class="frv-subtab-btn" data-sub="allemp" onclick="switchOverviewSub('allemp')">社員ごとの一覧</button>
     </div>
 
     <div id="ov-sub-summary" class="frv-subpanel">
       <div id="kpi-row" class="frv-kpi-row"></div>
       <div class="frv-card">
-        <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 4px;">1日あたり売上の伸び具合の分布（人数）</h3>
-        <div style="font-size:11px;color:#9ca3af;margin-bottom:8px;">横軸は「後の期間の売上 ÷ 前の期間の売上」の割合です。100%より右なら売上が伸びた人です。</div>
+        <h3 class="frv-card-title">1日あたり売上の伸び具合の分布（人数）</h3>
+        <div class="frv-card-sub">横軸は「後の期間の売上 ÷ 前の期間の売上」の割合です。100%より右なら売上が伸びた人です。</div>
         <canvas id="histogram-chart" height="70"></canvas>
       </div>
       <div id="coverage-note" class="frv-coverage"></div>
@@ -151,39 +279,41 @@ app.get('/sales-ai/fare-revision', async (c) => {
 
     <div id="ov-sub-honbun" class="frv-subpanel" style="display:none;">
       <div class="frv-card">
-        <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 8px;">目標未達率</h3>
-        <div id="honbun-kpi-row" class="frv-kpi-row"></div>
-        <div id="honbun-excluded-note" style="font-size:11px;color:#9ca3af;margin-top:6px;"></div>
+        <h3 class="frv-card-title" style="margin-bottom:10px;">目標未達率</h3>
+        <div id="honbun-kpi-row" class="frv-kpi-row" style="margin-bottom:0;"></div>
+        <div id="honbun-excluded-note" style="font-size:11px;color:#9ca3af;margin-top:8px;"></div>
       </div>
       <div class="frv-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0;">目標未達の社員一覧</h3>
-          <select id="honbun-sort" onchange="renderHonbunEmpTable()" class="frv-no-print" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+        <div class="frv-table-tools">
+          <h3 class="frv-card-title" style="margin:0;">目標未達の社員一覧</h3>
+          <select id="honbun-sort" onchange="renderHonbunEmpTable()" class="frv-no-print">
             <option value="growth-asc">1日あたり売上の伸び 低い順</option>
             <option value="return-earlier">帰る時間が早くなった順</option>
             <option value="return-after-asc">後の帰る時刻 早い順</option>
           </select>
         </div>
-        <table class="frv-table">
-          <thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th id="th-honbun-before">前の1日平均売上</th><th id="th-honbun-after">後の1日平均売上</th><th id="th-honbun-return-before">前の帰る時刻</th><th id="th-honbun-return-after">後の帰る時刻</th></tr></thead>
-          <tbody id="honbun-emp-tbody"></tbody>
-        </table>
-        <div id="honbun-emp-empty" style="display:none;font-size:12px;color:#9ca3af;padding:10px 0;">該当する人はいません。</div>
+        <div class="frv-table-wrap">
+          <table class="frv-table">
+            <thead><tr><th class="frv-no">No.</th><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th id="th-honbun-before">前の1日平均売上</th><th id="th-honbun-after">後の1日平均売上</th><th id="th-honbun-return-before">前の帰る時刻</th><th id="th-honbun-return-after">後の帰る時刻</th></tr></thead>
+            <tbody id="honbun-emp-tbody"></tbody>
+          </table>
+        </div>
+        <div id="honbun-emp-empty" class="frv-empty" style="display:none;">該当する人はいません。</div>
       </div>
     </div>
 
     <div id="ov-sub-breakdown" class="frv-subpanel" style="display:none;">
       <div style="display:flex;gap:14px;margin-bottom:14px;flex-wrap:wrap;">
-        <div class="frv-card" style="flex:1;min-width:220px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">課ごとの1日あたり売上の伸び（平均）</h3>
+        <div class="frv-card" style="flex:1;min-width:220px;margin-bottom:0;">
+          <h3 class="frv-card-title" style="margin-bottom:10px;">課ごとの1日あたり売上の伸び（平均）</h3>
           <table class="frv-table"><thead><tr><th>課</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody id="division-tbody"></tbody></table>
         </div>
-        <div class="frv-card" style="flex:1;min-width:220px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">班ごとの1日あたり売上の伸び（平均）</h3>
+        <div class="frv-card" style="flex:1;min-width:220px;margin-bottom:0;">
+          <h3 class="frv-card-title" style="margin-bottom:10px;">班ごとの1日あたり売上の伸び（平均）</h3>
           <table class="frv-table"><thead><tr><th>班</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody id="team-tbody"></tbody></table>
         </div>
-        <div class="frv-card" style="flex:1;min-width:220px;">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">勤務の種類ごとの1日あたり売上の伸び（平均）</h3>
+        <div class="frv-card" style="flex:1;min-width:220px;margin-bottom:0;">
+          <h3 class="frv-card-title" style="margin-bottom:10px;">勤務の種類ごとの1日あたり売上の伸び（平均）</h3>
           <table class="frv-table"><thead><tr><th>種類</th><th>平均の伸び</th><th>人数</th></tr></thead><tbody id="duty-tbody"></tbody></table>
         </div>
       </div>
@@ -191,13 +321,15 @@ app.get('/sales-ai/fare-revision', async (c) => {
 
     <div id="ov-sub-flagged" class="frv-subpanel" style="display:none;">
       <div class="frv-card">
-        <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 4px;">早めに切り上げていそうな人（一覧）</h3>
-        <div style="font-size:11px;color:#9ca3af;margin-bottom:10px;">売上は運賃改定前とほぼ変わっていないのに、働いた時間がはっきり短くなっている人です。いつもの目標額に早く届いて、早めに仕事を切り上げているのかもしれません。行をクリックすると、その人の詳しい状況を見られます。</div>
-        <table class="frv-table">
-          <thead><tr><th>氏名</th><th>課/班</th><th id="th-flagged-before">前の1日平均売上</th><th id="th-flagged-after">後の1日平均売上</th><th>1日あたり売上の伸び</th><th>単価の伸び</th><th>1乗務あたり労働時間の伸び</th><th>確からしさ</th></tr></thead>
-          <tbody id="flagged-tbody"></tbody>
-        </table>
-        <div id="flagged-empty" style="display:none;font-size:12px;color:#9ca3af;padding:10px 0;">該当する人はいません。</div>
+        <h3 class="frv-card-title">早めに切り上げていそうな人（一覧）</h3>
+        <div class="frv-card-sub">売上は運賃改定前とほぼ変わっていないのに、働いた時間がはっきり短くなっている人です。いつもの目標額に早く届いて、早めに仕事を切り上げているのかもしれません。行をクリックすると、その人の詳しい状況を見られます。</div>
+        <div class="frv-table-wrap">
+          <table class="frv-table">
+            <thead><tr><th class="frv-no">No.</th><th>氏名</th><th>課/班</th><th id="th-flagged-before">前の1日平均売上</th><th id="th-flagged-after">後の1日平均売上</th><th>1日あたり売上の伸び</th><th>単価の伸び</th><th>1乗務あたり労働時間の伸び</th><th>確からしさ</th></tr></thead>
+            <tbody id="flagged-tbody"></tbody>
+          </table>
+        </div>
+        <div id="flagged-empty" class="frv-empty" style="display:none;">該当する人はいません。</div>
       </div>
     </div>
 
@@ -209,34 +341,41 @@ app.get('/sales-ai/fare-revision', async (c) => {
         <button type="button" class="frv-subtab-btn" data-cat="insufficient_data" onclick="switchAllEmpCategory('insufficient_data')">データ不足 <span id="cat-count-insufficient_data"></span></button>
       </div>
       <div class="frv-card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
-          <h3 id="allemp-title" style="font-size:13px;font-weight:700;color:#374151;margin:0;">社員ごとの一覧</h3>
+        <div class="frv-table-tools">
+          <h3 id="allemp-title" class="frv-card-title" style="margin:0;">社員ごとの一覧</h3>
           <div style="display:flex;gap:8px;" class="frv-no-print">
-            <input type="text" id="all-emp-search" placeholder="社員名で検索" oninput="renderAllEmployeesTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
-            <select id="all-emp-sort" onchange="renderAllEmployeesTable()" style="border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+            <input type="text" id="all-emp-search" placeholder="社員名で絞り込み" oninput="renderAllEmployeesTable()">
+            <select id="all-emp-sort" onchange="renderAllEmployeesTable()">
               <option value="growth-asc">1日あたり売上の伸び 低い順</option>
               <option value="growth-desc">1日あたり売上の伸び 高い順</option>
               <option value="name-asc">名前順</option>
             </select>
           </div>
         </div>
-        <table class="frv-table">
-          <thead><tr><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th id="th-allemp-before">前の1日平均売上</th><th id="th-allemp-after">後の1日平均売上</th><th>1乗務あたり労働時間の伸び</th></tr></thead>
-          <tbody id="all-emp-tbody"></tbody>
-        </table>
-        <div id="all-emp-empty" style="display:none;font-size:12px;color:#9ca3af;padding:10px 0;">該当する人はいません。</div>
+        <div class="frv-table-wrap">
+          <table class="frv-table">
+            <thead><tr><th class="frv-no">No.</th><th>氏名</th><th>課/班</th><th>勤務の種類</th><th>1日あたり売上の伸び</th><th id="th-allemp-before">前の1日平均売上</th><th id="th-allemp-after">後の1日平均売上</th><th>1乗務あたり労働時間の伸び</th></tr></thead>
+            <tbody id="all-emp-tbody"></tbody>
+          </table>
+        </div>
+        <div id="all-emp-empty" class="frv-empty" style="display:none;">該当する人はいません。</div>
       </div>
     </div>
   </div>
 
   <div id="view-individual" style="display:none;">
-    <div class="frv-card frv-no-print">
+    <div class="frv-card frv-no-print" style="padding:14px 18px;">
       <div class="frv-search-wrap">
-        <input type="text" id="individual-search" list="emp-datalist" placeholder="社員名を入力して選んでください" oninput="onIndividualSearchInput()" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;font-size:13px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input type="text" id="individual-search" list="emp-datalist" placeholder="社員名を入力して選んでください" oninput="onIndividualSearchInput()">
         <datalist id="emp-datalist"></datalist>
       </div>
     </div>
-    <div id="individual-empty" style="color:#9ca3af;font-size:13px;">社員を選択してください。</div>
+    <div id="individual-empty" class="frv-empty" style="text-align:left;">社員を選択してください。全体ビューの一覧で行をクリックしても開けます。</div>
+    <div id="individual-loading" style="display:none;">
+      <div class="frv-kpi-row"><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div></div>
+      <div class="frv-card"><div class="sk sk-line" style="width:40%;"></div><div class="sk sk-block"></div></div>
+    </div>
     <div id="individual-content" style="display:none;">
       <div class="frv-subtabnav frv-no-print">
         <button type="button" class="frv-subtab-btn active" data-sub="summary" onclick="switchEmpSub('summary')">サマリー</button>
@@ -247,21 +386,21 @@ app.get('/sales-ai/fare-revision', async (c) => {
       <div id="emp-sub-summary" class="frv-subpanel">
         <div id="emp-kpi-row" class="frv-kpi-row"></div>
         <div class="frv-card">
-          <h3 id="emp-chart-title" style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">売上の移り変わり</h3>
+          <h3 id="emp-chart-title" class="frv-card-title" style="margin-bottom:10px;">売上の移り変わり</h3>
           <canvas id="emp-chart" height="90"></canvas>
         </div>
       </div>
 
       <div id="emp-sub-reasoning" class="frv-subpanel" style="display:none;">
         <div class="frv-card">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 6px;">なぜこの判定になったか（自動作成の説明）</h3>
+          <h3 class="frv-card-title">なぜこの判定になったか（自動作成の説明）</h3>
           <ul id="emp-reasoning" class="frv-reasoning"></ul>
         </div>
       </div>
 
       <div id="emp-sub-daily" class="frv-subpanel" style="display:none;">
         <div class="frv-card">
-          <h3 style="font-size:13px;font-weight:700;color:#374151;margin:0 0 10px;">日ごとの記録</h3>
+          <h3 class="frv-card-title" style="margin-bottom:10px;">日ごとの記録</h3>
           <div style="max-height:420px;overflow-y:auto;">
             <table class="frv-table">
               <thead><tr><th>いつの期間</th><th>日付</th><th>売上</th><th>働いた時間</th><th>記録の種類</th><th>帰る時刻</th></tr></thead>
@@ -319,6 +458,29 @@ const CATEGORY_LABELS = { above: '目標達成', met: '伸びたが未達', belo
 // fetch + JSON パース。サーバーがエラーページ（HTML）を返したとき、素の r.json() だと
 // Safari で「SyntaxError: The string did not match the expected pattern.」となって原因が
 // 分からないので、共通の分かりやすいメッセージに変換する（詳細は console に出す）。
+// 同じ条件の結果はこの画面を開いている間だけメモリに覚えておき、2回目以降は通信せず即表示する。
+// ブラウザの保存領域（localStorage等）には一切書かないので、画面を閉じれば消える。
+var FRV_CACHE = new Map();
+var FRV_CACHE_MAX = 40;
+var frvInflight = 0;
+function setProgress(delta) {
+  frvInflight = Math.max(0, frvInflight + delta);
+  document.getElementById('frv-progress').classList.toggle('on', frvInflight > 0);
+}
+function fetchJsonCached(url) {
+  if (FRV_CACHE.has(url)) return FRV_CACHE.get(url);
+  setProgress(1);
+  const p = fetchJsonOrThrow(url).then(function(data) { setProgress(-1); return data; }, function(err) {
+    setProgress(-1);
+    FRV_CACHE.delete(url);
+    throw err;
+  });
+  FRV_CACHE.set(url, p);
+  if (FRV_CACHE.size > FRV_CACHE_MAX) FRV_CACHE.delete(FRV_CACHE.keys().next().value);
+  return p;
+}
+function isCached(url) { return FRV_CACHE.has(url); }
+
 function fetchJsonOrThrow(url) {
   var MSG = '読み込みに失敗しました。時間をおいて再度お試しください。';
   return fetch(url).catch(function() {
@@ -402,10 +564,48 @@ function buildQueryString() {
 }
 
 function applyFilters() {
+  setDirty(false);
   loadOverview();
   honbunData = null;
   if (currentOverviewSub === 'honbun') loadHonbunResult();
   if (currentEmpId) loadEmployee(currentEmpId, currentEmpWageCategory);
+}
+
+// 条件を変えたのに検索を押していない状態を、検索ボタンの点滅で知らせる
+function setDirty(on) {
+  document.getElementById('search-btn').classList.toggle('frv-dirty', on);
+  document.getElementById('dirty-hint').classList.toggle('show', on);
+}
+function setSearchBusy(on) {
+  document.getElementById('search-btn').classList.toggle('frv-busy', on);
+}
+
+function growthTone(v) {
+  if (v === null || v === undefined) return 'none';
+  if (v >= 110) return 'ok';
+  if (v >= 100) return 'warn';
+  return 'bad';
+}
+function growthPill(v, note) {
+  return '<span class="frv-pill ' + growthTone(v) + '">' + fmtPct(v) + (note ? '<small>' + note + '</small>' : '') + '</span>';
+}
+function dutyBadge(code) {
+  return code ? '<span class="frv-duty">' + escHtmlJs(code) + '</span>' : '—';
+}
+function divTeam(e) {
+  return (e.division ?? '—') + '課' + (e.team ?? '—') + '班';
+}
+function skeletonRows(cols, n) {
+  let html = '';
+  for (let i = 0; i < n; i++) {
+    html += '<tr>';
+    for (let j = 0; j < cols; j++) html += '<td><div class="sk" style="height:12px;width:' + (j === 1 ? 70 : 50) + '%;"></div></td>';
+    html += '</tr>';
+  }
+  return html;
+}
+function rowAttrs(e) {
+  return ' class="frv-row-clickable" onmouseenter="prefetchEmployee(' + e.empId + ', \\'' + (e.wageCategory || '') + '\\')" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\', \\'' + (e.wageCategory || '') + '\\')"';
 }
 
 function switchView(view) {
@@ -426,26 +626,34 @@ function switchOverviewSub(name) {
   if (name === 'honbun' && !honbunData) loadHonbunResult();
 }
 
+function kpiCardsHtml(items, subPrefix) {
+  let html = '';
+  items.forEach(function(it) {
+    const bar = (it.ratio !== undefined && it.ratio !== null)
+      ? '<div class="frv-kpi-bar"><i style="width:' + Math.min(100, Math.max(0, it.ratio)) + '%;"></i></div>' : '';
+    html += '<div class="frv-kpi frv-fade tone-' + (it.tone || 'muted') + '"><div class="frv-kpi-label">' + escHtmlJs(it.label) + '</div><div class="frv-kpi-val">' + escHtmlJs(it.val) + '</div>' +
+      (it.sub ? '<div class="frv-kpi-sub">' + escHtmlJs(subPrefix) + escHtmlJs(it.sub) + '</div>' : '') + bar + '</div>';
+  });
+  return html;
+}
+function ratioPct(n, total) { return total ? Math.round(n / total * 1000) / 10 : null; }
+
 function renderHonbunResult(data) {
   const c = data.counts;
   const total = c.above + c.met + c.below + c.insufficientData;
   const achieved = c.above;
   const notAchieved = c.met + c.below;
   const judgedTotal = achieved + notAchieved;
+  const rA = ratioPct(achieved, judgedTotal), rN = ratioPct(notAchieved, judgedTotal);
   const items = [
-    { label: '対象人数', val: total + '名' },
-    { label: '目標達成', val: achieved + '名', sub: judgedTotal ? Math.round(achieved / judgedTotal * 1000) / 10 + '%' : '' },
-    { label: '目標未達', val: notAchieved + '名', sub: judgedTotal ? Math.round(notAchieved / judgedTotal * 1000) / 10 + '%' : '' },
-    { label: '　内訳：伸びているが未達', val: c.met + '名' },
-    { label: '　内訳：売上が下がった（100%未満）', val: c.below + '名' },
+    { label: '対象人数', val: total + '名', tone: 'main' },
+    { label: '目標達成', val: achieved + '名', sub: rA !== null ? rA + '%' : '', ratio: rA, tone: 'ok' },
+    { label: '目標未達', val: notAchieved + '名', sub: rN !== null ? rN + '%' : '', ratio: rN, tone: 'bad' },
+    { label: '内訳：伸びているが未達', val: c.met + '名', tone: 'warn' },
+    { label: '内訳：売上が下がった（100%未満）', val: c.below + '名', tone: 'bad' },
     { label: 'データが少なくて判定できない人', val: c.insufficientData + '名' },
   ];
-  let html = '';
-  items.forEach(function(it) {
-    html += '<div class="frv-kpi"><div class="frv-kpi-label">' + escHtmlJs(it.label) + '</div><div class="frv-kpi-val">' + escHtmlJs(it.val) + '</div>' +
-      (it.sub ? '<div class="frv-kpi-sub">判定対象の' + escHtmlJs(it.sub) + '</div>' : '') + '</div>';
-  });
-  document.getElementById('honbun-kpi-row').innerHTML = html;
+  document.getElementById('honbun-kpi-row').innerHTML = kpiCardsHtml(items, '判定対象の');
   document.getElementById('honbun-excluded-note').textContent =
     data.excludedCount ? '※ 伸び率95%未満（病気・休職等による著しい落ち込みとみなす）の' + data.excludedCount + '名を集計対象から除外しています。' : '';
 
@@ -486,44 +694,54 @@ function renderHonbunEmpTable() {
   emptyEl.textContent = '該当する人はいません。';
   emptyEl.style.display = list.length ? 'none' : '';
   let tblHtml = '';
-  list.forEach(function(e) {
+  list.forEach(function(e, i) {
     const diff = returnTimeDiffMin(e);
     const earlier = diff !== null && diff <= -5;
     const afterCell = earlier
-      ? '<td><span style="background:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap;">' + (e.after.avgReturnTime ?? '—') + '<span style="font-weight:400;font-size:11px;"> ' + Math.abs(diff) + '分早い</span></span></td>'
-      : '<td>' + (e.after.avgReturnTime ?? '—') + '</td>';
-    const down = e.achievementCategory === 'below';
-    const growthCell = down
-      ? '<td><span style="background:#fee2e2;color:#b91c1c;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap;">' + fmtPct(e.salesGrowthPct) + '<span style="font-weight:400;font-size:11px;"> 減少</span></span></td>'
-      : '<td style="color:' + pctColor(e.salesGrowthPct) + ';font-weight:700;">' + fmtPct(e.salesGrowthPct) + '</td>';
-    tblHtml += '<tr>' +
-      '<td>' + escHtmlJs(e.empName) + '</td>' +
-      '<td>' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</td>' +
-      '<td>' + (e.wageCategoryLabel ? escHtmlJs(e.wageCategoryLabel) : '—') + '</td>' +
+      ? '<td class="num"><span class="frv-pill bad">' + (e.after.avgReturnTime ?? '—') + '<small>' + Math.abs(diff) + '分早い</small></span></td>'
+      : '<td class="num">' + (e.after.avgReturnTime ?? '—') + '</td>';
+    const growthCell = e.achievementCategory === 'below'
+      ? '<td>' + growthPill(e.salesGrowthPct, '減少') + '</td>'
+      : '<td>' + growthPill(e.salesGrowthPct) + '</td>';
+    tblHtml += '<tr' + rowAttrs(e) + '>' +
+      '<td class="frv-no">' + (i + 1) + '</td>' +
+      '<td class="frv-name">' + escHtmlJs(e.empName) + '</td>' +
+      '<td>' + divTeam(e) + '</td>' +
+      '<td>' + dutyBadge(e.repDutyCode) + '</td>' +
       growthCell +
-      '<td>' + fmtYen(e.before.avgPerDuty) + '</td>' +
-      '<td>' + fmtYen(e.after.avgPerDuty) + '</td>' +
-      '<td>' + (e.before.avgReturnTime ?? '—') + '</td>' +
+      '<td class="num">' + fmtYen(e.before.avgPerDuty) + '</td>' +
+      '<td class="num">' + fmtYen(e.after.avgPerDuty) + '</td>' +
+      '<td class="num">' + (e.before.avgReturnTime ?? '—') + '</td>' +
       afterCell +
       '</tr>';
   });
   document.getElementById('honbun-emp-tbody').innerHTML = tblHtml;
 }
 
-function loadHonbunResult() {
+function honbunUrl() {
   const params = new URLSearchParams(buildQueryString());
   params.set('achievementThresholdPct', '103');
   params.set('excludeBelowGrowthPct', '95');
+  return '/api/fare-revision/overview?' + params.toString();
+}
+
+function loadHonbunResult() {
+  const url = honbunUrl();
   const emptyEl = document.getElementById('honbun-emp-empty');
-  emptyEl.textContent = '読み込み中…';
-  emptyEl.style.display = '';
-  fetchJsonOrThrow('/api/fare-revision/overview?' + params.toString())
+  if (!isCached(url)) {
+    emptyEl.style.display = 'none';
+    document.getElementById('honbun-kpi-row').innerHTML = '<div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div><div class="sk sk-kpi"></div>';
+    document.getElementById('honbun-emp-tbody').innerHTML = skeletonRows(9, 8);
+  }
+  fetchJsonCached(url)
     .then(function(data) {
+      if (url !== honbunUrl()) return; // 読み込み中に条件が変わった
       honbunData = data;
       renderHonbunResult(data);
     })
     .catch(function(err) {
       honbunData = null;
+      document.getElementById('honbun-kpi-row').innerHTML = '';
       document.getElementById('honbun-emp-tbody').innerHTML = '';
       emptyEl.textContent = String((err && err.message) || err);
       emptyEl.style.display = '';
@@ -579,77 +797,83 @@ function renderPeriodNote(periods) {
   document.getElementById('period-note').textContent =
     '今、比べている期間 — ' + periods.before.label + ': ' + periods.before.start + '〜' + periods.before.end + '（' + periods.before.days + '日間）　/　' +
     periods.after.label + ': ' + periods.after.start + '〜' + periods.after.end + '（' + periods.after.days + '日間）';
+  const chip = document.getElementById('period-chip');
+  chip.innerHTML = '<b>' + escHtmlJs(periods.before.label) + '</b> ' + escHtmlJs(periods.before.start) + '〜' + escHtmlJs(periods.before.end) +
+    ' <span class="sep">→</span> <b>' + escHtmlJs(periods.after.label) + '</b> ' + escHtmlJs(periods.after.start) + '〜' + escHtmlJs(periods.after.end);
+  chip.style.display = 'inline-flex';
 }
 
 function renderKpiRow(data) {
   const c = data.counts;
   const total = c.above + c.met + c.below + c.insufficientData;
+  const rA = ratioPct(c.above, total), rM = ratioPct(c.met, total), rB = ratioPct(c.below, total);
   const items = [
-    { label: '対象人数', val: total + '名' },
-    { label: '売上が' + data.thresholds.achievementThresholdPct + '%以上に伸びた人', val: c.above + '名', sub: total ? Math.round(c.above / total * 1000) / 10 + '%' : '' },
-    { label: '伸びたけど目標未達の人', val: c.met + '名', sub: total ? Math.round(c.met / total * 1000) / 10 + '%' : '' },
-    { label: '売上が下がった人', val: c.below + '名', sub: total ? Math.round(c.below / total * 1000) / 10 + '%' : '' },
+    { label: '対象人数', val: total + '名', tone: 'main' },
+    { label: '売上が' + data.thresholds.achievementThresholdPct + '%以上に伸びた人', val: c.above + '名', sub: rA !== null ? rA + '%' : '', ratio: rA, tone: 'ok' },
+    { label: '伸びたけど目標未達の人', val: c.met + '名', sub: rM !== null ? rM + '%' : '', ratio: rM, tone: 'warn' },
+    { label: '売上が下がった人', val: c.below + '名', sub: rB !== null ? rB + '%' : '', ratio: rB, tone: 'bad' },
     { label: 'データが少なくて判定できない人', val: c.insufficientData + '名' },
-    { label: '早めに切り上げていそうな人', val: data.flagged.length + '名' },
-    { label: '労働時間データがある割合', val: data.dataCoverage.coverageRatio + '%' },
+    { label: '早めに切り上げていそうな人', val: data.flagged.length + '名', tone: 'flag' },
+    { label: '労働時間データがある割合', val: data.dataCoverage.coverageRatio + '%', ratio: data.dataCoverage.coverageRatio },
   ];
-  let html = '';
-  items.forEach(function(it) {
-    html += '<div class="frv-kpi"><div class="frv-kpi-label">' + escHtmlJs(it.label) + '</div><div class="frv-kpi-val">' + escHtmlJs(it.val) + '</div>' +
-      (it.sub ? '<div class="frv-kpi-sub">全体の' + escHtmlJs(it.sub) + '</div>' : '') + '</div>';
-  });
-  document.getElementById('kpi-row').innerHTML = html;
+  document.getElementById('kpi-row').innerHTML = kpiCardsHtml(items, '全体の');
 }
 
 function renderHistogram(histogram) {
   const ctx = document.getElementById('histogram-chart').getContext('2d');
   const labels = histogram.map(function(h) { return h.bucketLabel; });
   const counts = histogram.map(function(h) { return h.count; });
+  // 伸び具合ごとに色分け（100%未満=赤系、100〜110%=黄、110%以上=緑系、データ不足=灰）
+  const HIST_COLORS = { '90%未満': '#f87171', '90〜100%': '#fca5a5', '100〜110%': '#fbbf24', '110〜120%': '#34d399', '120%以上': '#10b981' };
+  const colors = labels.map(function(l) { return HIST_COLORS[l] || '#cbd5e1'; });
   if (histogramChart) histogramChart.destroy();
   histogramChart = new Chart(ctx, {
     type: 'bar',
-    data: { labels: labels, datasets: [{ label: '社員数', data: counts, backgroundColor: '#2d6a9f' }] },
-    options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+    data: { labels: labels, datasets: [{ label: '社員数', data: counts, backgroundColor: colors, borderRadius: 6, maxBarThickness: 90 }] },
+    options: {
+      responsive: true,
+      animation: { duration: 350 },
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, ticks: { precision: 0 }, grid: { color: '#f1f5f9' } } },
+    },
   });
 }
 
 function renderBreakdownTables(data) {
   let divHtml = '';
   data.divisionBreakdown.forEach(function(d) {
-    divHtml += '<tr><td>' + d.division + '課</td><td style="color:' + pctColor(d.avgSalesGrowthPct) + ';font-weight:700;">' + fmtPct(d.avgSalesGrowthPct) + '</td><td>' + d.empCount + '名</td></tr>';
+    divHtml += '<tr><td class="frv-name">' + d.division + '課</td><td>' + growthPill(d.avgSalesGrowthPct) + '</td><td class="num">' + d.empCount + '名</td></tr>';
   });
   document.getElementById('division-tbody').innerHTML = divHtml;
 
   let teamHtml = '';
   data.teamBreakdown.forEach(function(t) {
-    teamHtml += '<tr><td>' + t.team + '班</td><td style="color:' + pctColor(t.avgSalesGrowthPct) + ';font-weight:700;">' + fmtPct(t.avgSalesGrowthPct) + '</td><td>' + t.empCount + '名</td></tr>';
+    teamHtml += '<tr><td class="frv-name">' + t.team + '班</td><td>' + growthPill(t.avgSalesGrowthPct) + '</td><td class="num">' + t.empCount + '名</td></tr>';
   });
   document.getElementById('team-tbody').innerHTML = teamHtml;
 
   let dutyHtml = '';
   data.dutyCategoryBreakdown.forEach(function(d) {
-    dutyHtml += '<tr><td>' + escHtmlJs(d.label) + '</td><td style="color:' + pctColor(d.avgSalesGrowthPct) + ';font-weight:700;">' + fmtPct(d.avgSalesGrowthPct) + '</td><td>' + d.empCount + '名</td></tr>';
+    dutyHtml += '<tr><td class="frv-name">' + escHtmlJs(d.label) + '</td><td>' + growthPill(d.avgSalesGrowthPct) + '</td><td class="num">' + d.empCount + '名</td></tr>';
   });
   document.getElementById('duty-tbody').innerHTML = dutyHtml;
 }
 
-function empLabel(e) {
-  return escHtmlJs(e.empName) + '<div style="font-size:10.5px;color:#9ca3af;">' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</div>';
-}
-
 function renderFlaggedTable(flagged) {
   document.getElementById('flagged-empty').style.display = flagged.length ? 'none' : '';
+  document.getElementById('flagged-count').textContent = '(' + flagged.length + ')';
   let html = '';
-  flagged.forEach(function(e) {
-    html += '<tr class="frv-row-clickable" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\', \\'' + (e.wageCategory || '') + '\\')">' +
-      '<td>' + empLabel(e) + '</td>' +
-      '<td>' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</td>' +
-      '<td>' + fmtYen(e.before.avgPerDuty) + '</td>' +
-      '<td>' + fmtYen(e.after.avgPerDuty) + '</td>' +
-      '<td style="color:' + pctColor(e.salesGrowthPct) + ';font-weight:700;">' + fmtPct(e.salesGrowthPct) + '</td>' +
-      '<td>' + fmtPct(e.hourlyRateGrowthPct) + '</td>' +
-      '<td>' + fmtPct(e.laborHoursGrowthPct) + '</td>' +
-      '<td>' + (e.earlyLeaveConfidence === 'high' ? '高' : '中') + '</td>' +
+  flagged.forEach(function(e, i) {
+    html += '<tr' + rowAttrs(e) + '>' +
+      '<td class="frv-no">' + (i + 1) + '</td>' +
+      '<td class="frv-name">' + escHtmlJs(e.empName) + '</td>' +
+      '<td>' + divTeam(e) + '</td>' +
+      '<td class="num">' + fmtYen(e.before.avgPerDuty) + '</td>' +
+      '<td class="num">' + fmtYen(e.after.avgPerDuty) + '</td>' +
+      '<td>' + growthPill(e.salesGrowthPct) + '</td>' +
+      '<td class="num">' + fmtPct(e.hourlyRateGrowthPct) + '</td>' +
+      '<td class="num">' + fmtPct(e.laborHoursGrowthPct) + '</td>' +
+      '<td>' + (e.earlyLeaveConfidence === 'high' ? '<span class="frv-pill bad">高</span>' : '<span class="frv-pill warn">中</span>') + '</td>' +
       '</tr>';
   });
   document.getElementById('flagged-tbody').innerHTML = html;
@@ -676,15 +900,16 @@ function renderAllEmployeesTable() {
   });
   document.getElementById('all-emp-empty').style.display = list.length ? 'none' : '';
   let html = '';
-  list.forEach(function(e) {
-    html += '<tr class="frv-row-clickable" onclick="selectEmployee(' + e.empId + ', \\'' + escHtmlJs(e.empName).replace(/'/g, "\\\\'") + '\\', \\'' + (e.wageCategory || '') + '\\')">' +
-      '<td>' + escHtmlJs(e.empName) + '</td>' +
-      '<td>' + (e.division ?? '—') + '課' + (e.team ?? '—') + '班</td>' +
-      '<td>' + (e.wageCategoryLabel ? escHtmlJs(e.wageCategoryLabel) : '—') + '</td>' +
-      '<td style="color:' + pctColor(e.salesGrowthPct) + ';font-weight:700;">' + fmtPct(e.salesGrowthPct) + '</td>' +
-      '<td>' + fmtYen(e.before.avgPerDuty) + '</td>' +
-      '<td>' + fmtYen(e.after.avgPerDuty) + '</td>' +
-      '<td>' + fmtPct(e.laborHoursGrowthPct) + '</td>' +
+  list.forEach(function(e, i) {
+    html += '<tr' + rowAttrs(e) + '>' +
+      '<td class="frv-no">' + (i + 1) + '</td>' +
+      '<td class="frv-name">' + escHtmlJs(e.empName) + '</td>' +
+      '<td>' + divTeam(e) + '</td>' +
+      '<td>' + dutyBadge(e.repDutyCode) + '</td>' +
+      '<td>' + growthPill(e.salesGrowthPct) + '</td>' +
+      '<td class="num">' + fmtYen(e.before.avgPerDuty) + '</td>' +
+      '<td class="num">' + fmtYen(e.after.avgPerDuty) + '</td>' +
+      '<td class="num">' + fmtPct(e.laborHoursGrowthPct) + '</td>' +
       '</tr>';
   });
   document.getElementById('all-emp-tbody').innerHTML = html;
@@ -701,14 +926,30 @@ function populateDatalist(employees) {
   document.getElementById('emp-datalist').innerHTML = html;
 }
 
+// 初回は骨組み表示、2回目以降（条件を変えて検索）は今の表示を薄くして上に読み込みバーを出す。
+// 同じ条件の結果を覚えていれば一瞬で切り替わる。
+let overviewReqSeq = 0;
 function loadOverview() {
-  document.getElementById('loading').style.display = '';
-  fetchJsonOrThrow('/api/fare-revision/overview?' + buildQueryString())
+  const seq = ++overviewReqSeq;
+  const url = '/api/fare-revision/overview?' + buildQueryString();
+  const viewEl = document.getElementById('view-overview');
+  const errEl = document.getElementById('load-error');
+  errEl.style.display = 'none';
+  const cached = isCached(url);
+  if (!cached) {
+    setSearchBusy(true);
+    if (overviewData) viewEl.classList.add('frv-refreshing');
+    else document.getElementById('loading').style.display = '';
+  }
+  fetchJsonCached(url)
     .then(function(data) {
+      if (seq !== overviewReqSeq) return; // 読み込み中にもう一度検索された
+      setSearchBusy(false);
+      viewEl.classList.remove('frv-refreshing');
       overviewData = data;
       currentPeriods = data.periods;
       document.getElementById('loading').style.display = 'none';
-      document.getElementById('view-overview').style.display = document.getElementById('btn-view-overview').classList.contains('active') ? '' : 'none';
+      viewEl.style.display = document.getElementById('btn-view-overview').classList.contains('active') ? '' : 'none';
       updatePeriodHeaders(data.periods);
       renderPeriodNote(data.periods);
       renderKpiRow(data);
@@ -720,11 +961,16 @@ function loadOverview() {
       renderAllEmployeesTable();
       renderCoverageNote(data.dataCoverage);
       populateDatalist(data.employees);
+      // 「本分析結果」タブを開いたときに待たずに済むよう、裏で先読みしておく
+      if (currentOverviewSub !== 'honbun') setTimeout(function() { fetchJsonCached(honbunUrl()).catch(function() {}); }, 300);
     })
     .catch(function(err) {
-      const el = document.getElementById('loading');
-      el.style.display = '';
-      el.textContent = String((err && err.message) || err);
+      if (seq !== overviewReqSeq) return;
+      setSearchBusy(false);
+      viewEl.classList.remove('frv-refreshing');
+      document.getElementById('loading').style.display = 'none';
+      errEl.textContent = String((err && err.message) || err);
+      errEl.style.display = '';
     });
 }
 
@@ -737,11 +983,27 @@ function onIndividualSearchInput() {
   }
 }
 
+function employeeUrl(empId, wageCategory) {
+  const params = new URLSearchParams(buildQueryString());
+  if (wageCategory) params.set('wageCategory', wageCategory);
+  return '/api/fare-revision/employee/' + empId + '?' + params.toString();
+}
+
+// 一覧の行にマウスを乗せたら、その人のデータを裏で先読みしておく（クリック時に待たずに表示できる）
+let prefetchTimer = null;
+function prefetchEmployee(empId, wageCategory) {
+  clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(function() {
+    fetchJsonCached(employeeUrl(empId, wageCategory || null)).catch(function() {});
+  }, 180);
+}
+
 function selectEmployee(empId, empName, wageCategory) {
   currentEmpId = empId;
   currentEmpWageCategory = wageCategory || null;
   switchView('individual');
   document.getElementById('individual-search').value = empName;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
   loadEmployee(empId, currentEmpWageCategory);
 }
 
@@ -754,19 +1016,17 @@ function laborHoursSourceLabel(s) {
 function renderEmployeeKpi(cmp) {
   const beforeLabel = cmp.before.range.label;
   const afterLabel = cmp.after.range.label;
+  const catTone = { above: 'ok', met: 'warn', below: 'bad' }[cmp.achievementCategory] || 'muted';
   const items = [
-    { label: '1日あたり売上の伸び', val: fmtPct(cmp.salesGrowthPct), color: pctColor(cmp.salesGrowthPct) },
-    { label: '判定', val: CATEGORY_LABELS[cmp.achievementCategory] || cmp.achievementCategory, color: '#1a3a5c' },
-    { label: '1時間あたり売上の伸び', val: fmtPct(cmp.hourlyRateGrowthPct), color: '#1a3a5c' },
-    { label: '1乗務あたり労働時間の伸び', val: fmtPct(cmp.laborHoursGrowthPct), color: '#1a3a5c' },
-    { label: '平均の1日の売上（' + beforeLabel + '→' + afterLabel + '）', val: fmtYen(cmp.before.avgPerDuty) + ' → ' + fmtYen(cmp.after.avgPerDuty), color: '#1a3a5c' },
-    { label: '平均の帰る時刻（' + beforeLabel + '→' + afterLabel + '）', val: (cmp.before.avgReturnTime ?? '—') + ' → ' + (cmp.after.avgReturnTime ?? '—'), color: '#1a3a5c' },
+    { label: '1日あたり売上の伸び', val: fmtPct(cmp.salesGrowthPct), tone: growthTone(cmp.salesGrowthPct) === 'none' ? 'muted' : growthTone(cmp.salesGrowthPct) },
+    { label: '判定', val: CATEGORY_LABELS[cmp.achievementCategory] || cmp.achievementCategory, tone: catTone },
+    { label: '1時間あたり売上の伸び', val: fmtPct(cmp.hourlyRateGrowthPct), tone: 'main' },
+    { label: '1乗務あたり労働時間の伸び', val: fmtPct(cmp.laborHoursGrowthPct), tone: 'main' },
+    { label: '平均の1日の売上（' + beforeLabel + '→' + afterLabel + '）', val: fmtYen(cmp.before.avgPerDuty) + ' → ' + fmtYen(cmp.after.avgPerDuty), tone: 'main' },
+    { label: '平均の帰る時刻（' + beforeLabel + '→' + afterLabel + '）', val: (cmp.before.avgReturnTime ?? '—') + ' → ' + (cmp.after.avgReturnTime ?? '—'), tone: 'main' },
   ];
-  let html = '';
-  items.forEach(function(it) {
-    html += '<div class="frv-kpi"><div class="frv-kpi-label">' + escHtmlJs(it.label) + '</div><div class="frv-kpi-val" style="color:' + it.color + ';font-size:15px;">' + escHtmlJs(it.val) + '</div></div>';
-  });
-  document.getElementById('emp-kpi-row').innerHTML = html;
+  document.getElementById('emp-kpi-row').innerHTML = kpiCardsHtml(items, '');
+  document.querySelectorAll('#emp-kpi-row .frv-kpi-val').forEach(function(el, i) { if (i >= 4) el.style.fontSize = '16px'; });
 }
 
 function renderEmployeeChart(dailyBefore, dailyAfter, periods) {
@@ -787,11 +1047,16 @@ function renderEmployeeChart(dailyBefore, dailyAfter, periods) {
     data: {
       labels: labels,
       datasets: [
-        { label: periods.before.label, data: beforeSeries, borderColor: '#9ca3af', backgroundColor: 'transparent', spanGaps: true, tension: 0.15 },
-        { label: periods.after.label, data: afterSeries, borderColor: '#2d6a9f', backgroundColor: 'transparent', spanGaps: true, tension: 0.15 },
+        { label: periods.before.label, data: beforeSeries, borderColor: '#9ca3af', backgroundColor: 'transparent', spanGaps: true, tension: 0.25, pointRadius: 2 },
+        { label: periods.after.label, data: afterSeries, borderColor: '#0f8567', backgroundColor: 'rgba(15,133,103,0.08)', fill: true, spanGaps: true, tension: 0.25, pointRadius: 2 },
       ],
     },
-    options: { responsive: true, interaction: { mode: 'index', intersect: false } },
+    options: {
+      responsive: true,
+      animation: { duration: 350 },
+      interaction: { mode: 'index', intersect: false },
+      scales: { x: { grid: { display: false } }, y: { grid: { color: '#f1f5f9' } } },
+    },
   });
 }
 
@@ -807,9 +1072,9 @@ function renderEmployeeReasoning(reasoning) {
 function renderEmployeeDaily(dailyBefore, dailyAfter, periods) {
   let html = '';
   function row(r, periodLabel) {
-    return '<tr><td>' + escHtmlJs(periodLabel) + '</td><td>' + r.date + '</td><td>' + fmtYen(r.amount) + '</td>' +
-      '<td>' + (r.laborHoursResolved !== null ? r.laborHoursResolved + '時間' : '—') + '</td>' +
-      '<td>' + laborHoursSourceLabel(r.laborHoursSource) + '</td><td>' + (r.returnTime ?? '—') + '</td></tr>';
+    return '<tr><td>' + escHtmlJs(periodLabel) + '</td><td class="num">' + r.date + '</td><td class="num">' + fmtYen(r.amount) + '</td>' +
+      '<td class="num">' + (r.laborHoursResolved !== null ? r.laborHoursResolved + '時間' : '—') + '</td>' +
+      '<td>' + laborHoursSourceLabel(r.laborHoursSource) + '</td><td class="num">' + (r.returnTime ?? '—') + '</td></tr>';
   }
   dailyAfter.slice().reverse().forEach(function(r) { html += row(r, periods.after.label); });
   dailyBefore.slice().reverse().forEach(function(r) { html += row(r, periods.before.label); });
@@ -817,25 +1082,44 @@ function renderEmployeeDaily(dailyBefore, dailyAfter, periods) {
 }
 
 function loadEmployee(empId, wageCategory) {
-  document.getElementById('individual-empty').style.display = 'none';
-  document.getElementById('individual-content').style.display = 'none';
-  const params = new URLSearchParams(buildQueryString());
-  if (wageCategory) params.set('wageCategory', wageCategory);
-  fetchJsonOrThrow('/api/fare-revision/employee/' + empId + '?' + params.toString())
+  const url = employeeUrl(empId, wageCategory);
+  const emptyEl = document.getElementById('individual-empty');
+  const loadingEl = document.getElementById('individual-loading');
+  const contentEl = document.getElementById('individual-content');
+  emptyEl.style.display = 'none';
+  if (!isCached(url)) {
+    contentEl.style.display = 'none';
+    loadingEl.style.display = '';
+  }
+  fetchJsonCached(url)
     .then(function(data) {
-      if (data.error) { document.getElementById('individual-empty').textContent = data.error; document.getElementById('individual-empty').style.display = ''; return; }
-      document.getElementById('individual-content').style.display = '';
+      if (empId !== currentEmpId) return; // 読み込み中に別の人が選ばれた
+      loadingEl.style.display = 'none';
+      if (data.error) { contentEl.style.display = 'none'; emptyEl.textContent = data.error; emptyEl.style.display = ''; return; }
+      contentEl.style.display = '';
+      contentEl.classList.remove('frv-fade'); void contentEl.offsetWidth; contentEl.classList.add('frv-fade');
       renderEmployeeKpi(data.comparison);
       renderEmployeeChart(data.dailyBefore, data.dailyAfter, data.periods);
       renderEmployeeReasoning(data.comparison.reasoning);
       renderEmployeeDaily(data.dailyBefore, data.dailyAfter, data.periods);
     })
     .catch(function(err) {
-      const el = document.getElementById('individual-empty');
-      el.textContent = String((err && err.message) || err);
-      el.style.display = '';
+      loadingEl.style.display = 'none';
+      contentEl.style.display = 'none';
+      emptyEl.textContent = String((err && err.message) || err);
+      emptyEl.style.display = '';
     });
 }
+
+// 条件パネルを触ったら「条件が変わりました」を出す。日付欄でEnterを押したら検索。
+(function() {
+  const card = document.getElementById('filter-card');
+  card.addEventListener('change', function() { setDirty(true); });
+  card.addEventListener('input', function(ev) { if (ev.target && ev.target.type === 'number') setDirty(true); });
+  card.addEventListener('keydown', function(ev) {
+    if (ev.key === 'Enter' && ev.target && ev.target.tagName === 'INPUT') { ev.preventDefault(); applyFilters(); }
+  });
+})();
 
 populateYoyYearOptions();
 onCompareModeChange();
