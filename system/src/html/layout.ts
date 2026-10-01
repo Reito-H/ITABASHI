@@ -46,11 +46,11 @@ export function layout(title: string, content: string, activePage: string = '', 
   <title>${escHtml(title)}</title>
   <style>
     :root {
-      --color-primary: #232a6b; --color-primary-dark: #171c4d; --color-primary-hover: #2f3888;
-      --color-action: #5666ff; --color-action-soft: #ecefff;
+      --color-primary: #17495f; --color-primary-dark: #0d2e3d; --color-primary-hover: #1f5a73;
+      --color-action: #0f8567; --color-action-soft: #e3f7f0;
       --color-accent: #f4a621; --color-danger: #dc2626; --color-danger-bg: #fef2f2; --color-danger-border: #fecaca;
       --color-success: #166534; --color-success-bg: #f0fdf4; --color-warning: #d97706; --color-warning-bg: #fffbeb;
-      --color-text: #141d2c; --color-text-muted: #566178; --color-border: #e4eaf5; --color-bg: #f5f8fd;
+      --color-text: #141d2c; --color-text-muted: #566178; --color-border: #dcefe7; --color-bg: #f3fbf8;
       --radius-sm: 5px; --radius-md: 8px; --radius-lg: 12px;
       --font-xs: 11px; --font-sm: 12px; --font-base: 14px; --font-lg: 16px;
     }
@@ -92,6 +92,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   const portalItems: Array<{ href: string; label: string; id: string; permKey: string }> = [
     { href: `${ADMIN_PATH}/settings/study-sessions`, label: '板橋ページ',   id: 'office-page',       permKey: 'settings.study-sessions settings.office-opinions settings.hiyari settings.surveys settings.daihon' },
     { href: `${ADMIN_PATH}/attendance-board`,        label: '出勤者ボード', id: 'attendance-board',  permKey: 'crew-shift' },
+    { href: `${ADMIN_PATH}/personal-shift`,          label: '個人別シフト', id: 'personal-shift',    permKey: 'crew-shift' },
     { href: `${ADMIN_PATH}/benri`,                   label: '便利',         id: 'benri',              permKey: 'benri' },
     { href: `${ADMIN_PATH}/shuttle`,                 label: 'シャトルバス', id: 'shuttle',            permKey: 'shuttle' },
   ];
@@ -110,15 +111,15 @@ export function layout(title: string, content: string, activePage: string = '', 
        新規実装・改修時はここを参照する。既存の直書き色は無理に置換しない。
        ブレークポイントはCSS変数に出来ないため運用ルールとして明記: モバイル<768px / タブレット768-1024px / PC>1024px */
     :root {
-      /* 明るい近未来パレット v3（2026-09〜 デザイン刷新 Phase 1）
-         主色は旧ネイビー #1a3a5c を深いインディゴへ。対話的な操作（主CTA・現在地・
-         アクティブ表示）は --color-action（アイリス）を1画面に1つだけ使う。
-         --color-accent（アンバー＝星）は強調の差し色。直書き色は段階的にこれらへ寄せる。 */
-      --color-primary: #232a6b;
-      --color-primary-dark: #171c4d;
-      --color-primary-hover: #2f3888;
-      --color-action: #5666ff;
-      --color-action-soft: #ecefff;
+      /* 明るい近未来パレット v4（2026-09〜 デザイン刷新 Phase 2：ネオミント×ディープティール）
+         主色（サイドバー等）は旧インディゴ #232a6b からディープティール #17495f へ。対話的な操作
+         （主CTA・現在地・アクティブ表示）は --color-action（ミントグリーン）を1画面に1つだけ使う。
+         --color-accent（アンバー＝ホシコンの「星」）は変更せず、強調の差し色として存置。 */
+      --color-primary: #17495f;
+      --color-primary-dark: #0d2e3d;
+      --color-primary-hover: #1f5a73;
+      --color-action: #0f8567;
+      --color-action-soft: #e3f7f0;
       --color-accent: #f4a621;
       --color-danger: #dc2626;
       --color-danger-bg: #fef2f2;
@@ -129,8 +130,8 @@ export function layout(title: string, content: string, activePage: string = '', 
       --color-warning-bg: #fffbeb;
       --color-text: #141d2c;
       --color-text-muted: #566178;
-      --color-border: #e4eaf5;
-      --color-bg: #f5f8fd;
+      --color-border: #dcefe7;
+      --color-bg: #f3fbf8;
       --radius-sm: 5px;
       --radius-md: 8px;
       --radius-lg: 12px;
@@ -190,9 +191,9 @@ export function layout(title: string, content: string, activePage: string = '', 
     .nav-item:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.2); color: white; }
     .nav-item:active { transform: scale(0.98); }
     .nav-item.active {
-      background: linear-gradient(135deg, rgba(86,102,255,0.42), rgba(86,102,255,0.18));
-      border-color: rgba(86,102,255,0.55); color: white;
-      box-shadow: 0 6px 16px rgba(86,102,255,0.28), inset 0 1px 0 rgba(255,255,255,0.15);
+      background: linear-gradient(135deg, rgba(15,133,103,0.42), rgba(15,133,103,0.18));
+      border-color: rgba(15,133,103,0.55); color: white;
+      box-shadow: 0 6px 16px rgba(15,133,103,0.28), inset 0 1px 0 rgba(255,255,255,0.15);
     }
     .nav-item.nav-item-highlight { color: var(--color-accent); background: rgba(242,193,78,0.1); border-color: rgba(242,193,78,0.22); }
     .nav-item.nav-item-highlight:hover { background: rgba(242,193,78,0.2); border-color: rgba(242,193,78,0.34); color: var(--color-accent); }
@@ -220,7 +221,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     .nav-portal-trigger:hover .nav-portal-caret { transform: translateX(2px); opacity: 1; }
     .nav-portal-flyout {
       position: fixed; min-width: 190px; padding: 8px; border-radius: 16px;
-      background: rgba(35,42,107,0.75);
+      background: rgba(23,73,95,0.75);
       backdrop-filter: blur(22px) saturate(180%); -webkit-backdrop-filter: blur(22px) saturate(180%);
       border: 1px solid rgba(255,255,255,0.14);
       box-shadow: 0 20px 50px rgba(10,15,40,0.45);
@@ -243,7 +244,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     }
     .nav-portal-flyout.open .nav-portal-item { opacity: 1; transform: translateX(0); }
     .nav-portal-item:hover { background: rgba(255,255,255,0.16); color: #fff; }
-    .nav-portal-item.active { background: rgba(86,102,255,0.4); color: #fff; }
+    .nav-portal-item.active { background: rgba(15,133,103,0.4); color: #fff; }
     @media (max-width: 768px) {
       .nav-portal-flyout { transform-origin: top center; transform: scaleY(0.5) translateY(-8px); }
       .nav-portal-flyout.open { transform: scaleY(1) translateY(0); }
@@ -823,7 +824,7 @@ export function loginSelectPage(): string {
     body {
       font-family: 'Hiragino Sans', 'Meiryo', -apple-system, sans-serif;
       min-height: 100vh;
-      background: linear-gradient(155deg, #3b40b4 0%, #262a80 54%, #1b1f5c 100%);
+      background: linear-gradient(155deg, #1f5a73 0%, #17495f 54%, #0d2e3d 100%);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -865,10 +866,10 @@ export function loginSelectPage(): string {
       flex-shrink: 0;
       width: 44px; height: 44px;
       border-radius: 10px;
-      background: #ecefff;
+      background: #e3f7f0;
       display: flex; align-items: center; justify-content: center;
     }
-    .choice-title { font-size: 15px; font-weight: 700; color: #232a6b; }
+    .choice-title { font-size: 15px; font-weight: 700; color: #17495f; }
     .choice-sub { font-size: 11.5px; color: #6b7593; margin-top: 2px; }
     .choice-arrow { margin-left: auto; color: #94a0b6; font-size: 18px; }
   </style>
@@ -881,7 +882,7 @@ export function loginSelectPage(): string {
     <a class="choice" href="${ADMIN_PATH}/login?mode=pc">
       <div class="choice-row">
         <div class="choice-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="13" rx="1.5" stroke="#232a6b" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="#232a6b" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="2" y="4" width="20" height="13" rx="1.5" stroke="#17495f" stroke-width="1.8"/><path d="M8 21h8M12 17v4" stroke="#17495f" stroke-width="1.8" stroke-linecap="round"/></svg>
         </div>
         <div>
           <div class="choice-title">PCでログイン</div>
@@ -894,7 +895,7 @@ export function loginSelectPage(): string {
     <a class="choice" href="${ADMIN_PATH}/login?mode=sp">
       <div class="choice-row">
         <div class="choice-icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="2" width="12" height="20" rx="2" stroke="#232a6b" stroke-width="1.8"/><path d="M11 19h2" stroke="#232a6b" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="6" y="2" width="12" height="20" rx="2" stroke="#17495f" stroke-width="1.8"/><path d="M11 19h2" stroke="#17495f" stroke-width="1.8" stroke-linecap="round"/></svg>
         </div>
         <div>
           <div class="choice-title">スマホでログイン</div>
@@ -965,7 +966,7 @@ function loginPagePc(error: string = '', csrfToken: string = ''): string {
     .brand {
       display: flex; align-items: center; gap: 8px;
       font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
-      color: #232a6b; margin-bottom: 16px;
+      color: #17495f; margin-bottom: 16px;
     }
     .brand .star { color: #f4a621; font-size: 14px; line-height: 1; }
     .headline { font-size: 20px; font-weight: 800; color: #141d2c; letter-spacing: 0.02em; margin-bottom: 3px; }
@@ -974,12 +975,12 @@ function loginPagePc(error: string = '', csrfToken: string = ''): string {
     .field { margin-bottom: 14px; }
     .field label { display:block; font-size:11px; font-weight:700; color:#566178; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:6px; }
     .field input { width:100%; border:1px solid #ccd6ea; border-radius:9px; padding:11px 13px; font-size:14px; color:#141d2c; outline:none; transition:border-color .15s, box-shadow .15s; font-family:inherit; background:#fff; }
-    .field input:focus { border-color:#5666ff; box-shadow:0 0 0 3px rgba(86,102,255,0.18); }
-    .btn { width:100%; background:#5666ff; color:#fff; border:none; border-radius:9px; padding:12px; font-size:14px; font-weight:700; letter-spacing:0.06em; cursor:pointer; margin-top:4px; box-shadow:0 10px 24px rgba(86,102,255,0.34); transition:background .15s, transform .05s; font-family:inherit; }
-    .btn:hover { background:#4553e6; }
+    .field input:focus { border-color:#0f8567; box-shadow:0 0 0 3px rgba(15,133,103,0.18); }
+    .btn { width:100%; background:#0f8567; color:#fff; border:none; border-radius:9px; padding:12px; font-size:14px; font-weight:700; letter-spacing:0.06em; cursor:pointer; margin-top:4px; box-shadow:0 10px 24px rgba(15,133,103,0.34); transition:background .15s, transform .05s; font-family:inherit; }
+    .btn:hover { background:#0c6b53; }
     .btn:active { transform: translateY(1px); }
     .switch-link { display:block; text-align:center; margin-top:16px; font-size:11px; color:#566178; text-decoration:none; }
-    .switch-link:hover { text-decoration:underline; color:#232a6b; }
+    .switch-link:hover { text-decoration:underline; color:#17495f; }
     @media (max-width: 560px) {
       body { overflow: auto; }
       .bg::after { background: linear-gradient(0deg, rgba(10,15,30,0.52) 0, rgba(10,15,30,0.08) 44%, transparent 66%); }
@@ -1071,7 +1072,7 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
     }
     .brand-line {
       font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
-      color: #232a6b; margin-bottom: 10px;
+      color: #17495f; margin-bottom: 10px;
     }
     .brand-line .star { color: #f4a621; }
     .card-title {
@@ -1119,8 +1120,8 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
       min-height: 52px;
     }
     .field input:focus {
-      border-color: #5666ff;
-      box-shadow: 0 0 0 3px rgba(86,102,255,0.18);
+      border-color: #0f8567;
+      box-shadow: 0 0 0 3px rgba(15,133,103,0.18);
     }
     .pw-wrap { position: relative; }
     .pw-wrap input { padding-right: 52px; }
@@ -1143,7 +1144,7 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
     .pw-toggle svg { pointer-events: none; }
     .btn {
       width: 100%;
-      background: #5666ff;
+      background: #0f8567;
       color: #ffffff;
       border: none;
       border-radius: 13px;
@@ -1154,13 +1155,13 @@ function loginPageSp(error: string = '', csrfToken: string = ''): string {
       cursor: pointer;
       margin-top: 6px;
       min-height: 52px;
-      box-shadow: 0 10px 24px rgba(86,102,255,0.32);
+      box-shadow: 0 10px 24px rgba(15,133,103,0.32);
       transition: background 0.15s;
       font-family: inherit;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
     }
-    .btn:active { background: #4553e6; }
+    .btn:active { background: #0c6b53; }
     .switch-link {
       display: block;
       text-align: center;

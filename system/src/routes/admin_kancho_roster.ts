@@ -1,10 +1,12 @@
-// 班長関連 設定ハブ ＋ 班長リスト
+// 班長リスト
 // 班長シフト表の「枠」（役割・班色・並び順）の編集は班長シフト表本体（⚙️→枠編集）に統合済み
 // （旧・枠設定ページ /settings/kancho-slots は廃止。班長シフト表の名前タップから割当・入れ替えを行う運用は変更なし）。
 // 「班長リスト」は社員管理の「班長として登録」(employees.is_hanchyo)の一覧＋社員番号
 // （希望休フォームの本人確認に使用）と、今どの枠を担当しているかを確認する画面。
 // 唯一の編集操作は「班長登録の解除」（is_hanchyo=0に戻すだけ。kancho_membersには手を付けない）。
-// ページ: /settings/kancho（ハブ） /settings/kancho-roster（班長リスト）
+// 旧・班長関連ハブページ(/settings/kancho)は廃止し、このページ・希望休フォーム設定・ロジック仕様への
+// 導線は班長シフト表本体（⚙️メニュー）に統合した。
+// ページ: /settings/kancho-roster（班長リスト）
 // API   : /api/kancho-roster（GET一覧・POST /unregisterで解除）
 import { Hono } from 'hono';
 import type { Env } from '../auth';
@@ -26,31 +28,6 @@ async function adminName(c: { env: Env; get: (k: 'adminId') => number }): Promis
   return { id, name: row?.username ?? `id:${id}` };
 }
 
-// ===== ハブページ =====
-app.get('/settings/kancho', (c) => {
-  const cardStyle = 'display:block;background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px 20px;text-decoration:none;color:inherit;box-shadow:0 1px 4px rgba(0,0,0,0.06);';
-  const html = `
-    <div class="no-print" style="margin-bottom:20px;">
-      <a href="${ADMIN_PATH}/settings" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 設定に戻る</a>
-      <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;margin-top:10px;">班長関連</h2>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;max-width:820px;">
-      <a href="${ADMIN_PATH}/settings/kancho-roster" style="${cardStyle}">
-        <div style="font-weight:700;color:#1e3a5f;margin-bottom:4px;">班長リスト</div>
-        <div style="font-size:12px;color:#6b7280;">社員管理で班長登録した人の一覧・社員番号・今どの枠を担当しているか</div>
-      </a>
-      <a href="${ADMIN_PATH}/settings/kancho-wish" style="${cardStyle}">
-        <div style="font-weight:700;color:#1e3a5f;margin-bottom:4px;">希望休フォーム</div>
-        <div style="font-size:12px;color:#6b7280;">募集期間・対象月度・送信権限・提出状況の確認</div>
-      </a>
-      <a href="${ADMIN_PATH}/settings/kancho-logic" style="${cardStyle}">
-        <div style="font-weight:700;color:#1e3a5f;margin-bottom:4px;">ロジック仕様</div>
-        <div style="font-size:12px;color:#6b7280;">データモデル・自動伝播・記号ルール・警告チェックなどの内部仕様（閲覧専用）</div>
-      </a>
-    </div>`;
-  return c.html(layout('班長関連', html, 'settings'));
-});
-
 // ===== 班長リストページ =====
 // 一覧・割当状況は閲覧のみ。唯一の編集操作は「班長登録の解除」(employees.is_hanchyo=0)。
 // 枠(kancho_members)の作成・紐付けは行わない（過去の重複行事故の反省点、変更なし）
@@ -58,7 +35,7 @@ app.get('/settings/kancho-roster', async (c) => {
   const editable = await canEditRoster(c);
   const html = `
     <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-      <a href="${ADMIN_PATH}/settings/kancho" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 班長関連に戻る</a>
+      <a href="${ADMIN_PATH}/kancho-shift" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 班長シフト表に戻る</a>
       <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">班長リスト</h2>
     </div>
     <div style="font-size:12px;color:#9ca3af;margin-bottom:12px;max-width:860px;line-height:1.7;">

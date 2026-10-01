@@ -32,7 +32,7 @@ app.get('/settings/kancho-wish', async (c) => {
 
   const html = `
     <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-      <a href="${ADMIN_PATH}/settings/kancho" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 班長関連に戻る</a>
+      <a href="${ADMIN_PATH}/kancho-shift" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 班長シフト表に戻る</a>
       <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">希望休フォーム</h2>
     </div>
 

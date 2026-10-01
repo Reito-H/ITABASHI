@@ -75,7 +75,6 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
   [/^\/settings\/kancho-logic/,         'settings.kancho-logic'],
-  [/^\/settings\/kancho$/,              'settings.kancho'],
   [/^\/settings/,                       'settings'],
   // 設定配下のAPI
   [/^\/api\/accounts/,                  'settings.accounts'],
@@ -131,6 +130,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/dispatch-board/,     'crew-shift'],
   [/^\/vehicle-rotation/,   'crew-shift'],
   [/^\/api\/dispatch/,      'crew-shift'],
+  [/^\/personal-shift/,      'crew-shift'],
+  [/^\/api\/personal-shift/, 'crew-shift'],
   [/^\/shift/,        'shift'],
   [/^\/newcomers/,    'newcomers'],
   [/^\/employees/,    'newcomers'],
@@ -287,7 +288,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'crew-portal', label: '個人データ参照（日別明細・売上）' },
     { key: 'tantosha',    label: '担当車表' },
     { key: 'todo',        label: 'やることリスト' },
-    { key: 'crew-shift',  label: '乗務員シフト・配車管理・夏季稼働' },
+    { key: 'crew-shift',  label: '乗務員シフト・個人別シフト・配車管理・夏季稼働' },
   ]},
 
   { label: '全アカウント共通だった機能（閲覧のON/OFF）', note: 'いずれも編集はフル権限アカウントのみ', children: [
@@ -326,7 +327,7 @@ export const PERMISSION_TREE: PermNode[] = [
       { key: 'settings.instructors',    label: '班長・指導者' },
       { key: 'settings.periods',        label: '月度設定' },
     ]},
-    { key: 'settings.kancho', label: '班長関連（ハブ）', children: [
+    { label: '班長関連', children: [
       { key: 'settings.kancho-roster', label: '班長リスト（班長登録の解除のみ編集可）' },
       { key: 'settings.kancho-wish',   label: '希望休フォーム' },
       { key: 'settings.kancho-logic',  label: '班長シフト ロジック仕様（閲覧のみ）', viewOnly: true },

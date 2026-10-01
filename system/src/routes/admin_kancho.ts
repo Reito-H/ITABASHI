@@ -5,7 +5,7 @@ import { Hono } from 'hono';
 import type { Env } from '../auth';
 import { getPeriodSettings, getPeriodRange, getShiftDisplayRange, getPeriod } from '../auth';
 import { layout } from '../html/layout';
-import { kanchoShiftPage, kanchoPrintPage, kanchoPeriodNavHtml, VACANT_SLOT_LABEL, type KanchoMember, type KanchoShiftType, type KanchoMemo, type KanchoCell, type KanchoWish, type KanchoForbiddenPair } from '../html/kancho_shift';
+import { kanchoShiftPage, kanchoPrintPage, kanchoPeriodNavHtml, VACANT_SLOT_LABEL, type KanchoMember, type KanchoShiftType, type KanchoMemo, type KanchoCell, type KanchoWish, type KanchoForbiddenPair, type KanchoWishRemark } from '../html/kancho_shift';
 import { getAdminPermissions } from '../permissions';
 import { runNotification } from '../cron';
 
@@ -193,7 +193,7 @@ app.get('/kancho-shift', async (c) => {
   const { start: dispStart, end: dispEnd, dates } = getShiftDisplayRange(year, month, periodCfg);
   const { prevYear, prevMonth, nextYear, nextMonth } = adjacentPeriod(year, month);
 
-  const [members, types, shifts, memos, wishes, forbiddenPairs] = await Promise.all([
+  const [members, types, shifts, memos, wishes, forbiddenPairs, wishSettings] = await Promise.all([
     // 無効メンバーも取得（名簿管理モーダルで再有効化できるように。表への表示は画面側で絞る）
     c.env.DB.prepare(
       `SELECT m.*,
@@ -216,6 +216,8 @@ app.get('/kancho-shift', async (c) => {
        WHERE member_id_a IN (SELECT id FROM kancho_members WHERE year = ? AND month = ?)
          AND member_id_b IN (SELECT id FROM kancho_members WHERE year = ? AND month = ?)`
     ).bind(year, month, year, month).all<KanchoForbiddenPair>(),
+    c.env.DB.prepare('SELECT target_year, target_month, open_from, open_until FROM kancho_wish_settings WHERE id = 1')
+      .first<{ target_year: number; target_month: number; open_from: string | null; open_until: string | null }>(),
   ]);
 
   const shiftMap: Record<string, KanchoCell> = {};
@@ -226,11 +228,28 @@ app.get('/kancho-shift', async (c) => {
   const memberList = members.results ?? [];
   fillAdjacentShifts(memberList, dates, periodStart, periodEnd, shiftMap);
 
+  // 希望休フォームの「その他要望」をシフト表の「・希望休」欄に自動反映（表示専用のミラー）。
+  // フォームの対象月度がこのシフト表の月度と一致する場合のみ対象にする
+  let wishRemarks: KanchoWishRemark[] = [];
+  if (wishSettings && wishSettings.target_year === year && wishSettings.target_month === month) {
+    const remarkRows = await c.env.DB.prepare(
+      `SELECT r.member_id, m.name, r.content FROM kancho_wish_remarks r
+       JOIN kancho_members m ON m.id = r.member_id
+       WHERE m.year = ? AND m.month = ?`
+    ).bind(year, month).all<KanchoWishRemark>();
+    wishRemarks = remarkRows.results ?? [];
+  }
+  const todayStr = new Date().toISOString().split('T')[0];
+  const wishFormOpen = !!wishSettings && wishSettings.target_year === year && wishSettings.target_month === month
+    && (!wishSettings.open_from || todayStr >= wishSettings.open_from)
+    && (!wishSettings.open_until || todayStr <= wishSettings.open_until);
+
   const editable = await canEdit(c);
   const headerNav = kanchoPeriodNavHtml(year, month, periodStart, periodEnd);
   const html = kanchoShiftPage(
     memberList, types.results ?? [], shiftMap, memos.results ?? [],
-    dates, year, month, periodStart, periodEnd, editable, wishes.results ?? [], forbiddenPairs.results ?? []
+    dates, year, month, periodStart, periodEnd, editable, wishes.results ?? [], forbiddenPairs.results ?? [],
+    wishRemarks, wishFormOpen
   );
   return c.html(layout('班長シフト', html, 'kancho-shift', headerNav));
 });

@@ -12,7 +12,7 @@ const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 app.get('/settings/kancho-logic', (c) => {
   const html = `
 <div class="no-print" style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-  <a href="${ADMIN_PATH}/settings/kancho" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 班長関連に戻る</a>
+  <a href="${ADMIN_PATH}/kancho-shift" style="color:#6b7280;font-size:13px;text-decoration:none;padding:6px 12px;border:1px solid #d1d5db;border-radius:6px;background:white;">← 班長シフト表に戻る</a>
   <h2 style="font-size:17px;font-weight:700;color:#1e3a5f;">班長シフト ロジック仕様</h2>
 </div>
 <style>
@@ -221,7 +221,6 @@ app.get('/settings/kancho-logic', (c) => {
     <tr><th>キー</th><th>対象パス</th><th>用途</th></tr>
     <tr><td>kancho-shift</td><td>/kancho-shift（本体・印刷・個人別確認含む）、/api/kancho/*</td><td>班長シフト表の閲覧全般</td></tr>
     <tr><td>kancho-shift.edit</td><td>同上の非GET</td><td>シフト保存・名簿/記号編集・希望休登録など</td></tr>
-    <tr><td>settings.kancho</td><td>/settings/kancho（ハブページ）</td><td>班長関連メニューのトップ</td></tr>
     <tr><td>settings.kancho-roster／.edit</td><td>/settings/kancho-roster, /api/kancho-roster*</td><td>班長リスト閲覧／班長登録解除の編集</td></tr>
     <tr><td>settings.kancho-wish／.edit</td><td>/settings/kancho-wish, /api/kancho-wish-settings*</td><td>希望休フォーム設定閲覧／編集</td></tr>
     <tr><td>settings.kancho-logic</td><td>/settings/kancho-logic</td><td>このロジック仕様書ページの閲覧（編集操作なしのため.editキーは無い）</td></tr>
@@ -240,6 +239,7 @@ app.get('/settings/kancho-logic', (c) => {
     <li><b>2026-08-08（追加）</b>: ロジック仕様書を作成し設定ページから閲覧可能に。印刷ページに前月度・次月度の枠（前後3日）の参考表示を追加。斜め直・終業班長の運用ルール、枠とシフトの結合原則をユーザーヒアリングに基づき文書化</li>
     <li><b>2026-08-08（さらに追加）</b>: 斜め直当日の12:00〜14:00カバレッジ警告を新規実装。課の判定を月固定のteam_colorから日別の実効班色（cell_color優先）に変更し、1課の班長が臨時で2課を手伝う等のクロス課対応を反映できるようにした。印刷ボタンをツールバーから⚙️歯車メニュー内に移動</li>
     <li><b>2026-09-17</b>: ①②表（s1/s2区分）を全廃止（ユーザー明示）。班長シフト表・印刷ページ・LIFF閲覧ページの①②表表示、枠編集/記号管理モーダルの「表」項目、開閉トグルを削除し、main表のみに一本化。既存DBのkancho_members.sectionにs1/s2の行が残っていても以後は表示・編集経路がない（必要なら個別にmainへ再割当てするか無効化する）</li>
+    <li><b>2026-09-25</b>: 旧・班長関連ハブページ(/settings/kancho)を廃止し、班長リスト・希望休フォーム設定・ロジック仕様への導線を班長シフト表本体の⚙️メニューに統合。担当者変更モーダルの「表示名」欄は候補者選択と連動した自動入力をやめ常に手入力に変更。希望休フォームで班長本人が入力した「その他要望」を、対象月度が一致する場合にシフト表の「・希望休」欄へ表示専用で自動反映（元データはkancho_wish_remarksのまま）。シフト表ヘッダーに、受付期間中のみ表示される本人用「希望休を入力する」ボタン（kancho-shift閲覧権限があれば誰でも利用可）を追加。希望休フォーム側の社員番号入力欄のHTMLタグ閉じ忘れ（次へボタンが機能しなくなる不具合）を修正しデザインも刷新</li>
   </ul>
 
   <h3 id="kl-10">10. 実装上の注意点</h3>

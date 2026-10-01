@@ -384,9 +384,9 @@ app.get('/', async (c) => {
     font-family:'Hiragino Sans','Meiryo',sans-serif; max-width:1160px; position:relative;
     padding:22px 22px 28px; margin:-16px -16px 0; border-radius:0 0 22px 22px;
     background:
-      radial-gradient(900px 420px at 12% -8%, rgba(86,102,255,0.12), transparent 62%),
+      radial-gradient(900px 420px at 12% -8%, rgba(15,133,103,0.12), transparent 62%),
       radial-gradient(760px 360px at 100% -6%, rgba(244,166,33,0.10), transparent 58%),
-      var(--color-bg, #f5f8fd);
+      var(--color-bg, #f3fbf8);
   }
   .hm-sec-title { font-size:14px; font-weight:700; color:#64748b; letter-spacing:.06em; margin:0 2px 10px; }
   /* ===== 今日オペレーション画面（新ホーム） ===== */
@@ -410,7 +410,7 @@ app.get('/', async (c) => {
     border:1px solid rgba(255,255,255,0.7); box-shadow:0 4px 18px rgba(20,29,44,0.05);
     transition:background .15s, border-color .15s, box-shadow .15s, transform .08s;
   }
-  .op-row:hover { background:rgba(255,255,255,0.8); border-color:rgba(86,102,255,0.35); box-shadow:0 10px 26px rgba(86,102,255,.16); transform:translateY(-1px); }
+  .op-row:hover { background:rgba(255,255,255,0.8); border-color:rgba(15,133,103,0.35); box-shadow:0 10px 26px rgba(15,133,103,.16); transform:translateY(-1px); }
   .op-row:active { transform:translateY(1px); }
   .op-label { font-size:15px; font-weight:800; color:var(--color-text, #141d2c); }
   .op-status { display:flex; flex-direction:column; gap:3px; min-width:0; }
@@ -419,11 +419,11 @@ app.get('/', async (c) => {
   .op-badge.op-good { background:#e9f7f1; color:#0f7a5a; }
   .op-badge.op-warn { background:#fdeceb; color:#c0392b; }
   .op-badge.op-crit { background:#fbe4e4; color:#c22f2f; }
-  .op-badge.op-info { background:var(--color-action-soft, #ecefff); color:var(--color-action, #4a5ae0); }
+  .op-badge.op-info { background:var(--color-action-soft, #e3f7f0); color:var(--color-action, #0f8567); }
   .op-badge.op-muted { background:#f1f5f9; color:#64748b; }
   .op-sub { font-size:12px; color:#8a96a8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .op-go { font-size:13px; font-weight:800; color:var(--color-action, #5666ff); white-space:nowrap; border:1px solid var(--color-border, #e4eaf5); border-radius:8px; padding:6px 11px; }
-  .op-go-primary { background:var(--color-action, #5666ff); color:#fff; border-color:var(--color-action, #5666ff); box-shadow:0 0 0 4px rgba(86,102,255,.20); }
+  .op-go { font-size:13px; font-weight:800; color:var(--color-action, #0f8567); white-space:nowrap; border:1px solid var(--color-border, #dcefe7); border-radius:8px; padding:6px 11px; }
+  .op-go-primary { background:var(--color-action, #0f8567); color:#fff; border-color:var(--color-action, #0f8567); box-shadow:0 0 0 4px rgba(15,133,103,.20); }
   /* シャトルバス運行ブロック */
   .shuttle-block {
     display:block; padding:14px 18px 12px; margin-bottom:26px; border-radius:16px; text-decoration:none; color:var(--color-text, #141d2c);
@@ -431,11 +431,11 @@ app.get('/', async (c) => {
     border:1px solid rgba(255,255,255,0.7); box-shadow:0 4px 18px rgba(20,29,44,0.05);
     transition:background .15s, border-color .15s, box-shadow .15s;
   }
-  .shuttle-block:hover { background:rgba(255,255,255,0.8); border-color:rgba(86,102,255,0.35); box-shadow:0 10px 26px rgba(86,102,255,.16); }
+  .shuttle-block:hover { background:rgba(255,255,255,0.8); border-color:rgba(15,133,103,0.35); box-shadow:0 10px 26px rgba(15,133,103,.16); }
   .sb-head { display:flex; justify-content:space-between; font-size:13px; font-weight:700; color:#475569; margin-bottom:14px; }
   .sb-line { position:relative; height:4px; background:#e4ecf8; border-radius:999px; margin:0 6px 8px; }
   .sb-stop { position:absolute; top:50%; width:8px; height:8px; border-radius:50%; background:#ccd6ea; transform:translate(-50%,-50%); }
-  .sb-bus { position:absolute; top:50%; width:13px; height:13px; border-radius:50%; background:var(--color-action, #5666ff); border:2px solid #fff; transform:translate(-50%,-50%); box-shadow:0 0 0 4px rgba(86,102,255,.30); transition:left .4s ease; }
+  .sb-bus { position:absolute; top:50%; width:13px; height:13px; border-radius:50%; background:var(--color-action, #0f8567); border:2px solid #fff; transform:translate(-50%,-50%); box-shadow:0 0 0 4px rgba(15,133,103,.30); transition:left .4s ease; }
   .sb-stops { display:flex; justify-content:space-between; font-size:11px; color:#94a3b8; margin:0 2px 12px; }
   .sb-recent { display:grid; gap:4px; }
   .sb-recent div { display:flex; justify-content:space-between; gap:12px; font-size:12px; color:#64748b; }
@@ -445,10 +445,10 @@ app.get('/', async (c) => {
   .today-launch a {
     font-size:12px; font-weight:700; color:#475569; text-decoration:none; text-align:center; padding:11px 10px; border-radius:12px;
     background:rgba(255,255,255,0.55); backdrop-filter:blur(16px) saturate(150%); -webkit-backdrop-filter:blur(16px) saturate(150%);
-    border:1px solid rgba(255,255,255,0.65); border-left:3px solid var(--color-action, #5666ff);
+    border:1px solid rgba(255,255,255,0.65); border-left:3px solid var(--color-action, #0f8567);
     transition:background .15s, color .15s, transform .08s;
   }
-  .today-launch a:hover { background:rgba(236,239,255,0.85); color:var(--color-action, #5666ff); transform:translateY(-1px); }
+  .today-launch a:hover { background:rgba(227,247,240,0.85); color:var(--color-action, #0f8567); transform:translateY(-1px); }
   @media (max-width: 900px) { .today-launch { grid-template-columns:repeat(3,1fr); } }
   @media (max-width: 560px) { .today-launch { grid-template-columns:repeat(2,1fr); } }
   /* 折りたたみ（月次の統計） */
@@ -1103,7 +1103,9 @@ app.get('/settings/shift', (c) => {
     { href: `${ADMIN}/settings/coaches`,        perm: 'settings.coaches',        title: '研修担当',     desc: 'シフト表の研修担当者（コーチ）一覧' },
     { href: `${ADMIN}/settings/instructors`,    perm: 'settings.instructors',    title: '班長・指導者', desc: 'シフト表下部の班長・指導者一覧' },
     { href: `${ADMIN}/settings/periods`,        perm: 'settings.periods',        title: '月度設定',     desc: '各月度の開始日・締め日の設定' },
-    { href: `${ADMIN}/settings/kancho`,         perm: 'settings.kancho settings.kancho-roster settings.kancho-wish settings.kancho-logic', title: '班長関連', desc: '班長リスト（社員番号・内勤）、希望休フォームの設定、ロジック仕様' },
+    { href: `${ADMIN}/settings/kancho-roster`,  perm: 'settings.kancho-roster',  title: '班長リスト',   desc: '班長として登録した人の一覧・社員番号・今どの枠を担当しているか（班長シフト表の⚙️からも開けます）' },
+    { href: `${ADMIN}/settings/kancho-wish`,    perm: 'settings.kancho-wish',    title: '希望休フォーム', desc: '募集期間・対象月度・送信権限・提出状況の確認（班長シフト表の⚙️からも開けます）' },
+    { href: `${ADMIN}/settings/kancho-logic`,   perm: 'settings.kancho-logic',   title: '班長シフト ロジック仕様', desc: 'データモデル・自動伝播・記号ルール・警告チェックなどの内部仕様（閲覧専用）' },
   ];
   const html = settingsSubHeader('シフト関連の設定') + `
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;max-width:820px;">

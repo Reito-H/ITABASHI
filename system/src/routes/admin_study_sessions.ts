@@ -220,6 +220,16 @@ app.get('/settings/study-sessions', async (c) => {
             ${ENTRY_TYPES.map((t) => `<label style="display:flex;align-items:center;gap:5px;"><input type="checkbox" class="elig-entry" value="${escHtml(t)}">${escHtml(t)}</label>`).join('')}
           </div>
           <label style="font-size:12px;color:#374151;display:flex;align-items:center;gap:6px;margin-bottom:10px;"><input type="checkbox" id="f-elig-newcomer">新人登録中の人のみ</label>
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;">課（チェックしたものが対象）</div>
+          <div id="f-elig-division" style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:10px;font-size:12px;color:#374151;">
+            ${[1, 2, 3, 4].map((d) => `<label style="display:flex;align-items:center;gap:5px;"><input type="checkbox" class="elig-division" value="${d}">${d}課</label>`).join('')}
+          </div>
+          <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;">年齢（社員名簿の生年月日から判定）</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px;">
+            <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px;"><input id="f-elig-age-min" type="number" min="0" max="99" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:5px;font-size:12px;">歳以上</label>
+            <label style="font-size:12px;color:#6b7280;display:flex;align-items:center;gap:4px;"><input id="f-elig-age-max" type="number" min="0" max="99" style="width:56px;border:1px solid #d1d5db;border-radius:6px;padding:5px;font-size:12px;">歳以下</label>
+          </div>
+          <div style="font-size:11px;color:#9ca3af;margin:-4px 0 10px;">空欄なら年齢はしぼりません。社員名簿に生年月日が登録されていない人は、年齢の条件がある場合は対象外になります。</div>
           <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px;">社員番号を指定（この番号の人のみ・任意）</div>
           <textarea id="f-elig-empnos" rows="2" placeholder="社員番号を改行・カンマ・スペース区切りで入力" style="width:100%;box-sizing:border-box;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:12px;font-family:inherit;"></textarea>
           <div style="position:relative;margin-top:6px;">
@@ -593,12 +603,16 @@ app.get('/settings/study-sessions', async (c) => {
       var sel = document.querySelector('input[name="f-elig-mode"]:checked');
       if (!sel || sel.value !== 'conditions') return { mode: 'all' };
       var entry = Array.prototype.map.call(document.querySelectorAll('.elig-entry:checked'), function(c){ return c.value; });
+      var divs = Array.prototype.map.call(document.querySelectorAll('.elig-division:checked'), function(c){ return parseInt(c.value); });
       return {
         mode: 'conditions',
         tenure_max_months: eligMonths('f-elig-max-y', 'f-elig-max-m'),
         tenure_min_months: eligMonths('f-elig-min-y', 'f-elig-min-m'),
         entry_types: entry,
         newcomers_only: document.getElementById('f-elig-newcomer').checked,
+        divisions: divs,
+        age_min: parseInt(document.getElementById('f-elig-age-min').value) || null,
+        age_max: parseInt(document.getElementById('f-elig-age-max').value) || null,
         emp_nos: eligParseEmpNos(document.getElementById('f-elig-empnos').value)
       };
     }
@@ -611,6 +625,10 @@ app.get('/settings/study-sessions', async (c) => {
       var ets = e.entry_types || [];
       Array.prototype.forEach.call(document.querySelectorAll('.elig-entry'), function(c){ c.checked = ets.indexOf(c.value) >= 0; });
       document.getElementById('f-elig-newcomer').checked = !!e.newcomers_only;
+      var divs = e.divisions || [];
+      Array.prototype.forEach.call(document.querySelectorAll('.elig-division'), function(c){ c.checked = divs.indexOf(parseInt(c.value)) >= 0; });
+      document.getElementById('f-elig-age-min').value = (e.age_min != null) ? e.age_min : '';
+      document.getElementById('f-elig-age-max').value = (e.age_max != null) ? e.age_max : '';
       document.getElementById('f-elig-empnos').value = (e.emp_nos || []).join('\\n');
       document.getElementById('f-elig-empsearch').value = '';
       document.getElementById('f-elig-empresults').style.display = 'none';
@@ -2418,9 +2436,15 @@ app.post('/api/study-sessions/:id/close', async (c) => {
 app.delete('/api/study-sessions/:id', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
   const id = parseInt(c.req.param('id'));
-  await c.env.DB.prepare('DELETE FROM study_session_participants WHERE session_id = ?').bind(id).run();
-  await c.env.DB.prepare('DELETE FROM study_session_slots WHERE session_id = ?').bind(id).run();
-  await c.env.DB.prepare('DELETE FROM study_sessions WHERE id = ?').bind(id).run();
+  // 外部キーで study_sessions を参照する子テーブルを先に消す（「当日のご案内」レイアウトも含む）。
+  // batch で1トランザクションにし、途中で失敗しても参加者・回だけ消える半端な状態を残さない。
+  const db = c.env.DB;
+  await db.batch([
+    db.prepare('DELETE FROM study_session_participants WHERE session_id = ?').bind(id),
+    db.prepare('DELETE FROM study_session_slots WHERE session_id = ?').bind(id),
+    db.prepare('DELETE FROM study_session_guide_layouts WHERE session_id = ?').bind(id),
+    db.prepare('DELETE FROM study_sessions WHERE id = ?').bind(id),
+  ]);
   return c.json({ ok: true });
 });
 

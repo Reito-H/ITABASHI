@@ -162,7 +162,7 @@ app.get('/settings/reports', async (c) => {
     const printHref = `${ADMIN_PATH}${info.printPath}/${r.id}`;
     const previewUrl = `${ADMIN_PATH}/api/report-preview/${info.slug}/${r.id}`;
     return `${yearSep}<tr onclick="location.href='${viewHref}'" style="cursor:pointer;" data-preview-url="${previewUrl}"
-      onmouseover="this.style.background='rgba(86,102,255,0.06)';showReportPreview(event,this)" onmousemove="moveReportPreview(event)" onmouseout="this.style.background='';hideReportPreview()">
+      onmouseover="this.style.background='rgba(15,133,103,0.06)';showReportPreview(event,this)" onmousemove="moveReportPreview(event)" onmouseout="this.style.background='';hideReportPreview()">
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:10px;color:#9ca3af;white-space:nowrap;">${escHtml(formatDateNoYear(r.created_at))}</td>
       <td style="padding:10px 6px;border-bottom:1px solid #f3f4f6;font-size:11px;color:#6b7280;white-space:nowrap;">${caseIdDisplay(r.vehicle_no, r.case_no)}</td>
       <td style="padding:12px 16px;border-bottom:1px solid #f3f4f6;font-size:15px;font-weight:700;color:#111827;line-height:1.5;">${unifiedCustomerCellHtml(r)}</td>
@@ -194,9 +194,9 @@ app.get('/settings/reports', async (c) => {
       .rc-wrap {
         position:relative; padding:20px 20px 26px; margin:-16px -16px 0; border-radius:0 0 22px 22px;
         background:
-          radial-gradient(900px 420px at 12% -8%, rgba(86,102,255,0.12), transparent 62%),
+          radial-gradient(900px 420px at 12% -8%, rgba(15,133,103,0.12), transparent 62%),
           radial-gradient(760px 360px at 100% -6%, rgba(244,166,33,0.10), transparent 58%),
-          var(--color-bg, #f5f8fd);
+          var(--color-bg, #f3fbf8);
       }
       .rc-chip {
         padding:6px 14px; border-radius:20px; font-size:13px; text-decoration:none; font-weight:600; color:#374151;

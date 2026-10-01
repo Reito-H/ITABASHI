@@ -127,13 +127,22 @@ export async function createSession(db: D1Database, adminId: number): Promise<st
   return sessionId;
 }
 
-// セッション検証
+// セッション検証（スライディング方式：有効なアクセスがあるたびに期限を24時間先へ延長する。
+// ただし毎リクエストでUPDATEすると書き込みが増えすぎるため、残り期限が23時間を切った
+// とき＝前回延長からおおよそ1時間以上経過したときだけ延長する。これにより、使い続けている
+// 限りタイムアウトせず、丸1日操作が無いセッションだけが期限切れになる）
 export async function validateSession(db: D1Database, sessionId: string): Promise<number | null> {
-  const now = new Date().toISOString();
+  const now = Date.now();
   const row = await db.prepare(
-    'SELECT admin_id FROM sessions WHERE id = ? AND expires_at > ?'
-  ).bind(sessionId, now).first<{ admin_id: number }>();
-  return row?.admin_id ?? null;
+    'SELECT admin_id, expires_at FROM sessions WHERE id = ? AND expires_at > ?'
+  ).bind(sessionId, new Date(now).toISOString()).first<{ admin_id: number; expires_at: string }>();
+  if (!row) return null;
+  const currentExpiresAt = new Date(row.expires_at).getTime();
+  if (currentExpiresAt < now + 23 * 60 * 60 * 1000) {
+    const newExpiresAt = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+    await db.prepare('UPDATE sessions SET expires_at = ? WHERE id = ?').bind(newExpiresAt, sessionId).run();
+  }
+  return row.admin_id;
 }
 
 // セッション削除（ログアウト）

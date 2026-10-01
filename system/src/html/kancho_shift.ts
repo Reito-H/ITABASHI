@@ -5,7 +5,8 @@
 //   ・赤文字 = 希望休の反映
 //   ・セル背景 = セル個別色(他班ヘルプ等) > 班色(直遅早) > 記号色 > 空白は班色
 import { escHtml, safeJson, saveToastHtml, saveToastScript, FAVICON_DATA_URI } from './layout';
-import { ADMIN_PATH } from '../config';
+import { ADMIN_PATH, KANCHO_WISH_PATH } from '../config';
+import { todayJST } from '../liff_common';
 
 export type KanchoMember = {
   id: number;
@@ -74,6 +75,15 @@ export type KanchoForbiddenPair = {
   member_id_a: number;
   member_id_b: number;
   reason: string;
+};
+
+// 希望休フォーム（班長本人が入力する公開フォーム）の「その他要望」欄。
+// シフト表の「・希望休」欄に自動で追記表示するために使う（元データはkancho_wish_remarksのまま保持し、
+// ここでは表示用にマージするだけ＝手入力メモを壊さない）
+export type KanchoWishRemark = {
+  member_id: number;
+  name: string;
+  content: string;
 };
 
 const WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
@@ -173,7 +183,9 @@ export function kanchoShiftPage(
   periodEnd: string,
   canEdit: boolean,
   wishes: KanchoWish[] = [],
-  forbiddenPairs: KanchoForbiddenPair[] = []
+  forbiddenPairs: KanchoForbiddenPair[] = [],
+  wishRemarks: KanchoWishRemark[] = [],
+  wishFormOpen: boolean = false
 ): string {
   const members = allMembers.filter(m => m.is_active === 1);
   const wishSet = new Set(wishes.map(w => `${w.member_id}_${w.date}`));
@@ -190,6 +202,8 @@ export function kanchoShiftPage(
   const HDR_BG = 'background:#1e3a5f;color:white;';
   const FIX_BG = 'background:#f8fafc;';
 
+  const today = todayJST();
+
   function dateHeaders(): string {
     return dates.map(d => {
       const dt = new Date(d);
@@ -197,10 +211,12 @@ export function kanchoShiftPage(
       const dow = dt.getUTCDay();
       const isWeekend = dow === 0 || dow === 6;
       const inPeriod = d >= periodStart && d <= periodEnd;
-      const bg = !inPeriod ? '#f3f4f6' : isWeekend ? '#fef2f2' : '#eff6ff';
-      return `<th style="min-width:30px;max-width:30px;text-align:center;font-size:11px;padding:3px 1px;border:1px solid #d1d5db;background:${bg};${!inPeriod ? 'opacity:0.55;' : ''}">
-        <div>${day}</div>
-        <div style="color:${dow === 0 ? '#ef4444' : dow === 6 ? '#3b82f6' : '#374151'};">${WEEKDAY_JA[dow]}</div>
+      const isToday = d === today;
+      const bg = isToday ? '#fde68a' : !inPeriod ? '#f3f4f6' : isWeekend ? '#fef2f2' : '#eff6ff';
+      return `<th style="min-width:30px;max-width:30px;text-align:center;font-size:11px;padding:3px 1px;border:1px solid #d1d5db;background:${bg};${!inPeriod ? 'opacity:0.55;' : ''}${isToday ? 'box-shadow:inset 0 0 0 2px #d97706;' : ''}">
+        ${isToday ? '<div style="font-size:9px;line-height:1;color:#d97706;">▼</div>' : ''}
+        <div style="${isToday ? 'font-size:14px;font-weight:800;color:#78350f;' : ''}">${day}</div>
+        <div style="${isToday ? 'font-weight:700;color:#78350f;' : `color:${dow === 0 ? '#ef4444' : dow === 6 ? '#3b82f6' : '#374151'};`}">${WEEKDAY_JA[dow]}</div>
       </th>`;
     }).join('');
   }
@@ -264,6 +280,19 @@ export function kanchoShiftPage(
     `<tr><td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;font-weight:600;white-space:nowrap;">${escHtml(k.title)}</td>
      <td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;">${escHtml(k.content)}</td></tr>`).join('');
 
+  // 希望休フォームで班長本人が入力した「その他要望」を、手入力のメモ欄とは別枠で自動表示する
+  // （kancho_wish_remarksが原本のため、ここでの表示はあくまでミラー。編集はフォーム側でのみ行う）
+  const wishRemarksWithContent = wishRemarks.filter(r => r.content && r.content.trim());
+  const autoRemarkSection = wishRemarksWithContent.length ? `
+    <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #d1d5db;">
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">本人提出（希望休フォーム・自動反映）</div>
+      <table style="width:100%;border-collapse:collapse;">
+        ${wishRemarksWithContent.map(r =>
+          `<tr><td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;font-weight:600;white-space:nowrap;color:#1e3a5f;">${escHtml(r.name)}</td>
+           <td style="padding:3px 8px;border-bottom:1px solid #f3f4f6;font-size:12px;">${escHtml(r.content)}</td></tr>`).join('')}
+      </table>
+    </div>` : '';
+
   const memoSection = `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px;align-items:start;" id="memo-area">
     <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;">
@@ -286,6 +315,7 @@ export function kanchoShiftPage(
         : (kibou.length
             ? `<table style="width:100%;border-collapse:collapse;">${kibouReadRows}</table>`
             : `<div style="font-size:13px;color:#9ca3af;">なし</div>`)}
+      ${autoRemarkSection}
     </div>
   </div>
   ${canEdit ? `<div style="margin-top:8px;text-align:right;">
@@ -296,9 +326,10 @@ export function kanchoShiftPage(
   return `
 <div style="font-family:'Hiragino Sans','Meiryo',sans-serif;">
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+    ${wishFormOpen ? `<a href="${KANCHO_WISH_PATH}" target="_blank" rel="noopener" style="text-decoration:none;padding:6px 14px;border-radius:6px;font-size:13px;font-weight:700;color:#78350f;background:linear-gradient(135deg,#fde68a,#f2c14e);box-shadow:0 1px 3px rgba(0,0,0,0.15);white-space:nowrap;">📝 希望休を入力する（本人用）</a>` : ''}
     <a href="${ADMIN_PATH}/kancho-shift/personal" class="btn-secondary" style="text-decoration:none;">👤 個人別確認</a>
     <button onclick="openWarnings()" id="warnings-btn" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">⚠ 警告チェック</button>
-    ${canEdit ? `<button onclick="openWishes()" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">希望休</button>` : ''}
+    ${canEdit ? `<button onclick="openWishes()" class="btn-secondary" style="border:none;cursor:pointer;background:#dc2626;">希望休（代理入力）</button>` : ''}
     <div style="position:relative;">
       <button onclick="toggleGearMenu(event)" id="gear-btn" class="btn-secondary" style="border:none;cursor:pointer;font-size:15px;line-height:1;">⚙️</button>
       <div id="gear-menu" class="gear-menu">
@@ -307,7 +338,10 @@ export function kanchoShiftPage(
         ${canEdit ? `
         <button class="gear-item" onclick="closeGearMenu();openNotify()">通知設定</button>
         <button class="gear-item" onclick="closeGearMenu();openSlots()">枠編集（追加・役割・班色）</button>
-        <button class="gear-item" onclick="closeGearMenu();openTypes()">記号管理</button>` : ''}
+        <button class="gear-item" onclick="closeGearMenu();openTypes()">記号管理</button>
+        <a class="gear-item" href="${ADMIN_PATH}/settings/kancho-roster" style="text-decoration:none;box-sizing:border-box;">班長リスト</a>
+        <a class="gear-item" href="${ADMIN_PATH}/settings/kancho-wish" style="text-decoration:none;box-sizing:border-box;">希望休フォーム設定</a>
+        <a class="gear-item" href="${ADMIN_PATH}/settings/kancho-logic" style="text-decoration:none;box-sizing:border-box;">ロジック仕様</a>` : ''}
       </div>
     </div>
   </div>
@@ -768,9 +802,8 @@ function onLinkSelectChange() {
   } else {
     warn.style.display = 'none';
   }
-  if (!opt || !opt.value || opt.value === _linkCurrentEmpNo) return;
-  var full = opt.textContent.replace(/（.*$/, '').trim();
-  sel('#link-dispname').value = full.split(/[\s　]+/)[0] || full;
+  // 表示名（シフト表に出す名前）と社員番号は完全に別の項目のため、担当者を選び直しても
+  // 表示名欄は自動で書き換えない（必要ならここで手動編集してもらう）
 }
 async function saveLinkEmp() {
   var empNo = sel('#link-select').value;

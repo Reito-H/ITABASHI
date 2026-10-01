@@ -47,7 +47,7 @@ function addMonths(dateStr: string, delta: number): string {
 async function findActiveEmployee(db: D1Database, empNo: string): Promise<EmpForEligibility | null> {
   if (!empNo) return null;
   return db.prepare(
-    'SELECT emp_no, hire_date, entry_type, is_newcomer FROM employees WHERE emp_no = ? AND is_active = 1'
+    'SELECT emp_no, hire_date, entry_type, is_newcomer, division, birth_date FROM employees WHERE emp_no = ? AND is_active = 1'
   ).bind(empNo).first<EmpForEligibility>();
 }
 async function getHomeOfficeId(db: D1Database): Promise<number> {
@@ -601,12 +601,13 @@ var _empNo = '';
 var _sessions = [];
 var _lastRegistered = null;
 var _penalty = null;
-// 入口の切り替え: ?view=surveys でアンケート一覧から / ?survey=<id> で特定アンケートを直接開く
-var _startView = '', _startSurveyId = '';
+// 入口の切り替え: ?view=surveys でアンケート一覧から / ?survey=<id> で特定アンケートを直接開く / ?emp_no=<n> で社員番号を入力済みにして自動で次へ進む
+var _startView = '', _startSurveyId = '', _startEmpNo = '';
 try {
   var _qp = new URLSearchParams(location.search);
   _startView = _qp.get('view') || '';
   _startSurveyId = _qp.get('survey') || '';
+  _startEmpNo = toHalfWidth((_qp.get('emp_no') || '').trim());
 } catch (e) {}
 
 function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1114,7 +1115,13 @@ async function submitSurvey() {
 if (_startSurveyId || _startView === 'surveys' || _startView === 'survey') {
   document.getElementById('step1-sub').textContent = 'アンケートに回答します。社員番号を入力してください';
 }
-showStep('step1');
+if (_startEmpNo) {
+  document.getElementById('emp-no').value = _startEmpNo;
+  showStep('step1');
+  loadBoard();
+} else {
+  showStep('step1');
+}
 </script>
 </body>
 </html>`);

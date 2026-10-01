@@ -24,9 +24,9 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-root{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Noto Sans JP',sans-serif;
   position:relative;padding:16px;margin:-16px;border-radius:0 0 22px 22px;
   background:
-    radial-gradient(900px 420px at 12% -8%, rgba(86,102,255,0.10), transparent 62%),
+    radial-gradient(900px 420px at 12% -8%, rgba(15,133,103,0.10), transparent 62%),
     radial-gradient(760px 360px at 100% -6%, rgba(244,166,33,0.08), transparent 58%),
-    var(--color-bg, #f5f8fd);}
+    var(--color-bg, #f3fbf8);}
 
 /* タイトル行の高さがフォントの行間で膨らまないよう明示的に固定する（このstyleは
    /handoverページにしか出力されないため他ページのヘッダーには影響しない） */
@@ -247,19 +247,36 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-limit-add-btn{background:var(--navy);color:#fff;border:none;border-radius:6px;padding:7px 16px;font-size:13px;
                   font-weight:700;cursor:pointer;margin-left:auto;}
 
-#ho-toka-add-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
-                     align-items:center;justify-content:center;}
-#ho-toka-add-overlay.show{display:flex;}
-#ho-toka-add-modal{background:rgba(255,255,255,.92);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
-                   border:1px solid rgba(255,255,255,.6);border-radius:16px;padding:18px 20px;width:320px;max-width:90vw;
-                   box-shadow:0 20px 50px rgba(15,23,42,.3);}
-.ho-toka-add-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:800;
-                  color:var(--navy);margin-bottom:12px;}
-#ho-toka-add-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
+/* 「当欠・稼働を追加」フォームは、やることリスト・車両管理と同じ非モーダルの浮遊パネル方式
+   （背景クリックでは閉じない・×ボタンでのみ閉じる・ヘッダードラッグで自由に移動できる）。
+   固定項目のフォームのためリサイズは無し（ドラッグのみ）。 */
+.ho-tokaadd-float{position:fixed;z-index:956;width:320px;max-width:92vw;
+                  background:rgba(255,255,255,.92);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);
+                  border:1px solid rgba(255,255,255,.6);border-radius:16px;
+                  box-shadow:0 24px 60px rgba(15,23,42,.28),0 2px 8px rgba(15,23,42,.14);
+                  display:flex;flex-direction:column;overflow:visible;}
+.ho-tokaadd-float[hidden]{display:none;}
+.ho-tokaadd-float.dragging{box-shadow:0 30px 70px rgba(15,23,42,.36);}
+.ho-tokaadd-float-head{display:flex;align-items:center;gap:8px;padding:10px 10px 10px 14px;border-radius:16px 16px 0 0;
+                  background:linear-gradient(135deg,#1e2a3a 0%,#334862 55%,#3f7cc9 100%);color:#fff;
+                  cursor:grab;user-select:none;flex-shrink:0;touch-action:none;}
+.ho-tokaadd-float-head:active{cursor:grabbing;}
+.ho-tokaadd-float-drag{display:flex;align-items:center;opacity:.5;flex-shrink:0;}
+.ho-tokaadd-float-title{font-size:13.5px;font-weight:800;letter-spacing:.02em;flex:1;white-space:nowrap;}
+#ho-toka-add-close{border:none;background:rgba(255,255,255,.14);color:#fff;width:24px;height:24px;flex-shrink:0;
+                   border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;}
+#ho-toka-add-close:hover{background:rgba(255,255,255,.26);}
+.ho-tokaadd-float-body{padding:16px 18px;}
 .ho-toka-add-row{margin-bottom:12px;position:relative;}
 .ho-toka-add-row label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px;}
 #ho-toka-add-name{width:100%;border:1px solid #ccc;border-radius:6px;padding:7px 9px;font-size:14px;font-family:inherit;}
 #ho-toka-add-reason{width:100%;border:1px solid #ccc;border-radius:6px;padding:7px 9px;font-size:13px;font-family:inherit;}
+/* 理由の候補は入力欄の下にチップとして常設表示する（フォーム内の通常レイアウトの一部にすることで、
+   フローティングポップアップとして入力欄に重ねて出す方式をやめ、直接入力しても崩れないようにする）。 */
+.ho-toka-add-reason-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
+.ho-toka-add-reason-chip{border:1px solid #ccc;background:#f9fafb;color:#374151;border-radius:12px;
+                         padding:3px 10px;font-size:11px;cursor:pointer;white-space:nowrap;}
+.ho-toka-add-reason-chip:hover{background:#eef2ff;border-color:#a5b4fc;}
 .ho-toka-add-vals{display:flex;gap:8px;}
 .ho-toka-add-vbtn{flex:1;border:1px solid #ccc;background:#fafafa;border-radius:6px;padding:8px 0;font-size:14px;
                   font-weight:800;color:#333;cursor:pointer;}
@@ -287,10 +304,6 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-ta{width:100%;border:none;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;resize:none;font-family:inherit;
        background:transparent;color:#111;flex:1 1 auto;min-height:100px;overflow-y:hidden;}
 .ho-ta[readonly]{color:#555;}
-/* 当欠・理由欄：＋ボタンで登録した行の「名前」の上にだけ透明なホットスポットを重ね、
-   ホバー時にtitle属性のブラウザ標準ツールチップで理由を表示する（本文の表示テキスト自体は変えない）。 */
-.ho-toka-hover-layer{position:fixed;z-index:60;pointer-events:none;}
-.ho-toka-hotspot{position:fixed;pointer-events:auto;cursor:help;border-bottom:1px dotted var(--navy);}
 .ho-ce{width:100%;outline:none;font-size:var(--ho-fs,14px);line-height:1.8;word-break:break-all;white-space:pre-wrap;color:#111;flex:1;}
 .ho-ce[contenteditable="false"]{color:#555;}
 
@@ -301,6 +314,8 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-cbtn{border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:800;cursor:pointer;}
 .ho-cbtn-k{background:#fff;color:#111;}
 .ho-cbtn-r{background:var(--red);color:#fff;}
+.ho-cbtn-b{background:#1d4ed8;color:#fff;}
+.ho-cbtn-big{background:rgba(255,255,255,.14);color:#fff;}
 .ho-cbtn-x{background:transparent;border:none;color:rgba(255,255,255,.4);font-size:16px;cursor:pointer;padding:0 2px;}
 
 #ho-save-dot{position:fixed;top:64px;right:18px;width:8px;height:8px;border-radius:50%;opacity:0;transition:opacity .3s;z-index:400;}
@@ -319,6 +334,14 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-stale-banner:hover{background:#b91c1c;}
 #ho-stale-banner.show{display:flex;}
 @media (max-width:768px){ #ho-stale-banner{top:auto;bottom:64px;right:12px;} }
+
+#ho-auth-banner{position:fixed;top:100px;right:16px;z-index:901;display:none;align-items:center;gap:8px;
+                 background:#d97706;color:#fff;font-size:12px;font-weight:700;padding:9px 14px;border-radius:20px;
+                 box-shadow:0 6px 18px rgba(217,119,6,.4);cursor:pointer;border:none;max-width:min(92vw,360px);
+                 text-align:left;line-height:1.5;}
+#ho-auth-banner:hover{background:#b45309;}
+#ho-auth-banner.show{display:flex;}
+@media (max-width:768px){ #ho-auth-banner{top:auto;bottom:112px;right:12px;} }
 
 #ho-accident-alert{position:fixed;top:16px;right:16px;z-index:960;display:none;align-items:center;gap:10px;
                     background:#fff;border:1px solid #fecaca;color:#991b1b;font-size:13px;font-weight:700;
@@ -344,12 +367,12 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 #ho-cm-popup .ho-cm-close:hover{background:rgba(255,255,255,.28);}
 @media (max-width:768px){ #ho-cm-popup{top:auto;bottom:110px;left:12px;max-width:calc(100vw - 24px);} }
 
-#ho-suggest{position:fixed;z-index:650;background:rgba(255,255,255,.92);backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);
+#ho-suggest{position:fixed;z-index:970;background:rgba(255,255,255,.92);backdrop-filter:blur(14px) saturate(150%);-webkit-backdrop-filter:blur(14px) saturate(150%);
             border:1px solid rgba(0,0,0,.08);border-radius:10px;
             box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:180px;overflow-y:auto;display:none;min-width:110px;}
 .ho-suggest-item{padding:6px 12px;font-size:13px;cursor:pointer;white-space:nowrap;color:#111;}
 .ho-suggest-item:hover{background:#f0c04033;}
-#ho-numpick{position:fixed;z-index:650;display:none;gap:6px;background:rgba(30,42,58,.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+#ho-numpick{position:fixed;z-index:970;display:none;gap:6px;background:rgba(30,42,58,.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
             border-radius:10px;padding:6px;
             box-shadow:0 8px 24px rgba(0,0,0,.3);}
 .ho-num-btn{border:none;border-radius:5px;padding:6px 10px;font-size:12px;font-weight:800;cursor:pointer;}
@@ -446,6 +469,22 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 .ho-tokasum-bar-fill{height:100%;background:var(--navy);border-radius:4px;}
 .ho-tokasum-bar-val{width:24px;flex-shrink:0;text-align:right;color:#333;font-weight:700;}
 .ho-tokasum-reason-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid #f5f5f5;}
+.ho-tokasum-row-reason{color:#888;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;
+                       white-space:nowrap;flex-shrink:1;}
+.ho-tokasum-row-reason-empty{color:#bbb;}
+.ho-tokasum-row-editbtn{border:1px solid #ccc;background:#fff;color:#555;border-radius:10px;padding:2px 9px;
+                        font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;}
+.ho-tokasum-row-editbtn:hover{border-color:#999;color:#111;}
+.ho-tokasum-editbox{display:none;padding:8px 6px 10px;border-bottom:1px solid #f0f0f0;background:#fafbfc;}
+.ho-tokasum-editbox.show{display:block;}
+.ho-tokasum-editbox-lbl{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px;}
+.ho-tokasum-editbox-input{width:100%;border:1px solid #ccc;border-radius:6px;padding:6px 8px;font-size:13px;
+                          font-family:inherit;box-sizing:border-box;margin-bottom:7px;}
+.ho-tokasum-editbox-btns{display:flex;gap:6px;flex-wrap:wrap;}
+.ho-tokasum-editbox-btn{border:1px solid #ccc;background:#fff;border-radius:6px;padding:5px 11px;font-size:12px;
+                        font-weight:700;cursor:pointer;color:#333;}
+.ho-tokasum-editbox-btn.primary{background:var(--navy);border-color:var(--navy);color:#fff;}
+.ho-tokasum-editbox-btn.warn{border-color:#dc2626;color:#dc2626;}
 
 /* 円グラフ（人別構成・理由内訳の共通コンポーネント。conic-gradientのみで実装、外部ライブラリ不使用） */
 .ho-pie-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:6px 2px 14px;}
@@ -507,6 +546,9 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 <div id="ho-toolbar">
   <button class="ho-cbtn ho-cbtn-k" id="ho-c-black">黒</button>
   <button class="ho-cbtn ho-cbtn-r" id="ho-c-red">赤</button>
+  <button class="ho-cbtn ho-cbtn-b" id="ho-c-blue">青</button>
+  <button class="ho-cbtn ho-cbtn-big" id="ho-c-big" title="選択した文字を大きくする">大</button>
+  <button class="ho-cbtn ho-cbtn-big" id="ho-c-reset" title="選択した文字のサイズを元に戻す">戻す</button>
   <button class="ho-cbtn-x" id="ho-c-close">×</button>
 </div>
 <div id="ho-suggest"></div>
@@ -519,6 +561,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 <div id="ho-save-dot"></div>
 <div id="ho-toast"></div>
 <button type="button" id="ho-stale-banner">⚠ 他の端末で更新されています。クリックして更新</button>
+<button type="button" id="ho-auth-banner">⚠ ログインの有効期限が切れました。このタブはそのままにして、クリックで開く別タブでログインし直してください。入力内容は消えず、ログインが済むと自動的に保存されます。</button>
 <div id="ho-accident-alert" role="alert">
   <span>⚠ 本日は事故多発日です</span>
   <button type="button" class="ho-aa-close" id="ho-accident-alert-close" aria-label="閉じる">×</button>
@@ -607,9 +650,13 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     </div>
   </div>
 </div>
-<div id="ho-toka-add-overlay">
-  <div id="ho-toka-add-modal">
-    <div class="ho-toka-add-head"><span>当欠・稼働を追加</span><button type="button" id="ho-toka-add-close">×</button></div>
+<div id="ho-toka-add-float" class="ho-tokaadd-float" hidden>
+  <div class="ho-tokaadd-float-head" id="ho-toka-add-float-head">
+    <span class="ho-tokaadd-float-drag" aria-hidden="true"><svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor"><circle cx="2" cy="2" r="1.5"/><circle cx="8" cy="2" r="1.5"/><circle cx="2" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="2" cy="14" r="1.5"/><circle cx="8" cy="14" r="1.5"/></svg></span>
+    <span class="ho-tokaadd-float-title" id="ho-toka-add-title">当欠・稼働を追加</span>
+    <button type="button" id="ho-toka-add-close" aria-label="閉じる" title="閉じる">×</button>
+  </div>
+  <div class="ho-tokaadd-float-body">
     <div class="ho-toka-add-row">
       <label>名前</label>
       <input type="text" id="ho-toka-add-name" placeholder="名前" autocomplete="off">
@@ -625,7 +672,8 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
     </div>
     <div class="ho-toka-add-row">
       <label>理由</label>
-      <input type="text" id="ho-toka-add-reason" placeholder="理由（任意）" maxlength="200">
+      <input type="text" id="ho-toka-add-reason" placeholder="理由（自由入力もできます）" maxlength="200">
+      <div class="ho-toka-add-reason-chips" id="ho-toka-add-reason-chips"></div>
     </div>
     <button type="button" id="ho-toka-add-submit" disabled>追加</button>
   </div>
@@ -658,6 +706,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
 const TODO_URL = ${safeJson(`${ADMIN_PATH}/todo`)};
+const LOGIN_URL = ${safeJson(`${ADMIN_PATH}/login`)};
 const EDITABLE = ${editable ? 'true' : 'false'};
 const MY_DIVISION = ${safeJson(myDivision)};
 function lastDivision(){
@@ -671,8 +720,8 @@ function initialDivision(){
 const H = {
   division: initialDivision(), date: null, dates: [], updatedAt: null, fieldTimers: {}, savedRange: null,
   numpickApply: null, fontSizes: { 1: 14, 2: 14, 3: 14, 4: 14 }, limits: [],
-  sections: [], customContent: [], saveFailCount: 0,
-  tokaEntriesToday: [], tokaAddValue: null, nameExclusions: [],
+  sections: [], customContent: [], saveFailCount: 0, authRetryCount: 0,
+  tokaAddValue: null, nameExclusions: [], tokaConvertCtx: null,
 };
 // DOM要素id → DBカラム名（項目単位の部分保存で使用）
 const FIELD_BY_ID = {
@@ -723,9 +772,16 @@ async function api(method, path, body){
   // ログインセッション切れ時、APIへのリクエストはログイン画面(HTML)へリダイレクトされ
   // 200 OKで返ってくることがある。res.okだけで判定すると「保存成功」と誤認するため、
   // レスポンスがJSONでない＝ログイン画面等が返ってきたケースを明示的にエラー扱いする。
+  // authExpired=true を付け、呼び出し側（saveField）で「再読み込みしないで待つ」専用の
+  // 復帰処理に振り分けられるようにする（このページを再読み込みすると入力中の内容が消えるため）。
   const ct = res.headers.get('content-type') || '';
   if (!ct.includes('application/json')){
-    throw new Error(res.redirected ? 'ログインが切れています。ページを再読み込みしてください' : '通信エラー（サーバーの応答が不正です）');
+    if (res.redirected){
+      const err = new Error('ログインの有効期限が切れています');
+      err.authExpired = true;
+      throw err;
+    }
+    throw new Error('通信エラー（サーバーの応答が不正です）');
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'エラー');
@@ -779,7 +835,7 @@ document.querySelectorAll('#ho-numpick .ho-num-btn').forEach(b => b.addEventList
 }));
 
 // テキストエリア内の任意の文字位置(offset)をミラーdivで算出（座標系はビューポート基準）。
-// offset省略時は現在のキャレット位置（当欠ホバー用ホットスポットの位置計算でも共用する）。
+// offset省略時は現在のキャレット位置。
 function getTextareaOffsetRect(ta, offset){
   const div = document.createElement('div');
   const style = getComputedStyle(ta);
@@ -884,75 +940,98 @@ function recalcJisseki(){
   scheduleSave('kabu_jisseki');
 }
 
-// ===== 当欠・理由欄：＋ボタンで登録した行の「名前」に理由のホバーツールチップを重ねる =====
-// ＋ボタン経由の登録は本文に「名前 -1.0」「名前 +0.5」のみを書く（理由は書かない）ため、
-// 本文中の対応行を探し、名前の文字位置の上にだけ透明なホットスポットを重ねてtitle属性で
-// ブラウザ標準のツールチップを出す（本文の見た目・保存内容は一切変えない）。当欠（－）・
-// 稼働追加（＋）どちらの行にも対応する。
-const TOKA_HOTSPOT_RE = /^(.+?)\\s+([+\\-])(0\\.5|1\\.0)(?!\\d)\\s*$/;
-let tokaHotspotTimer;
-function scheduleTokaHotspotRecalc(){
-  clearTimeout(tokaHotspotTimer);
-  tokaHotspotTimer = setTimeout(computeTokaHotspots, 250);
+// ===== 当欠・理由欄：理由の候補（この課でよく入力されている理由を頻度順に出す）=====
+// テキストエリアでの±数値ピッカー確定直後と、「＋」ボタンの理由欄フォーカス時の両方から使う共通処理。
+async function fetchTokaReasonSuggestions(){
+  try {
+    const data = await api('GET', '/'+H.division+'/toka-reason-suggest');
+    return data.reasons || [];
+  } catch(e){ return []; }
 }
-function computeTokaHotspots(){
-  const ta = document.getElementById('ho-toka-c');
-  const layer = document.getElementById('ho-toka-hover-layer');
-  if (!ta || !layer) return;
-  layer.innerHTML = '';
-  const pool = (H.tokaEntriesToday || []).filter(e => e.reason).slice();
-  if (!pool.length) return;
-  const lines = ta.value.split('\\n');
-  let offset = 0;
-  lines.forEach(line => {
-    const trimmed = line.trim();
-    const m = trimmed.match(TOKA_HOTSPOT_RE);
-    if (m){
-      const name = m[1];
-      const value = (m[2] === '-' ? -1 : 1) * parseFloat(m[3]);
-      const idx = pool.findIndex(e => e.name === name && Math.abs(e.value - value) < 0.001);
-      if (idx !== -1){
-        const entry = pool[idx];
-        pool.splice(idx, 1);
-        const leadWs = line.length - line.replace(/^\\s+/, '').length;
-        const nameStart = offset + leadWs;
-        const nameEnd = nameStart + name.length;
-        const r1 = getTextareaOffsetRect(ta, nameStart);
-        const r2 = getTextareaOffsetRect(ta, nameEnd);
-        if (r1.top === r2.top && entry.reason){
-          const hotspot = document.createElement('span');
-          hotspot.className = 'ho-toka-hotspot';
-          hotspot.title = entry.reason;
-          hotspot.style.left = r1.left+'px';
-          hotspot.style.top = r1.top+'px';
-          hotspot.style.width = Math.max(4, r2.left - r1.left)+'px';
-          hotspot.style.height = (r1.bottom - r1.top)+'px';
-          layer.appendChild(hotspot);
-        }
-      }
-    }
-    offset += line.length + 1;
+// ±数値ピッカーで当欠行を確定した直後、その場でよく使う理由を候補表示する（クリックで自動挿入。
+// そのまま自由に書いてもよい＝候補を出さず放置しても記述式入力は従来通り可能）。
+async function showTokaReasonSuggest(ta, pos){
+  const reasons = await fetchTokaReasonSuggestions();
+  if (!reasons.length) return;
+  if (document.activeElement !== ta || ta.selectionStart !== pos || ta.selectionEnd !== pos) return;
+  const rect = getTextareaOffsetRect(ta, pos);
+  showSuggestList(reasons, rect, (reason) => {
+    const cur = ta.value;
+    const insert = reason + '\\n'; // 選択後は改行して次の人の入力にすぐ移れるようにする
+    ta.value = cur.slice(0, pos) + insert + cur.slice(pos);
+    const newPos = pos + insert.length;
+    ta.focus(); ta.setSelectionRange(newPos, newPos);
+    hideSuggest();
+    autoGrowTa(ta);
+    scheduleSave('toka_content');
   });
 }
-window.addEventListener('resize', scheduleTokaHotspotRecalc);
 
-// ===== 当欠・理由欄：＋ボタン（名前・数値・理由をフォームで登録）=====
+// ===== 当欠・理由欄：＋ボタン（名前・数値・理由をフォームで登録。やることリスト・車両管理と
+// 同じ非モーダルの浮遊パネル。背景クリックでは閉じず、×ボタンでのみ閉じる。ドラッグで自由に移動でき、
+// 開いたまま引き継ぎシート本体や他のボタンも操作できる） =====
+function isTokaAddFloatOpen(){
+  const el = document.getElementById('ho-toka-add-float');
+  return !!el && !el.hidden;
+}
+function loadTokaAddFloatGeom(){
+  try { const raw = localStorage.getItem('ho_tokaadd_float_geom'); if (raw) return JSON.parse(raw); } catch(e){}
+  return null;
+}
+function saveTokaAddFloatGeom(g){ try { localStorage.setItem('ho_tokaadd_float_geom', JSON.stringify(g)); } catch(e){} }
+function clampTokaAddFloatGeom(g){
+  const margin = 8;
+  const panel = document.getElementById('ho-toka-add-float');
+  const width = panel.offsetWidth || 320;
+  const height = panel.offsetHeight || 320;
+  const left = Math.min(Math.max(g.left, margin), Math.max(margin, window.innerWidth - width - margin));
+  const top = Math.min(Math.max(g.top, margin), Math.max(margin, window.innerHeight - height - margin));
+  return { left: left, top: top };
+}
+function applyTokaAddFloatGeom(g){
+  const panel = document.getElementById('ho-toka-add-float');
+  panel.style.left = g.left + 'px'; panel.style.top = g.top + 'px';
+}
+function defaultTokaAddFloatGeom(){
+  const btn = document.getElementById('ho-toka-add-btn');
+  let left = window.innerWidth - 320 - 24;
+  let top = 90;
+  if (btn){ const r = btn.getBoundingClientRect(); left = r.left; top = r.bottom + 8; }
+  return clampTokaAddFloatGeom({ left: left, top: top });
+}
+function positionTokaAddFloat(){
+  const stored = loadTokaAddFloatGeom();
+  applyTokaAddFloatGeom(stored ? clampTokaAddFloatGeom(stored) : defaultTokaAddFloatGeom());
+}
 function closeTokaAddModal(){
-  document.getElementById('ho-toka-add-overlay').classList.remove('show');
+  document.getElementById('ho-toka-add-float').hidden = true;
+  H.tokaConvertCtx = null;
   hideSuggest();
 }
 function updateTokaAddSubmitState(){
   const name = document.getElementById('ho-toka-add-name').value.trim();
   document.getElementById('ho-toka-add-submit').disabled = !(name && H.tokaAddValue);
 }
-function openTokaAddModal(){
+// ctxを渡すと「これは名前でした」変換モードになる（当欠記録モーダルの誤判定修正から呼ばれる）。
+// ctx = { date, targetName, targetValue, presetName }。通常の追加（今日のシートへの＋ボタン）
+// との違いはsubmitTokaAdd側で吸収し、このフォーム自体（名前・数値・理由の入力欄）は共用する。
+async function openTokaAddModal(ctx){
+  H.tokaConvertCtx = ctx || null;
   const nameEl = document.getElementById('ho-toka-add-name');
   const reasonEl = document.getElementById('ho-toka-add-reason');
-  nameEl.value = ''; reasonEl.value = ''; H.tokaAddValue = null;
+  nameEl.value = (ctx && ctx.presetName) || ''; reasonEl.value = ''; H.tokaAddValue = null;
+  document.getElementById('ho-toka-add-reason-chips').innerHTML = '';
   document.querySelectorAll('.ho-toka-add-vbtn').forEach(b => b.classList.remove('active'));
   updateTokaAddSubmitState();
-  document.getElementById('ho-toka-add-overlay').classList.add('show');
+  const titleEl = document.getElementById('ho-toka-add-title');
+  if (titleEl) titleEl.textContent = ctx ? '名前として登録し直す' : '当欠・稼働を追加';
+  const submitBtn = document.getElementById('ho-toka-add-submit');
+  if (submitBtn) submitBtn.textContent = ctx ? '登録' : '追加';
+  document.getElementById('ho-toka-add-float').hidden = false;
+  positionTokaAddFloat();
   nameEl.focus();
+  await renderTokaAddReasonChips();
+  positionTokaAddFloat(); // 理由チップの分だけ高さが増えるため、追加後に位置を計算し直す
 }
 document.querySelectorAll('.ho-toka-add-vbtn').forEach(b => b.addEventListener('click', () => {
   H.tokaAddValue = parseFloat(b.dataset.v);
@@ -960,9 +1039,37 @@ document.querySelectorAll('.ho-toka-add-vbtn').forEach(b => b.addEventListener('
   updateTokaAddSubmitState();
 }));
 document.getElementById('ho-toka-add-close').addEventListener('click', closeTokaAddModal);
-document.getElementById('ho-toka-add-overlay').addEventListener('click', (e) => {
-  if (e.target.id === 'ho-toka-add-overlay') closeTokaAddModal();
-});
+(function initTokaAddFloatChrome(){
+  const panel = document.getElementById('ho-toka-add-float');
+  const head = document.getElementById('ho-toka-add-float-head');
+  let sx = 0, sy = 0, sg = null, dragging = false;
+  function onDown(e){
+    if (e.target.closest('#ho-toka-add-close')) return;
+    dragging = true;
+    sx = e.clientX; sy = e.clientY;
+    const r = panel.getBoundingClientRect();
+    sg = { left: r.left, top: r.top };
+    panel.classList.add('dragging');
+    if (e.target.setPointerCapture) { try { e.target.setPointerCapture(e.pointerId); } catch(err){} }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp, { once: true });
+    e.preventDefault();
+  }
+  function onMove(e){
+    if (!dragging) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    applyTokaAddFloatGeom(clampTokaAddFloatGeom({ left: sg.left + dx, top: sg.top + dy }));
+  }
+  function onUp(){
+    document.removeEventListener('pointermove', onMove);
+    panel.classList.remove('dragging');
+    dragging = false;
+    const r = panel.getBoundingClientRect();
+    saveTokaAddFloatGeom({ left: r.left, top: r.top });
+  }
+  head.addEventListener('pointerdown', onDown);
+  window.addEventListener('resize', () => { if (isTokaAddFloatOpen()) applyTokaAddFloatGeom(clampTokaAddFloatGeom(panel.getBoundingClientRect())); });
+})();
 (function(){
   const nameEl = document.getElementById('ho-toka-add-name');
   let timer;
@@ -982,23 +1089,49 @@ document.getElementById('ho-toka-add-overlay').addEventListener('click', (e) => 
     }, 280);
   });
 })();
+// 理由の候補はポップアップではなく、入力欄の下にチップとしてフォーム内に常設表示する
+// （ポップアップを入力欄に重ねて出す方式だと、そのまま自由入力しようとした時にフォームの
+// 見た目が崩れる、との指摘のため）。
+async function renderTokaAddReasonChips(){
+  const wrap = document.getElementById('ho-toka-add-reason-chips');
+  wrap.innerHTML = '';
+  const reasons = await fetchTokaReasonSuggestions();
+  if (!reasons.length) return;
+  const reasonEl = document.getElementById('ho-toka-add-reason');
+  wrap.innerHTML = reasons.map(r => '<button type="button" class="ho-toka-add-reason-chip">'+esc(r)+'</button>').join('');
+  wrap.querySelectorAll('.ho-toka-add-reason-chip').forEach((btn, i) => btn.addEventListener('click', () => {
+    reasonEl.value = reasons[i];
+  }));
+}
 async function submitTokaAdd(){
   const name = document.getElementById('ho-toka-add-name').value.trim();
   const reason = document.getElementById('ho-toka-add-reason').value.trim();
   const value = H.tokaAddValue;
-  if (!name || !value || !H.date) return;
+  const ctx = H.tokaConvertCtx;
+  if (!name || !value) return;
+  if (!ctx && !H.date) return;
   const btn = document.getElementById('ho-toka-add-submit');
   btn.disabled = true;
   try {
-    const res = await api('POST', '/'+H.division+'/'+H.date+'/toka-entry', { name, value, reason });
-    const ta = document.getElementById('ho-toka-c');
-    if (ta) { ta.value = res.toka_content; autoGrowTa(ta); }
-    H.updatedAt = res.updated_at || H.updatedAt;
-    H.tokaEntriesToday.push({ name, value, reason });
-    recalcJisseki();
-    computeTokaHotspots();
-    closeTokaAddModal();
-    toast('当欠を追加しました');
+    if (ctx) {
+      // 「当欠記録を見る」での誤判定修正: 元エントリの理由を消し、切り出した名前を
+      // その日の集計にだけ新しい当欠エントリとして追加する（本文は書き換えない）
+      await api('POST', '/'+H.division+'/'+ctx.date+'/toka-correction', {
+        targetName: ctx.targetName, targetValue: ctx.targetValue, reason: '',
+        extraName: name, extraValue: value, extraReason: reason,
+      });
+      closeTokaAddModal();
+      toast('名前として登録し直しました');
+      await reloadTokaSumAfterEdit();
+    } else {
+      const res = await api('POST', '/'+H.division+'/'+H.date+'/toka-entry', { name, value, reason });
+      const ta = document.getElementById('ho-toka-c');
+      if (ta) { ta.value = res.toka_content; autoGrowTa(ta); }
+      H.updatedAt = res.updated_at || H.updatedAt;
+      recalcJisseki();
+      closeTokaAddModal();
+      toast('当欠を追加しました');
+    }
   } catch(e){
     toast('エラー: '+e.message, 3000);
     updateTokaAddSubmitState();
@@ -1445,26 +1578,96 @@ function renderTokaSumBody(){
     listEl.innerHTML = '<div class="ho-tokasum-empty">この月の当欠記録はありません</div>';
     return;
   }
-  listEl.innerHTML = data.entries.map(e =>
-    '<div class="ho-tokasum-row"'+(e.reason?' title="'+esc(e.reason)+'"':'')+'><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
-    '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'+
-    '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span></div>'
-  ).join('');
+  listEl.innerHTML = data.entries.map(tokaEntryRowHtml).join('');
+  wireTokaRowEditButtons();
+}
+// 誤判定修正（理由の直接編集／「これは名前でした」変換）に対応した1行分のHTML。
+// 「当欠記録を見る」の日別一覧・理由別詳細の両方から使う共通部品。
+function tokaEntryRowHtml(e){
+  const reasonHtml = e.reason
+    ? '<span class="ho-tokasum-row-reason" title="'+esc(e.reason)+'">'+esc(e.reason)+'</span>'
+    : '<span class="ho-tokasum-row-reason ho-tokasum-row-reason-empty">(理由未記入)</span>';
+  return '<div class="ho-tokasum-item">'
+    + '<div class="ho-tokasum-row" data-date="'+esc(e.date)+'" data-name="'+esc(e.name)+'" data-value="'+e.value+'" data-reason="'+esc(e.reason||'')+'">'
+    + '<span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'
+    + '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'
+    + reasonHtml
+    + '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span>'
+    + '<button type="button" class="ho-tokasum-row-editbtn">編集</button>'
+    + '</div>'
+    + '<div class="ho-tokasum-editbox"></div>'
+    + '</div>';
+}
+// 行の「編集」ボタン：理由の直接編集と「これは名前でした」変換の入口。
+// 一覧を再描画するたびに呼び直す必要がある（innerHTML入れ替えでリスナーが消えるため）。
+function wireTokaRowEditButtons(){
+  document.querySelectorAll('#ho-tokasum-list .ho-tokasum-row-editbtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = btn.closest('.ho-tokasum-row');
+      const box = row.nextElementSibling;
+      const wasOpen = box.classList.contains('show');
+      document.querySelectorAll('#ho-tokasum-list .ho-tokasum-editbox.show').forEach(b => { b.classList.remove('show'); b.innerHTML = ''; });
+      if (wasOpen) return;
+      const ctx = { date: row.dataset.date, name: row.dataset.name, value: parseFloat(row.dataset.value), reason: row.dataset.reason };
+      box.innerHTML =
+        '<div class="ho-tokasum-editbox-lbl">理由を修正</div>'
+        + '<input type="text" class="ho-tokasum-editbox-input" maxlength="200" value="'+esc(ctx.reason)+'" placeholder="理由（空にすると「理由未記入」になります）">'
+        + '<div class="ho-tokasum-editbox-btns">'
+        + '<button type="button" class="ho-tokasum-editbox-btn primary" data-act="save">保存</button>'
+        + '<button type="button" class="ho-tokasum-editbox-btn warn" data-act="convert">これは名前でした</button>'
+        + '<button type="button" class="ho-tokasum-editbox-btn" data-act="cancel">キャンセル</button>'
+        + '</div>';
+      box.classList.add('show');
+      box.querySelector('[data-act="cancel"]').addEventListener('click', () => { box.classList.remove('show'); box.innerHTML = ''; });
+      box.querySelector('[data-act="save"]').addEventListener('click', () => saveTokaReasonCorrection(ctx, box));
+      box.querySelector('[data-act="convert"]').addEventListener('click', () => {
+        box.classList.remove('show'); box.innerHTML = '';
+        openTokaAddModal({ date: ctx.date, targetName: ctx.name, targetValue: ctx.value, presetName: ctx.reason });
+      });
+    });
+  });
+}
+// 理由欄をそのままの文字列で保存（空文字＝「理由未記入」に確定）
+async function saveTokaReasonCorrection(ctx, box){
+  const input = box.querySelector('.ho-tokasum-editbox-input');
+  const reason = input.value.trim();
+  const saveBtn = box.querySelector('[data-act="save"]');
+  saveBtn.disabled = true;
+  try {
+    await api('POST', '/'+H.division+'/'+ctx.date+'/toka-correction', { targetName: ctx.name, targetValue: ctx.value, reason });
+    toast('理由を修正しました');
+    await reloadTokaSumAfterEdit();
+  } catch(e){
+    toast('エラー: '+e.message, 3000);
+    saveBtn.disabled = false;
+  }
+}
+// 誤判定修正の保存後、月次データを再取得して現在の表示（日別一覧／理由別詳細）を更新する。
+// loadTokaSummary()のrenderTokaSumBody()は'reason-detail'表示中は何もしないため、
+// その場合はopenTokaReasonDetail()で絞り込み直す。
+async function reloadTokaSumAfterEdit(){
+  try {
+    const data = await api('GET', '/'+H.division+'/toka-summary?month='+H.tokaSumMonth);
+    H.tokaSumData = data;
+    document.getElementById('ho-tokasum-count').innerHTML = '板橋'+H.division+'課 当欠数：<b>'+data.count+'</b>件';
+    if (H.tokaSumView === 'reason-detail' && H.tokaSumReasonFilter) openTokaReasonDetail(H.tokaSumReasonFilter);
+    else renderTokaSumBody();
+  } catch(e){
+    toast('エラー: '+e.message, 3000);
+  }
 }
 // 理由をクリックして絞り込んだ、その理由に該当する日付・氏名の一覧
 function openTokaReasonDetail(reason){
   H.tokaSumBackTo = 'reason';
+  H.tokaSumReasonFilter = reason;
   setTokaSumView('reason-detail');
   const listEl = document.getElementById('ho-tokasum-list');
   const data = H.tokaSumData;
   const rows = (data?.entries || []).filter(e => (e.reason || '(理由未記入)') === reason);
-  const rowsHtml = rows.length ? rows.map(e =>
-    '<div class="ho-tokasum-row"><span class="ho-tokasum-row-date">'+fmtMd(e.date)+'</span>'+
-    '<span class="ho-tokasum-row-name">'+esc(e.name)+'</span>'+
-    '<span class="ho-tokasum-row-val">'+e.value.toFixed(1)+'</span></div>'
-  ).join('') : '<div class="ho-tokasum-empty">該当する記録はありません</div>';
+  const rowsHtml = rows.length ? rows.map(tokaEntryRowHtml).join('') : '<div class="ho-tokasum-empty">該当する記録はありません</div>';
   listEl.innerHTML =
     '<div class="ho-tokasum-detail-name">'+esc(reason)+'（'+rows.length+'件）</div>' + rowsHtml;
+  wireTokaRowEditButtons();
 }
 // 個人別の当欠傾向（曜日別/月推移/理由内訳）を表示する
 async function openTokaDetail(name){
@@ -1818,7 +2021,6 @@ async function loadSheet(date){
     const data = await api('GET', '/'+H.division+'/'+date);
     H.updatedAt = data.version ?? (data.sheet?.updated_at || null);
     H.customContent = data.customContent || [];
-    H.tokaEntriesToday = data.tokaEntries || [];
     H.saveFailCount = 0;
     renderSheet(data.sheet, date);
     hideStaleBanner();
@@ -1836,6 +2038,17 @@ function showStaleBanner(){
 function hideStaleBanner(){
   document.getElementById('ho-stale-banner').classList.remove('show');
 }
+// ログイン有効期限切れ用バナー。クリックで別タブにログイン画面を開く（このタブは移動しない＝
+// 入力中の内容を保ったまま、別タブでログインし直すだけでこのタブの保存が自動的に再開する）。
+function showAuthBanner(){
+  document.getElementById('ho-auth-banner').classList.add('show');
+}
+function hideAuthBanner(){
+  document.getElementById('ho-auth-banner').classList.remove('show');
+}
+document.getElementById('ho-auth-banner').addEventListener('click', () => {
+  window.open(LOGIN_URL, '_blank');
+});
 async function checkStaleVersion(){
   if (!H.date) return;
   const division = H.division, date = H.date;
@@ -1851,7 +2064,7 @@ async function reloadStaleSheet(){
   await flushPendingSaves(); // 自分の未保存の入力を消さないよう、読み込み直す前に先に保存する
   // 保存が（リトライしても）失敗したままだと、ここで読み込み直すと未保存の入力が
   // サーバー側の古い内容で上書きされて消えてしまう。その場合は読み込みを中止する。
-  if (H.saveFailCount > 0){
+  if (H.saveFailCount > 0 || H.authRetryCount > 0){
     showStaleBanner();
     toast('保存できていない内容があるため更新を中止しました。保存が完了してから再度お試しください', 5000);
     return;
@@ -1978,7 +2191,6 @@ function buildSpecialSectionHtml(s, sheet, ro, ce){
         + (EDITABLE ? '<button type="button" class="ho-toka-add-btn'+(isPromoActive()?' ho-promo-blink':'')+'" id="ho-toka-add-btn" title="当欠を追加">＋</button>' : '')
         + '</div>'
         + '<textarea class="ho-ta" id="ho-toka-c"'+ro+'>'+esc(sheet?.toka_content||'')+'</textarea>'
-        + '<div class="ho-toka-hover-layer" id="ho-toka-hover-layer"></div>'
         + '</div>';
     case 'jiko':
       return '<div class="ho-sec ho-jiko"'+style+'><div class="ho-lbl red">'+lbl+'</div><div class="ho-ce" id="ho-jiko-c" contenteditable="'+ce+'">'+safeHtml(sheet?.jiko_content)+'</div></div>';
@@ -2019,7 +2231,9 @@ function wireSpecialSection(s){
         const numRect = getTextareaCaretRect(ta);
         showNumpick(numRect, (signed) => {
           const cur2 = ta.value;
-          const insert = ' ' + signed + '\\n';
+          // 改行せず同じ行に続けて理由を書けるようにする（「名前 -1.0 理由」を1行に収める）。
+          // 理由候補をクリックした場合はshowTokaReasonSuggest側で改行して次の入力に備える。
+          const insert = ' ' + signed + ' ';
           ta.value = cur2.slice(0, newPos) + insert + cur2.slice(newPos);
           const finalPos = newPos + insert.length;
           ta.focus(); ta.setSelectionRange(finalPos, finalPos);
@@ -2027,14 +2241,13 @@ function wireSpecialSection(s){
           autoGrowTa(ta);
           scheduleSave('toka_content');
           recalcJisseki();
+          showTokaReasonSuggest(ta, finalPos);
         });
       },
     });
     attachHankaku(el);
     attachAutoGrow(el);
-    el.addEventListener('input', scheduleTokaHotspotRecalc);
-    document.getElementById('ho-toka-add-btn')?.addEventListener('click', openTokaAddModal);
-    computeTokaHotspots();
+    document.getElementById('ho-toka-add-btn')?.addEventListener('click', () => openTokaAddModal());
   } else if (s.section_key === 'jomu'){
     attachNameSuggest(el, field);
     attachHankaku(el);
@@ -2125,8 +2338,6 @@ function renderSheet(sheet, date){
     wireRightColumnSections();
     document.getElementById('ho-del-btn')?.addEventListener('click', () => confirmDeleteDate(H.date));
   }
-  // 閲覧のみ権限でも理由のホバーツールチップは見えるようにする（EDITABLEの外で計算）
-  if (!EDITABLE) computeTokaHotspots();
 }
 
 // ===== やることリスト（フローティングパネル）=====
@@ -2511,11 +2722,20 @@ document.addEventListener('selectionchange', () => {
   const rect = range.getBoundingClientRect();
   const tb = document.getElementById('ho-toolbar');
   tb.style.display = 'flex';
-  const tw = tb.offsetWidth || 140;
+  const tw = tb.offsetWidth || 180;
+  const th = tb.offsetHeight || 36;
+  // #ho-toolbarはposition:fixed（ビューポート基準）のため、getBoundingClientRect()の値に
+  // window.scrollYを足してはいけない（足すとスクロールした分だけ余計にずれ、ページ下の方で
+  // 選択するとツールバーが画面外に出て見えなくなるバグになっていた）。
+  // 横（選択範囲の右横/左横）に出すとドラッグでの範囲選択の邪魔になるとの指摘のため、
+  // 選択範囲の真下（2行分あける）に戻す。下に収まらなければ真上（同じく2行分）に出す。
+  const lineHeight = parseFloat(getComputedStyle(ce).lineHeight) || 24;
+  const gap = lineHeight * 2;
+  let top = rect.bottom + gap;
+  if (top + th > window.innerHeight - 8) top = rect.top - gap - th;
+  top = Math.max(8, Math.min(top, window.innerHeight - th - 8));
   let left = rect.left + rect.width/2 - tw/2;
-  left = Math.max(8, Math.min(left, window.innerWidth-tw-8));
-  let top = rect.top - 52 + window.scrollY;
-  if (top < 60) top = rect.bottom + 8 + window.scrollY;
+  left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
   tb.style.left = left+'px'; tb.style.top = top+'px';
 });
 function hideToolbar(){ document.getElementById('ho-toolbar').style.display='none'; H.savedRange=null; }
@@ -2530,8 +2750,33 @@ function applyColor(color){
   hideToolbar();
   if (ceEl && FIELD_BY_ID[ceEl.id]) scheduleSave(FIELD_BY_ID[ceEl.id]);
 }
+// 選択した文字だけを大きくする（execCommand('fontSize')は1〜7段階の相対指定。5=「大」相当）。
+function applyBigText(){
+  if (!H.savedRange) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(H.savedRange);
+  document.execCommand('fontSize', false, '5');
+  const node = H.savedRange.commonAncestorContainer;
+  const ceEl = (node.nodeType===1 ? node : node.parentElement)?.closest('.ho-ce');
+  hideToolbar();
+  if (ceEl && FIELD_BY_ID[ceEl.id]) scheduleSave(FIELD_BY_ID[ceEl.id]);
+}
+// 「大」で拡大した文字を既定サイズ（3）に戻す
+function resetBigText(){
+  if (!H.savedRange) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(H.savedRange);
+  document.execCommand('fontSize', false, '3');
+  const node = H.savedRange.commonAncestorContainer;
+  const ceEl = (node.nodeType===1 ? node : node.parentElement)?.closest('.ho-ce');
+  hideToolbar();
+  if (ceEl && FIELD_BY_ID[ceEl.id]) scheduleSave(FIELD_BY_ID[ceEl.id]);
+}
 document.getElementById('ho-c-black').onclick = () => applyColor('#000000');
 document.getElementById('ho-c-red').onclick = () => applyColor('#e53935');
+document.getElementById('ho-c-blue').onclick = () => applyColor('#1d4ed8');
+document.getElementById('ho-c-big').onclick = applyBigText;
+document.getElementById('ho-c-reset').onclick = resetBigText;
 document.getElementById('ho-c-close').onclick = hideToolbar;
 
 // ===== 保存（項目単位）=====
@@ -2563,20 +2808,59 @@ function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 // リトライも含めて完了するまでPromiseを返し続けることで、flushPendingSaves()が
 // 「リトライ中なのに完了扱い」にならないようにしている。
 const SAVE_RETRY_DELAYS_MS = [1000, 2500];
+// ログイン有効期限切れの間は待っても直らないため、通常の2回リトライでは諦めてしまう。
+// 別タブでログインし直せばこのタブのCookieも即座に有効になる（同一オリジンのため）ので、
+// 一定間隔で無期限にリトライし続け、再ログインが完了した瞬間に自動で保存を成立させる。
+const AUTH_RETRY_INTERVAL_MS = 15000;
+async function saveOnce(field, division, date, value){
+  const res = field.startsWith('section_')
+    ? await api('PATCH', '/'+division+'/'+date+'/section-content/'+field.slice(8), { value })
+    : await api('PATCH', '/'+division+'/'+date+'/field', { field, value });
+  if (division === H.division && date === H.date) H.updatedAt = res.updated_at || H.updatedAt;
+}
+async function retryAfterLogin(field, division, date, value, dot){
+  H.authRetryCount = (H.authRetryCount || 0) + 1;
+  showAuthBanner();
+  try {
+    while (true){
+      await sleep(AUTH_RETRY_INTERVAL_MS);
+      try {
+        await saveOnce(field, division, date, value);
+        dot.className = 'saved';
+        setTimeout(() => { dot.className = ''; }, 2000);
+        toast('ログインが復帰し、保存が完了しました', 3000);
+        return;
+      } catch(e){
+        if (!e.authExpired){
+          dot.className = 'error';
+          H.saveFailCount = (H.saveFailCount || 0) + 1;
+          toast('保存に失敗しました: '+e.message+'（入力内容は画面に残っています。再読み込みはせず、保存できるまでお待ちください）', 5000);
+          return;
+        }
+        // まだログインし直されていない。バナーを出し続けたままリトライを継続する。
+      }
+    }
+  } finally {
+    H.authRetryCount = Math.max(0, (H.authRetryCount || 0) - 1);
+    if (H.authRetryCount === 0) hideAuthBanner();
+  }
+}
 async function saveField(field, division, date, value){
   if (!date) return;
   const dot = document.getElementById('ho-save-dot');
   for (let attempt = 0; attempt <= SAVE_RETRY_DELAYS_MS.length; attempt++){
     try {
-      const res = field.startsWith('section_')
-        ? await api('PATCH', '/'+division+'/'+date+'/section-content/'+field.slice(8), { value })
-        : await api('PATCH', '/'+division+'/'+date+'/field', { field, value });
-      if (division === H.division && date === H.date) H.updatedAt = res.updated_at || H.updatedAt;
+      await saveOnce(field, division, date, value);
       dot.className = 'saved';
       setTimeout(() => { dot.className = ''; }, 2000);
       H.saveFailCount = 0;
       return;
     } catch(e){
+      if (e.authExpired){
+        dot.className = 'error';
+        await retryAfterLogin(field, division, date, value, dot);
+        return;
+      }
       if (attempt < SAVE_RETRY_DELAYS_MS.length){
         dot.className = 'saving';
         await sleep(SAVE_RETRY_DELAYS_MS[attempt]);
@@ -2679,7 +2963,7 @@ window.addEventListener('pagehide', () => { flushPendingSaves(); });
 // 保存待ち・保存失敗のまま閉じようとした場合はブラウザ標準の確認ダイアログで警告する
 window.addEventListener('beforeunload', (e) => {
   const hasPending = Object.values(H.fieldTimers).some(t => t);
-  if (hasPending || H.saveFailCount > 0){
+  if (hasPending || H.saveFailCount > 0 || H.authRetryCount > 0){
     e.preventDefault();
     e.returnValue = '';
   }

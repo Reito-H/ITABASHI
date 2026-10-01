@@ -194,75 +194,155 @@ app.get(KANCHO_WISH_PATH, (c) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
-  <title>希望休入力</title>
+  <title>班長シフト希望休フォーム</title>
   <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
-    * { box-sizing: border-box; }
-    body { font-family: 'Hiragino Sans','Meiryo',sans-serif; background:#f5f6f8; margin:0; padding:18px; color:#1f2937; font-size:16px; }
-    h1 { font-size:22px; color:#1e3a5f; margin:0 0 6px; }
-    .sub { font-size:14px; color:#6b7280; margin-bottom:20px; }
-    .card { background:white; border:1px solid #e5e7eb; border-radius:14px; padding:20px; margin-bottom:16px; }
-    .big-input { width:100%; font-size:22px; padding:16px; border:2px solid #93c5fd; border-radius:10px; text-align:center; letter-spacing:2px; }
-    .big-btn { width:100%; padding:16px; font-size:18px; font-weight:700; border:none; border-radius:10px; background:#2563eb; color:white; cursor:pointer; margin-top:14px; }
-    .big-btn.secondary { background:#f3f4f6; color:#374151; }
-    .big-btn.green { background:#16a34a; }
-    .err { color:#dc2626; font-size:14px; margin-top:10px; text-align:center; }
-    #msg { text-align:center; padding:60px 12px; color:#6b7280; font-size:16px; }
-    .name-confirm { text-align:center; padding:16px 0; }
-    .name-confirm .nm { font-size:28px; font-weight:700; color:#1e3a5f; margin:10px 0 20px; }
-    .cal-title { font-size:16px; font-weight:700; color:#1e3a5f; margin-bottom:10px; }
-    .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
-    .cal-dow { text-align:center; font-size:12px; color:#9ca3af; padding-bottom:4px; }
-    .cal-cell { padding:12px 2px; text-align:center; border-radius:8px; border:2px solid #d1d5db; font-size:15px; font-weight:700; background:white; cursor:pointer; touch-action:manipulation; min-height:44px; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html { -webkit-text-size-adjust: 100%; }
+    html, body { overflow-x:hidden; width:100%; }
+    body {
+      font-family: 'Hiragino Sans','Meiryo',sans-serif; margin:0; color:#1f2937; font-size:16px;
+      background: linear-gradient(160deg,#2e1354 0%,#1e3a5f 45%,#0f2743 100%);
+      min-height:100vh; padding:max(16px,env(safe-area-inset-top)) 14px 40px;
+      transition:padding-bottom .15s;
+    }
+    body.has-submit-bar { padding-bottom:96px; }
+    .page { max-width:480px; margin:0 auto; width:100%; }
+    .brand { display:flex; align-items:center; gap:10px; padding:6px 4px 18px; color:#f2c14e; }
+    .brand .badge {
+      width:34px; height:34px; border-radius:9px; background:#2e1354; display:flex; align-items:center; justify-content:center;
+      box-shadow:0 4px 14px rgba(0,0,0,0.35); flex-shrink:0;
+    }
+    .brand .badge svg { width:20px; height:20px; }
+    .brand h1 { font-size:16px; color:#fff; font-weight:700; letter-spacing:0.3px; }
+    .brand .sub { font-size:11px; color:#c7d2e8; margin-top:1px; }
+    .card {
+      background:#ffffff; border-radius:18px; padding:22px 20px; margin-bottom:14px;
+      box-shadow:0 14px 34px rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.5);
+    }
+    .step-title { font-size:16px; font-weight:700; color:#1e3a5f; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+    .step-title .num {
+      width:24px; height:24px; border-radius:50%; background:#eef2ff; color:#2e1354; font-size:12px; font-weight:800;
+      display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    }
+    .field-label { font-size:12.5px; color:#6b7280; margin-bottom:8px; font-weight:600; }
+    .big-input {
+      width:100%; font-size:26px; font-weight:700; padding:16px 14px; border:2px solid #dbe3f0; border-radius:12px;
+      text-align:center; letter-spacing:4px; color:#1e3a5f; background:#f8fafc; transition:border-color .15s,box-shadow .15s;
+      font-variant-numeric: tabular-nums;
+    }
+    .big-input:focus { outline:none; border-color:#2e1354; box-shadow:0 0 0 4px rgba(46,19,84,0.12); background:#fff; }
+    .big-input::placeholder { color:#c3cbdb; letter-spacing:4px; font-weight:600; }
+    .input-hint { font-size:12px; color:#9ca3af; margin-top:8px; text-align:center; }
+    .big-btn {
+      width:100%; padding:16px; font-size:16px; font-weight:700; border:none; border-radius:12px; color:white; cursor:pointer;
+      margin-top:16px; touch-action:manipulation; transition:transform .08s, box-shadow .15s; display:flex; align-items:center; justify-content:center; gap:6px;
+    }
+    .big-btn:active { transform:scale(0.98); }
+    .big-btn.primary { background:linear-gradient(135deg,#3a2a72,#2e1354); box-shadow:0 8px 18px rgba(46,19,84,0.35); }
+    .big-btn.primary:disabled { opacity:0.55; box-shadow:none; }
+    .big-btn.secondary { background:#f3f4f6; color:#374151; box-shadow:none; }
+    .big-btn.green { background:linear-gradient(135deg,#22a35a,#16a34a); box-shadow:0 8px 18px rgba(22,163,74,0.3); }
+    .err { color:#dc2626; font-size:13.5px; margin-top:10px; text-align:center; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:8px 10px; }
+    #msg { text-align:center; padding:70px 12px; color:#e5e9f2; font-size:15px; }
+    .name-confirm { text-align:center; padding:6px 0 2px; }
+    .name-confirm .nm { font-size:26px; font-weight:800; color:#1e3a5f; margin:12px 0 22px; }
+    .cal-title { font-size:15px; font-weight:700; color:#1e3a5f; margin-bottom:8px; }
+    .cal-grid { display:grid; grid-template-columns:repeat(7, minmax(0,1fr)); gap:clamp(3px,1.2vw,5px); width:100%; }
+    .cal-dow { text-align:center; font-size:11.5px; color:#9ca3af; padding-bottom:4px; font-weight:600; min-width:0; }
+    .cal-cell {
+      padding:12px 0; text-align:center; border-radius:9px; border:2px solid #e5e9f2; font-size:clamp(11.5px,3.4vw,14.5px); font-weight:700;
+      letter-spacing:-0.3px; white-space:nowrap;
+      background:#fafbfc; cursor:pointer; touch-action:manipulation; min-height:44px; min-width:0; overflow:hidden;
+      transition:background .12s,border-color .12s,color .12s;
+    }
+    .cal-cell.len4 { font-size:clamp(10px,2.9vw,12.5px); }
+    .cal-cell.len5 { font-size:clamp(9px,2.5vw,11px); letter-spacing:-0.5px; }
     .cal-cell.pad { visibility:hidden; }
     .cal-cell.wish { background:#fee2e2; border-color:#dc2626; color:#dc2626; }
     .cal-cell.loading { opacity:0.4; pointer-events:none; }
-    textarea { width:100%; border:1px solid #d1d5db; border-radius:8px; padding:10px; font-size:15px; font-family:inherit; margin-top:8px; box-sizing:border-box; }
-    .hint { font-size:13px; color:#6b7280; margin:12px 0; line-height:1.7; }
+    textarea {
+      width:100%; border:2px solid #e5e9f2; border-radius:10px; padding:12px; font-size:15px; font-family:inherit;
+      margin-top:8px; box-sizing:border-box; resize:vertical; transition:border-color .15s;
+    }
+    textarea:focus { outline:none; border-color:#2e1354; }
+    .hint { font-size:12.5px; color:#6b7280; margin:10px 0; line-height:1.7; }
     .hint b { color:#dc2626; }
     .step { display:none; }
-    #toast { display:none; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#166534; color:white; padding:10px 20px; border-radius:8px; font-size:14px; }
+    #toast {
+      display:none; position:fixed; bottom:calc(24px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); background:#166534; color:white;
+      padding:11px 22px; border-radius:99px; font-size:13.5px; font-weight:600; box-shadow:0 8px 20px rgba(0,0,0,0.3); z-index:60;
+    }
+    body.has-submit-bar #toast { bottom:calc(96px + env(safe-area-inset-bottom)); }
+    .cal-card { padding-left:14px; padding-right:14px; }
+    .submit-bar {
+      position:fixed; left:0; right:0; bottom:0; display:none; z-index:40;
+      background:#ffffff; box-shadow:0 -8px 22px rgba(0,0,0,0.18);
+      padding:12px 14px calc(12px + env(safe-area-inset-bottom));
+    }
+    .submit-bar.show { display:block; }
+    .submit-bar .inner { max-width:480px; margin:0 auto; }
+    .submit-bar .big-btn { margin-top:0; }
+    @media (max-width:360px) {
+      .card { padding:18px 14px; border-radius:14px; }
+      .cal-card { padding-left:10px; padding-right:10px; }
+      .big-input { font-size:22px; letter-spacing:2px; }
+    }
   </style>
 </head>
 <body>
-  <h1>希望休入力</h1>
-  <div id="msg">読み込み中...</div>
-  <div id="closed" class="card step"><div style="text-align:center;color:#6b7280;">現在、希望休の受付期間ではありません。</div></div>
+  <div class="page">
+    <div class="brand">
+      <div class="badge"><svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><polygon points="32.00,10.00 37.29,24.72 52.92,25.20 40.56,34.78 44.93,49.80 32.00,41.00 19.07,49.80 23.44,34.78 11.08,25.20 26.71,24.72" fill="#f2c14e"/></svg></div>
+      <div>
+        <h1>班長シフト希望休フォーム</h1>
+        <div class="sub" id="period-label">読み込み中...</div>
+      </div>
+    </div>
+    <div id="msg">読み込み中...</div>
+    <div id="closed" class="card step"><div style="text-align:center;color:#6b7280;">現在、希望休の受付期間ではありません。</div></div>
 
-  <div id="step1" class="step">
-    <div class="sub" id="period-label"></div>
-    <div class="card">
-      <div style="font-size:15px;font-weight:700;margin-bottom:10px;">社員番号を入力してください</div>
-      <input id="emp-no" class="big-input" type="tel" inputmode="numeric" placeholder="12345678" maxlength="12" oninput="this.value = toHalfWidth(this.value)"
-      <button class="big-btn" onclick="lookup()">次へ</button>
-      <div id="lookup-err" class="err" style="display:none;"></div>
+    <div id="step1" class="step">
+      <div class="card">
+        <div class="step-title"><span class="num">1</span>社員番号を入力してください</div>
+        <input id="emp-no" class="big-input" type="tel" inputmode="numeric" autocomplete="off" placeholder="12345678" maxlength="12" oninput="this.value = toHalfWidth(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();lookup();}">
+        <div class="input-hint">半角・全角どちらでも入力できます</div>
+        <button class="big-btn primary" onclick="lookup()" id="lookup-btn">次へ進む →</button>
+        <div id="lookup-err" class="err" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div id="step2" class="step">
+      <div class="card name-confirm">
+        <div class="step-title" style="justify-content:center;"><span class="num">2</span>お名前の確認</div>
+        <div style="font-size:14px;color:#6b7280;">このお名前で間違いありませんか？</div>
+        <div class="nm" id="confirm-name"></div>
+        <button class="big-btn green" onclick="goStep3()">はい、これで進みます</button>
+        <button class="big-btn secondary" onclick="backToStep1()">いいえ、番号を入力し直す</button>
+      </div>
+    </div>
+
+    <div id="step3" class="step">
+      <div class="card cal-card">
+        <div class="cal-title">休みたい日をタップしてください</div>
+        <div class="hint">タップした日が<b>赤く</b>なれば希望休として登録されます。もう一度タップすると解除できます。</div>
+        <div class="cal-grid" id="cal-dow"></div>
+        <div class="cal-grid" id="cal-grid" style="margin-top:5px;"></div>
+      </div>
+      <div class="card">
+        <div style="font-size:15px;font-weight:700;color:#1e3a5f;">その他要望（自由記入・任意）</div>
+        <textarea id="remark" rows="4" placeholder="例: 〇〇の日は都合がつけば休みたいです"></textarea>
+      </div>
+      <div class="card">
+        <div class="hint">タップした希望休と、その他要望をまとめて担当者にお知らせします。下の「この内容で送信」ボタンを押すと担当者に送られます（何度でも送信し直せます）。</div>
+        <div id="submit-err" class="err" style="display:none;"></div>
+      </div>
     </div>
   </div>
 
-  <div id="step2" class="step">
-    <div class="card name-confirm">
-      <div style="font-size:15px;color:#6b7280;">このお名前で間違いありませんか？</div>
-      <div class="nm" id="confirm-name"></div>
-      <button class="big-btn green" onclick="goStep3()">はい、これで進みます</button>
-      <button class="big-btn secondary" onclick="backToStep1()">いいえ、番号を入力し直す</button>
-    </div>
-  </div>
-
-  <div id="step3" class="step">
-    <div class="card">
-      <div class="cal-title">休みたい日をタップしてください</div>
-      <div class="hint">タップした日が<b>赤く</b>なれば希望休として登録されます。もう一度タップすると解除できます。</div>
-      <div class="cal-grid" id="cal-dow"></div>
-      <div class="cal-grid" id="cal-grid" style="margin-top:5px;"></div>
-    </div>
-    <div class="card">
-      <div style="font-size:15px;font-weight:700;">その他要望（自由記入・任意）</div>
-      <textarea id="remark" rows="4" placeholder="例: 〇〇の日は都合がつけば休みたいです"></textarea>
-    </div>
-    <div class="card">
-      <div class="hint">タップした希望休と、その他要望をまとめて担当者にお知らせします。入力し終わったら押してください（何度でも送信し直せます）。</div>
+  <div class="submit-bar" id="submit-bar">
+    <div class="inner">
       <button class="big-btn green" onclick="submitReport()" id="submit-btn">この内容で送信</button>
-      <div id="submit-err" class="err" style="display:none;"></div>
     </div>
   </div>
 
@@ -280,6 +360,9 @@ function showStep(id) {
   ['msg','closed','step1','step2','step3'].forEach(function(s) {
     document.getElementById(s).style.display = (s === id) ? (s === 'msg' || s === 'closed' ? 'block' : 'block') : 'none';
   });
+  var onStep3 = (id === 'step3');
+  document.getElementById('submit-bar').classList.toggle('show', onStep3);
+  document.body.classList.toggle('has-submit-bar', onStep3);
 }
 function toast(msg) {
   var el = document.getElementById('toast');
@@ -291,10 +374,16 @@ async function init() {
   try {
     var res = await fetch('/api/public/kancho-wish/status');
     var d = await res.json();
-    if (!d.open) { showStep('closed'); return; }
-    document.getElementById('period-label').textContent = d.label + 'の希望休を受け付けています';
+    if (!d.open) {
+      document.getElementById('period-label').textContent = '現在は受付期間ではありません';
+      showStep('closed');
+      return;
+    }
+    document.getElementById('period-label').textContent = d.label + 'の希望休を受け付け中';
     showStep('step1');
+    setTimeout(function() { var el = document.getElementById('emp-no'); if (el) el.focus(); }, 50);
   } catch (e) {
+    document.getElementById('period-label').textContent = '';
     document.getElementById('msg').textContent = '読み込みに失敗しました。時間をおいて再度お試しください。';
   }
 }
@@ -305,8 +394,10 @@ function toHalfWidth(s) {
 async function lookup() {
   var empNo = toHalfWidth(document.getElementById('emp-no').value.trim());
   var errEl = document.getElementById('lookup-err');
+  var btn = document.getElementById('lookup-btn');
   errEl.style.display = 'none';
   if (!empNo) { errEl.textContent = '社員番号を入力してください'; errEl.style.display = 'block'; return; }
+  btn.disabled = true; btn.textContent = '確認中...';
   try {
     var res = await fetch('/api/public/kancho-wish/lookup?emp_no=' + encodeURIComponent(empNo));
     var d = await res.json();
@@ -318,6 +409,8 @@ async function lookup() {
     showStep('step2');
   } catch (e) {
     errEl.textContent = '確認に失敗しました。もう一度お試しください'; errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = '次へ進む →';
   }
 }
 function backToStep1() {
@@ -325,6 +418,7 @@ function backToStep1() {
   _empNo = '';
   document.getElementById('emp-no').value = '';
   showStep('step1');
+  setTimeout(function() { var el = document.getElementById('emp-no'); if (el) el.focus(); }, 50);
 }
 
 async function goStep3() {
@@ -367,8 +461,9 @@ function renderCal() {
     var inPeriod = dt >= _periodStart && dt <= _periodEnd;
     if (!inPeriod) return '<div class="cal-cell pad"></div>';
     var t = new Date(dt + 'T00:00:00');
-    var cls = 'cal-cell' + (_wishSet[dt] ? ' wish' : '');
-    return '<div class="' + cls + '" data-date="' + dt + '" onclick="toggleDate(this)">' + (t.getMonth() + 1) + '/' + t.getDate() + '</div>';
+    var label = (t.getMonth() + 1) + '/' + t.getDate();
+    var cls = 'cal-cell' + (label.length >= 5 ? ' len5' : (label.length >= 4 ? ' len4' : '')) + (_wishSet[dt] ? ' wish' : '');
+    return '<div class="' + cls + '" data-date="' + dt + '" onclick="toggleDate(this)">' + label + '</div>';
   }).join('');
 }
 async function toggleDate(el) {

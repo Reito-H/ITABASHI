@@ -5,8 +5,12 @@
 //     - tenure_min_months : 入社から今日までが N ヶ月以上
 //     - entry_types       : 入社区分（'新卒'|'キャリア'|'縁故'）のいずれか。空配列=不問
 //     - newcomers_only    : 新人登録中（is_newcomer=1）のみ
+//     - divisions         : 課（1〜4）のいずれか。空配列=不問
+//     - age_min           : 年齢が N 歳以上（誕生日基準）
+//     - age_max           : 年齢が N 歳以下
 //     - emp_nos           : この社員番号のみ。空配列=不問
 //   hire_date 未登録の社員は、在籍年数の条件が付いている場合は「対象外」扱い（判定できないため）。
+//   birth_date 未登録の社員は、年齢の条件が付いている場合は「対象外」扱い（判定できないため）。
 
 export type Eligibility = {
   mode: 'all' | 'conditions';
@@ -14,6 +18,9 @@ export type Eligibility = {
   tenure_min_months: number | null;
   entry_types: string[];
   newcomers_only: boolean;
+  divisions: number[];
+  age_min: number | null;
+  age_max: number | null;
   emp_nos: string[];
 };
 
@@ -22,6 +29,8 @@ export type EmpForEligibility = {
   hire_date: string | null;
   entry_type: string | null;
   is_newcomer: number | null;
+  division: number | null;
+  birth_date: string | null;
 };
 
 export const ENTRY_TYPES = ['新卒', 'キャリア', '縁故'] as const;
@@ -32,6 +41,9 @@ const EMPTY: Eligibility = {
   tenure_min_months: null,
   entry_types: [],
   newcomers_only: false,
+  divisions: [],
+  age_min: null,
+  age_max: null,
   emp_nos: [],
 };
 
@@ -66,12 +78,18 @@ export function parseEligibility(raw: string | null | undefined): Eligibility {
   const empNos = Array.isArray(j.emp_nos)
     ? (j.emp_nos as unknown[]).map((x) => String(x).trim()).filter(Boolean).slice(0, 500)
     : [];
+  const divisions = Array.isArray(j.divisions)
+    ? [...new Set((j.divisions as unknown[]).map((x) => toInt(x)).filter((n): n is number => n != null && n >= 1 && n <= 4))]
+    : [];
   return {
     mode,
     tenure_max_months: toInt(j.tenure_max_months),
     tenure_min_months: toInt(j.tenure_min_months),
     entry_types: entryTypes,
     newcomers_only: j.newcomers_only === true || j.newcomers_only === 1,
+    divisions,
+    age_min: toInt(j.age_min),
+    age_max: toInt(j.age_max),
     emp_nos: empNos,
   };
 }
@@ -83,7 +101,9 @@ export function serializeEligibility(input: unknown): string | null {
   if (e.mode !== 'conditions') return null;
   const hasAny =
     e.tenure_max_months != null || e.tenure_min_months != null ||
-    e.entry_types.length > 0 || e.newcomers_only || e.emp_nos.length > 0;
+    e.entry_types.length > 0 || e.newcomers_only ||
+    e.divisions.length > 0 || e.age_min != null || e.age_max != null ||
+    e.emp_nos.length > 0;
   if (!hasAny) return null; // 条件なし＝全員
   return JSON.stringify({
     mode: 'conditions',
@@ -91,6 +111,9 @@ export function serializeEligibility(input: unknown): string | null {
     tenure_min_months: e.tenure_min_months,
     entry_types: e.entry_types,
     newcomers_only: e.newcomers_only,
+    divisions: e.divisions,
+    age_min: e.age_min,
+    age_max: e.age_max,
     emp_nos: e.emp_nos,
   });
 }
@@ -105,16 +128,29 @@ export function monthsBetween(from: string | null | undefined, to: string): numb
   return months;
 }
 
+// birth_date(YYYY-MM-DD) から today(YYYY-MM-DD) までの満年齢。birth_date が無効なら null。
+export function ageAt(birthDate: string | null | undefined, today: string): number | null {
+  const m = monthsBetween(birthDate, today);
+  return m == null ? null : Math.floor(m / 12);
+}
+
 export function isEligible(e: Eligibility, emp: EmpForEligibility, today: string): boolean {
   if (e.mode !== 'conditions') return true;
   if (e.emp_nos.length > 0 && !e.emp_nos.includes(String(emp.emp_no).trim())) return false;
   if (e.entry_types.length > 0 && !e.entry_types.includes(emp.entry_type ?? '')) return false;
   if (e.newcomers_only && emp.is_newcomer !== 1) return false;
+  if (e.divisions.length > 0 && (emp.division == null || !e.divisions.includes(emp.division))) return false;
   if (e.tenure_max_months != null || e.tenure_min_months != null) {
     const m = monthsBetween(emp.hire_date, today);
     if (m == null) return false; // 入社日不明＝在籍年数を判定できない
     if (e.tenure_max_months != null && m > e.tenure_max_months) return false;
     if (e.tenure_min_months != null && m < e.tenure_min_months) return false;
+  }
+  if (e.age_min != null || e.age_max != null) {
+    const age = ageAt(emp.birth_date, today);
+    if (age == null) return false; // 生年月日不明＝年齢を判定できない
+    if (e.age_min != null && age < e.age_min) return false;
+    if (e.age_max != null && age > e.age_max) return false;
   }
   return true;
 }
@@ -133,6 +169,10 @@ export function describeEligibility(e: Eligibility): string {
   }
   if (e.entry_types.length > 0) parts.push(e.entry_types.join('・'));
   if (e.newcomers_only) parts.push('新人登録中');
+  if (e.divisions.length > 0) parts.push(e.divisions.slice().sort().map((d) => d + '課').join('・'));
+  if (e.age_min != null && e.age_max != null) parts.push(e.age_min + '〜' + e.age_max + '歳');
+  else if (e.age_min != null) parts.push(e.age_min + '歳以上');
+  else if (e.age_max != null) parts.push(e.age_max + '歳以下');
   if (e.emp_nos.length > 0) parts.push('社員番号' + e.emp_nos.length + '名を指定');
   return parts.length ? parts.join(' / ') : '全員';
 }

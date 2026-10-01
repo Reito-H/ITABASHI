@@ -178,6 +178,53 @@ async function loadStructuredTokaByDate(db: Env['DB'], divNum: number, dateFrom:
   return map;
 }
 
+// parseTokaLinesの2行先読み方式（当欠行の直後が当欠行に見えなければ理由とみなす）は、
+// 次の行に「値未入力のまま残った別の人の名前」があると、それを理由と誤認することがある
+// （例: 名前だけ入力して離脱→次の人の当欠行の「理由」として拾われてしまう）。集計・候補提示の
+// どちらでも名前が理由として紛れ込まないよう、社員名簿に実在する名前と完全一致する「理由」は
+// 空（理由未記入）扱いにする（parseTokaLines自体は既に何度も調整済みで壊れやすいため、
+// こちらで後処理する方針）。
+async function loadEmployeeNameSet(db: Env['DB']): Promise<Set<string>> {
+  const rows = await db.prepare('SELECT name FROM employees').all<{ name: string }>();
+  return new Set((rows.results ?? []).map(r => r.name));
+}
+function sanitizeReason(reason: string, employeeNames: Set<string>): string {
+  return employeeNames.has(reason) ? '' : reason;
+}
+
+// 「当欠記録を見る」モーダルでの誤判定修正（migration_167）。本文（toka_content）は一切書き換えず、
+// 集計時にだけ適用する上書きレイヤー。target_name/target_valueに一致する既存エントリの理由を
+// reasonで上書きし（空文字にすれば「理由未記入」に確定できる＝sanitizeReasonの自動除外待ちにしない）、
+// extra_nameがあれば「これは名前でした」変換として、本文に対応行が無い新規の当欠エントリを
+// その日の集計にだけ追加する（handover_toka_entriesと違い、本文への追記は行わない）。
+type TokaCorrection = {
+  target_name: string; target_value: number; reason: string;
+  extra_name: string | null; extra_value: number | null; extra_reason: string;
+};
+async function loadCorrectionsByDate(db: Env['DB'], divNum: number, dateFrom: string, dateTo: string): Promise<Map<string, TokaCorrection[]>> {
+  const rows = await db.prepare(
+    'SELECT date, target_name, target_value, reason, extra_name, extra_value, extra_reason FROM handover_toka_corrections WHERE division = ? AND date >= ? AND date < ? ORDER BY id'
+  ).bind(divNum, dateFrom, dateTo).all<TokaCorrection & { date: string }>();
+  const map = new Map<string, TokaCorrection[]>();
+  for (const r of rows.results ?? []) {
+    const list = map.get(r.date) ?? [];
+    list.push({ target_name: r.target_name, target_value: r.target_value, reason: r.reason || '', extra_name: r.extra_name, extra_value: r.extra_value, extra_reason: r.extra_reason || '' });
+    map.set(r.date, list);
+  }
+  return map;
+}
+function applyCorrections(entries: TokaEntry[], corrections: TokaCorrection[]): TokaEntry[] {
+  const result = entries.slice();
+  for (const cr of corrections) {
+    const idx = result.findIndex(e => e.name === cr.target_name && Math.abs(e.value - cr.target_value) < 0.001);
+    if (idx !== -1) result[idx] = { ...result[idx], reason: cr.reason };
+    if (cr.extra_name != null && cr.extra_value != null) {
+      result.push({ name: cr.extra_name, value: cr.extra_value, reason: cr.extra_reason });
+    }
+  }
+  return result;
+}
+
 // 当欠・理由欄の月間集計（記録ページ用）。日別の一覧・理由別ランキングに加え、当欠回数が多い人のランキングも返す。
 app.get('/api/handover/:division/toka-summary', async (c) => {
   const division = c.req.param('division');
@@ -189,11 +236,17 @@ app.get('/api/handover/:division/toka-summary', async (c) => {
   const rows = await c.env.DB.prepare(
     'SELECT date, toka_content FROM handover_sheets WHERE division = ? AND date LIKE ? ORDER BY date'
   ).bind(divNum, `${month}%`).all<{ date: string; toka_content: string }>();
-  const structuredByDate = await loadStructuredTokaByDate(c.env.DB, divNum, `${month}-01`, `${month}-32`);
+  const [structuredByDate, employeeNames, correctionsByDate] = await Promise.all([
+    loadStructuredTokaByDate(c.env.DB, divNum, `${month}-01`, `${month}-32`),
+    loadEmployeeNameSet(c.env.DB),
+    loadCorrectionsByDate(c.env.DB, divNum, `${month}-01`, `${month}-32`),
+  ]);
 
   const entries: { date: string; name: string; value: number; reason: string }[] = [];
   for (const row of rows.results ?? []) {
-    const parsed = mergeStructuredReasons(parseTokaLines(row.toka_content || ''), structuredByDate.get(row.date) ?? []);
+    let parsed = mergeStructuredReasons(parseTokaLines(row.toka_content || ''), structuredByDate.get(row.date) ?? []);
+    parsed = parsed.map(e => ({ ...e, reason: sanitizeReason(e.reason, employeeNames) }));
+    parsed = applyCorrections(parsed, correctionsByDate.get(row.date) ?? []);
     for (const e of parsed) entries.push({ date: row.date, name: e.name, value: e.value, reason: e.reason });
   }
 
@@ -237,7 +290,11 @@ app.get('/api/handover/:division/toka-detail', async (c) => {
   const rows = await c.env.DB.prepare(
     'SELECT date, toka_content FROM handover_sheets WHERE division = ? AND date >= ? AND date < ? ORDER BY date'
   ).bind(divNum, `${startYm}-01`, `${month}-32`).all<{ date: string; toka_content: string }>();
-  const structuredByDate = await loadStructuredTokaByDate(c.env.DB, divNum, `${startYm}-01`, `${month}-32`);
+  const [structuredByDate, employeeNames, correctionsByDate] = await Promise.all([
+    loadStructuredTokaByDate(c.env.DB, divNum, `${startYm}-01`, `${month}-32`),
+    loadEmployeeNameSet(c.env.DB),
+    loadCorrectionsByDate(c.env.DB, divNum, `${startYm}-01`, `${month}-32`),
+  ]);
 
   const monthlyMap = new Map<string, { count: number; total: number }>();
   const weekday = [0, 0, 0, 0, 0, 0, 0];
@@ -246,7 +303,9 @@ app.get('/api/handover/:division/toka-detail', async (c) => {
 
   for (const row of rows.results ?? []) {
     const ym = row.date.slice(0, 7);
-    const dayParsed = mergeStructuredReasons(parseTokaLines(row.toka_content || ''), structuredByDate.get(row.date) ?? []);
+    let dayParsed = mergeStructuredReasons(parseTokaLines(row.toka_content || ''), structuredByDate.get(row.date) ?? []);
+    dayParsed = dayParsed.map(e => ({ ...e, reason: sanitizeReason(e.reason, employeeNames) }));
+    dayParsed = applyCorrections(dayParsed, correctionsByDate.get(row.date) ?? []);
     for (const parsed of dayParsed) {
       if (parsed.name !== name) continue;
       const cur = monthlyMap.get(ym) ?? { count: 0, total: 0 };
@@ -254,9 +313,10 @@ app.get('/api/handover/:division/toka-detail', async (c) => {
       cur.total += Math.abs(parsed.value);
       monthlyMap.set(ym, cur);
       weekday[new Date(row.date + 'T00:00:00Z').getUTCDay()] += 1;
-      const reasonKey = parsed.reason || '(理由未記入)';
+      const reason = parsed.reason;
+      const reasonKey = reason || '(理由未記入)';
       reasonMap.set(reasonKey, (reasonMap.get(reasonKey) ?? 0) + 1);
-      entries.push({ date: row.date, value: parsed.value, reason: parsed.reason });
+      entries.push({ date: row.date, value: parsed.value, reason });
     }
   }
 
@@ -272,6 +332,60 @@ app.get('/api/handover/:division/toka-detail', async (c) => {
     .sort((a, b) => b.count - a.count);
 
   return c.json({ name, monthly, weekday, reasons, entries });
+});
+
+// 当欠行の直後の行が当欠行として認識できない場合は理由とみなす、という parseTokaLines の
+// 見出し（2行先読み）方式は、次の行に「値をまだ入力していない別の人の名前」だけが残っている
+// ケース（入力を離脱した等）を理由と誤認してしまうことがある。理由候補にまで名前が混ざると
+// 使い物にならないため、社員名簿に実在する名前と完全一致する候補はここで除外する
+// （パース処理自体は既に何度も調整済みで壊れやすいため、集計側でなく候補提示側で対処する）。
+//
+// 過去の入力実績が少ない・無い課でも候補が空にならないよう、タクシー乗務員の当欠として
+// 実際によくある理由を固定リストとして用意し、実績由来の候補で埋まらない分を補う
+// （実績のあるものを優先表示）。「交通機関の遅延」のような通勤者向けの理由ではなく、
+// 乗務員自身の体調・家庭の事情・自家用車のトラブル等、現場の実態に即したものにしている。
+const TOKA_REASON_FALLBACK = [
+  '体調不良', '発熱', '腹痛', '頭痛', '通院', '私用',
+  '冠婚葬祭', '有給休暇', '寝坊', '家族の急病', '車両トラブル', '悪天候',
+];
+
+// 当欠・理由欄の「理由」入力補助用: この課で過去によく入力されている理由を頻度順に返す
+// （名前の混入を除外した上で、件数が少なければ定番理由で補う）。期間は絞らず全期間対象
+// （「通院」「私用」等はいつの時期でも使う定番理由のため、直近だけに絞る必要はないと判断）。
+// テキストエリアでの±数値ピッカー確定後、および「＋」ボタンの理由欄フォーカス時、
+// 両方から呼ばれる（`handover_sheet.ts`のshowTokaReasonSuggest）。
+app.get('/api/handover/:division/toka-reason-suggest', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const divNum = parseInt(division, 10);
+  const [rows, employeeNames, structuredByDate, correctionsByDate] = await Promise.all([
+    c.env.DB.prepare("SELECT date, toka_content FROM handover_sheets WHERE division = ? AND toka_content != ''")
+      .bind(divNum).all<{ date: string; toka_content: string }>(),
+    loadEmployeeNameSet(c.env.DB),
+    loadStructuredTokaByDate(c.env.DB, divNum, '0000-01-01', '9999-12-31'),
+    loadCorrectionsByDate(c.env.DB, divNum, '0000-01-01', '9999-12-31'),
+  ]);
+
+  const reasonCount = new Map<string, number>();
+  for (const row of rows.results ?? []) {
+    let parsed = mergeStructuredReasons(parseTokaLines(row.toka_content || ''), structuredByDate.get(row.date) ?? []);
+    parsed = parsed.map(e => ({ ...e, reason: sanitizeReason((e.reason || '').trim(), employeeNames) }));
+    parsed = applyCorrections(parsed, correctionsByDate.get(row.date) ?? []);
+    for (const e of parsed) {
+      const reason = (e.reason || '').trim();
+      if (!reason) continue;
+      reasonCount.set(reason, (reasonCount.get(reason) ?? 0) + 1);
+    }
+  }
+  const fromHistory = [...reasonCount.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason]) => reason);
+  const reasons = fromHistory.slice(0, 8);
+  for (const fallback of TOKA_REASON_FALLBACK) {
+    if (reasons.length >= 12) break;
+    if (!reasons.includes(fallback)) reasons.push(fallback);
+  }
+  return c.json({ reasons });
 });
 
 // 当欠欄オートコンプリート用: 課内の在籍社員名を部分一致検索。
@@ -820,17 +934,17 @@ app.get('/api/handover/:division/:date', async (c) => {
      WHERE s.division = ? AND s.kind = 'custom' AND s.is_active = 1`
   ).bind(date, divNum).all<{ sectionId: number; content: string | null }>();
   const customContent = (customRows.results ?? []).map(r => ({ sectionId: r.sectionId, content: r.content ?? '' }));
-  const tokaEntryRows = await c.env.DB.prepare(
-    'SELECT name, value, reason FROM handover_toka_entries WHERE division = ? AND date = ? ORDER BY id'
-  ).bind(divNum, date).all<{ name: string; value: number; reason: string }>();
   const version = await sheetVersion(c.env.DB, divNum, date);
-  return c.json({ sheet: sheet ?? null, customContent, tokaEntries: tokaEntryRows.results ?? [], version });
+  return c.json({ sheet: sheet ?? null, customContent, version });
 });
 
-// ＋ボタンからの当欠・稼働追加登録。本文（toka_content）には「名前 -1.0」「名前 +0.5」のみを
-// 追記し（理由は書かない）、理由はhandover_toka_entriesに構造化して保存する。フロント側は
-// 名前にカーソルを当てるとこの理由をポップアップ表示する（本文中の行と名前・数値が一致する分だけ
-// 紐付ける方式のため、本文の行が手動で編集・削除されればこの登録も以後の集計・表示から自動的に外れる）。
+// ＋ボタンからの当欠・稼働追加登録。本文（toka_content）には理由も含めて「名前 -1.0 理由」の
+// ように1行そのまま追記する（テキストエリア上の自由入力と同じ見た目の普通のテキストにする。
+// 以前は理由を本文に書かずhandover_toka_entriesだけに構造化保存し、カーソルを当てた時だけ
+// ポップアップ表示する方式だったが、「乗せないと見えないのはやめて普通にテキストとして
+// 配置してほしい」との要望で本文に直接書く方式に変更した）。理由はhandover_toka_entriesにも
+// 引き続き保存する（登録者・登録日時の記録用。既存データとの互換のため、本文に理由が無い
+// 過去の行はmergeStructuredReasonsで引き続きこちらから補完される）。
 // プラス（稼働追加・代走等）は既存のparseTokaLines/TOKA_ENTRY_REがマイナス行しか当欠として
 // 拾わない仕様（既存コメント「+の代走行は対象外」）のため、当欠記録の集計には出てこないが、
 // クライアント側の稼働実績自動計算（calcTokaDelta、+/-両対応）には反映される。
@@ -855,7 +969,7 @@ app.post('/api/handover/:division/:date/toka-entry', async (c) => {
   if (!sheet) return c.json({ error: 'シートが存在しません' }, 404);
 
   const signStr = value >= 0 ? '+' : '';
-  const line = `${name} ${signStr}${value.toFixed(1)}`;
+  const line = reason ? `${name} ${signStr}${value.toFixed(1)} ${reason}` : `${name} ${signStr}${value.toFixed(1)}`;
   const newContent = sheet.toka_content ? `${sheet.toka_content}\n${line}` : line;
   const admin = await adminName(c);
 
@@ -870,6 +984,51 @@ app.post('/api/handover/:division/:date/toka-entry', async (c) => {
     .bind(divNum, date).first<{ updated_at: string }>();
   await logAction(c, 'save', divNum, date, admin);
   return c.json({ ok: true, id: r.meta.last_row_id, toka_content: newContent, updated_at: saved?.updated_at ?? null });
+});
+
+// 「当欠記録を見る」モーダルでの誤判定修正登録。本文（toka_content）は一切書き換えない。
+// (1) 理由の直接編集: targetName/targetValueに一致するエントリの理由をreasonで上書き
+//     （空文字を渡せば「理由未記入」に確定できる。過去に社員名簿の名前と誤って一致してしまい
+//     sanitizeReasonで自動的に空欄化されていたケースも、これで明示的に確定できる）。
+// (2) 「これは名前でした」変換: (1)に加えextraName/extraValueを渡すと、本文に対応行の無い
+//     新規の当欠エントリとして、その日の集計にだけ追加する（handover_toka_entriesとは別物で、
+//     本文には一切追記しない＝ユーザー要望により集計・記録画面側だけで完結させる設計）。
+app.post('/api/handover/:division/:date/toka-correction', async (c) => {
+  const division = c.req.param('division');
+  const date = c.req.param('date');
+  if (!isValidDivision(division) || !isValidDate(date)) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+
+  const b = await c.req.json<{
+    targetName?: string; targetValue?: number; reason?: string;
+    extraName?: string; extraValue?: number; extraReason?: string;
+  }>().catch(() => ({}) as { targetName?: string; targetValue?: number; reason?: string; extraName?: string; extraValue?: number; extraReason?: string });
+  const targetName = (b.targetName || '').trim();
+  const targetValue = Number(b.targetValue);
+  const reason = (b.reason || '').trim().slice(0, 200);
+  if (!targetName || !Number.isFinite(targetValue)) return c.json({ error: '対象の指定が不正です' }, 400);
+
+  let extraName: string | null = null;
+  let extraValue: number | null = null;
+  let extraReason = '';
+  if (b.extraName) {
+    extraName = b.extraName.trim();
+    extraValue = Number(b.extraValue);
+    extraReason = (b.extraReason || '').trim().slice(0, 200);
+    if (!extraName) return c.json({ error: '名前を入力してください' }, 400);
+    if (!TOKA_ADD_VALUES.has(extraValue)) return c.json({ error: '数値の指定が不正です' }, 400);
+  }
+
+  const divNum = parseInt(division, 10);
+  const sheet = await c.env.DB.prepare('SELECT 1 FROM handover_sheets WHERE division = ? AND date = ?').bind(divNum, date).first();
+  if (!sheet) return c.json({ error: 'シートが存在しません' }, 404);
+
+  const admin = await adminName(c);
+  const r = await c.env.DB.prepare(
+    `INSERT INTO handover_toka_corrections (division, date, target_name, target_value, reason, extra_name, extra_value, extra_reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(divNum, date, targetName, targetValue, reason, extraName, extraValue, extraReason, admin.name).run();
+  await logAction(c, 'save', divNum, date, admin);
+  return c.json({ ok: true, id: r.meta.last_row_id });
 });
 
 // 他端末での更新検知用の軽量ポーリングエンドポイント（フルデータを含まない）

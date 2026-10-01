@@ -5,7 +5,7 @@
 // 社員番号は employees と照合し、課・班をサーバー側で控える（氏名は保存しない）。
 import { Hono } from 'hono';
 import type { Env } from '../auth';
-import { HIYARI_PATH } from '../config';
+import { HIYARI_PATH, STUDY_SESSION_PATH } from '../config';
 import { FAVICON_DATA_URI } from '../html/layout';
 import {
   HIYARI_WEATHER_OPTS, HIYARI_AREA_OPTS, HIYARI_COUNTERPART_OPTS,
@@ -175,10 +175,19 @@ app.get(HIYARI_PATH, (c) => {
       <div class="txt">ご報告ありがとうございました。<br>安全運転にご協力をお願いします。</div>
       <button class="big-btn secondary" style="margin-top:20px;" onclick="resetForm()">続けてもう1件報告する</button>
     </div>
+    <div class="card" style="background:#eff6ff;border:2px solid #bfdbfe;text-align:center;">
+      <div style="font-size:15px;font-weight:800;color:#1e3a5f;margin-bottom:8px;">そのままよろしければ</div>
+      <div style="font-size:14px;color:#374151;line-height:1.7;margin-bottom:4px;">板橋オリジナルの勉強会やイベントに<br>参加しませんか？</div>
+      <button class="big-btn" id="to-study-btn" onclick="goToStudySessions()">イベント参加申し込みへ</button>
+    </div>
   </div>
 
 <script>
 var _empNo = '';
+var STUDY_SESSION_URL = ${JSON.stringify(STUDY_SESSION_PATH)};
+function goToStudySessions() {
+  location.href = STUDY_SESSION_URL + '?emp_no=' + encodeURIComponent(_empNo);
+}
 function toHalfWidth(s){ return s.replace(/[０-９]/g, function(ch){ return String.fromCharCode(ch.charCodeAt(0)-0xFEE0); }); }
 function show(id){ ['step1','step2','step3'].forEach(function(s){ document.getElementById(s).style.display = (s===id)?'block':'none'; }); window.scrollTo(0,0); }
 function val(id){ return document.getElementById(id).value.trim(); }

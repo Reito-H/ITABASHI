@@ -16,6 +16,7 @@ export type CrewShiftMember = {
   team: number;
   is_active: number;
   sort_order: number;
+  sheet_left_days: number | null;
 };
 
 export type CrewShiftType = {

@@ -204,16 +204,19 @@ app.get('/api/crew-shift/pdf-parser.js', async (c) => {
 
 app.post('/api/crew-shift/import/members', async (c) => {
   const body = await c.req.json<{
-    members: Array<{ emp_code: string; name: string; car_no: string | null; division: string; team: number; sort_order: number }>;
+    members: Array<{ emp_code: string; name: string; car_no: string | null; division: string; team: number; sort_order: number; sheet_left_days?: number | null }>;
   }>();
   const members = body.members ?? [];
   if (members.length === 0) return c.json({ ok: true });
 
+  // car_no / sheet_left_days は「個人別シフトPDF」など元情報を持たない取込元では常にnullで
+  // 送られてくるため、COALESCEで既存値を保持する（そうしないと取り込むたびに他方式の取込で
+  // 登録済みの値が消える）。
   const stmts = members.map(m => c.env.DB.prepare(
-    `INSERT INTO crew_shift_members (emp_code, name, car_no, division, team, sort_order) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(emp_code) DO UPDATE SET name = excluded.name, car_no = excluded.car_no, division = excluded.division, team = excluded.team,
-       is_active = 1, updated_at = datetime('now','localtime')`
-  ).bind(m.emp_code, m.name, m.car_no, m.division, m.team, m.sort_order));
+    `INSERT INTO crew_shift_members (emp_code, name, car_no, division, team, sort_order, sheet_left_days) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(emp_code) DO UPDATE SET name = excluded.name, car_no = COALESCE(excluded.car_no, car_no), division = excluded.division, team = excluded.team,
+       sheet_left_days = COALESCE(excluded.sheet_left_days, sheet_left_days), is_active = 1, updated_at = datetime('now','localtime')`
+  ).bind(m.emp_code, m.name, m.car_no, m.division, m.team, m.sort_order, m.sheet_left_days ?? null));
   await c.env.DB.batch(stmts);
   return c.json({ ok: true });
 });
