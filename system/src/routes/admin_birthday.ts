@@ -778,6 +778,8 @@ birthdayPublicApi.get('/photo/:id', async (c) => {
   if (!obj) return c.json({ error: '写真が見つかりません' }, 404);
 
   const headers = new Headers();
-  headers.set('Content-Type', row.photo_mime_type || 'application/octet-stream');
+  // 保存時のMIMEはアップロード側の申告値のため、ビットマップ画像以外（text/html・SVG等）は画像として配信しない
+  const mime = row.photo_mime_type ?? '';
+  headers.set('Content-Type', /^image\/(jpeg|png|gif|webp|heic|heif|avif)$/.test(mime) ? mime : 'application/octet-stream');
   return new Response(obj.body, { headers });
 });

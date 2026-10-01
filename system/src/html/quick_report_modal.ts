@@ -514,13 +514,15 @@ export function quickReportModalScript(): string {
       .then(function(data) {
         var sheet = data && data.sheet;
         if (!sheet) { box.innerHTML = division + '課: 本日の引き継ぎシートはまだ作成されていません'; box.style.display = 'block'; return; }
-        var strip = function(html) {
-          var tmp = document.createElement('div');
-          tmp.innerHTML = html || '';
-          var t = tmp.textContent || '';
-          return t.length > 60 ? t.slice(0, 60) + '…' : t;
+        var esc = function(s) {
+          return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         };
-        var lines = ['<b>' + division + '課 本日の引き継ぎ状況</b>（動態: ' + (sheet.douta || '未') + '）'];
+        // 引き継ぎシート本文はHTMLのため、DOMParser（解析中にスクリプト・画像読込が走らない）で文字だけ取り出す
+        var strip = function(html) {
+          var t = new DOMParser().parseFromString(html || '', 'text/html').body.textContent || '';
+          return esc(t.length > 60 ? t.slice(0, 60) + '…' : t);
+        };
+        var lines = ['<b>' + esc(division) + '課 本日の引き継ぎ状況</b>（動態: ' + esc(sheet.douta || '未') + '）'];
         var main = strip(sheet.main_content);
         var toka = strip(sheet.toka_content);
         if (main) lines.push('引き継ぎ: ' + main);

@@ -7,6 +7,22 @@ const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 const ALLOWED_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'gif'];
 const MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
 
+// 配信時のContent-Typeは拡張子から決める（アップロード時にブラウザが申告するfile.typeは送り手が自由に
+// 書き換えられるため、text/html等を申告されると同一オリジンでWebページとして開かれてしまう）
+const MIME_BY_EXT: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+};
+function mimeForKey(key: string): string {
+  return MIME_BY_EXT[(key.split('.').pop() || '').toLowerCase()] ?? 'application/octet-stream';
+}
+
 type ResourceRow = {
   id: number; title: string; category: string; filename: string | null;
   mime_type: string | null; size_bytes: number | null;
@@ -50,8 +66,11 @@ app.get('/:id/file', async (c) => {
   if (!obj) return c.json({ error: 'ファイルが見つかりません' }, 404);
 
   const headers = new Headers();
-  headers.set('Content-Type', row.mime_type || 'application/octet-stream');
-  headers.set('Content-Disposition', `inline; filename="${encodeURIComponent(row.filename || 'file')}"`);
+  const mime = mimeForKey(row.r2_key);
+  headers.set('Content-Type', mime);
+  // PDF・画像以外（Office等）や判定不能な形式はブラウザで開かずダウンロードさせる
+  const inline = mime === 'application/pdf' || mime.startsWith('image/');
+  headers.set('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(row.filename || 'file')}"`);
   return new Response(obj.body, { headers });
 });
 
@@ -78,13 +97,13 @@ app.post('/', async (c) => {
 
   const r2Key = `documents/${crypto.randomUUID()}.${ext}`;
   await c.env.DOCUMENTS_BUCKET.put(r2Key, file.stream(), {
-    httpMetadata: { contentType: file.type || 'application/octet-stream' },
+    httpMetadata: { contentType: mimeForKey(r2Key) },
   });
 
   const result = await c.env.DB.prepare(`
     INSERT INTO resources (title, category, filename, r2_key, mime_type, size_bytes, uploaded_by)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).bind(title, category, file.name, r2Key, file.type || 'application/octet-stream', file.size, uploadedBy).run();
+  `).bind(title, category, file.name, r2Key, mimeForKey(r2Key), file.size, uploadedBy).run();
 
   return c.json({ ok: true, id: result.meta.last_row_id });
 });

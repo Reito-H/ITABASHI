@@ -97,6 +97,7 @@ import adminDaihonRoutes from './routes/admin_daihon';
 import adminSrRoutes from './routes/admin_sr';
 import adminKmPinsRoutes from './routes/admin_km_pins';
 import adminSalesStrategyRoutes from './routes/admin_sales_strategy';
+import adminNavInsightsRoutes from './routes/admin_nav_insights';
 import requestsApi from './routes/api/requests';
 import liffKanchoRoutes from './routes/liff_kancho';
 import publicKanchoWishRoutes from './routes/public_kancho_wish';
@@ -290,6 +291,8 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   // 班長個人別確認: 書き込み(その他メモ保存)も含めて閲覧権限(kancho-shift)だけで利用可能にする
   // （<key>.edit を要求する既定ルールを外し、ルート側で kancho-shift の有無だけをチェックする）
   if (subPath.startsWith('/api/kancho-personal/')) return next();
+  // 動線収集（匿名）: どのアカウントの画面遷移も集計対象にするため、ページ権限に関わらず記録を受け付ける（ログインは必須）
+  if (subPath === '/api/nav-log') return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -400,6 +403,7 @@ app.route(`/${SECRET}/admin`, adminChoseiRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
 app.route(`/${SECRET}/admin`, adminWeatherNoticeRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
+app.route(`/${SECRET}/admin`, adminNavInsightsRoutes);
 
 // =====================
 // API（認証必須）

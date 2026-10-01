@@ -738,7 +738,25 @@ const HEIGHT_PX = { small:80, normal:120, large:160, xlarge:220 };
 
 function esc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function safeNum(v){ return (v===null||v===undefined||v==='') ? '' : String(v); }
-function safeHtml(s){ return (!s || s === 'NaN') ? '' : s; }
+// 保存済みの書式付き本文（contenteditable）を表示前に無害化する。スクリプト実行につながる要素・属性
+// （script/iframe等、on○○属性、javascript:リンク）だけを取り除き、文字装飾・色・貼り付けた表などの見た目は残す。
+// DOMParserで解析するため、解析中に画像読込やスクリプト実行は起きない
+const UNSAFE_HTML_TAGS = 'script,iframe,frame,frameset,object,embed,applet,base,meta,link,svg,math,template,noscript';
+const URL_ATTRS = ['href','src','action','formaction','xlink:href','background','poster','data'];
+function safeHtml(s){
+  if (!s || s === 'NaN') return '';
+  const doc = new DOMParser().parseFromString('<body>' + s + '</body>', 'text/html');
+  doc.body.querySelectorAll(UNSAFE_HTML_TAGS).forEach(el => el.remove());
+  doc.body.querySelectorAll('*').forEach(el => {
+    Array.from(el.attributes).forEach(a => {
+      const name = a.name.toLowerCase();
+      const val = a.value.replace(/[\\s\\u0000-\\u001f]/g, '').toLowerCase();
+      const badUrl = URL_ATTRS.includes(name) && (val.startsWith('javascript:') || val.startsWith('vbscript:') || (val.startsWith('data:') && !val.startsWith('data:image/')));
+      if (name.startsWith('on') || name === 'srcdoc' || badUrl) el.removeAttribute(a.name);
+    });
+  });
+  return doc.body.innerHTML;
+}
 function today(){
   const n = new Date(new Date().toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}));
   return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
@@ -2279,7 +2297,7 @@ function renderSheet(sheet, date){
   const ro = EDITABLE ? '' : ' readonly';
   const ce = EDITABLE ? 'true' : 'false';
   const t = today();
-  const douta = sheet?.douta || '未';
+  const douta = esc(sheet?.douta || '未');
   const doutaCls = douta === '⭕' ? ' ok' : '';
 
   el.innerHTML =

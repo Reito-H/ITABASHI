@@ -1086,6 +1086,7 @@ app.get('/settings/admin-tools', (c) => {
     { heading: 'システム', cards: [
       { href: `${ADMIN}/settings/documents`, perm: 'settings.documents',      title: 'データセンター' },
       { href: `${ADMIN}/settings/status`,    perm: 'settings.status',         title: 'システムステータス' },
+      { href: `${ADMIN}/settings/nav-insights`, perm: 'settings.nav-insights', title: '動線分析' },
       { href: `${ADMIN}/request-review`,     perm: 'settings.requests-admin', title: '要望欄（収集一覧）' },
     ]},
   ];

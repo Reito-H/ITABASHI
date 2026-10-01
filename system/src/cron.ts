@@ -199,6 +199,11 @@ export async function handleCron(env: Env): Promise<void> {
   // 前月分の気象庁データ自動取込（毎月3日4時）
   await checkMonthlyWeatherImport(env, nowJST, currentHour);
 
+  // 動線収集ログ（nav_events）の180日より古い行を削除（毎日3時。migration_168未適用でも他処理を止めない）
+  if (currentHour === 3) {
+    await env.DB.prepare("DELETE FROM nav_events WHERE created_at < datetime('now','+9 hours','-180 days')").run().catch(() => {});
+  }
+
   const settings = await env.DB.prepare(
     'SELECT type, send_hour, send_minute, last_sent_date FROM notification_settings WHERE is_enabled = 1'
   ).all<{ type: string; send_hour: number; send_minute: number; last_sent_date: string | null }>();

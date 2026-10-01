@@ -798,10 +798,87 @@ export function layout(title: string, content: string, activePage: string = '', 
       if (typeof openQrModal === 'function') openQrModal(null, phone);
     }
     ${showReportFab ? quickReportModalScript() : ''}
+    ${NAV_LOG_SCRIPT}
   </script>
 </body>
 </html>`;
 }
+
+// ===== 動線収集（匿名） =====
+// 管理画面のページ遷移を記録し、設定 → 管理者項目 →「動線分析」で集計する（admin_nav_insights.ts）。
+// アカウントとは紐付けない: 誰の操作かは送らず、タブごとの使い捨てID（sessionStorage）で1回の利用内の流れだけを追う。
+// 入力内容・画面の中身は送らない。送るのは「開いたページ（数字IDは:idに伏せる）・直前のページ・どこを押して来たか・
+// 滞在時間・ページ内のクリック回数・PC/スマホ」のみ。ページを離れる（タブを隠す）ときに1回だけsendBeaconで送る。
+// iframe埋め込み表示（やることリスト等）は記録しない。
+const NAV_LOG_SCRIPT = `
+    (function () {
+      try {
+        if (window.top !== window) return;
+        var BASE = '${ADMIN_PATH}';
+        var ss = window.sessionStorage;
+        function norm(href) {
+          var u = new URL(href, location.href);
+          if (u.origin !== location.origin || u.pathname.indexOf(BASE) !== 0) return null;
+          var p = (u.pathname.slice(BASE.length) || '/').split('/').map(function (s) {
+            return (/^[0-9]+$/.test(s) || /^[0-9a-f-]{16,}$/i.test(s)) ? ':id' : s;
+          }).join('/');
+          var tab = u.searchParams.get('tab');
+          return tab ? p + '?tab=' + tab.slice(0, 30) : p;
+        }
+        var page = norm(location.href);
+        if (!page || page.indexOf('/api/') === 0) return;
+        var visit = ss.getItem('nav_visit');
+        if (!visit) {
+          visit = window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2);
+          ss.setItem('nav_visit', visit);
+        }
+        var st = null;
+        function begin(forcedVia) {
+          var seq = parseInt(ss.getItem('nav_seq') || '0', 10) + 1;
+          ss.setItem('nav_seq', String(seq));
+          var from = ss.getItem('nav_last');
+          var pending = null;
+          try { pending = JSON.parse(ss.getItem('nav_click') || 'null'); } catch (e) {}
+          ss.removeItem('nav_click');
+          var navEntry = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || {};
+          var via = 'direct';
+          if (forcedVia) via = forcedVia;
+          else if (navEntry.type === 'back_forward') via = 'back';
+          else if (navEntry.type === 'reload') via = 'reload';
+          else if (pending && pending.to === page && Date.now() - pending.at < 15000) via = pending.area;
+          else if (from) via = 'other';
+          ss.setItem('nav_last', page);
+          st = { seq: seq, from: from, via: via, start: Date.now(), clicks: 0, sent: false };
+        }
+        function send() {
+          if (!st || st.sent) return;
+          st.sent = true;
+          var body = JSON.stringify({
+            v: visit, s: st.seq, p: page, f: st.from, via: st.via,
+            t: document.title.replace(' | ホシコン', '').slice(0, 60),
+            d: Date.now() - st.start, c: st.clicks,
+            m: window.matchMedia('(max-width: 767px)').matches ? 'sp' : 'pc'
+          });
+          navigator.sendBeacon(BASE + '/api/nav-log', new Blob([body], { type: 'application/json' }));
+        }
+        begin(null);
+        document.addEventListener('click', function (e) {
+          if (st) st.clicks++;
+          var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+          if (!a) return;
+          var to = norm(a.href);
+          if (!to) return;
+          var area = a.closest('.nav-portal-flyout') ? 'portal'
+            : a.closest('.sidebar') ? 'sidebar'
+            : a.closest('.desktop-header, .mobile-header') ? 'header' : 'page';
+          ss.setItem('nav_click', JSON.stringify({ to: to, area: area, at: Date.now() }));
+        }, true);
+        document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') send(); });
+        window.addEventListener('pagehide', send);
+        // 「戻る」でキャッシュから復元された場合はスクリプトが再実行されないため、ここで新しい1回分として数え直す
+        window.addEventListener('pageshow', function (e) { if (e.persisted) begin('back'); });
+      } catch (e) {}
+    })();`;
 
 
 export const FAVICON_DATA_URI = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiMyZTEzNTQiLz4KICA8cG9seWdvbiBwb2ludHM9IjMyLjAwLDEwLjAwIDM3LjI5LDI0LjcyIDUyLjkyLDI1LjIwIDQwLjU2LDM0Ljc4IDQ0LjkzLDQ5LjgwIDMyLjAwLDQxLjAwIDE5LjA3LDQ5LjgwIDIzLjQ0LDM0Ljc4IDExLjA4LDI1LjIwIDI2LjcxLDI0LjcyIiBmaWxsPSIjZjJjMTRlIi8+Cjwvc3ZnPgo=';
