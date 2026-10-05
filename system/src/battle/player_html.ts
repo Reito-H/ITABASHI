@@ -212,6 +212,7 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
     }
     if (['ranking', 'timeattack', 'scoreboard'].indexOf(st.kind) >= 0) return waitScreen('結果発表！<br>前の画面に注目！');
     if (st.kind === 'video') return waitScreen('映像スタート！<br>前の画面に注目！');
+    if (st.kind === 'black') return waitScreen('少々お待ちください');
     if (st.kind === 'mygrowth') return growthView();
     if (st.kind === 'mysales') return salesView();
     if (st.kind === 'qbox') return qboxView();

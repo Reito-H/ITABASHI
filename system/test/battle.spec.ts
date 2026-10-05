@@ -44,7 +44,9 @@ beforeAll(async () => {
   const stmts = migration.split(';').map((s) => s.replace(/--.*$/gm, '').trim()).filter((s) => s);
   for (const s of stmts) await env.DB.prepare(s).run();
   await env.DB.prepare("INSERT INTO ib2_games (id, title, is_active) VALUES (1, 'T', 1)").run();
-  await env.DB.prepare("INSERT INTO ib2_roster (game_id, emp_no, name, team) VALUES (1, '1001', '山田', 'A'), (1, '1002', '佐藤', 'B')").run();
+  await env.DB.prepare("INSERT INTO ib2_roster (game_id, emp_no, name, team) VALUES (1, '1001', '山田', 'A'), (1, '1002', '佐藤', 'B'), (1, '1003', '鈴木', 'C')").run();
+  // 参加受付・チーム発表・代表者決めもメニューの項目
+  await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, -3, 'lobby', '参加受付', '{}'), (1, -2, 'reveal', 'チーム発表', '{}'), (1, -1, 'setup', '代表者決め', '{}')").run();
   const s1 = await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 0, 'buzzer', '交差点', '{}')").run();
   await env.DB.prepare("INSERT INTO ib2_questions (step_id, sort_order, prompt, answer, points) VALUES (?, 0, 'この交差点は？', '大和町', 10)").bind(s1.meta.last_row_id).run();
   const s2 = await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 1, 'choice', '○×', '{\"mode\":\"all\"}')").run();
@@ -87,6 +89,27 @@ describe('ITABASHI BATTLE 2', () => {
     await p1.until((s) => s.me && s.me.team === 'A' && s.stage === 'lobby');
     await admin.until((s) => s.online === 2);
 
+    // ロビー：最初はQRなし → 管理者の切替で表示。黒画面はいつでも出し入れできる
+    expect(admin.state().lobbyQr).toBe(false);
+    expect(admin.state().bgm).toBe('builtin:lobby');
+    admin.send({ t: 'lobbyQr', on: true });
+    await p1.until((s) => s.lobbyQr === true);
+    admin.send({ t: 'blackout', on: true });
+    await p1.until((s) => s.blackout === true);
+    admin.send({ t: 'blackout', on: false });
+    await p1.until((s) => s.blackout === false);
+
+    // 管理者がチームを移す・参加を取り消す
+    const t3 = await join('1003');
+    const p3 = await playerWs(t3);
+    await p3.until((s) => s.me && s.me.team === 'C');
+    admin.send({ t: 'moveplayer', emp: '1003', team: 'D' });
+    await p3.until((s) => s.me.team === 'D');
+    const ro = await env.DB.prepare("SELECT team FROM ib2_roster WHERE game_id = 1 AND emp_no = '1003'").first<{ team: string }>();
+    expect(ro!.team).toBe('D');
+    admin.send({ t: 'kickplayer', emp: '1003' });
+    await admin.until((s) => s.joined === 2);
+
     admin.send({ t: 'next' });
     await p1.until((s) => s.stage === 'reveal');
     admin.send({ t: 'next' });
@@ -95,6 +118,8 @@ describe('ITABASHI BATTLE 2', () => {
     await p1.until((s) => s.me.isLeader);
     p1.send({ t: 'teamname', name: '環七ライダーズ' });
     await admin.until((s) => s.teams[0].name === '環七ライダーズ');
+    admin.send({ t: 'setteam', team: 'A', name: '環七ライダーズ改' }); // 管理側からいつでも直せる
+    await admin.until((s) => s.teams[0].name === '環七ライダーズ改');
     p2.send({ t: 'teamname', name: 'NG' }); // 代表者でない人は決められない
     p2.send({ t: 'leader', emp: '1001' }); // 他チームの人は代表者にできない
 

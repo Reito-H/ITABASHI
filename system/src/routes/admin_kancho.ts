@@ -251,7 +251,10 @@ app.get('/kancho-shift', async (c) => {
     dates, year, month, periodStart, periodEnd, editable, wishes.results ?? [], forbiddenPairs.results ?? [],
     wishRemarks, wishFormOpen
   );
-  return c.html(layout('班長シフト', html, 'kancho-shift', headerNav));
+  // 共通レイアウトのheaderExtraはPC用ヘッダーにしか出ないため、スマホでは本文先頭に同じナビを出す
+  const mobileNav = `<style>.ks-mobile-nav{display:none;}@media (max-width:768px){.ks-mobile-nav{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px;}.ks-mobile-nav span{white-space:normal !important;text-align:center;}}</style>
+    <div class="ks-mobile-nav no-print">${headerNav}</div>`;
+  return c.html(layout('班長シフト', mobileNav + html, 'kancho-shift', headerNav));
 });
 
 app.get('/kancho-shift/print', async (c) => {

@@ -7,6 +7,9 @@ const OX = ['○', '×'];
 const OKNG = ['OK', 'NG'];
 
 export const BATTLE_PRESET: PresetStep[] = [
+  { kind: 'lobby', title: '参加受付' },
+  { kind: 'reveal', title: 'チーム発表' },
+  { kind: 'setup', title: '代表者・チーム名決め' },
   { kind: 'video', title: 'オープニング映像', config: { autoplay: true, bgm: 'none' } },
   { kind: 'title', title: 'オープニング', config: { subtitle: '繁忙期を勝ち抜け！ チーム対抗バトル', body: '1日を通してチームで得点を競います\n優勝チームには表彰あり！', bgm: 'builtin:battle' } },
   {

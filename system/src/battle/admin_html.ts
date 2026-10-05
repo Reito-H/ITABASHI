@@ -77,6 +77,13 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
 .qr svg{display:block;width:100%;height:auto;}
 .pill{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;background:rgba(255,255,255,.08);margin:2px;}
 .pill.on{background:rgba(124,255,107,.18);color:var(--green);}
+.blk{display:flex;gap:8px;margin-bottom:12px;}
+.blk .b{flex:1;}
+.b.blkOn{background:#000;color:#fff;border:2px solid var(--pink);box-shadow:0 0 18px rgba(255,59,107,.6);}
+.mem{display:inline-flex;align-items:center;gap:3px;padding:2px 3px 2px 8px;border-radius:999px;font-size:11px;background:rgba(255,255,255,.08);margin:2px;}
+.mem.on{background:rgba(124,255,107,.18);color:var(--green);}
+.mem select{font-size:11px;padding:1px 2px;border-radius:6px;background:#111;color:var(--ink);border:1px solid var(--line);}
+.mem button{border:0;background:transparent;color:var(--mute);cursor:pointer;font-size:12px;padding:0 4px;}
 .ro{background:rgba(255,210,63,.12);border:1px solid rgba(255,210,63,.4);color:var(--yellow);border-radius:10px;padding:10px 12px;font-size:12px;margin-bottom:12px;}
 </style></head><body>
 <div class="bar">
@@ -122,7 +129,11 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
 
   Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function(b){ b.onclick = function(){ tab = b.getAttribute('data-tab'); Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function(x){ x.classList.toggle('on', x === b); }); draw(); }; });
   var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  IB2N.connect(proto + location.host + WS, function(s){ S = s; if (tab === 'ctl') drawCtl(); }, function(m){ if (m.t === 'score' && tab === 'log') load(); });
+  // チーム名などを入力している最中は画面を描き直さない（入力が消えないように）。入力を終えたら描き直す
+  var ctlPending = false;
+  function typing(){ var a = document.activeElement; return !!(a && page.contains(a) && a.hasAttribute && (a.hasAttribute('data-setname') || a.hasAttribute('data-move') || a.hasAttribute('data-setleader'))); }
+  page.addEventListener('focusout', function(){ setTimeout(function(){ if (ctlPending && !typing()) { ctlPending = false; drawCtl(); } }, 0); });
+  IB2N.connect(proto + location.host + WS, function(s){ S = s; if (tab === 'ctl') { if (typing()) ctlPending = true; else drawCtl(); } }, function(m){ if (m.t === 'score' && tab === 'log') load(); });
 
   function draw(){
     if (!D) { page.innerHTML = '<div class="hint">読み込み中…</div>'; return; }
@@ -135,12 +146,14 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     if (tab !== 'ctl' || !D) return;
     if (!S) { page.innerHTML = '<div class="hint blink">接続中…</div>'; return; }
     ['reason', 'cst', 'tmin'].forEach(function(id){ var el = document.getElementById(id); if (el) ctlKeep[id] = el.value; });
-    var flow = [{ i: -3, t: '参加受付（ロビー）', k: 'START' }, { i: -2, t: 'チーム発表', k: '' }, { i: -1, t: '代表者・チーム名決め', k: '' }]
-      .concat((S.steps || []).map(function(x, i){ return { i: i, t: x.title, k: kindL(x.kind) }; }));
-    var curI = S.stage === 'lobby' ? -3 : S.stage === 'reveal' ? -2 : S.stage === 'setup' ? -1 : S.stepIdx;
-    var left = '<div class="pn"><h3>FLOW</h3><div class="flow">' + flow.map(function(f, n){ return '<button data-goto="' + f.i + '" class="' + (f.i === curI ? 'cur' : '') + '"><span class="k">' + (f.i < 0 ? '◆' : (f.i + 1)) + '</span><span>' + escH(f.t) + '</span><span class="kd">' + escH(f.k) + '</span></button>'; }).join('') + '</div></div>';
-    var center = '<div class="pn"><div class="big"><button class="b gh" id="prev">◀ 戻る</button><button class="b go" id="next" style="flex:1">次へ進む ▶</button></div>' + nowPanel() + '</div>';
-    var right = scorePanel() + bgmPanel() + '<div class="pn" style="margin-top:12px"><h3>JOIN</h3><div style="display:flex;gap:12px;align-items:center"><div class="qr">' + QR + '</div><div class="hint" style="word-break:break-all">参加用URL<br><span style="color:var(--ink)">' + escH(JOIN) + '</span><br><br>参戦 ' + S.joined + ' 人／接続中 ' + S.online + ' 人</div></div>'
+    var flow = (S.steps || []).map(function(x, i){ return { i: i, t: x.title, k: kindL(x.kind) }; });
+    var curI = S.stepIdx;
+    var left = '<div class="pn"><h3>FLOW</h3><div class="flow">' + flow.map(function(f){ return '<button data-goto="' + f.i + '" class="' + (f.i === curI ? 'cur' : '') + '"><span class="k">' + (f.i + 1) + '</span><span>' + escH(f.t) + '</span><span class="kd">' + escH(f.k) + '</span></button>'; }).join('') + '</div><div class="hint" style="margin-top:8px">順番の入れ替えや追加は「メニュー」タブで。</div></div>';
+    // トラブル用の黒画面は、どの場面でもすぐ押せるよう一番上に置く
+    var blk = '<div class="blk"><button class="b ' + (S.blackout ? 'blkOn' : 'gh') + '" id="blackout">' + (S.blackout ? '黒画面を解除する' : '黒画面にする（トラブル時）') + '</button></div>'
+      + (S.blackout ? '<div class="qbox" style="border-color:var(--pink)">プロジェクターは今、真っ黒です（音も止まっています）。</div>' : '');
+    var center = '<div class="pn">' + blk + '<div class="big"><button class="b gh" id="prev">◀ 戻る</button><button class="b go" id="next" style="flex:1">次へ進む ▶</button></div>' + nowPanel() + '</div>';
+    var right = scorePanel() + '<div class="pn" style="margin-top:12px"><h3>TEAMS（いつでも修正）</h3><div class="hint">チーム名・代表者・メンバーのチーム移動をいつでも直せます。×は参加の取り消し（本人が社員番号を入れ直せば戻れます）。</div>' + teamsTable(true, true) + '</div>' + bgmPanel() + '<div class="pn" style="margin-top:12px"><h3>JOIN</h3><div style="display:flex;gap:12px;align-items:center"><div class="qr">' + QR + '</div><div class="hint" style="word-break:break-all">参加用URL<br><span style="color:var(--ink)">' + escH(JOIN) + '</span><br><br>参戦 ' + S.joined + ' 人／接続中 ' + S.online + ' 人</div></div>'
       + '<div class="acts"><button class="b sm gh" id="resetSoft">得点・チーム名をリセット</button><button class="b sm ng" id="resetAll">参加者も含め全部リセット</button></div></div>';
     page.innerHTML = '<div class="grid3">' + left + center + '<div>' + right + '</div></div>';
     Object.keys(ctlKeep).forEach(function(id){ var el = document.getElementById(id); if (el && ctlKeep[id]) el.value = ctlKeep[id]; });
@@ -150,11 +163,14 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     var h = '';
     if (S.stage === 'lobby') {
       var names = []; S.teams.forEach(function(t){ t.members.forEach(function(m){ names.push('<span class="pill ' + (m.online ? 'on' : '') + '">' + escH(m.name) + '</span>'); }); });
-      return '<div class="now"><h2>参加受付中</h2><div class="meta">プロジェクターにQRコードが出ています。全員そろったら「次へ」でチーム発表。</div></div><div class="qbox">参戦 ' + S.joined + ' 人<br>' + (names.join('') || '<span class="hint">まだいません</span>') + '</div>';
+      return '<div class="now"><h2>参加受付（ロビー）</h2><div class="meta">' + (S.lobbyQr ? 'プロジェクターにQRコードが出ています。全員そろったら「次へ」。' : 'プロジェクターはロゴだけを表示中です。参加してもらうタイミングで「QRを表示」を押してください。') + '</div></div>'
+        + '<div class="acts"><button class="b ' + (S.lobbyQr ? 'gh' : 'go') + '" id="lobbyQr">' + (S.lobbyQr ? 'QRを隠す（ロゴだけに戻す）' : 'QRを表示（演出つき）') + '</button></div>'
+        + '<div class="qbox">参戦 ' + S.joined + ' 人<br>' + (names.join('') || '<span class="hint">まだいません</span>') + '</div>';
     }
     if (S.stage === 'reveal') return '<div class="now"><h2>チーム発表</h2><div class="meta">メンバーで集まってもらったら「次へ」で代表者・チーム名決め。</div></div>' + teamsTable(false);
-    if (S.stage === 'setup') return '<div class="now"><h2>代表者・チーム名決め</h2><div class="meta">各チームのスマホで決めます。ここから直接直すこともできます。全チームそろったら「次へ」でメニュー開始。</div></div>' + teamsTable(true);
+    if (S.stage === 'setup') return '<div class="now"><h2>代表者・チーム名決め</h2><div class="meta">各チームのスマホで決めます。右の「TEAMS」から直接直すこともできます。全チームそろったら「次へ」。</div></div>' + teamsTable(false);
     var st = S.step; if (!st) return '<div class="hint">メニューがありません。「メニュー」タブで作成してください。</div>';
+    if (st.kind === 'black') return '<div class="now"><div class="meta">ROUND ' + (S.stepIdx + 1) + ' / ' + S.stepCount + '　黒画面</div><h2>' + escH(st.title) + '</h2><div class="meta">プロジェクターは真っ黒です（BGMも止まります）。「次へ」で次に進みます。</div></div>';
     var q = S.q, ph = S.phase;
     h = '<div class="now"><div class="meta">ROUND ' + (S.stepIdx + 1) + ' / ' + S.stepCount + '　' + escH(kindL(st.kind)) + (st.mode === 'leader' ? '（代表者のみ回答）' : '') + '</div><h2>' + escH(st.title) + '</h2>'
       + (q ? '<div class="meta">第' + q.no + '問 / 全' + S.qCount + '問　状態：' + phaseL(ph) + '</div>' : '') + '</div>';
@@ -194,7 +210,16 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     return a;
   }
   function phaseL(p){ return { intro: 'タイトル表示', ready: '問題表示（回答前）', open: '回答受付中', judge: '判定中', closed: '締切', reveal: '正解発表', survived: '生き残り発表', show: '表示中' }[p] || p; }
-  function teamsTable(edit){
+  function memberCell(t, m){
+    return '<span class="mem ' + (m.online ? 'on' : '') + '">' + escH(m.name) + '<select data-move="' + escH(m.emp) + '" title="チームを移す">' + ['A', 'B', 'C', 'D'].map(function(x){ return '<option' + (x === t.team ? ' selected' : '') + '>' + x + '</option>'; }).join('') + '</select><button data-kick="' + escH(m.emp) + '" data-kname="' + escH(m.name) + '" title="参加を取り消す">×</button></span>';
+  }
+  function teamsTable(edit, compact){
+    if (compact) return S.teams.map(function(t){
+      return '<div class="t' + t.team + '" style="border-top:1px solid var(--line);padding:8px 0"><div style="display:flex;gap:6px;align-items:center"><b style="color:var(--tc);font-family:var(--num);font-size:18px;min-width:16px">' + t.team + '</b>'
+        + '<input class="f" data-setname="' + t.team + '" value="' + escH(t.name) + '" maxlength="16" placeholder="チーム名" style="flex:1;min-width:0">'
+        + '<select class="f" data-setleader="' + t.team + '" style="width:110px"><option value="">代表者未定</option>' + t.members.map(function(m){ return '<option value="' + escH(m.emp) + '"' + (m.emp === t.leader ? ' selected' : '') + '>' + escH(m.name) + '</option>'; }).join('') + '</select></div>'
+        + '<div style="margin-top:4px">' + (t.members.map(function(m){ return memberCell(t, m); }).join('') || '<span class="hint">メンバーなし</span>') + '</div></div>';
+    }).join('');
     return '<table class="tb" style="margin-top:12px"><tr><th>チーム</th><th>代表者</th><th>チーム名</th><th>メンバー</th></tr>' + S.teams.map(function(t){
       var lead = edit ? '<select class="f" data-setleader="' + t.team + '"><option value="">（未定）</option>' + t.members.map(function(m){ return '<option value="' + escH(m.emp) + '"' + (m.emp === t.leader ? ' selected' : '') + '>' + escH(m.name) + '</option>'; }).join('') + '</select>' : escH(t.leaderName || '');
       var nm = edit ? '<input class="f" data-setname="' + t.team + '" value="' + escH(t.name) + '" maxlength="16">' : escH(t.name);
@@ -232,6 +257,10 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     Array.prototype.forEach.call(page.querySelectorAll('[data-qpt]'), function(b){ b.onclick = function(){ send({ t: 'score', team: b.getAttribute('data-qpt'), delta: 5, reason: '質問箱：いい質問' }); }; });
     Array.prototype.forEach.call(page.querySelectorAll('[data-setleader]'), function(s){ s.onchange = function(){ send({ t: 'setteam', team: s.getAttribute('data-setleader'), leader: s.value }); }; });
     Array.prototype.forEach.call(page.querySelectorAll('[data-setname]'), function(s){ s.onchange = function(){ send({ t: 'setteam', team: s.getAttribute('data-setname'), name: s.value }); }; });
+    Array.prototype.forEach.call(page.querySelectorAll('[data-move]'), function(s){ s.onchange = function(){ send({ t: 'moveplayer', emp: s.getAttribute('data-move'), team: s.value }); s.blur(); }; });
+    Array.prototype.forEach.call(page.querySelectorAll('[data-kick]'), function(b){ b.onclick = function(){ if (confirm(b.getAttribute('data-kname') + ' さんの参加を取り消しますか？（名簿には残ります）')) send({ t: 'kickplayer', emp: b.getAttribute('data-kick') }); }; });
+    var bo = document.getElementById('blackout'); if (bo) bo.onclick = function(){ send({ t: 'blackout', on: !S.blackout }); };
+    var lq = document.getElementById('lobbyQr'); if (lq) lq.onclick = function(){ send({ t: 'lobbyQr', on: !S.lobbyQr }); };
     var rs = document.getElementById('resetSoft'); if (rs) rs.onclick = function(){ if (confirm('得点・チーム名・代表者・回答を消して、参加受付から始め直します。参加者はそのままです。よろしいですか？')) send({ t: 'reset' }); };
     var ra = document.getElementById('resetAll'); if (ra) ra.onclick = function(){ if (confirm('参加者も含めてすべて消し、最初からやり直します。リハーサル後などに使います。よろしいですか？')) send({ t: 'reset', players: true }); };
   }
@@ -273,12 +302,16 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     if (['choice', 'number', 'order', 'vote'].indexOf(k) >= 0) h += cfgField(s, 'mode', '回答する人', 'select', '<option value="all"' + (c.mode !== 'leader' ? ' selected' : '') + '>全員（正解した人数ぶんチームに加点）</option><option value="leader"' + (c.mode === 'leader' ? ' selected' : '') + '>代表者だけ（チームで相談）</option>');
     h += '</div></div>';
     if (k === 'title') h += cfgField(s, 'subtitle', 'サブタイトル') + cfgField(s, 'body', '本文（改行可）', 'area') + '<div class="row2"><div>' + cfgField(s, 'image_id', '画像', 'select', mediaOpts('image', c.image_id)) + '</div><div>' + cfgField(s, 'timer', 'タイマー（分・休憩など）', 'number') + '</div></div>';
-    if (k === 'video') h += '<div class="row2"><div>' + cfgField(s, 'video_id', '動画（「素材」でアップロード）', 'select', mediaOpts('video', c.video_id)) + '</div><div>' + cfgField(s, 'autoplay', 'このラウンドに入ったら自動で再生', 'check') + '</div></div><div class="hint">再生中はBGMが止まり、プロジェクターに全画面で流れます。音は動画の音がそのまま出ます。</div>';
+    if (k === 'video') h += '<div class="row2"><div>' + cfgField(s, 'video_id', '動画（「素材」でアップロード）', 'select', mediaOpts('video', c.video_id)) + '</div><div>' + cfgField(s, 'autoplay', 'このラウンドに入ったら自動で再生', 'check') + '</div></div>'
+      + cfgField(s, 'audio_id', '映像と一緒に流す曲（別音源・選ぶと動画の音は消えます）', 'select', mediaOpts('audio', c.audio_id)) + '<div class="hint">再生中はBGMが止まり、プロジェクターに全画面で流れます。別音源を選ぶとその曲を、選ばないと動画の音を流します。</div>';
     if (k === 'buzzer') h += cfgField(s, 'zoom', '画像をズームから少しずつ引いて見せる（難易度アップ）', 'check');
     if (k === 'choice') h += '<div class="row2"><div>' + cfgField(s, 'survival', '○×サバイバル（間違えたら脱落）', 'check') + '</div><div>' + cfgField(s, 'survivalPoints', '生き残り1人あたりの得点', 'number') + '</div></div>';
     if (k === 'number') h += cfgField(s, 'unit', '単位（円・分など）');
     if (k === 'timeattack') h += cfgField(s, 'top', '表示する人数（上位）', 'number') + '<div class="hint">タイムは「車椅子タイム」タブで入力します。</div>';
     if (k === 'scoreboard') h += cfgField(s, 'final', '最終結果（優勝チームを紙吹雪で発表）', 'check');
+    if (k === 'lobby') h += '<div class="hint">最初はロゴだけを中央に表示します。進行画面の「QRを表示」で参加用QRを演出つきで出します。BGMを「変えない」にすると定番のロビー曲が流れます。</div>';
+    if (k === 'reveal' || k === 'setup') h += '<div class="hint">BGMを「変えない」にすると定番の曲が流れます。</div>';
+    if (k === 'black') h += '<div class="hint">プロジェクターを真っ黒にして、BGMも止めます。トラブル時は進行画面の「黒画面にする」ボタンでいつでも出せます。</div>';
     if (EDIT) h += '<div class="acts"><button class="b c" id="saveStep">ラウンド設定を保存</button><span class="sp"></span><button class="b sm ng" id="delStep">このラウンドを削除</button></div>';
     if (['buzzer', 'choice', 'number', 'order', 'vote', 'ranking'].indexOf(k) >= 0) {
       h += '<h3 style="margin-top:16px">' + (k === 'ranking' ? 'ランキング（上が1位）' : '問題') + '</h3>' + s.questions.map(function(q, i){ return qEditor(s, q, i); }).join('');

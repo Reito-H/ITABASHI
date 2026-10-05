@@ -45,6 +45,18 @@ html,body{background:#000;}
 @keyframes twoFlicker{0%,62%,64.5%,67%,90%,100%{opacity:1;}63%{opacity:.35;}65.5%{opacity:.55;}66%{opacity:.2;}91%{opacity:.6;}}
 @keyframes twoPulse{0%,100%{filter:drop-shadow(0 0 .8cqw rgba(47,211,255,.9)) drop-shadow(0 0 2.6cqw rgba(255,59,107,.7));}50%{filter:drop-shadow(0 0 1.4cqw rgba(47,211,255,1)) drop-shadow(0 0 4.4cqw rgba(255,59,107,.95));}}
 .lobby{display:grid;grid-template-columns:1.25fr 1fr;gap:4cqw;align-items:center;width:100%;}
+/* QR非表示中：ロゴだけを中央に大きく */
+.lobby.qrOff{grid-template-columns:1fr;text-align:center;}
+.lobby.qrOff .bigLogo{font-size:11cqw;}
+.lobby.qrOff .bigLogo .two{font-size:18cqw;}
+/* QR表示オン：光の輪と一緒にQRが回転しながら飛び出す */
+.lobby.qrIn .qrSide{animation:qrIn 1.1s cubic-bezier(.2,1.4,.4,1) both;}
+.lobby.qrIn .qrSide .qr{animation:qrGlow 1.6s ease-out both;}
+.lobby.qrIn .logoSide{animation:logoSlide .8s cubic-bezier(.2,1,.3,1) both;}
+@keyframes qrIn{0%{transform:scale(0) rotate(-200deg);opacity:0;filter:brightness(4);}60%{transform:scale(1.12) rotate(8deg);opacity:1;}100%{transform:scale(1) rotate(0);filter:none;}}
+@keyframes qrGlow{0%{box-shadow:0 0 0 0 rgba(255,255,255,1),0 0 0 0 rgba(47,211,255,1);}50%{box-shadow:0 0 0 3cqw rgba(255,59,107,0),0 0 8cqw 2cqw rgba(47,211,255,.9);}100%{box-shadow:0 0 4cqw rgba(47,211,255,.45);}}
+@keyframes logoSlide{from{transform:translateX(18cqw) scale(1.25);}to{transform:none;}}
+.blackOv{position:absolute;inset:0;background:#000;z-index:30;display:none;}
 .qr{background:#fff;border-radius:1.4cqw;padding:1.4cqw;width:24cqw;margin:0 auto;box-shadow:0 0 4cqw rgba(47,211,255,.45);}
 .qr svg{display:block;width:100%;height:auto;}
 .url{font-family:var(--num);font-size:.9cqw;color:var(--mute);margin-top:1.2cqh;word-break:break-all;}
@@ -138,6 +150,7 @@ html,body{background:#000;}
   <div class="pops" id="pops"></div>
   <canvas id="confetti"></canvas>
   <div class="flashAll" id="fa"></div>
+  <div class="blackOv" id="black"></div>
 </div></div>
 <div class="startOv" id="ov"><div>CLICK TO START<small>クリックで音を有効化して全画面表示</small></div></div>
 <script>${BATTLE_AUDIO_JS}</script>
@@ -165,6 +178,7 @@ html,body{background:#000;}
   function effBgm(){
     if (!S) return null;
     var k = S.bgm;
+    if (S.blackout || (S.step && S.step.kind === 'black')) return null;
     if (S.stage === 'step' && S.step && S.step.kind === 'video') return null;
     if (k && k.indexOf('builtin:') === 0 && S.stage === 'step' && S.step && S.phase === 'open' && ['choice', 'number', 'order', 'vote'].indexOf(S.step.kind) >= 0) return ['builtin:think', 'builtin:think3', 'builtin:think2'][S.stepIdx % 3];
     return k;
@@ -203,6 +217,14 @@ html,body{background:#000;}
     if (document.getElementById('ov').style.display === 'none') IB2A.bgm(effBgm(), MEDIA);
     document.getElementById('round').textContent = S.stage === 'step' ? 'ROUND ' + (S.stepIdx + 1) + ' / ' + S.stepCount : (S.stage === 'lobby' ? 'ENTRY' : 'TEAM BUILDING');
     scoreBar();
+    // 黒画面（メニューの「黒画面」またはトラブル用の常時ボタン）。音も止める
+    var blk = !!(S.blackout || (S.stage === 'step' && S.step && S.step.kind === 'black'));
+    document.getElementById('black').style.display = blk ? 'block' : 'none';
+    if (blk) IB2A.stopTrack();
+    var qrNow = S.stage === 'lobby' && !!S.lobbyQr;
+    qrAnim = qrNow && prevQr === false;
+    if (qrAnim) { var fa = document.getElementById('fa'); fa.classList.remove('go'); void fa.offsetWidth; fa.classList.add('go'); }
+    prevQr = S.stage === 'lobby' ? qrNow : null;
     var h = view();
     if (h !== lastHtml) {
       lastHtml = h; main.innerHTML = h; afterRender();
@@ -214,22 +236,41 @@ html,body{background:#000;}
   // 動画：管理者の再生・一時停止・最初からに合わせる（ずれが1秒を超えたら位置を合わせ直す）
   function syncVideo(){
     var v = document.getElementById('vid');
-    if (!v || !S || !S.video) return;
+    if (!v || !S || !S.video) { IB2A.stopTrack(); return; }
+    if (S.blackout) { IB2A.stopTrack(); if (!v.paused) v.pause(); return; }
     var want = S.video.playing ? S.video.offset + (IB2N.now() - S.video.at) / 1000 : S.video.offset;
+    var aud = S.step && S.step.audio;
+    if (aud) {
+      // 別音源あり：映像は常に無音、曲は Web Audio で同じ位置から鳴らす（0.25秒以上ずれたら合わせ直す）
+      v.muted = true;
+      IB2A.preloadTrack(aud);
+      if (S.video.playing) { var tp = IB2A.trackPos(); if (tp < 0 || Math.abs(tp - want) > 0.25) IB2A.playTrack(aud, want); }
+      else IB2A.stopTrack();
+    }
     if (v.duration && want > v.duration) want = v.duration;
     if (Math.abs((v.currentTime || 0) - want) > 1) { try { v.currentTime = Math.max(0, want); } catch (e) {} }
+    // 一度でも画面をクリックしていれば音ありで再生できる。クリック前は無音で流し、クリックした瞬間に音ありへ戻す
+    if (!aud && v.muted && userActed()) v.muted = false;
     if (S.video.playing && v.paused && !v.ended) { var p = v.play(); if (p && p.catch) p.catch(function(){ v.muted = true; v.play().catch(function(){}); }); }
     if (!S.video.playing && !v.paused) v.pause();
+    var hint = document.getElementById('vidMute');
+    if (hint) hint.style.display = (aud ? !IB2A.ready() : v.muted) && S.video.playing ? '' : 'none';
   }
+  var prevQr = null, qrAnim = false;
+  var acted = false;
+  function userActed(){ try { if (navigator.userActivation && navigator.userActivation.hasBeenActive) return true; } catch (e) {} return acted; }
+  document.addEventListener('pointerdown', function(){ acted = true; IB2A.unlock(); var v = document.getElementById('vid'); if (v && v.muted && !(S && S.step && S.step.audio)) { v.muted = false; if (!v.paused) v.play().catch(function(){}); } syncVideo(); }, true);
   setInterval(syncVideo, 1000);
 
   function view(){
     if (S.stage === 'lobby') {
       var names = []; S.teams.forEach(function(t){ t.members.forEach(function(m){ names.push(m.name); }); });
-      return '<div class="lobby"><div><div class="bigLogo neon">ITABASHI<br>BATTLE<b class="two">2</b></div>'
+      var logo = '<div class="bigLogo neon">ITABASHI<br>BATTLE<b class="two">2</b></div>';
+      if (!S.lobbyQr) return '<div class="lobby qrOff"><div class="logoSide">' + logo + '</div></div>';
+      return '<div class="lobby' + (qrAnim ? ' qrIn' : '') + '"><div class="logoSide">' + logo
         + '<div class="sub">繁忙期勉強会　チーム対抗バトル</div><div class="cnt">参戦 <b class="neon">' + S.joined + '</b> 人</div>'
         + '<div class="names">' + names.map(function(n){ return '<span>' + escH(n) + '</span>'; }).join('') + '</div></div>'
-        + '<div><div class="kick">SCAN TO JOIN</div><div class="qr">' + QR + '</div><div class="url">' + escH(JOIN) + '</div><div class="sub" style="font-size:1.5cqw">スマホで読み取って、社員番号を入力！</div></div></div>';
+        + '<div class="qrSide"><div class="kick">SCAN TO JOIN</div><div class="qr">' + QR + '</div><div class="sub" style="font-size:1.5cqw">スマホで読み取って、社員番号を入力！</div></div></div>';
     }
     if (S.stage === 'reveal') {
       return '<div class="kick">TEAM ANNOUNCEMENT</div><div class="teams">' + S.teams.map(function(t, i){
@@ -257,7 +298,7 @@ html,body{background:#000;}
       + '<div class="sub" style="font-size:3cqw;color:var(--ink);margin-top:4cqh">自分のスマホを見てみよう！</div>'
       + '<div class="sub" style="font-size:1.8cqw">' + (st.kind === 'mygrowth' ? '1乗務あたりの平均売上が、月度ごとにどれだけ伸びたかが表示されます' : '日ごとの売上の記録を見て、CSVで保存できます') + '</div>'
       + '<div class="sub" style="font-size:1.5cqw;margin-top:3cqh">あなたのデータは、あなたのスマホにだけ表示されます</div>';
-    if (st.kind === 'video') return st.video ? '<div class="vidWrap"><video id="vid" src="' + escH(st.video) + '" playsinline preload="auto"></video><div class="none" id="vidErr" style="display:none;position:absolute;text-align:center;line-height:2">この動画はこのブラウザでは再生できない形式です<br><small>MP4（H.264）で書き出して、アップロードし直してください</small></div></div>' : '<div class="vidWrap"><div class="none">NO VIDEO</div></div>';
+    if (st.kind === 'video') return st.video ? '<div class="vidWrap"><video id="vid" src="' + escH(st.video) + '" playsinline preload="auto"></video><div id="vidMute" style="display:none;position:absolute;right:2cqw;bottom:2cqh;padding:1cqh 1.4cqw;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:1.3cqw;font-weight:800;">音が出ていません　画面をクリックすると音が出ます</div><div class="none" id="vidErr" style="display:none;position:absolute;text-align:center;line-height:2">この動画はこのブラウザでは再生できない形式です<br><small>MP4（H.264）で書き出して、アップロードし直してください</small></div></div>' : '<div class="vidWrap"><div class="none">NO VIDEO</div></div>';
     if (st.kind === 'title') {
       return '<div class="kick">ROUND ' + (S.stepIdx + 1) + '</div><div class="title neon pop">' + escH(st.title) + '</div>'
         + (st.subtitle ? '<div class="sub" style="color:var(--ink);font-size:2.6cqw">' + escH(st.subtitle) + '</div>' : '')

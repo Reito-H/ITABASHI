@@ -371,7 +371,36 @@ var IB2A = (function(){
     if (b != null) { volB = b; if (bgmBus) bgmBus.gain.value = b; if (audioEl) audioEl.volume = b; }
     if (s != null) { volS = s; if (sfxBus) sfxBus.gain.value = s; }
   }
-  return { unlock: unlock, sfx: sfx, bgm: bgm, vol: vol, ready: ready, current: function(){ return curKey; } };
+  // ---------- 映像と一緒に流す曲（別音源）。BGM・効果音と同じ Web Audio で鳴らすので、CLICK TO START 後は確実に鳴る ----------
+  var trackBufs = {}, trackSrc = null, trackUrl = '', trackStartCtx = 0, trackOffset = 0;
+  function loadTrack(url){
+    if (trackBufs[url]) return trackBufs[url];
+    trackBufs[url] = fetch(url).then(function(r){ return r.arrayBuffer(); }).then(function(ab){
+      return new Promise(function(res, rej){ ctx.decodeAudioData(ab, res, rej); });
+    });
+    return trackBufs[url];
+  }
+  function stopTrack(){ if (trackSrc) { try { trackSrc.stop(); } catch (e) {} trackSrc = null; } }
+  function playTrack(url, offset){
+    if (!ctx) return;
+    trackUrl = url;
+    loadTrack(url).then(function(buf){
+      if (trackUrl !== url) return;
+      stopTrack();
+      if (offset >= buf.duration) return;
+      var s = ctx.createBufferSource(); s.buffer = buf;
+      var g = ctx.createGain(); g.gain.value = 1;
+      s.connect(g); g.connect(master);
+      var at = ctx.currentTime + 0.03;
+      s.start(at, Math.max(0, offset));
+      trackSrc = s; trackStartCtx = at; trackOffset = Math.max(0, offset);
+      s.onended = function(){ if (trackSrc === s) trackSrc = null; };
+    }).catch(function(){});
+  }
+  function trackPos(){ return trackSrc ? trackOffset + (ctx.currentTime - trackStartCtx) : -1; }
+  function preloadTrack(url){ if (ctx) loadTrack(url); }
+  return { unlock: unlock, sfx: sfx, bgm: bgm, vol: vol, ready: ready, current: function(){ return curKey; },
+    playTrack: playTrack, stopTrack: function(){ trackUrl = ''; stopTrack(); }, trackPos: trackPos, preloadTrack: preloadTrack };
 })();
 `;
 

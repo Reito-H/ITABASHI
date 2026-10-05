@@ -4,6 +4,10 @@ export type TeamId = typeof TEAMS[number];
 export const TEAM_COLORS: Record<TeamId, string> = { A: '#ff3b6b', B: '#2fd3ff', C: '#ffd23f', D: '#7cff6b' };
 
 export const STEP_KINDS: Array<{ v: string; l: string; desc: string }> = [
+  { v: 'lobby', l: '参加受付（ロビー）', desc: 'ロゴを中央に表示。「QRを表示」で参加用QRを演出つきで出す' },
+  { v: 'reveal', l: 'チーム発表', desc: 'A〜Dのチームとメンバーを発表（スマホにも自分のチームを表示）' },
+  { v: 'setup', l: '代表者・チーム名決め', desc: '各チームのスマホで代表者とチーム名を決める' },
+  { v: 'black', l: '黒画面', desc: 'プロジェクターを真っ黒にする（音も止める）' },
   { v: 'title', l: 'タイトル・講座・休憩', desc: '見出し・本文・画像を表示（タイマーも使える）' },
   { v: 'video', l: '動画', desc: 'プロジェクターで動画を全画面再生（オープニング映像など）' },
   { v: 'buzzer', l: '早押しクイズ', desc: '画像や問題文を出して早押し。講師が○×で判定' },

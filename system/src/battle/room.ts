@@ -51,6 +51,8 @@ interface Live {
   timerEnd: number;              // タイトル（休憩など）のタイマー
   seq: number;                   // 状態の版（画面側の演出の重複防止）
   video: { playing: boolean; offset: number; at: number }; // 動画ラウンドの再生状態（offset=秒、at=再生開始のサーバー時刻）
+  lobbyQr: boolean;              // 参加受付で参加用QRを出しているか（最初はロゴだけ）
+  blackout: boolean;             // トラブル時の黒画面（どの場面でも上にかぶせる）
   streakTeam: string;            // 早押しで連続正解中のチーム（コンボ演出）
   streak: number;
 }
@@ -59,7 +61,7 @@ function freshLive(): Live {
   return {
     stage: 'lobby', stepIdx: 0, phase: '', qIdx: 0, openAt: 0, deadline: 0,
     buzz: [], buzzCursor: 0, buzzLocked: [], answers: {}, survivors: null, revealN: 0, picked: null,
-    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0, streakTeam: '', streak: 0, video: { playing: false, offset: 0, at: 0 },
+    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0, streakTeam: '', streak: 0, video: { playing: false, offset: 0, at: 0 }, lobbyQr: false, blackout: false,
   };
 }
 
@@ -108,9 +110,13 @@ export class BattleRoom {
     const storedId = await this.state.storage.get<number>('gameId');
     this.gameId = storedId ?? gameIdHint ?? 0;
     if (!storedId && this.gameId) await this.state.storage.put('gameId', this.gameId);
-    this.live = { ...freshLive(), ...((await this.state.storage.get<Live>('live')) ?? {}) };
+    const stored = await this.state.storage.get<Live>('live');
+    // 参加受付などがメニューに入る前に保存された進行状態か（その場合はラウンド番号を受付ぶんずらす）
+    const legacy = !!stored && !('blackout' in stored);
+    this.live = { ...freshLive(), ...(stored ?? {}) };
     await this.reloadAll();
     this.loaded = true;
+    this.normalizeStage(legacy);
     // 休止から戻ったときも「わたしの売上」ラウンド中なら本人データを読み直す
     const cur = this.curStep();
     if (cur && SALES_KINDS.includes(cur.kind)) await this.loadMySales(Array.from(this.players.keys()));
@@ -195,7 +201,7 @@ export class BattleRoom {
     // 参加者が増えたことを全員に知らせる（ロビーの名前表示）。その人の最初の接続ならポンと鳴らす
     if (role === 'player') {
       const already = this.state.getWebSockets('player').filter((w) => (w.deserializeAttachment() as Att | null)?.emp === att.emp).length > 1;
-      if (!already && this.live.stage === 'lobby') this.sfx('pop');
+      if (!already && this.effStage() === 'lobby') this.sfx('pop');
       this.broadcast();
     }
     return new Response(null, { status: 101, webSocket: client });
@@ -238,6 +244,24 @@ export class BattleRoom {
 
   // ---------------- 便利関数 ----------------
   private curStep(): Step | null { return this.live.stage === 'step' ? this.steps[this.live.stepIdx] ?? null : null; }
+  // 参加受付・チーム発表・代表者決めもメニューの1項目。画面側には従来どおり stage 名で伝える
+  private effStage(): 'lobby' | 'reveal' | 'setup' | 'step' {
+    const st = this.curStep();
+    return st && (st.kind === 'lobby' || st.kind === 'reveal' || st.kind === 'setup') ? st.kind : 'step';
+  }
+  // 以前の固定の参加受付（stage='lobby' など）や最初の状態を、メニュー上の該当項目に置き換える
+  private normalizeStage(legacy = false): void {
+    const L = this.live;
+    if (L.stage === 'step' && legacy) {
+      let head = 0;
+      while (head < this.steps.length && ['lobby', 'reveal', 'setup'].includes(this.steps[head].kind)) head++;
+      L.stepIdx += head;
+    }
+    if (L.stage === 'step') { if (L.stepIdx >= this.steps.length) L.stepIdx = Math.max(0, this.steps.length - 1); return; }
+    const want = L.stage;
+    const idx = this.steps.findIndex((s) => s.kind === want);
+    this.enterStep(idx >= 0 ? idx : 0);
+  }
   private curQ(): QItem | null { const s = this.curStep(); return s ? s.qs[this.live.qIdx] ?? null : null; }
   private online(): Set<string> {
     const set = new Set<string>();
@@ -273,7 +297,8 @@ export class BattleRoom {
     const st = this.curStep();
     L.survivors = st && st.kind === 'choice' && st.config.survival ? Array.from(this.players.keys()) : null;
     L.phase = st && ['buzzer', 'choice', 'number', 'order', 'vote'].includes(st.kind) ? 'intro' : st?.kind === 'qbox' ? 'open' : 'show';
-    const bgm = st ? String(st.config.bgm || '') : '';
+    const defBgm: Record<string, string> = { lobby: 'builtin:lobby', reveal: 'builtin:battle', setup: 'builtin:funk', black: 'none' };
+    const bgm = st ? String(st.config.bgm || defBgm[st.kind] || '') : '';
     if (bgm) L.bgm = bgm === 'none' ? null : bgm;
     // 動画ラウンドは入った瞬間から再生（自動再生オフなら講師が「再生」を押す）
     L.video = { playing: !!(st && st.kind === 'video' && st.config.autoplay !== false && st.config.video_id), offset: 0, at: Date.now() };
@@ -296,7 +321,7 @@ export class BattleRoom {
     const team = me.team;
     const tm = this.teams.get(team)!;
 
-    if (t === 'leader' && L.stage === 'setup') {
+    if (t === 'leader' && this.effStage() === 'setup') {
       const target = String(m.emp || '');
       const p = this.players.get(target);
       if (!p || p.team !== team || tm.leader) return;
@@ -307,7 +332,7 @@ export class BattleRoom {
       this.broadcast();
       return;
     }
-    if (t === 'teamname' && L.stage === 'setup') {
+    if (t === 'teamname' && this.effStage() === 'setup') {
       if (tm.leader !== emp) return;
       const name = String(m.name || '').trim().slice(0, 16);
       if (!name) return;
@@ -449,6 +474,54 @@ export class BattleRoom {
       this.broadcast();
       return;
     }
+    if (t === 'blackout') {
+      L.blackout = typeof m.on === 'boolean' ? m.on : !L.blackout;
+      await this.save(); this.broadcast(); return;
+    }
+    if (t === 'lobbyQr') {
+      L.lobbyQr = typeof m.on === 'boolean' ? m.on : !L.lobbyQr;
+      if (L.lobbyQr) { this.sfx('reveal2'); this.sfx('sparkle', { delay: 500 }); }
+      await this.save(); this.broadcast(); return;
+    }
+    if (t === 'moveplayer') {
+      // 参加者のチームを入れ替える（名簿も合わせて直す）。代表者だった場合は元チームの代表者を外す
+      const emp = String(m.emp || ''), team = String(m.team || '') as TeamId;
+      const p = this.players.get(emp);
+      if (!p || !this.teams.has(team) || p.team === team) return;
+      const old = this.teams.get(p.team)!;
+      if (old.leader === emp) {
+        old.leader = '';
+        await this.env.DB.prepare('UPDATE ib2_teams SET leader_emp = ? WHERE game_id = ? AND team = ?').bind('', this.gameId, p.team).run();
+      }
+      p.team = team;
+      await this.env.DB.batch([
+        this.env.DB.prepare('UPDATE ib2_players SET team = ? WHERE game_id = ? AND emp_no = ?').bind(team, this.gameId, emp),
+        this.env.DB.prepare('UPDATE ib2_roster SET team = ? WHERE game_id = ? AND emp_no = ?').bind(team, this.gameId, emp),
+      ]);
+      for (const ws of this.state.getWebSockets('player')) {
+        const a = ws.deserializeAttachment() as Att | null;
+        if (a?.emp === emp) { a.team = team; ws.serializeAttachment(a); }
+      }
+      this.broadcast(); return;
+    }
+    if (t === 'kickplayer') {
+      // 参加を取り消す（名簿には残るので、本人が社員番号を入れ直せば戻れる）
+      const emp = String(m.emp || '');
+      const p = this.players.get(emp);
+      if (!p) return;
+      const tm = this.teams.get(p.team);
+      if (tm && tm.leader === emp) {
+        tm.leader = '';
+        await this.env.DB.prepare('UPDATE ib2_teams SET leader_emp = ? WHERE game_id = ? AND team = ?').bind('', this.gameId, p.team).run();
+      }
+      await this.env.DB.prepare('DELETE FROM ib2_players WHERE game_id = ? AND emp_no = ?').bind(this.gameId, emp).run();
+      this.players.delete(emp);
+      for (const ws of this.state.getWebSockets('player')) {
+        const a = ws.deserializeAttachment() as Att | null;
+        if (a?.emp === emp) { this.send(ws, { t: 'kicked', soft: false }); try { ws.close(4002, 'removed'); } catch { /* 済 */ } }
+      }
+      this.broadcast(); return;
+    }
     if (t === 'reset') {
       // ゲームを最初（ロビー）から。得点・チーム名・代表者も消す
       await this.env.DB.batch([
@@ -459,27 +532,21 @@ export class BattleRoom {
       if (m.players) await this.env.DB.prepare('DELETE FROM ib2_players WHERE game_id = ?').bind(this.gameId).run();
       this.live = freshLive();
       await this.reloadAll();
+      this.normalizeStage();
       await this.save();
       for (const ws of this.state.getWebSockets('player')) this.send(ws, { t: 'kicked', soft: !m.players });
       this.broadcast();
       return;
     }
     if (t === 'next' || t === 'prev' || t === 'goto') {
-      if (t === 'goto') {
-        const i = Number(m.i);
-        if (i === -3) { L.stage = 'lobby'; L.bgm = 'builtin:lobby'; }
-        else if (i === -2) { L.stage = 'reveal'; L.bgm = 'builtin:battle'; }
-        else if (i === -1) { L.stage = 'setup'; }
-        else this.enterStep(i);
-      } else if (t === 'next') {
-        if (L.stage === 'lobby') { L.stage = 'reveal'; L.bgm = 'builtin:battle'; this.sfx('taiko'); this.sfx('cheer', { delay: 600 }); }
-        else if (L.stage === 'reveal') { L.stage = 'setup'; L.bgm = 'builtin:funk'; this.sfx('whoosh'); }
-        else if (L.stage === 'setup') { if (this.steps.length) { this.enterStep(0); this.sfx('whoosh'); } }
-        else if (L.stepIdx < this.steps.length - 1) { this.enterStep(L.stepIdx + 1); this.sfx('whoosh'); }
-      } else {
-        if (L.stage === 'step') { if (L.stepIdx > 0) this.enterStep(L.stepIdx - 1); else L.stage = 'setup'; }
-        else if (L.stage === 'setup') L.stage = 'reveal';
-        else if (L.stage === 'reveal') L.stage = 'lobby';
+      if (!this.steps.length) return;
+      const to = t === 'goto' ? Number(m.i) : L.stepIdx + (t === 'next' ? 1 : -1);
+      if (!Number.isFinite(to) || to < 0 || to >= this.steps.length) return;
+      this.enterStep(to);
+      const nk = this.curStep()?.kind;
+      if (t !== 'prev') {
+        if (nk === 'reveal') { this.sfx('taiko'); this.sfx('cheer', { delay: 600 }); }
+        else if (nk !== 'black') this.sfx('whoosh');
       }
       const cur = this.curStep();
       if (cur && SALES_KINDS.includes(cur.kind)) await this.loadMySales(Array.from(this.players.keys()));
@@ -707,7 +774,7 @@ export class BattleRoom {
       return { team: t, name: tm.name, leader: tm.leader, leaderName: this.players.get(tm.leader)?.name ?? '', score: this.scores.get(t) ?? 0, members };
     });
     const s: Record<string, unknown> = {
-      seq: L.seq, now: Date.now(), stage: L.stage, phase: L.phase, bgm: L.bgm,
+      seq: L.seq, now: Date.now(), stage: this.effStage(), phase: L.phase, bgm: L.bgm, lobbyQr: L.lobbyQr, blackout: L.blackout,
       stepIdx: L.stepIdx, stepCount: this.steps.length, teams,
       steps: att.role === 'admin' ? this.steps.map((x) => ({ id: x.id, kind: x.kind, title: x.title, qn: x.qs.length })) : undefined,
       joined: this.players.size, online: on.size, timerEnd: L.timerEnd,
@@ -716,7 +783,7 @@ export class BattleRoom {
       const cfg = st.config;
       s.step = { id: st.id, kind: st.kind, title: st.title, mode: cfg.mode || 'all', survival: !!cfg.survival, unit: cfg.unit || '', zoom: !!cfg.zoom,
         subtitle: cfg.subtitle || '', body: cfg.body || '', image: mediaUrl(Number(cfg.image_id) || null), final: !!cfg.final, timer: cfg.timer || 0,
-        video: mediaUrl(Number(cfg.video_id) || null) };
+        video: mediaUrl(Number(cfg.video_id) || null), audio: mediaUrl(Number(cfg.audio_id) || null) };
       if (st.kind === 'video') s.video = L.video ?? { playing: false, offset: 0, at: 0 };
       s.qIdx = L.qIdx; s.qCount = st.qs.length;
       if (q && ['buzzer', 'choice', 'number', 'order', 'vote'].includes(st.kind)) {

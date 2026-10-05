@@ -498,7 +498,7 @@ app.get('/settings/documents', async (c) => {
     }
     // "2026/9/5" → UTCミリ秒（日付の前後比較・曜日判定用）。ゼロ埋め無しの日付も文字列比較せずに扱う
     function csvDateMs(d) {
-      const m = d ? d.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/) : null;
+      const m = d ? d.match(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})$/) : null;
       return m ? Date.UTC(+m[1], +m[2]-1, +m[3]) : null;
     }
     // 出勤時間の決定:
