@@ -2,7 +2,7 @@
 //   タブ: 進行 / メニュー / チーム / 素材 / 車椅子タイム / 得点履歴
 //   進行はWebSocket（BattleRoom）へ直接操作を送り、設定の保存はREST API（/ib2/api/*）。保存後は reload を送って即反映。
 import { battleHead, BATTLE_BASE_CSS, BATTLE_NET_JS } from './theme';
-import { BATTLE_AUDIO_JS } from './audio';
+import { BATTLE_AUDIO_JS, SFX_CATALOG } from './audio';
 import { STEP_KINDS } from './types';
 
 export function battleAdminPage(opts: { adminPath: string; apiBase: string; wsPath: string; screenUrl: string; joinUrl: string; qrSvg: string; editable: boolean; hoshikonUrl: string }): string {
@@ -98,6 +98,8 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
   var API = ${JSON.stringify(opts.apiBase)}, WS = ${JSON.stringify(opts.wsPath)}, JOIN = ${JSON.stringify(opts.joinUrl)}, QR = ${JSON.stringify(opts.qrSvg)};
   var EDIT = ${opts.editable ? 'true' : 'false'};
   var KINDS = ${JSON.stringify(STEP_KINDS)};
+  var SFX_CAT = ${JSON.stringify(SFX_CATALOG)};
+  var sfxLocal = false;
   var page = document.getElementById('page');
   var tab = 'ctl', S = null, D = null, selStep = null, cand = null;
   // ホシコンのサイドバー（板橋バトル2）から ?tab=menu などで直接開けるようにする
@@ -204,7 +206,8 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
       .concat((D.media || []).filter(function(m){ return m.kind === 'audio'; }).map(function(m){ return ['media:' + m.id, '曲：' + m.name]; }));
     return '<div class="pn" style="margin-top:12px"><h3>SOUND</h3><select class="f" id="bgmSel">' + opts.map(function(o){ return '<option value="' + o[0] + '"' + ((S.bgm || '') === o[0] ? ' selected' : '') + '>' + escH(o[1]) + '</option>'; }).join('') + '</select>'
       + '<div class="hint" style="margin:6px 0">音はプロジェクター画面から流れます。回答受付中は内蔵BGMが自動でシンキングタイムに切り替わります。</div>'
-      + '<div class="acts">' + [['correct', '正解'], ['wrong', '不正解'], ['buzz', '早押し'], ['drumroll', 'ドラム'], ['fanfare', 'ファンファーレ'], ['whoosh', 'シュッ'], ['score', '加点']].map(function(x){ return '<button class="b sm gh" data-sfx="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div></div>';
+      + '<label class="hint" style="display:flex;gap:6px;align-items:center;margin:4px 0 8px"><input type="checkbox" id="sfxLocal"' + (sfxLocal ? ' checked' : '') + '> この画面でも鳴らす（試聴）</label>'
+      + SFX_CAT.map(function(c){ return '<div class="hint" style="margin-top:8px">' + escH(c.cat) + '</div><div class="acts" style="margin:4px 0">' + c.items.map(function(x){ return '<button class="b sm gh" data-sfx="' + x[0] + '">' + escH(x[1]) + '</button>'; }).join('') + '</div>'; }).join('') + '</div>';
   }
   function bindCtl(){
     var n = document.getElementById('next'), p = document.getElementById('prev');
@@ -216,7 +219,8 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
       if (d === 'custom') { d = Number(document.getElementById('cst').value); if (!d) { alert('±の点数を入力してください'); return; } }
       send({ t: 'score', team: b.getAttribute('data-sc'), delta: Number(d), reason: reason || '手動' });
     }; });
-    Array.prototype.forEach.call(page.querySelectorAll('[data-sfx]'), function(b){ b.onclick = function(){ send({ t: 'sfx', name: b.getAttribute('data-sfx') }); }; });
+    Array.prototype.forEach.call(page.querySelectorAll('[data-sfx]'), function(b){ b.onclick = function(){ var n = b.getAttribute('data-sfx'); send({ t: 'sfx', name: n }); if (sfxLocal) { IB2A.unlock(); setTimeout(function(){ IB2A.sfx(n); }, 30); } }; });
+    var sl = document.getElementById('sfxLocal'); if (sl) sl.onchange = function(){ sfxLocal = sl.checked; if (sfxLocal) IB2A.unlock(); };
     var bs = document.getElementById('bgmSel'); if (bs) bs.onchange = function(){ send({ t: 'bgm', key: bs.value || null }); };
     Array.prototype.forEach.call(page.querySelectorAll('[data-pick]'), function(b){ b.onclick = function(){ act('pick', { id: Number(b.getAttribute('data-pick')) }); }; });
     Array.prototype.forEach.call(page.querySelectorAll('[data-qpt]'), function(b){ b.onclick = function(){ send({ t: 'score', team: b.getAttribute('data-qpt'), delta: 5, reason: '質問箱：いい質問' }); }; });

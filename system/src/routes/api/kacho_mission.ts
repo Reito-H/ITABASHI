@@ -9,6 +9,7 @@ import { contractDateForBirthday, LABOR_UNION_MIN_AGE, LABOR_UNION_MAX_AGE } fro
 import { todayIsoJST } from '../../utils/accident_period';
 import { parseSS2026Import, SS2026_DAYS_IN_MONTH } from '../../data/summer_safety_2026';
 import { defaultDoc } from '../../html/autumn_safety_tefuda';
+import { AS2026_FIRST_DAY, AS2026_LAST_DAY } from '../../data/autumn_safety_2026';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -678,6 +679,74 @@ app.post('/autumn-safety-2026-tefuda', async (c) => {
      ON CONFLICT(id) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at`
   ).bind(json).run();
   return c.json({ ok: true });
+});
+
+// ============ 秋の全国交通安全運動（2026/9/21〜9/30）手札の集計 ============
+// テーブル: autumn_safety_2026_people / _entries / _meta（migration_175）
+
+// AIレポート欄（総括）の保存
+app.post('/autumn-safety-2026/report', async (c) => {
+  const body = await c.req.json<{ text?: string }>().catch(() => ({} as { text?: string }));
+  const text = (body.text ?? '').slice(0, 8000);
+  await c.env.DB.prepare(
+    `INSERT INTO autumn_safety_2026_meta (key, value, updated_at) VALUES ('ai_report', ?, datetime('now','localtime'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(text).run();
+  return c.json({ ok: true });
+});
+
+// 1マス（person × day × item）の値を更新。value が null/0 なら削除。
+app.post('/autumn-safety-2026/entry', async (c) => {
+  const b = await c.req.json<{ person_key?: string; day?: number; item?: number; value?: number | null }>().catch(() => ({} as Record<string, unknown>));
+  const key = String(b.person_key ?? '').trim();
+  const day = Number(b.day);
+  const item = Number(b.item);
+  if (!key || !Number.isInteger(day) || day < AS2026_FIRST_DAY || day > AS2026_LAST_DAY || (item !== 1 && item !== 2 && item !== 3)) {
+    return c.json({ error: 'パラメータが不正です' }, 400);
+  }
+  const exists = await c.env.DB.prepare('SELECT 1 FROM autumn_safety_2026_people WHERE person_key = ?').bind(key).first();
+  if (!exists) return c.json({ error: '対象の乗務員が見つかりません' }, 404);
+
+  const v = b.value == null ? null : Number(b.value);
+  if (v == null || v === 0) {
+    await c.env.DB.prepare('DELETE FROM autumn_safety_2026_entries WHERE person_key = ? AND day = ? AND item = ?').bind(key, day, item).run();
+    return c.json({ ok: true, value: null });
+  }
+  if (v !== 1 && v !== 2 && v !== 3) return c.json({ error: '値は 1/2/3 のみです' }, 400);
+  await c.env.DB.prepare(
+    `INSERT INTO autumn_safety_2026_entries (person_key, day, item, value, updated_at) VALUES (?, ?, ?, ?, datetime('now','localtime'))
+     ON CONFLICT(person_key, day, item) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(key, day, item, v).run();
+  return c.json({ ok: true, value: v });
+});
+
+// 手札を社員名簿に紐づけ直す（emp_no=null で「不明」に戻す）。氏名・課・班は名簿から引く。
+app.post('/autumn-safety-2026/person-link', async (c) => {
+  const b = await c.req.json<{ person_key?: string; emp_no?: string | null }>().catch(() => ({} as Record<string, unknown>));
+  const key = String(b.person_key ?? '').trim();
+  if (!key) return c.json({ error: 'パラメータが不正です' }, 400);
+  const row = await c.env.DB.prepare('SELECT person_key FROM autumn_safety_2026_people WHERE person_key = ?').bind(key).first();
+  if (!row) return c.json({ error: '対象が見つかりません' }, 404);
+
+  const empNo = b.emp_no == null || String(b.emp_no).trim() === '' ? null : String(b.emp_no).trim().slice(0, 20);
+  if (!empNo) {
+    await c.env.DB.prepare(
+      `UPDATE autumn_safety_2026_people SET emp_no = NULL, emp_name = '不明', team = NULL, division = NULL, updated_at = datetime('now','localtime') WHERE person_key = ?`
+    ).bind(key).run();
+    return c.json({ ok: true });
+  }
+  const emp = await c.env.DB.prepare('SELECT emp_no, name, team, division FROM employees WHERE emp_no = ?')
+    .bind(empNo).first<{ emp_no: string; name: string; team: number | null; division: number | null }>();
+  if (!emp) return c.json({ error: `社員番号 ${empNo} は社員名簿にありません` }, 404);
+
+  const dup = await c.env.DB.prepare('SELECT sheet_no FROM autumn_safety_2026_people WHERE emp_no = ? AND person_key != ?')
+    .bind(empNo, key).first<{ sheet_no: number | null }>();
+  const name = emp.name.replace(/\u3000+/g, ' ').trim();
+  const div = emp.division ?? (emp.team == null ? null : Math.ceil(emp.team / 2));
+  await c.env.DB.prepare(
+    `UPDATE autumn_safety_2026_people SET emp_no = ?, emp_name = ?, team = ?, division = ?, updated_at = datetime('now','localtime') WHERE person_key = ?`
+  ).bind(emp.emp_no, name, emp.team, div, key).run();
+  return c.json({ ok: true, warning: dup ? `${name} さんは手札 #${dup.sheet_no ?? '?'} にも紐づいています（2枚目の手札として集計されます）` : null });
 });
 
 export default app;

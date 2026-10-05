@@ -303,7 +303,7 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
     var sl = document.getElementById('sendLeader'); if (sl) sl.onclick = function(){ send({ t: 'leader', emp: draft.leader }); };
     var sn = document.getElementById('sendName'); if (sn) sn.onclick = function(){ var v = document.getElementById('tname').value.trim(); if (v) send({ t: 'teamname', name: v }); };
     var bz = document.getElementById('buzz');
-    if (bz) bz.addEventListener('pointerdown', function(e){ e.preventDefault(); var ms = Math.round(performance.now() - shownAt); bz.disabled = true; IB2A.unlock(); IB2A.sfx('buzz'); vib(80); send({ t: 'buzz', ms: ms }); });
+    if (bz) bz.addEventListener('pointerdown', function(e){ e.preventDefault(); var ms = Math.round(performance.now() - shownAt); bz.disabled = true; IB2A.unlock(); IB2A.sfx('buzz', S && S.me ? S.me.team : null); vib(80); send({ t: 'buzz', ms: ms }); });
     Array.prototype.forEach.call(app.querySelectorAll('[data-ans]'), function(b){ b.onclick = function(){ var ms = Math.round(performance.now() - shownAt); b.classList.add('sel'); Array.prototype.forEach.call(app.querySelectorAll('[data-ans]'), function(x){ x.disabled = true; }); vib(30); send({ t: 'answer', a: b.getAttribute('data-ans'), ms: ms }); }; });
     var ni = document.getElementById('numIn'); if (ni) ni.oninput = function(){ draft.num = ni.value; };
     var sn2 = document.getElementById('sendNum'); if (sn2) sn2.onclick = function(){ var v = (ni.value || '').trim(); if (!v) return; send({ t: 'answer', a: v, ms: Math.round(performance.now() - shownAt) }); };

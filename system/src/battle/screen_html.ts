@@ -140,7 +140,10 @@ html,body{background:#000;}
   };
   var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
   IB2N.connect(proto + location.host + WS, function(s){ S = s; render(); }, function(m){
-    if (m.t === 'sfx') { IB2A.sfx(m.name); if (m.name === 'buzz' || m.name === 'correct') { var f = document.getElementById('fa'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); } }
+    if (m.t === 'sfx') {
+      var play = function(){ IB2A.sfx(m.name, m.team); if (m.name === 'buzz' || m.name === 'correct' || m.name === 'scoreBig' || m.name === 'explosion') { var f = document.getElementById('fa'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); } };
+      if (m.delay) setTimeout(play, m.delay); else play();
+    }
     if (m.t === 'score') popScore(m.team, m.delta);
   });
 
@@ -343,7 +346,7 @@ html,body{background:#000;}
       var left = Math.max(0, S.deadline - IB2N.now()), tot = Math.max(1, (S.q.timeLimit || 20) * 1000);
       rc.setAttribute('stroke-dashoffset', String(276.5 * (1 - left / tot)));
       var sec = Math.ceil(left / 1000); rt.textContent = sec;
-      if (sec <= 5 && sec > 0 && sec !== tickSec) { tickSec = sec; IB2A.sfx('tick'); }
+      if (sec <= 5 && sec > 0 && sec !== tickSec) { tickSec = sec; IB2A.sfx(sec <= 3 ? 'count' : 'tick'); }
     }
     var tb = document.getElementById('tbig');
     if (tb && S.timerEnd) { var l = Math.max(0, S.timerEnd - IB2N.now()); tb.textContent = Math.floor(l / 60000) + ':' + ('0' + Math.floor(l / 1000) % 60).slice(-2); }

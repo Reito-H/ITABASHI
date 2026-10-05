@@ -38,13 +38,15 @@ interface Live {
   awardedKey: string;            // 同じ問題に二重加点しないための印
   timerEnd: number;              // タイトル（休憩など）のタイマー
   seq: number;                   // 状態の版（画面側の演出の重複防止）
+  streakTeam: string;            // 早押しで連続正解中のチーム（コンボ演出）
+  streak: number;
 }
 
 function freshLive(): Live {
   return {
     stage: 'lobby', stepIdx: 0, phase: '', qIdx: 0, openAt: 0, deadline: 0,
     buzz: [], buzzCursor: 0, buzzLocked: [], answers: {}, survivors: null, revealN: 0, picked: null,
-    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0,
+    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0, streakTeam: '', streak: 0,
   };
 }
 
@@ -166,8 +168,12 @@ export class BattleRoom {
     this.state.acceptWebSocket(server, [role]);
     server.serializeAttachment(att);
     server.send(JSON.stringify({ t: 'state', s: this.view(att) }));
-    // 参加者が増えたことを全員に知らせる（ロビーの名前表示）
-    if (role === 'player') this.broadcast();
+    // 参加者が増えたことを全員に知らせる（ロビーの名前表示）。その人の最初の接続ならポンと鳴らす
+    if (role === 'player') {
+      const already = this.state.getWebSockets('player').filter((w) => (w.deserializeAttachment() as Att | null)?.emp === att.emp).length > 1;
+      if (!already && this.live.stage === 'lobby') this.sfx('pop');
+      this.broadcast();
+    }
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -218,8 +224,9 @@ export class BattleRoom {
     return set;
   }
   private send(ws: WebSocket, msg: unknown): void { try { ws.send(JSON.stringify(msg)); } catch { /* 切断済み */ } }
-  private sfx(name: string): void {
-    for (const ws of this.state.getWebSockets()) this.send(ws, { t: 'sfx', name });
+  // 効果音。team = 早押しのチーム別の音、delay = 前の音に続けて鳴らすまでのミリ秒
+  private sfx(name: string, opts: { team?: string; delay?: number } = {}): void {
+    for (const ws of this.state.getWebSockets()) this.send(ws, { t: 'sfx', name, team: opts.team, delay: opts.delay });
   }
   private broadcast(): void {
     for (const ws of this.state.getWebSockets()) {
@@ -383,7 +390,7 @@ export class BattleRoom {
     }
     if (L.phase === 'open') { L.phase = 'judge'; L.buzzCursor = L.buzz.findIndex((b) => !L.buzzLocked.includes(b.emp)); if (L.buzzCursor < 0) L.buzzCursor = 0; }
     await this.save();
-    this.sfx('buzz');
+    this.sfx('buzz', { team: L.buzz[0]?.team });
     this.broadcast();
   }
 
@@ -393,13 +400,13 @@ export class BattleRoom {
     const t = String(m.t);
     const by = att.adminName || '';
     if (t === 'reload') { await this.reloadAll(); this.broadcast(); return; }
-    if (t === 'sfx') { this.sfx(String(m.name || '')); return; }
+    if (t === 'sfx') { this.sfx(String(m.name || '').slice(0, 30)); return; }
     if (t === 'bgm') { L.bgm = m.key ? String(m.key) : null; await this.save(); this.broadcast(); return; }
     if (t === 'score') {
       const team = String(m.team) as TeamId;
       const delta = Math.round(Number(m.delta) || 0);
       await this.addScore(team, delta, String(m.reason || '手動'), by);
-      this.sfx(delta > 0 ? 'score' : 'wrong');
+      this.sfx(delta >= 10 ? 'scoreBig' : delta > 0 ? (Math.random() < 0.5 ? 'score' : 'coin') : 'wrong');
       await this.save();
       this.broadcast();
       return;
@@ -439,7 +446,7 @@ export class BattleRoom {
         else if (i === -1) { L.stage = 'setup'; }
         else this.enterStep(i);
       } else if (t === 'next') {
-        if (L.stage === 'lobby') { L.stage = 'reveal'; L.bgm = 'builtin:battle'; this.sfx('whoosh'); }
+        if (L.stage === 'lobby') { L.stage = 'reveal'; L.bgm = 'builtin:battle'; this.sfx('taiko'); this.sfx('cheer', { delay: 600 }); }
         else if (L.stage === 'reveal') { L.stage = 'setup'; this.sfx('whoosh'); }
         else if (L.stage === 'setup') { if (this.steps.length) { this.enterStep(0); this.sfx('whoosh'); } }
         else if (L.stepIdx < this.steps.length - 1) { this.enterStep(L.stepIdx + 1); this.sfx('whoosh'); }
@@ -468,13 +475,13 @@ export class BattleRoom {
       L.timerEnd = L.timerEnd ? 0 : (min > 0 ? now + min * 60000 : 0);
     } else if (a === 'show') {
       // 問題を出す（早押しは画像を出した時点から計測、他は intro→ready）
-      if (L.phase === 'intro') { L.phase = 'ready'; this.sfx('whoosh'); }
+      if (L.phase === 'intro') { L.phase = 'ready'; this.sfx('quizIntro'); }
     } else if (a === 'open' && q) {
       if (L.phase !== 'ready' && L.phase !== 'intro') return;
       L.phase = 'open'; L.openAt = now;
       L.deadline = st.kind === 'buzzer' ? 0 : now + Math.max(5, q.time_limit) * 1000;
       if (L.deadline) await this.state.storage.setAlarm(L.deadline);
-      this.sfx(st.kind === 'buzzer' ? 'start' : 'start');
+      this.sfx(st.kind === 'buzzer' ? 'start' : 'go');
     } else if (a === 'close') {
       if (L.phase === 'open') { L.phase = 'closed'; L.deadline = 0; this.sfx('timeup'); }
     } else if (a === 'ok' && q && st.kind === 'buzzer' && L.phase === 'judge') {
@@ -487,7 +494,10 @@ export class BattleRoom {
       }
       L.result = { winner: b.emp };
       L.phase = 'reveal';
+      L.streak = L.streakTeam === b.team ? L.streak + 1 : 1;
+      L.streakTeam = b.team;
       this.sfx('correct');
+      if (L.streak >= 2) this.sfx('combo', { delay: 700 });
     } else if (a === 'ng' && st.kind === 'buzzer' && L.phase === 'judge') {
       const b = L.buzz[L.buzzCursor];
       if (b) L.buzzLocked.push(b.emp);
@@ -502,6 +512,8 @@ export class BattleRoom {
         await this.settle(st, q, by);
         L.phase = 'reveal';
         this.sfx(st.kind === 'vote' ? 'reveal' : 'correct');
+        const elim = (L.result as { eliminated?: string[] } | null)?.eliminated;
+        if (elim && elim.length) this.sfx('eliminate', { delay: 900 });
       }
     } else if (a === 'nextq' || a === 'prevq') {
       const ni = L.qIdx + (a === 'nextq' ? 1 : -1);
@@ -514,12 +526,14 @@ export class BattleRoom {
       if (L.revealN < total) {
         L.revealN++;
         const remaining = total - L.revealN;
-        this.sfx(remaining === 0 ? 'fanfare' : 'reveal');
+        if (remaining === 0) { this.sfx(st.kind === 'scoreboard' && st.config.final ? 'victory' : 'fanfare'); this.sfx('clapCheer', { delay: 500 }); }
+        else this.sfx(remaining === 1 ? 'drumroll' : 'reveal');
       }
     } else if (a === 'revealAll') {
       const total = st.kind === 'timeattack' ? Math.min(this.timeattack.length, Number(st.config.top || 10)) : st.kind === 'scoreboard' ? 4 : st.qs.length;
       L.revealN = total;
       this.sfx('fanfare');
+      this.sfx('clapCheer', { delay: 500 });
     } else if (a === 'drumroll') {
       this.sfx('drumroll');
       return;
@@ -538,7 +552,8 @@ export class BattleRoom {
           if (p && pts) await this.addScore(p.team, pts, `${st.title} 生き残り（${p.name}）`, by);
         }
         L.phase = 'survived';
-        this.sfx('fanfare');
+        this.sfx('survive');
+        this.sfx('applause', { delay: 600 });
       }
     } else return;
     await this.save();

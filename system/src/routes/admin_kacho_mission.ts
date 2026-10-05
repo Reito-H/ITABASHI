@@ -112,6 +112,7 @@ app.get('/kacho-mission', async (c) => {
     ${card(`${ADMIN_PATH}/kacho-mission/hiyari`, 'ヒヤリハット')}
     ${card(`${ADMIN_PATH}/kacho-mission/summer-safety-2026`, '夏季交通安全（2026）')}
     ${card(`${ADMIN_PATH}/kacho-mission/autumn-safety-tefuda`, '秋の全国交通安全運動 手札')}
+    ${card(`${ADMIN_PATH}/kacho-mission/autumn-safety-2026`, '秋の全国交通安全運動（2026）集計')}
     ${card(`${ADMIN_PATH}/kacho-mission/masters`, '課長マスタ')}
     ${isFullAccess ? card(`${ADMIN_PATH}/driver-reports`, 'ドライバー報告') : ''}
     ${card(`${ADMIN_PATH}/nojico`, 'nojico')}
