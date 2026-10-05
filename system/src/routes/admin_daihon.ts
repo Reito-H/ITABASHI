@@ -2,6 +2,9 @@
 //   ページ : /daihon/:id            編集（settings.study-sessions[.edit]）
 //            /daihon/:id/present     全画面プレゼン（settings.study-sessions で閲覧可）
 //            /daihon/:id/print       印刷（台本つき）
+//            /daihon/:id/pdf         PDF保存用（スライドのみ・16:9）
+//            /daihon/img/*           写真スライドの画像（R2: DOCUMENTS_BUCKET の daihon/ 配下）
+//            /daihon/flyer/:id       ビラ（A4縦1枚）の編集、/daihon/flyer/:id/print で印刷・PDF（daihon_flyers・migration_171）
 //   API    : /api/daihon/*           書き込みは settings.study-sessions.edit（またはフル権限）
 //   一覧は /settings/study-sessions の「台本」タブが /api/daihon/decks を呼んで描画する。
 //   権限は permissions.ts の PATH_PERMISSIONS で /daihon・/api/daihon → settings.study-sessions にマッピング。
@@ -12,10 +15,11 @@ import { ADMIN_PATH } from '../config';
 import { layout } from '../html/layout';
 import { getAdminPermissions } from '../permissions';
 import {
-  daihonEditPage, daihonPresentPage, daihonPrintPage,
+  daihonEditPage, daihonPresentPage, daihonPrintPage, daihonPdfPage, slideImages,
   normLayout, normAccent,
   type DaihonDeck, type DaihonSlide,
 } from '../html/daihon';
+import { daihonFlyerEditPage, daihonFlyerPrintPage, normalizeFlyer, type DaihonFlyer } from '../html/daihon_flyer';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -43,9 +47,31 @@ async function renumber(db: D1Database, orderedIds: number[]): Promise<void> {
     await db.prepare('UPDATE daihon_slides SET sort_order = ? WHERE id = ?').bind(i, orderedIds[i]).run();
   }
 }
+async function deleteImages(env: Env, keys: string[]): Promise<void> {
+  for (const k of keys) await env.DOCUMENTS_BUCKET.delete(k).catch(() => {});
+}
+const IMAGE_TYPES: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
+const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
 function S(v: unknown, max: number): string {
   return String(v ?? '').replace(/\r\n/g, '\n').slice(0, max);
 }
+
+// =====================  ページ: ビラ  =====================
+async function loadFlyer(db: D1Database, id: number): Promise<DaihonFlyer | null> {
+  return await db.prepare('SELECT * FROM daihon_flyers WHERE id = ?').bind(id).first<DaihonFlyer>();
+}
+app.get('/daihon/flyer/:id', async (c) => {
+  const editable = await canEdit(c);
+  const f = await loadFlyer(c.env.DB, parseInt(c.req.param('id'), 10));
+  if (!f) return c.html(layout('ビラ', '<p style="padding:20px;">ビラが見つかりません。<a href="' + ADMIN_PATH + '/settings/study-sessions?tab=script">一覧へ戻る</a></p>', 'office-page'), 404);
+  return c.html(layout(`${f.title} ― ビラ編集`, daihonFlyerEditPage(f, ADMIN_PATH, editable), 'office-page'));
+});
+app.get('/daihon/flyer/:id/print', async (c) => {
+  const f = await loadFlyer(c.env.DB, parseInt(c.req.param('id'), 10));
+  if (!f) return c.text('ビラが見つかりません', 404);
+  return c.html(daihonFlyerPrintPage(f, c.req.query('preview') === '1'));
+});
 
 // =====================  ページ  =====================
 app.get('/daihon/:id', async (c) => {
@@ -71,6 +97,27 @@ app.get('/daihon/:id/print', async (c) => {
   if (!deck) return c.text('台本が見つかりません', 404);
   const slides = await loadSlides(c.env.DB, id);
   return c.html(daihonPrintPage(deck, slides));
+});
+
+app.get('/daihon/:id/pdf', async (c) => {
+  const id = parseInt(c.req.param('id'), 10);
+  const deck = await loadDeck(c.env.DB, id);
+  if (!deck) return c.text('台本が見つかりません', 404);
+  const slides = await loadSlides(c.env.DB, id);
+  return c.html(daihonPdfPage(deck, slides));
+});
+
+app.get('/daihon/img/*', async (c) => {
+  const rest = c.req.path.split('/daihon/img/')[1] ?? '';
+  if (!/^[\w./-]+$/.test(rest) || rest.includes('..')) return c.text('Not found', 404);
+  const obj = await c.env.DOCUMENTS_BUCKET.get('daihon/' + rest);
+  if (!obj) return c.text('Not found', 404);
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': obj.httpMetadata?.contentType || 'image/jpeg',
+      'Cache-Control': 'private, max-age=86400',
+    },
+  });
 });
 
 // =====================  API: デッキ  =====================
@@ -129,8 +176,48 @@ app.patch('/api/daihon/decks/:id', async (c) => {
 app.delete('/api/daihon/decks/:id', async (c) => {
   const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
   const id = parseInt(c.req.param('id'), 10);
+  const all = await loadSlides(c.env.DB, id);
+  await deleteImages(c.env, all.flatMap((s) => slideImages(s)));
   await c.env.DB.prepare('DELETE FROM daihon_slides WHERE deck_id = ?').bind(id).run();
   await c.env.DB.prepare('DELETE FROM daihon_decks WHERE id = ?').bind(id).run();
+  return c.json({ ok: true });
+});
+
+// =====================  API: ビラ  =====================
+app.get('/api/daihon/flyers', async (c) => {
+  const r = await c.env.DB.prepare('SELECT id, title, updated_at FROM daihon_flyers ORDER BY sort_order, id').all<{ id: number; title: string; updated_at: string }>();
+  return c.json({ editable: await canEdit(c), flyers: r.results ?? [] });
+});
+
+app.post('/api/daihon/flyers', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const title = S(body.title, 120).trim();
+  if (!title) return c.json({ error: '名前を入力してください' }, 400);
+  const maxRow = await c.env.DB.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM daihon_flyers').first<{ m: number }>();
+  const data = normalizeFlyer({ headline: title });
+  const ins = await c.env.DB.prepare(
+    'INSERT INTO daihon_flyers (title, data, sort_order, created_by) VALUES (?, ?, ?, ?)'
+  ).bind(title, JSON.stringify(data), (maxRow?.m ?? -1) + 1, await username(c.env.DB, c.get('adminId'))).run();
+  return c.json({ ok: true, id: Number(ins.meta.last_row_id) });
+});
+
+app.patch('/api/daihon/flyers/:id', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
+  const id = parseInt(c.req.param('id'), 10);
+  if (!(await loadFlyer(c.env.DB, id))) return c.json({ error: '見つかりません' }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const title = S(body.title, 120).trim();
+  if (!title) return c.json({ error: '名前は空にできません' }, 400);
+  await c.env.DB.prepare(
+    "UPDATE daihon_flyers SET title = ?, data = ?, updated_at = datetime('now','localtime') WHERE id = ?"
+  ).bind(title, JSON.stringify(normalizeFlyer(body.data)), id).run();
+  return c.json({ ok: true });
+});
+
+app.delete('/api/daihon/flyers/:id', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
+  await c.env.DB.prepare('DELETE FROM daihon_flyers WHERE id = ?').bind(parseInt(c.req.param('id'), 10)).run();
   return c.json({ ok: true });
 });
 
@@ -181,11 +268,46 @@ app.patch('/api/daihon/slides/:id', async (c) => {
 app.delete('/api/daihon/slides/:id', async (c) => {
   const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
   const id = parseInt(c.req.param('id'), 10);
-  const row = await c.env.DB.prepare('SELECT deck_id FROM daihon_slides WHERE id = ?').bind(id).first<{ deck_id: number }>();
+  const row = await c.env.DB.prepare('SELECT deck_id, images FROM daihon_slides WHERE id = ?').bind(id).first<{ deck_id: number; images: string }>();
   if (!row) return c.json({ error: '見つかりません' }, 404);
+  await deleteImages(c.env, slideImages(row));
   await c.env.DB.prepare('DELETE FROM daihon_slides WHERE id = ?').bind(id).run();
   const ordered = await loadSlides(c.env.DB, row.deck_id);
   await renumber(c.env.DB, ordered.map((s) => s.id));
+  return c.json({ ok: true });
+});
+
+// 写真スライドに画像を1枚追加（本文は画像のバイナリそのもの。クライアント側で縮小済み）
+app.post('/api/daihon/slides/:id/images', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
+  const id = parseInt(c.req.param('id'), 10);
+  const row = await c.env.DB.prepare('SELECT id, images FROM daihon_slides WHERE id = ?').bind(id).first<{ id: number; images: string }>();
+  if (!row) return c.json({ error: 'スライドが見つかりません' }, 404);
+  const keys = slideImages(row);
+  if (keys.length >= 4) return c.json({ error: '写真は1枚のスライドに4枚までです' }, 400);
+  const type = (c.req.header('Content-Type') || '').split(';')[0].trim().toLowerCase();
+  const ext = IMAGE_TYPES[type];
+  if (!ext) return c.json({ error: 'JPEG・PNG・WebP・GIFの画像を選んでください' }, 400);
+  const buf = await c.req.arrayBuffer();
+  if (!buf.byteLength) return c.json({ error: '画像が空です' }, 400);
+  if (buf.byteLength > IMAGE_MAX_BYTES) return c.json({ error: '画像が大きすぎます（8MBまで）' }, 400);
+  const key = `daihon/${id}/${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  await c.env.DOCUMENTS_BUCKET.put(key, buf, { httpMetadata: { contentType: type } });
+  keys.push(key);
+  await c.env.DB.prepare('UPDATE daihon_slides SET images = ? WHERE id = ?').bind(JSON.stringify(keys), id).run();
+  return c.json({ ok: true, key });
+});
+
+app.delete('/api/daihon/slides/:id/images', async (c) => {
+  const denied = requireEdit(c, await canEdit(c)); if (denied) return denied;
+  const id = parseInt(c.req.param('id'), 10);
+  const key = c.req.query('key') || '';
+  const row = await c.env.DB.prepare('SELECT id, images FROM daihon_slides WHERE id = ?').bind(id).first<{ id: number; images: string }>();
+  if (!row) return c.json({ error: 'スライドが見つかりません' }, 404);
+  const keys = slideImages(row);
+  if (!keys.includes(key)) return c.json({ error: '写真が見つかりません' }, 404);
+  await deleteImages(c.env, [key]);
+  await c.env.DB.prepare('UPDATE daihon_slides SET images = ? WHERE id = ?').bind(JSON.stringify(keys.filter((k) => k !== key)), id).run();
   return c.json({ ok: true });
 });
 

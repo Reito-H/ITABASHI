@@ -1,5 +1,5 @@
 // 共通HTMLレイアウト
-import { ADMIN_PATH, APP_VERSION } from '../config';
+import { ADMIN_PATH, APP_VERSION, BATTLE_PUBLIC_PATH, BATTLE_NAV_UNTIL } from '../config';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
 import { announcementBarHtml, announcementBarScript } from './announcement_bar';
 import { birthdayPopupHtml, birthdayPopupScript } from './birthday_popup';
@@ -97,6 +97,19 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/shuttle`,                 label: 'シャトルバス', id: 'shuttle',            permKey: 'shuttle' },
   ];
   const portalPerm = portalItems.map(p => p.permKey).join(' ');
+  // 期間限定：新卒 繁忙期勉強会のゲームアプリ「板橋バトル2」。BATTLE_NAV_UNTIL（日本時間の日付）まで表示する
+  const todayJst = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const showBattleNav = todayJst <= BATTLE_NAV_UNTIL;
+  const battleLinks: Array<{ href: string; label: string; newTab?: boolean }> = [
+    { href: `${ADMIN_PATH}/ib2`,            label: '進行（当日の操作）' },
+    { href: `${ADMIN_PATH}/ib2?tab=menu`,   label: 'メニュー・問題' },
+    { href: `${ADMIN_PATH}/ib2?tab=team`,   label: 'チーム・名簿' },
+    { href: `${ADMIN_PATH}/ib2?tab=media`,  label: '素材（画像・曲）' },
+    { href: `${ADMIN_PATH}/ib2?tab=ta`,     label: '車椅子タイム' },
+    { href: `${ADMIN_PATH}/ib2?tab=log`,    label: '得点履歴' },
+    { href: `${ADMIN_PATH}/ib2/screen`,     label: 'プロジェクター画面', newTab: true },
+    { href: `${BATTLE_PUBLIC_PATH}/`,       label: '参加者画面（スマホ用）', newTab: true },
+  ];
 
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -216,6 +229,21 @@ export function layout(title: string, content: string, activePage: string = '', 
        追従させる（overflow:autoの祖先の内側だと、はみ出す表示がクリップされてしまうため）。
        開閉は常にJS（#nav-portal-trigger のイベント）が付与する.openクラスで行う。 */
     .nav-portal-trigger { display: flex; align-items: center; justify-content: space-between; }
+    /* 期間限定「板橋バトル2」：ゲームアプリへの入口。クリックで下にメニューが開く */
+    .nav-battle { position: relative; display: flex; align-items: center; gap: 8px; width: calc(100% - 20px); margin: 6px 10px; padding: 12px 14px;
+      border: 1px solid rgba(255,59,107,.55); border-radius: 12px; cursor: pointer; text-align: left;
+      background: linear-gradient(135deg, rgba(255,59,107,.28), rgba(155,107,255,.28) 55%, rgba(47,211,255,.24));
+      color: #fff; font-size: 14px; font-weight: 900; line-height: 1.2; letter-spacing: .02em; box-shadow: 0 0 14px rgba(255,59,107,.35); }
+    .nav-battle:hover { box-shadow: 0 0 20px rgba(255,59,107,.6); }
+    .nav-battle > span { white-space: nowrap; }
+    .nav-battle .nb-tag { flex-shrink: 0; font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 999px; background: #ff3b6b; color: #fff; letter-spacing: .02em; }
+    .nav-battle .nb-caret { margin-left: auto; transition: transform .2s ease; opacity: .8; }
+    .nav-battle.open .nb-caret { transform: rotate(90deg); }
+    .nav-battle-sub { display: none; flex-direction: column; gap: 2px; margin: 0 10px 6px 18px; padding-left: 8px; border-left: 2px solid rgba(255,59,107,.45); }
+    .nav-battle-sub.open { display: flex; }
+    .nav-battle-sub a { display: block; padding: 7px 10px; border-radius: 8px; color: #e7e3ff; font-size: 12.5px; font-weight: 600; text-decoration: none; }
+    .nav-battle-sub a:hover { background: rgba(255,255,255,.12); color: #fff; }
+    .nav-battle-sub a.active { background: rgba(255,59,107,.3); color: #fff; }
     .nav-portal-caret { flex-shrink: 0; opacity: .55; transition: transform .25s ease, opacity .25s ease; }
     .nav-portal-trigger.open .nav-portal-caret,
     .nav-portal-trigger:hover .nav-portal-caret { transform: translateX(2px); opacity: 1; }
@@ -385,8 +413,19 @@ export function layout(title: string, content: string, activePage: string = '', 
     <nav style="flex:1;overflow-y:auto;overscroll-behavior:contain;padding:6px 0;">
       ${navItems.map(item => {
         if (item.portal) {
+          const battle = showBattleNav ? `
+        <div data-perm-key="settings.study-sessions">
+          <button type="button" class="nav-battle${activePage === 'battle' ? ' open' : ''}" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open');try{localStorage.setItem('ho_battle_nav',this.classList.contains('open')?'1':'0')}catch(e){}">
+            <span>板橋バトル2</span><span class="nb-tag">期間限定</span>
+            <svg class="nb-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+          <div class="nav-battle-sub${activePage === 'battle' ? ' open' : ''}">
+            ${battleLinks.map(l => `<a href="${l.href}"${l.newTab ? ' target="_blank" rel="noopener"' : ''} onclick="closeSidebar()">${escHtml(l.label)}</a>`).join('')}
+          </div>
+        </div>
+        <script>try{if(localStorage.getItem('ho_battle_nav')==='1'){var b=document.currentScript.previousElementSibling.querySelector('.nav-battle');if(b&&!b.classList.contains('open')){b.classList.add('open');b.nextElementSibling.classList.add('open');}}}catch(e){}</script>` : '';
           const portalActive = portalItems.some(p => p.id === activePage);
-          return `
+          return battle + `
         <div class="nav-portal-wrap" data-perm-key="${portalPerm}">
           <a href="javascript:void(0)" id="nav-portal-trigger" class="nav-item nav-portal-trigger${portalActive ? ' active' : ''}">
             <span>${escHtml(item.label)}</span>

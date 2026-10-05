@@ -109,6 +109,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/km-pins/,                   'settings.sales-strategy'],
   // 各ページ
   [/^\/daihon(\/|$)/, 'settings.daihon|settings.study-sessions'],
+  // ITABASHI BATTLE 2（新卒 繁忙期勉強会のゲームアプリ）の管理者・プロジェクター画面
+  [/^\/ib2(\/|$)/, 'settings.study-sessions'],
   [/^\/kancho-shift/, 'kancho-shift'],
   [/^\/api\/kancho/,  'kancho-shift'],
   [/^\/kanri-kobo/,     'kanri-kobo'],

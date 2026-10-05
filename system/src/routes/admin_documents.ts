@@ -483,14 +483,59 @@ app.get('/settings/documents', async (c) => {
       '公B':'b','公Ｂ':'b','公D':'D','公Ｄ':'D','公a':'a','公ａ':'a','公b':'B','公ｂ':'B',
       'A勤':'a','Ａ勤':'a',
     };
-    const TIME_CANDS = [6.0,6.5,8.0,9.5,15.0,16.0,18.0,19.0];
-    const TIME_LABELS = {6.0:'6:00',6.5:'6:50',8.0:'8:00',9.5:'9:30',15.0:'15:00',16.0:'16:00',18.0:'18:00',19.0:'19:00'};
+    // 出勤時間の選択肢（社員編集画面の ALL_TIMES と同じ8種）。h は時刻を時間単位の小数で持つ（6:50 = 6+50/60）
+    const TIME_CANDS = [
+      {h:6.0,label:'6:00'},{h:6+50/60,label:'6:50'},{h:8.0,label:'8:00'},{h:9.5,label:'9:30'},
+      {h:15.0,label:'15:00'},{h:16.0,label:'16:00'},{h:18.0,label:'18:00'},{h:19.0,label:'19:00'},
+    ];
+    const TIME_HOURS = Object.fromEntries(TIME_CANDS.map(c => [c.label, c.h]));
+    const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
     function snapStartTime(h) {
-      let best=TIME_CANDS[0], bd=Math.abs(h-best);
-      for (const c of TIME_CANDS) { const d=Math.abs(h-c); if(d<bd){bd=d;best=c;} }
-      return TIME_LABELS[best]||null;
+      let best=TIME_CANDS[0], bd=Math.abs(h-best.h);
+      for (const c of TIME_CANDS) { const d=Math.abs(h-c.h); if(d<bd){bd=d;best=c;} }
+      return best.label;
     }
+    // "2026/9/5" → UTCミリ秒（日付の前後比較・曜日判定用）。ゼロ埋め無しの日付も文字列比較せずに扱う
+    function csvDateMs(d) {
+      const m = d ? d.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/) : null;
+      return m ? Date.UTC(+m[1], +m[2]-1, +m[3]) : null;
+    }
+    // 出勤時間の決定:
+    //   メイン = その人の最終乗務日から遡って30日間の乗務を、1日ずつ最寄りの出勤時間に当てはめ、最も回数が多い時間
+    //            （同数なら直近に出た方）。CSV全体の期間には左右されない。
+    //   曜日例外 = CSV全期間のうちメインと2時間以内の乗務（＝同系統の勤務）を曜日別に数え、
+    //            その曜日が2回以上あり過半数がメイン以外の同じ時間なら「金16:00」のように記録。
+    //            ただし期間全体でメインが最多でない（途中でシフトが変わった）人は例外なし
+    function decideStartTime(entries) {
+      const pts = entries.map(s => ({ ms: csvDateMs(s.date), label: snapStartTime(s.time) })).filter(p => p.ms !== null);
+      if (!pts.length) return { start_time: null, start_time_note: null };
+      const lastMs = Math.max(...pts.map(p => p.ms));
+      const recent = pts.filter(p => p.ms > lastMs - 30*86400000);
+      const cnt = {}, lastSeen = {};
+      for (const p of recent) { cnt[p.label] = (cnt[p.label]||0)+1; lastSeen[p.label] = Math.max(lastSeen[p.label]||0, p.ms); }
+      const main = Object.keys(cnt).sort((a,b) => (cnt[b]-cnt[a]) || (lastSeen[b]-lastSeen[a]))[0];
+
+      const byDow = {}, near = {};
+      for (const p of pts) {
+        if (Math.abs(TIME_HOURS[p.label] - TIME_HOURS[main]) > 2) continue;
+        near[p.label] = (near[p.label]||0)+1;
+        const dow = new Date(p.ms).getUTCDay();
+        (byDow[dow] = byDow[dow] || []).push(p.label);
+      }
+      // 期間全体ではメイン以外が最多＝途中でシフト自体が変わった人。曜日のクセではないので例外は書かない
+      if (Object.keys(near).some(l => near[l] > near[main])) return { start_time: main, start_time_note: null };
+      const notes = [];
+      for (const dow of [1,2,3,4,5,6,0]) {
+        const arr = byDow[dow];
+        if (!arr || arr.length < 2) continue;
+        const f = {}; for (const l of arr) f[l] = (f[l]||0)+1;
+        const [top, n] = Object.entries(f).sort((a,b) => b[1]-a[1])[0];
+        if (top !== main && n * 2 > arr.length) notes.push(WEEKDAY_JA[dow] + top);
+      }
+      return { start_time: main, start_time_note: notes.length ? notes.join('・') : null };
+    }
+    function fmtStartTime(t, note) { return t ? t + (note ? '（' + note + '）' : '') : '—'; }
     function fmtHours(h) {
       if(isNaN(h)||h<0) return null;
       const hr=Math.floor(h)%24, mn=Math.round((h-Math.floor(h))*60);
@@ -625,16 +670,9 @@ app.get('/settings/documents', async (c) => {
         await new Promise(r => setTimeout(r, 0));
       }
 
-      let recentCutoff = '';
-      if (csvMaxDate) {
-        const ms = new Date(csvMaxDate.replace(/\\//g,'-')).getTime() - 30*86400000;
-        recentCutoff = new Date(ms).toISOString().slice(0,10).replace(/-/g,'/');
-      }
-
       csvParsedData = Object.values(empMap).map(e => {
         const work_schedule = modeOf(e.workTypes);
-        const allTimes = e.startEntries.map(s=>s.time);
-        const start_time = avgOf(allTimes) !== null ? snapStartTime(avgOf(allTimes)) : null;
+        const { start_time, start_time_note } = decideStartTime(e.startEntries);
 
         const sortedCars = Object.entries(e.carFreq).sort((a,b)=>b[1]-a[1]).map(([c])=>c);
         const used_cars = sortedCars.length ? JSON.stringify(sortedCars.slice(0,5)) : null;
@@ -654,9 +692,12 @@ app.get('/settings/documents', async (c) => {
         const isLongAbsent = daysSinceLast !== null && daysSinceLast >= 90;
 
         let hasTimeChange=false, recentAvg=null, earlyAvg=null;
-        if (recentCutoff && e.startEntries.length >= 6) {
-          const rec = e.startEntries.filter(s=>s.date>=recentCutoff).map(s=>s.time);
-          const ear = e.startEntries.filter(s=>s.date< recentCutoff).map(s=>s.time);
+        // シフト変化: その人の最終乗務日から30日以内 vs それより前 の出庫時刻平均を比較
+        const startMsList = e.startEntries.map(s=>csvDateMs(s.date)).filter(ms=>ms!==null);
+        if (startMsList.length >= 6) {
+          const cutoffMs = Math.max(...startMsList) - 30*86400000;
+          const rec = e.startEntries.filter(s=>csvDateMs(s.date)>cutoffMs).map(s=>s.time);
+          const ear = e.startEntries.filter(s=>{ const ms=csvDateMs(s.date); return ms!==null && ms<=cutoffMs; }).map(s=>s.time);
           if (rec.length>=3 && ear.length>=3) {
             recentAvg=avgOf(rec); earlyAvg=avgOf(ear);
             hasTimeChange = Math.abs(recentAvg-earlyAvg) >= 2;
@@ -666,7 +707,7 @@ app.get('/settings/documents', async (c) => {
         return {
           emp_no:e.emp_no, name:e.name, name_kana:null,
           division, team:e.team,
-          work_schedule, start_time,
+          work_schedule, start_time, start_time_note,
           used_cars, topCarsDisplay,
           avg_return_time,
           lastDate, daysSinceLast, isLongAbsent,
@@ -721,7 +762,7 @@ app.get('/settings/documents', async (c) => {
             '</td>' +
           '<td style="padding:5px 8px;font-size:12px;">'+(e.division?e.division+'課 ':'')+( e.team?e.team+'班':'—')+'</td>' +
           '<td style="padding:5px 8px;font-size:12px;">'+(e.work_schedule||'—')+'</td>' +
-          '<td style="padding:5px 8px;font-size:12px;">'+(e.start_time||'—')+'</td>' +
+          '<td style="padding:5px 8px;font-size:12px;">'+fmtStartTime(e.start_time, e.start_time_note)+'</td>' +
           '<td style="padding:5px 8px;font-family:monospace;font-size:11px;color:#374151;">'+(e.topCarsDisplay)+'</td>' +
           '<td style="padding:5px 8px;font-size:12px;color:#6b7280;">'+(e.avg_return_time||'—')+'</td>' +
           '<td style="padding:5px 8px;">'+flags.join(' ')+'</td>' +
@@ -838,7 +879,7 @@ app.get('/settings/documents', async (c) => {
         emp_no: e.emp_no, name: e.name,
         name_kana: e.name_kana || null,
         division: e.division, team: e.team,
-        work_schedule: e.work_schedule, start_time: e.start_time,
+        work_schedule: e.work_schedule, start_time: e.start_time, start_time_note: e.start_time_note,
         avg_return_time: e.avg_return_time,
         used_cars: e.used_cars,
         isLongAbsent: e.isLongAbsent || false,

@@ -36,6 +36,7 @@ app.post('/', async (c) => {
     seq_no?: number;
     work_schedule?: string;
     start_time?: string;
+    start_time_note?: string | null;
     car_no?: string;
     enrollment_status?: string;
     work_hours_type?: string;
@@ -64,9 +65,9 @@ app.post('/', async (c) => {
   try {
     const result = await c.env.DB.prepare(`
       INSERT INTO employees (emp_no, name, name_kana, division, team, locker_no, phone, entry_type,
-        hire_date, birth_date, seq_no, work_schedule, start_time, car_no, enrollment_status,
+        hire_date, birth_date, seq_no, work_schedule, start_time, start_time_note, car_no, enrollment_status,
         work_hours_type, is_caution, is_sales_followup, problem_notes, retirement_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
       data.emp_no,
       data.name,
@@ -81,6 +82,7 @@ app.post('/', async (c) => {
       data.seq_no ?? null,
       data.work_schedule ?? null,
       data.start_time ?? null,
+      data.start_time_note?.trim().slice(0, 40) || null,
       data.car_no ?? null,
       data.enrollment_status ?? '通常',
       data.work_hours_type ?? null,
@@ -122,6 +124,7 @@ app.put('/:id', async (c) => {
     interview_target?: number;
     work_schedule?: string | null;
     start_time?: string | null;
+    start_time_note?: string | null;
     car_no?: string | null;
     enrollment_status?: string | null;
     work_hours_type?: string | null;
@@ -155,6 +158,7 @@ app.put('/:id', async (c) => {
   if (data.interview_target !== undefined) { sets.push('interview_target = ?');   vals.push(data.interview_target); }
   if (data.work_schedule !== undefined)  { sets.push('work_schedule = ?');        vals.push(data.work_schedule ?? null); }
   if (data.start_time !== undefined)     { sets.push('start_time = ?');           vals.push(data.start_time ?? null); }
+  if (data.start_time_note !== undefined) { sets.push('start_time_note = ?');     vals.push(data.start_time_note?.trim().slice(0, 40) || null); }
   if (data.car_no !== undefined)         { sets.push('car_no = ?');               vals.push(data.car_no ?? null); }
   if (data.enrollment_status !== undefined) { sets.push('enrollment_status = ?'); vals.push(data.enrollment_status ?? '通常'); }
   if (data.work_hours_type !== undefined){ sets.push('work_hours_type = ?');      vals.push(data.work_hours_type ?? null); }
@@ -235,6 +239,7 @@ app.post('/csv-import', async (c) => {
       team?: number | null;
       work_schedule?: string | null;
       start_time?: string | null;
+      start_time_note?: string | null;
       avg_return_time?: string | null;
       used_cars?: string | null;
       isLongAbsent?: boolean;
@@ -288,13 +293,13 @@ app.post('/csv-import', async (c) => {
     statements.push(
       c.env.DB.prepare(
         `INSERT OR IGNORE INTO employees
-           (emp_no, name, name_kana, division, team, work_schedule, start_time,
+           (emp_no, name, name_kana, division, team, work_schedule, start_time, start_time_note,
             avg_return_time, used_cars, status, enrollment_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`
       ).bind(
         emp.emp_no, emp.name, normalizeKana(emp.name_kana),
         emp.division ?? null, emp.team ?? null,
-        emp.work_schedule ?? null, emp.start_time ?? null,
+        emp.work_schedule ?? null, emp.start_time ?? null, emp.start_time_note ?? null,
         emp.avg_return_time ?? null, emp.used_cars ?? null,
         enrollStatus
       )
@@ -310,6 +315,7 @@ app.post('/csv-import', async (c) => {
            team            = COALESCE(?, team),
            work_schedule   = COALESCE(?, work_schedule),
            start_time      = COALESCE(?, start_time),
+           start_time_note = CASE WHEN ? IS NOT NULL THEN ? ELSE start_time_note END,
            avg_return_time = COALESCE(?, avg_return_time),
            used_cars       = ?,
            enrollment_status = CASE WHEN ? = 1 THEN '長欠' ELSE enrollment_status END,
@@ -319,6 +325,8 @@ app.post('/csv-import', async (c) => {
         normalizeKana(emp.name_kana),
         emp.division ?? null, emp.team ?? null,
         emp.work_schedule ?? null, emp.start_time ?? null,
+        // 出勤時間が算出できた時だけ曜日例外も入れ替える（例外なしならnullでクリア）
+        emp.start_time ?? null, emp.start_time_note ?? null,
         emp.avg_return_time ?? null,
         emp.used_cars ?? null,
         emp.isLongAbsent ? 1 : 0,

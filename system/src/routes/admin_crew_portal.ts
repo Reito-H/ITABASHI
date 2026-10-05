@@ -13,7 +13,7 @@ const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 type EmpRow = {
   id: number; name: string; emp_no: string; division: number | null; team: number | null;
   hire_date: string | null; birth_date: string | null;
-  work_schedule: string | null; start_time: string | null; car_no: string | null;
+  work_schedule: string | null; start_time: string | null; start_time_note: string | null; car_no: string | null;
   enrollment_status: string | null; is_active: number | null; retirement_date: string | null;
   is_hanchyo: number | null; is_caution: number | null; is_sales_followup: number | null;
   status: string | null;
@@ -82,7 +82,7 @@ app.get('/crew-portal/employee/:id', async (c) => {
 
   const emp = await c.env.DB.prepare(
     `SELECT id, name, emp_no, division, team, hire_date, birth_date,
-            work_schedule, start_time, car_no, enrollment_status, is_active, retirement_date,
+            work_schedule, start_time, start_time_note, car_no, enrollment_status, is_active, retirement_date,
             is_hanchyo, is_caution, is_sales_followup, status
      FROM employees WHERE id = ?`
   ).bind(id).first<EmpRow>();
@@ -175,7 +175,7 @@ app.get('/crew-portal/employee/:id', async (c) => {
           ${metaItem('所属', `${emp.division ? emp.division + '課' : '—'}${emp.team ? ' ' + emp.team + '班' : ''}`)}
           ${metaItem('入社', `${emp.hire_date ? escHtml(emp.hire_date) : '—'}${empTenure ? `（勤続${empTenure}）` : ''}`)}
           ${empAge !== null ? metaItem('年齢', `${empAge}歳`) : ''}
-          ${metaItem('勤務', `${emp.work_schedule ? escHtml(emp.work_schedule) : '—'}${emp.start_time ? ' / ' + escHtml(emp.start_time) + '出' : ''}`)}
+          ${metaItem('勤務', `${emp.work_schedule ? escHtml(emp.work_schedule) : '—'}${emp.start_time ? ' / ' + escHtml(emp.start_time) + '出' + (emp.start_time_note ? '（' + escHtml(emp.start_time_note) + '）' : '') : ''}`)}
           ${metaItem('担当車', emp.car_no ? escHtml(emp.car_no) : '—', true)}
           ${emp.is_active === 0 && emp.retirement_date ? metaItem('退職日', escHtml(emp.retirement_date)) : ''}
         </div>

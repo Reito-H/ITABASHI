@@ -22,6 +22,15 @@ bucket_name = "benten-id-photos"
 binding = "STUDY_NOTES_BUCKET"
 bucket_name = "benten-study-notes"
 
+# ITABASHI BATTLE 2（新卒 繁忙期勉強会のゲームアプリ）のリアルタイム進行。無料プランで使える SQLite 型の Durable Object
+[[durable_objects.bindings]]
+name = "BATTLE_ROOM"
+class_name = "BattleRoom"
+
+[[migrations]]
+tag = "v1-battle-room"
+new_sqlite_classes = ["BattleRoom"]
+
 [vars]
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
@@ -127,6 +136,11 @@ zone_name = "bentenclub.com"
 # 羽田空港 到着便一覧（ログイン不要の固定URL・HANEDA_ARRIVALS_PATH）
 [[routes]]
 pattern = "bentenclub.com/hn-55ab0e5aa8fb480119a216d3bc702650*"
+zone_name = "bentenclub.com"
+
+# ITABASHI BATTLE 2 の参加用URL（ログイン不要の固定URL・BATTLE_PUBLIC_PATH）
+[[routes]]
+pattern = "bentenclub.com/ib2-8cbb19aa8bae80ec4652540a9cb36da1c9151104*"
 zone_name = "bentenclub.com"
 
 [[routes]]

@@ -4,7 +4,7 @@ export const ADMIN_PATH = `/${SECRET}/admin`;
 
 // アプリバージョン表示（右上ベル横のバッジ）。大きめの変更をデプロイするたびに手動で更新する。
 // 更新ルールは docs/SPECIFICATION.md 6.3 を参照
-export const APP_VERSION = '0.0.69';
+export const APP_VERSION = '0.0.75';
 
 // 希望休フォーム（ログイン不要の公開ページ）の秘密パス。推測されないよう複雑な文字列にする
 export const KANCHO_WISH_PATH = '/kw-dea54792603559b9bb0e74ebb70188b4';
@@ -38,3 +38,9 @@ export const HANEDA_ARRIVALS_PATH = '/hn-55ab0e5aa8fb480119a216d3bc702650';
 // 通常の交通安全サイネージ（SIGNAGE_PUBLIC_PATH）とは別画面。異常気象警報が出ている間だけ、
 // モニターの表示先をこのURLへ手動で切り替える運用。どの日に表示するかは管理画面のカレンダーで事前指定する。
 export const WEATHER_NOTICE_PUBLIC_PATH = '/wn-3f6a8d15c9247ee0a25de2fb4c02a19b';
+
+// ITABASHI BATTLE 2（新卒 繁忙期勉強会のゲームアプリ）の参加用URL。ログイン不要・社員番号で参加するため推測されない長いパスにする。
+// 管理者画面・プロジェクター画面はホシコンの管理画面配下（/admin/ib2）。wrangler.toml の routes にも同じパスを登録すること
+export const BATTLE_PUBLIC_PATH = '/ib2-8cbb19aa8bae80ec4652540a9cb36da1c9151104';
+// ホシコンの左サイドバーに「板橋バトル2」（期間限定）を出す最終日（日本時間・この日まで表示）
+export const BATTLE_NAV_UNTIL = '2026-11-30';

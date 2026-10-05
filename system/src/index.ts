@@ -94,6 +94,8 @@ import adminChoseiRoutes from './routes/admin_chosei';
 import adminSignageRoutes from './routes/admin_signage';
 import adminWeatherNoticeRoutes from './routes/admin_weather_notice';
 import adminDaihonRoutes from './routes/admin_daihon';
+import { battlePublicRoutes, battleAdminRoutes } from './routes/battle';
+export { BattleRoom } from './battle/room';
 import adminSrRoutes from './routes/admin_sr';
 import adminKmPinsRoutes from './routes/admin_km_pins';
 import adminSalesStrategyRoutes from './routes/admin_sales_strategy';
@@ -114,7 +116,7 @@ import publicWeatherNoticeRoutes from './routes/public_weather_notice';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
-import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH } from './config';
+import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH, BATTLE_PUBLIC_PATH } from './config';
 import { FAVICON_DATA_URI } from './html/layout';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -152,6 +154,8 @@ app.use('*', async (c, next) => {
 // セキュリティヘッダー
 app.use('*', async (c, next) => {
   await next();
+  // WebSocket の接続応答（101）はヘッダーを書き換えられないのでそのまま返す（ITABASHI BATTLE 2）
+  if (c.res.status === 101) return;
   const reqUrl = new URL(c.req.url);
   const pathname = reqUrl.pathname;
   const isLiff = pathname.startsWith('/liff');
@@ -181,6 +185,9 @@ app.use('*', async (c, next) => {
   // このページのみ CSP に wasm-unsafe-eval / blob: を、Permissions-Policy にカメラ許可を追加する。
   const isIdPhotosPage = pathname === `/${SECRET}/admin/kacho-mission/id-photos`;
   const isWasmCameraPage = isIdPhotosPage;
+  // ITABASHI BATTLE 2: 参加者のスマホ画面・管理者画面・プロジェクター画面。Google Fonts・WebSocket・音声再生を許可し、
+  // 管理者画面から同一オリジンでの表示も許可する
+  const isBattlePage = pathname === BATTLE_PUBLIC_PATH || pathname.startsWith(BATTLE_PUBLIC_PATH + '/') || /^\/[^/]+\/admin\/ib2(\/|$)/.test(pathname);
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   // 中身が変わらない配信物（URLにバージョンを含むPDF解析バンドル・ログイン背景画像）は、
@@ -199,6 +206,15 @@ app.use('*', async (c, next) => {
       "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
       "connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net blob: data:; " +
       "worker-src 'self' blob:; frame-ancestors 'none';"
+    );
+  } else if (isBattlePage) {
+    c.res.headers.set('X-Frame-Options', 'SAMEORIGIN');
+    c.res.headers.set('Referrer-Policy', 'no-referrer');
+    c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+      "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob: data:; " +
+      `connect-src 'self' wss://${reqUrl.host} ws://${reqUrl.host}; frame-ancestors 'self';`
     );
   } else if (isLiff) {
     // LIFF ページ: LINE SDKを許可、フレーム制限を緩和
@@ -406,6 +422,7 @@ app.route(`/${SECRET}/admin`, adminChoseiRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
 app.route(`/${SECRET}/admin`, adminWeatherNoticeRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
+app.route(`/${SECRET}/admin`, battleAdminRoutes);
 app.route(`/${SECRET}/admin`, adminNavInsightsRoutes);
 
 // =====================
@@ -528,6 +545,7 @@ app.route('', publicHiyariRoutes);
 app.route('', publicHanedaFlightsRoutes);
 app.route('', publicSignageRoutes);
 app.route('', publicWeatherNoticeRoutes);
+app.route('', battlePublicRoutes);
 
 // ルートは秘密パスへリダイレクト
 app.get('/', (c) => c.redirect(`${ADMIN_PATH}/login`));

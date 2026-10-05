@@ -403,6 +403,7 @@ app.get('/settings/study-sessions', async (c) => {
         講座やイベントのスライド（見出し＋箇条書き）と台本（読み上げ用のナレーション）を、パワーポイントのように1枚ずつ編集できます。
         <br>・<b>プレゼンを開く</b>：全画面のスライド投影（←→／スペースで送り・<b>F</b>で全画面・<b>N</b>で画面下に台本バー）。
         <br>・<b>印刷（台本つき）</b>：スライドと台本を並べてA4に印刷。台本だけ配りたいときにも使えます。
+        <br>・<b>PDF出力</b>：スライドだけを1枚1ページのPDFにします。<b>PowerPoint書き出し</b>は編集画面から行えます。
       </div>
       ${editable ? `
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -412,6 +413,16 @@ app.get('/settings/study-sessions', async (c) => {
       <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px;max-width:1000px;">
         <div style="font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;">台本一覧</div>
         <div id="dh-list" style="font-size:13px;color:#6b7280;">読み込み中...</div>
+      </div>
+      <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px;max-width:1000px;margin-top:16px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;color:#1e3a5f;">ビラ（A4縦1枚）</div>
+          <span style="font-size:11px;color:#9ca3af;">告知用の1枚もの。文字を差し替えて、印刷・PDF出力できます。</span>
+          ${editable ? `<span style="flex:1;"></span>
+          <input id="fl-new-title" type="text" maxlength="120" placeholder="新しいビラの名前" style="min-width:200px;border:1px solid #d1d5db;border-radius:7px;padding:7px 9px;font-size:12px;">
+          <button onclick="flNew()" style="padding:7px 14px;background:#2563eb;color:white;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">＋ 新しいビラ</button>` : ''}
+        </div>
+        <div id="fl-list" style="font-size:13px;color:#6b7280;">読み込み中...</div>
       </div>
     </div>
 
@@ -1463,6 +1474,7 @@ app.get('/settings/study-sessions', async (c) => {
     async function loadScripts(force) {
       if (dhLoaded && !force) return;
       dhLoaded = true;
+      if (!force) loadFlyers();
       var box = document.getElementById('dh-list');
       try {
         var res = await fetch(DH_API + '/decks');
@@ -1486,6 +1498,7 @@ app.get('/settings/study-sessions', async (c) => {
             + '<a href="' + DH_BASE + '/' + x.id + '/present" target="_blank" rel="noopener" style="padding:7px 14px;background:#2563eb;color:#fff;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">プレゼンを開く</a>'
             + '<a href="' + DH_BASE + '/' + x.id + '" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">' + (canEd ? '編集' : '内容を見る') + '</a>'
             + '<a href="' + DH_BASE + '/' + x.id + '/print" target="_blank" rel="noopener" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">印刷（台本つき）</a>'
+            + '<a href="' + DH_BASE + '/' + x.id + '/pdf" target="_blank" rel="noopener" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">PDF出力</a>'
             + '<button type="button" onclick="dhCopyUrl(' + x.id + ')" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">投影URLをコピー</button>'
             + (canEd ? '<button type="button" onclick="dhDelete(' + x.id + ')" style="padding:7px 12px;background:#fff;color:#b91c1c;border:1px solid #fecaca;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">削除</button>' : '')
             + '</div></div>';
@@ -1493,6 +1506,36 @@ app.get('/settings/study-sessions', async (c) => {
       } catch (e) {
         box.innerHTML = '<div style="color:#dc2626;">読み込みに失敗しました</div>';
       }
+    }
+    async function loadFlyers() {
+      var box = document.getElementById('fl-list');
+      try {
+        var d = await (await fetch(DH_API + '/flyers')).json();
+        var list = d.flyers || [];
+        var canEd = !!d.editable;
+        if (!list.length) { box.innerHTML = '<div style="color:#9ca3af;">まだビラはありません。</div>'; return; }
+        box.innerHTML = '<div style="display:flex;flex-direction:column;gap:8px;">' + list.map(function(x) {
+          return '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+            + '<span style="font-size:14px;font-weight:700;color:#1e3a5f;flex:1;min-width:200px;">' + escH(x.title) + '</span>'
+            + '<a href="' + DH_BASE + '/flyer/' + x.id + '/print" target="_blank" rel="noopener" style="padding:7px 14px;background:#2563eb;color:#fff;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">印刷 / PDF出力</a>'
+            + '<a href="' + DH_BASE + '/flyer/' + x.id + '" style="padding:7px 14px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">' + (canEd ? '編集' : '内容を見る') + '</a>'
+            + (canEd ? '<button type="button" onclick="flDelete(' + x.id + ')" style="padding:7px 12px;background:#fff;color:#b91c1c;border:1px solid #fecaca;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;">削除</button>' : '')
+            + '</div>';
+        }).join('') + '</div>';
+      } catch (e) {
+        box.innerHTML = '<div style="color:#dc2626;">読み込みに失敗しました</div>';
+      }
+    }
+    async function flNew() {
+      var t = (document.getElementById('fl-new-title').value || '').trim();
+      if (!t) { alert('名前を入力してください'); return; }
+      var j = await (await fetch(DH_API + '/flyers', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ title: t }) })).json().catch(function(){ return {}; });
+      if (j && j.id) location.href = DH_BASE + '/flyer/' + j.id; else alert((j && j.error) || '作成に失敗しました');
+    }
+    async function flDelete(id) {
+      if (!confirm('このビラを削除します。よろしいですか？（この操作は取り消せません）')) return;
+      var res = await fetch(DH_API + '/flyers/' + id, { method:'DELETE' });
+      if (res.ok) loadFlyers(); else alert('削除に失敗しました');
     }
     async function dhNew() {
       var t = (document.getElementById('dh-new-title').value || '').trim();

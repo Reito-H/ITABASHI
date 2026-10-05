@@ -1,8 +1,11 @@
 import { FAVICON_DATA_URI } from './layout';
+import { ADMIN_PATH } from '../config';
 // 台本（板橋ページ）— スライド＋台本デッキ
 //   - パワポのように「見出し＋箇条書き」のスライドと、読み上げ用の「台本」を1枚ずつ編集
 //   - present : 全画面プレゼン（←→/スペースで送り、F 全画面、N で下部に台本バー）
 //   - print   : 1枚1ページ＋台本を下に添えた印刷用（回線断の保険・台本だけ配る用途にも）
+//   - pdf     : スライドだけを16:9で1枚1ページに並べた PDF 保存用（印刷ダイアログで「PDFに保存」）
+//   - 編集画面の「PowerPoint書き出し」は DAIHON_PPTX_JS（PptxGenJS）でブラウザ側生成
 //   - list / edit ページは layout() でラップされる本文を返す
 //   - present / print は <!DOCTYPE html> 直返し（layout 無し）
 //
@@ -23,18 +26,22 @@ export interface DaihonSlide {
   id: number;
   deck_id: number;
   sort_order: number;
-  layout: string; // cover | section | content | closing
+  layout: string; // cover | section | content | steps | stat | photo | closing
   accent: string; // blue | green | amber | slate
   title: string;
   subtitle: string;
   body: string;
   notes: string;
+  images: string; // 写真レイアウト用：R2キーのJSON配列（migration_171）
 }
 
 export const DAIHON_LAYOUTS: Array<{ v: string; l: string; desc: string }> = [
   { v: 'cover', l: '表紙', desc: '講座タイトル・サブタイトル・講師名' },
   { v: 'section', l: '中扉', desc: '章の切り替え（大きな見出し1つ）' },
   { v: 'content', l: '本編', desc: '見出し＋箇条書き（通常のスライド）' },
+  { v: 'steps', l: '流れ', desc: '番号つきの手順カードを横に並べる（1行＝「見出し｜説明」）' },
+  { v: 'stat', l: '数字', desc: '大きな数字のカードを横に並べる（1行＝「数字｜説明」）' },
+  { v: 'photo', l: '写真', desc: '左に写真（最大4枚）、右に箇条書き' },
   { v: 'closing', l: '締め', desc: '締めのひとこと' },
 ];
 export const DAIHON_ACCENTS: Array<{ v: string; l: string }> = [
@@ -85,6 +92,45 @@ function titleFitStyle(text: unknown, baseCqw: number, oneLineChars: number): st
   return ` style="font-size:${(baseCqw * scale).toFixed(2)}cqw"`;
 }
 
+// 流れ・数字スライドの本文：1行＝「見出し｜説明」のカード。行頭「■ 」はカードの下に出す補足
+function splitCards(body: string): { cards: Array<{ t: string; d: string }>; leads: string[] } {
+  const cards: Array<{ t: string; d: string }> = [];
+  const leads: string[] = [];
+  for (const raw of String(body ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('■')) { leads.push(line.replace(/^■\s*/, '')); continue; }
+    const m = line.split(/[｜|]/);
+    cards.push({ t: (m[0] ?? '').trim(), d: m.slice(1).join('｜').trim() });
+  }
+  return { cards, leads };
+}
+function renderCards(body: string, kind: 'steps' | 'stat'): string {
+  const { cards, leads } = splitCards(body);
+  const n = Math.max(1, Math.min(cards.length, 5));
+  const items = cards.map((c, i) => kind === 'steps'
+    ? `<div class="dh-step"><span class="dh-step-no">${i + 1}</span><p class="dh-step-t">${inline(c.t)}</p>${c.d ? `<p class="dh-step-d">${inline(c.d)}</p>` : ''}</div>`
+    : `<div class="dh-stat"><p class="dh-stat-v">${inline(c.t)}</p>${c.d ? `<p class="dh-stat-d">${inline(c.d)}</p>` : ''}</div>`
+  ).join('');
+  return `<div class="dh-cards dh-cards-${kind}" style="--n:${n}">${items}</div>`
+    + leads.map((l) => `<p class="dh-lead">${inline(l)}</p>`).join('');
+}
+
+// 写真レイアウト：images 列（JSON配列）→ R2キーの配列
+export function slideImages(s: { images?: string | null }): string[] {
+  try {
+    const a = JSON.parse(String(s.images || '[]'));
+    return Array.isArray(a) ? a.filter((k) => typeof k === 'string' && /^daihon\/[\w./-]+$/.test(k)).slice(0, 4) : [];
+  } catch { return []; }
+}
+export function daihonImageUrl(key: string): string {
+  return `${ADMIN_PATH}/daihon/img/${key.replace(/^daihon\//, '')}`;
+}
+function renderPhotos(keys: string[]): string {
+  if (!keys.length) return '<div class="dh-photos dh-photos-empty"><span>写真（あとで追加）</span></div>';
+  return `<div class="dh-photos dh-photos-${keys.length}">${keys.map((k) => `<img src="${esc(daihonImageUrl(k))}" alt="">`).join('')}</div>`;
+}
+
 // ---------- 1スライド ----------
 export function renderSlide(s: DaihonSlide, index: number, total: number): string {
   const ac = `ac-${normAccent(s.accent)}`;
@@ -120,6 +166,30 @@ export function renderSlide(s: DaihonSlide, index: number, total: number): strin
       </div>
       ${pageno}
     </section>`;
+  }
+  if (layout === 'photo') {
+    return `<section class="dh-slide dh-content ${ac}" data-i="${index}">
+    <div class="dh-content-inner dh-fit">
+      <div class="dh-head">
+        <h2 class="dh-title"${titleFitStyle(s.title, 5.2, 19)}>${inline(s.title)}</h2>
+        ${s.subtitle ? `<p class="dh-sub">${inline(s.subtitle)}</p>` : ''}
+      </div>
+      <div class="dh-photo-wrap">${renderPhotos(slideImages(s))}<div class="dh-photo-body">${renderBody(s.body)}</div></div>
+    </div>
+    ${pageno}
+  </section>`;
+  }
+  if (layout === 'steps' || layout === 'stat') {
+    return `<section class="dh-slide dh-content ${ac}" data-i="${index}">
+    <div class="dh-content-inner dh-fit">
+      <div class="dh-head">
+        <h2 class="dh-title"${titleFitStyle(s.title, 5.2, 19)}>${inline(s.title)}</h2>
+        ${s.subtitle ? `<p class="dh-sub">${inline(s.subtitle)}</p>` : ''}
+      </div>
+      <div class="dh-body">${renderCards(s.body, layout)}</div>
+    </div>
+    ${pageno}
+  </section>`;
   }
   // content
   return `<section class="dh-slide dh-content ${ac}" data-i="${index}">
@@ -172,6 +242,33 @@ export const DAIHON_CSS = `
   .dh-lead{font-size:3.2cqw;font-weight:800;color:var(--ink);background:var(--ac-soft);border-left:.7cqw solid var(--ac);padding:1.4cqh 2cqw;border-radius:.6cqw;margin:1cqh 0;}
   .dh-gap{height:1.6cqh;}
   .dh-body strong,.dh-cover-sub strong,.dh-closing-body strong{color:var(--ac);font-weight:800;}
+
+  /* steps / stat */
+  .dh-cards{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:2.4cqw;}
+  .dh-step,.dh-stat{position:relative;background:var(--ac-soft);border-radius:1.2cqw;padding:2.4cqw 2.2cqw;}
+  .dh-cards-steps .dh-step:not(:last-child)::after{content:"";position:absolute;right:-1.75cqw;top:50%;margin-top:-.9cqw;border-left:1.1cqw solid var(--ac);border-top:.9cqw solid transparent;border-bottom:.9cqw solid transparent;}
+  .dh-step-no{display:grid;place-items:center;width:4.6cqw;height:4.6cqw;border-radius:50%;background:var(--ac);color:#fff;font-size:2.3cqw;font-weight:900;}
+  .dh-step-t{margin-top:2.4cqh;font-size:calc(2.7cqw * min(1, 3.4 / var(--n)));font-weight:800;line-height:1.35;color:var(--ink);}
+  .dh-step-d{margin-top:1.4cqh;font-size:calc(2.1cqw * min(1, 3.6 / var(--n)));font-weight:600;line-height:1.6;color:#4b5563;}
+  .dh-stat{text-align:center;padding:4cqw 2cqw;}
+  .dh-stat-v{font-size:6.4cqw;font-weight:900;line-height:1.1;color:var(--ac);letter-spacing:.01em;}
+  .dh-stat-d{margin-top:2cqh;font-size:2.2cqw;font-weight:700;line-height:1.5;color:#374151;}
+  .dh-cards + .dh-lead{margin-top:2.6cqh;}
+
+  /* photo */
+  .dh-photo-wrap{flex:1;min-height:0;display:grid;grid-template-columns:1.25fr 1fr;gap:3.2cqw;align-items:stretch;}
+  .dh-photos{display:grid;gap:1cqw;min-height:28cqh;border-radius:1cqw;overflow:hidden;}
+  .dh-photos img{width:100%;height:100%;object-fit:cover;display:block;min-height:0;}
+  .dh-photos-2{grid-template-columns:1fr 1fr;}
+  .dh-photos-3{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;}
+  .dh-photos-3 img:first-child{grid-row:span 2;}
+  .dh-photos-4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;}
+  .dh-photos-empty{display:grid;place-items:center;border:.3cqw dashed #cbd5e1;background:#f8fafc;color:#94a3b8;font-size:2.2cqw;font-weight:700;}
+  .dh-photo-body{display:flex;flex-direction:column;justify-content:center;gap:1cqh;}
+  .dh-photo-body .dh-list{gap:1.6cqh;}
+  .dh-photo-body .dh-list li{font-size:2.6cqw;padding-left:3.4cqw;}
+  .dh-photo-body .dh-list li::before{width:1.3cqw;height:1.3cqw;top:1.3cqh;}
+  .dh-photo-body .dh-lead{font-size:2.6cqw;}
 
   /* cover */
   .dh-cover{align-items:flex-start;justify-content:center;}
@@ -374,6 +471,20 @@ export function daihonPrintPage(deck: DaihonDeck, slides: DaihonSlide[]): string
   .dh-closing-title{font-size:26px;}
   .dh-closing-sub{font-size:14px;margin-top:5mm;}
   .dh-closing-body{font-size:13px;margin-top:5mm;}
+  .dh-cards{gap:4mm;}
+  .dh-step,.dh-stat{padding:5mm 4mm;border-radius:6px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .dh-cards-steps .dh-step:not(:last-child)::after{display:none;}
+  .dh-step-no{width:22px;height:22px;font-size:12px;}
+  .dh-step-t{margin-top:3mm;font-size:14px;}
+  .dh-step-d{margin-top:2mm;font-size:11px;}
+  .dh-stat-v{font-size:28px;}
+  .dh-stat-d{margin-top:2mm;font-size:12px;}
+  .dh-photo-wrap{gap:5mm;min-height:60mm;}
+  .dh-photos{min-height:60mm;}
+  .dh-photos-empty{font-size:12px;border-width:1px;}
+  .dh-photo-body .dh-list li{font-size:13px;padding-left:7mm;}
+  .dh-photo-body .dh-list li::before{width:5px;height:5px;top:7px;}
+  .dh-photo-body .dh-lead{font-size:13px;}
   .dh-print-note{margin-top:4mm;border:1px solid #d1d5db;border-radius:6px;padding:6mm;font-size:12px;line-height:1.9;white-space:pre-wrap;background:#f9fafb;}
   .dh-print-note b{display:block;font-size:10px;letter-spacing:.12em;color:#6b7280;margin-bottom:3mm;}
   @page{size:A4;margin:12mm;}
@@ -389,6 +500,310 @@ export function daihonPrintPage(deck: DaihonDeck, slides: DaihonSlide[]): string
 }
 
 // =====================================================================
+//  PowerPoint(.pptx) 書き出し — ブラウザ側で PptxGenJS を読み込んで生成
+//  （プレゼン画面と同じ配色・配置を 10in×5.625in の16:9 で再現。台本はノートに入る）
+//  window.DaihonPptx.build(deck, slides) を呼ぶ。テンプレートリテラル内なのでバックスラッシュは使わない。
+// =====================================================================
+export const DAIHON_PPTX_JS = `
+(function(){
+  var LIB = 'https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js';
+  var AC = { blue:['2563EB','EFF6FF'], green:['15803D','F0FDF4'], amber:['B45309','FFFBEB'], slate:['475569','F1F5F9'] };
+  var INK = '1F2937', MUTED = '6B7280', BODY = '374151', SUBT = '4B5563', HAIR = 'E5E7EB', PNO = '9CA3AF';
+  var FONT = 'Yu Gothic';
+  var NL = String.fromCharCode(10), CR = String.fromCharCode(13);
+  var W = 10, H = 5.625, PX = 0.8, CW = 8.4;
+
+  function loadLib(){
+    return new Promise(function(res, rej){
+      if (window.PptxGenJS) return res();
+      var s = document.createElement('script');
+      s.src = LIB;
+      s.onload = function(){ res(); };
+      s.onerror = function(){ rej(new Error('PowerPoint作成ライブラリの読み込みに失敗しました')); };
+      document.head.appendChild(s);
+    });
+  }
+  function lines(body){ return String(body || '').split(CR).join('').split(NL); }
+  function len(t){ return Array.from(String(t || '')).length; }
+  // 長い見出しは1行に収まる文字数を超えたぶんだけ縮小（プレゼン画面と同じ考え方）
+  function fitSize(text, base, oneLine){ var n = len(text); return n <= oneLine ? base : Math.max(base * 0.55, base * oneLine / n); }
+  // 大きな見出しの改行位置：スペース、なければ「、」の直後で分ける
+  function splitTitle(t, oneLine){
+    t = String(t || '');
+    if (len(t) <= oneLine) return [t];
+    var a = t.split(/[ 　]+/).filter(function(x){ return x; });
+    if (a.length >= 2) return a;
+    var k = t.indexOf('、');
+    if (k > 0 && k < t.length - 1) return [t.slice(0, k + 1), t.slice(k + 1)];
+    return [t];
+  }
+  function copy(o){ var r = {}; for (var k in o) r[k] = o[k]; return r; }
+  // **太字** を run に分割
+  var PARA_KEYS = ['paraSpaceBefore', 'paraSpaceAfter', 'align', 'indentLevel', 'bullet'];
+  function runs(text, opt, acColor){
+    var out = [];
+    String(text || '').split('**').forEach(function(p, i){
+      if (!p) return;
+      var o = copy(opt);
+      if (out.length) PARA_KEYS.forEach(function(k){ delete o[k]; });
+      if (i % 2 === 1) { o.bold = true; o.color = acColor; }
+      out.push({ text: p, options: o });
+    });
+    if (!out.length) out.push({ text: ' ', options: copy(opt) });
+    return out;
+  }
+  // 段落の配列 → addText 用の run 配列（段落の終わりに breakLine）
+  function paras(list){
+    var out = [];
+    list.forEach(function(rs, i){
+      if (i < list.length - 1) rs[rs.length - 1].options.breakLine = true;
+      out = out.concat(rs);
+    });
+    return out;
+  }
+  function stripMark(t){ return t.replace(/^[-・][ 　]*/, ''); }
+
+  function base(pres, s, i, total){
+    var sl = pres.addSlide();
+    var ac = AC[s.accent] || AC.blue;
+    sl.background = { color: s.layout === 'section' ? ac[0] : 'FFFFFF' };
+    if (s.layout !== 'section') sl.addShape(pres.shapes.RECTANGLE, { x: 0, y: 0, w: 0.09, h: H, fill: { color: ac[0] }, line: { color: ac[0], width: 0 } });
+    sl.addText((i + 1) + ' / ' + total, { x: W - 1.6, y: H - 0.48, w: 1.26, h: 0.3, fontFace: FONT, fontSize: 12, color: s.layout === 'section' ? 'FFFFFF' : PNO, align: 'right', transparency: s.layout === 'section' ? 30 : 0, margin: 0 });
+    if (s.notes) sl.addNotes(String(s.notes));
+    return { sl: sl, ac: ac };
+  }
+
+  // 見出し＋サブ見出し＋区切り線。本文エリアの上端 y を返す
+  function head(pres, sl, s, ac){
+    var ts = fitSize(s.title, 36, 19);
+    sl.addText(runs(s.title, { fontFace: FONT, fontSize: ts, bold: true, color: INK }, ac[0]), { x: PX, y: 0.5, w: CW, h: 0.8, valign: 'bottom', margin: 0, lang: 'ja-JP' });
+    var y = 1.38;
+    if (s.subtitle) {
+      sl.addText(runs(s.subtitle, { fontFace: FONT, fontSize: 18, bold: true, color: ac[0] }, ac[0]), { x: PX, y: 1.36, w: CW, h: 0.42, valign: 'middle', margin: 0, lang: 'ja-JP' });
+      y = 1.86;
+    }
+    sl.addShape(pres.shapes.LINE, { x: PX, y: y, w: CW, h: 0, line: { color: HAIR, width: 1.5 } });
+    return y + 0.22;
+  }
+
+  // 画像URL → { data: dataURL, w, h }（PowerPointへ埋め込むため）
+  function loadImage(url){
+    return fetch(url, { credentials: 'same-origin' }).then(function(r){ if (!r.ok) throw new Error('写真の読み込みに失敗しました'); return r.blob(); })
+      .then(function(b){ return new Promise(function(res, rej){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.onerror = rej; fr.readAsDataURL(b); }); })
+      .then(function(data){ return new Promise(function(res){ var im = new Image(); im.onload = function(){ res({ data: data, w: im.naturalWidth, h: im.naturalHeight }); }; im.onerror = function(){ res({ data: data, w: 4, h: 3 }); }; im.src = data; }); });
+  }
+  // 枠いっぱいに切り抜いて配置（プレゼン画面の object-fit:cover と同じ）
+  function coverImage(sl, im, x, y, w, h){
+    var r = Math.max(w / im.w, h / im.h), iw = im.w * r, ih = im.h * r;
+    sl.addImage({ data: im.data, x: x, y: y, w: iw, h: ih, sizing: { type: 'crop', x: (iw - w) / 2, y: (ih - h) / 2, w: w, h: h } });
+  }
+  function photoSlide(pres, s, i, total){
+    var b = base(pres, s, i, total), sl = b.sl, ac = b.ac;
+    var top = head(pres, sl, s, ac);
+    var imgs = s.loadedImages || [];
+    var bottom = H - 0.55, ah = bottom - top, aw = CW * 1.25 / 2.25 - 0.16, gap = 0.1;
+    if (!imgs.length) {
+      sl.addText('写真（あとで追加）', { shape: pres.shapes.RECTANGLE, x: PX, y: top, w: aw, h: ah, fill: { color: 'F8FAFC' }, line: { color: 'CBD5E1', width: 1.5, dashType: 'dash' }, fontFace: FONT, fontSize: 16, bold: true, color: '94A3B8', align: 'center', valign: 'middle' });
+    } else if (imgs.length === 1) {
+      coverImage(sl, imgs[0], PX, top, aw, ah);
+    } else if (imgs.length === 2) {
+      var hw = (aw - gap) / 2;
+      coverImage(sl, imgs[0], PX, top, hw, ah); coverImage(sl, imgs[1], PX + hw + gap, top, hw, ah);
+    } else {
+      var cw2 = (aw - gap) / 2, ch2 = (ah - gap) / 2;
+      if (imgs.length === 3) {
+        coverImage(sl, imgs[0], PX, top, cw2, ah);
+        coverImage(sl, imgs[1], PX + cw2 + gap, top, cw2, ch2); coverImage(sl, imgs[2], PX + cw2 + gap, top + ch2 + gap, cw2, ch2);
+      } else {
+        imgs.slice(0, 4).forEach(function(im, k){ coverImage(sl, im, PX + (k % 2) * (cw2 + gap), top + Math.floor(k / 2) * (ch2 + gap), cw2, ch2); });
+      }
+    }
+    var bx = PX + aw + 0.32, bw = PX + CW - bx;
+    var list = lines(s.body).map(function(x){ return x.trim(); }).map(function(t){
+      if (!t) return runs(' ', { fontFace: FONT, fontSize: 8 }, ac[0]);
+      if (t.charAt(0) === '■') return [{ text: '▍', options: { fontFace: FONT, fontSize: 17, bold: true, color: ac[0], paraSpaceBefore: 6, paraSpaceAfter: 6 } }].concat(runs(t.replace(/^■[ 　]*/, ''), { fontFace: FONT, fontSize: 17, bold: true, color: INK }, ac[0]));
+      return [{ text: '●  ', options: { fontFace: FONT, fontSize: 11, color: ac[0], paraSpaceAfter: 8 } }].concat(runs(stripMark(t), { fontFace: FONT, fontSize: 16, bold: true, color: BODY }, ac[0]));
+    });
+    sl.addText(paras(list), { x: bx, y: top, w: bw, h: ah, valign: 'middle', margin: 0, lineSpacingMultiple: 1.15, lang: 'ja-JP' });
+  }
+
+  function contentSlide(pres, s, i, total){
+    var b = base(pres, s, i, total), sl = b.sl, ac = b.ac;
+    var top = head(pres, sl, s, ac);
+    var ls = lines(s.body).map(function(x){ return x.trim(); });
+    var n = ls.filter(function(x){ return x; }).length;
+    var fs = n <= 4 ? 21 : n <= 6 ? 19 : n <= 8 ? 17 : 15;
+    var list = ls.map(function(t){
+      if (!t) return runs(' ', { fontFace: FONT, fontSize: fs * 0.5 }, ac[0]);
+      if (t.charAt(0) === '■') {
+        var lead = t.replace(/^■[ 　]*/, '');
+        return [{ text: '▍', options: { fontFace: FONT, fontSize: fs + 1, bold: true, color: ac[0], paraSpaceBefore: 6, paraSpaceAfter: 6 } }]
+          .concat(runs(lead, { fontFace: FONT, fontSize: fs + 1, bold: true, color: INK }, ac[0]));
+      }
+      return [{ text: '●  ', options: { fontFace: FONT, fontSize: fs * 0.7, color: ac[0], paraSpaceAfter: 8 } }]
+        .concat(runs(stripMark(t), { fontFace: FONT, fontSize: fs, bold: true, color: BODY }, ac[0]));
+    });
+    sl.addText(paras(list), { x: PX, y: top, w: CW, h: H - 0.55 - top, valign: 'middle', margin: [0, 4, 0, 0], lineSpacingMultiple: 1.15, lang: 'ja-JP' });
+  }
+
+  function cardsSlide(pres, s, i, total, kind){
+    var b = base(pres, s, i, total), sl = b.sl, ac = b.ac;
+    var top = head(pres, sl, s, ac);
+    var cards = [], leads = [];
+    lines(s.body).forEach(function(raw){
+      var t = raw.trim(); if (!t) return;
+      if (t.charAt(0) === '■') { leads.push(t.replace(/^■[ 　]*/, '')); return; }
+      var m = t.split(/[｜|]/);
+      cards.push({ t: (m[0] || '').trim(), d: m.slice(1).join('｜').trim() });
+    });
+    var n = Math.max(1, Math.min(cards.length, 5));
+    var gap = 0.26, cw = (CW - gap * (n - 1)) / n;
+    var ch = kind === 'steps' ? 2.35 : 2.1;
+    var leadH = leads.length * 0.5;
+    var avail = H - 0.55 - top;
+    var y = top + Math.max(0, (avail - ch - (leadH ? leadH + 0.25 : 0)) / 2);
+    cards.slice(0, 5).forEach(function(c, k){
+      var x = PX + k * (cw + gap);
+      sl.addShape(pres.shapes.ROUNDED_RECTANGLE, { x: x, y: y, w: cw, h: ch, fill: { color: ac[1] }, line: { color: ac[1], width: 0 }, rectRadius: 0.1 });
+      if (kind === 'steps') {
+        sl.addText(String(k + 1), { shape: pres.shapes.OVAL, x: x + 0.22, y: y + 0.24, w: 0.46, h: 0.46, fill: { color: ac[0] }, line: { color: ac[0], width: 0 }, fontFace: FONT, fontSize: 16, bold: true, color: 'FFFFFF', align: 'center', valign: 'middle', margin: 0 });
+        sl.addText(runs(c.t, { fontFace: FONT, fontSize: n >= 4 ? 17 : 19, bold: true, color: INK }, ac[0]), { x: x + 0.22, y: y + 0.82, w: cw - 0.4, h: 0.6, valign: 'top', margin: 0, lang: 'ja-JP' });
+        if (c.d) sl.addText(runs(c.d, { fontFace: FONT, fontSize: n >= 4 ? 12.5 : 14, bold: true, color: SUBT }, ac[0]), { x: x + 0.22, y: y + 1.42, w: cw - 0.4, h: ch - 1.56, valign: 'top', margin: 0, lineSpacingMultiple: 1.2, lang: 'ja-JP' });
+        if (k < n - 1) sl.addShape(pres.shapes.ISOSCELES_TRIANGLE, { x: x + cw + gap / 2 - 0.08, y: y + ch / 2 - 0.1, w: 0.2, h: 0.16, rotate: 90, fill: { color: ac[0] }, line: { color: ac[0], width: 0 } });
+      } else {
+        sl.addText(runs(c.t, { fontFace: FONT, fontSize: n >= 4 ? 36 : 44, bold: true, color: ac[0] }, ac[0]), { x: x + 0.1, y: y + 0.28, w: cw - 0.2, h: 0.85, align: 'center', valign: 'middle', margin: 0, lang: 'ja-JP' });
+        if (c.d) sl.addText(runs(c.d, { fontFace: FONT, fontSize: n >= 3 ? 13.5 : 15, bold: true, color: BODY }, ac[0]), { x: x + 0.15, y: y + 1.15, w: cw - 0.3, h: ch - 1.3, align: 'center', valign: 'top', margin: 0, lineSpacingMultiple: 1.15, lang: 'ja-JP' });
+      }
+    });
+    leads.forEach(function(l, k){
+      var ly = y + ch + 0.25 + k * 0.5;
+      sl.addShape(pres.shapes.RECTANGLE, { x: PX, y: ly, w: CW, h: 0.42, fill: { color: ac[1] }, line: { color: ac[1], width: 0 } });
+      sl.addShape(pres.shapes.RECTANGLE, { x: PX, y: ly, w: 0.06, h: 0.42, fill: { color: ac[0] }, line: { color: ac[0], width: 0 } });
+      sl.addText(runs(l, { fontFace: FONT, fontSize: 17, bold: true, color: INK }, ac[0]), { x: PX + 0.2, y: ly, w: CW - 0.3, h: 0.42, valign: 'middle', margin: 0, lang: 'ja-JP' });
+    });
+  }
+
+  function coverSlide(pres, s, i, total){
+    var b = base(pres, s, i, total), sl = b.sl, ac = b.ac;
+    sl.addShape(pres.shapes.OVAL, { x: W - 2.6, y: -0.8, w: 3.4, h: 3.4, fill: { color: ac[1] }, line: { color: ac[1], width: 0 } });
+    // 長いタイトルはスペースで改行（プレゼン画面の折り返しと揃える）
+    var tl = splitTitle(s.title, 11);
+    var longest = tl.reduce(function(m, x){ return Math.max(m, len(x)); }, 0);
+    var ts = Math.min(54, CW * 72 / Math.max(1, longest) * 0.92);
+    var th = tl.length * ts * 1.3 / 72;
+    var bl = lines(s.body).map(function(x){ return x.trim(); }).filter(function(x){ return x; });
+    var kh = s.subtitle ? 0.62 : 0, bh = bl.length ? bl.length * 0.4 + 0.25 : 0;
+    var y = Math.max(0.5, (H - (kh + th + bh)) / 2);
+    if (s.subtitle) {
+      var kw = Math.min(CW, len(s.subtitle) * 0.25 + 0.6);
+      sl.addText(runs(s.subtitle, { fontFace: FONT, fontSize: 18, bold: true, color: ac[0], charSpacing: 2 }, ac[0]), { shape: pres.shapes.ROUNDED_RECTANGLE, x: PX, y: y, w: kw, h: 0.46, rectRadius: 0.23, fill: { color: ac[1] }, line: { color: ac[1], width: 0 }, align: 'center', valign: 'middle', margin: 0, lang: 'ja-JP' });
+      y += kh;
+    }
+    sl.addText(paras(tl.map(function(t){ return runs(t, { fontFace: FONT, fontSize: ts, bold: true, color: INK }, ac[0]); })), { x: PX, y: y, w: CW, h: th, valign: 'middle', margin: 0, lineSpacingMultiple: 1.05, lang: 'ja-JP' });
+    if (bl.length) {
+      sl.addText(paras(bl.map(function(t){ return runs(stripMark(t.replace(/^■[ 　]*/, '')), { fontFace: FONT, fontSize: 19, bold: true, color: MUTED, paraSpaceAfter: 4 }, ac[0]); })), { x: PX, y: y + th + 0.25, w: CW, h: bh, valign: 'top', margin: 0, lang: 'ja-JP' });
+    }
+  }
+
+  function sectionSlide(pres, s, i, total){
+    var b = base(pres, s, i, total), sl = b.sl;
+    sl.addText(String(i).padStart(2, '0'), { x: PX, y: 1.25, w: CW, h: 0.75, fontFace: FONT, fontSize: 40, bold: true, color: 'FFFFFF', transparency: 45, margin: 0 });
+    sl.addText(runs(s.title, { fontFace: FONT, fontSize: fitSize(s.title, 58, 11), bold: true, color: 'FFFFFF' }, 'FFFFFF'), { x: PX, y: 2.0, w: CW, h: 1.3, valign: 'middle', margin: 0, lang: 'ja-JP' });
+    if (s.subtitle) sl.addText(runs(s.subtitle, { fontFace: FONT, fontSize: 22, bold: true, color: 'FFFFFF' }, 'FFFFFF'), { x: PX, y: 3.45, w: CW, h: 0.6, valign: 'top', margin: 0, lang: 'ja-JP' });
+  }
+
+  function closingSlide(pres, s, i, total){
+    var b = base(pres, s, i, total), sl = b.sl, ac = b.ac;
+    var tl = splitTitle(s.title, 12);
+    var longest = tl.reduce(function(m, x){ return Math.max(m, len(x)); }, 0);
+    var ts = Math.min(50, 7.8 * 72 / Math.max(1, longest) * 0.92);
+    var th = tl.length * ts * 1.3 / 72;
+    var bl = lines(s.body).map(function(x){ return x.trim(); }).filter(function(x){ return x; });
+    var sh = s.subtitle ? 0.7 : 0, bh = bl.length ? bl.length * 0.38 + 0.2 : 0;
+    var y = Math.max(0.5, (H - (th + sh + bh)) / 2);
+    sl.addText(paras(tl.map(function(t){ return runs(t, { fontFace: FONT, fontSize: ts, bold: true, color: INK, align: 'center' }, ac[0]); })), { x: 1.1, y: y, w: 7.8, h: th, align: 'center', valign: 'middle', margin: 0, lineSpacingMultiple: 1.05, lang: 'ja-JP' });
+    y += th;
+    if (s.subtitle) { sl.addText(runs(s.subtitle, { fontFace: FONT, fontSize: 22, bold: true, color: ac[0] }, ac[0]), { x: 1.1, y: y + 0.15, w: 7.8, h: 0.5, align: 'center', valign: 'middle', margin: 0, lang: 'ja-JP' }); y += sh; }
+    if (bl.length) sl.addText(paras(bl.map(function(t){ return runs(stripMark(t.replace(/^■[ 　]*/, '')), { fontFace: FONT, fontSize: 18, bold: true, color: MUTED, align: 'center', paraSpaceAfter: 4 }, ac[0]); })), { x: 1.1, y: y + 0.15, w: 7.8, h: bh, align: 'center', valign: 'top', margin: 0, lang: 'ja-JP' });
+  }
+
+  function build(deck, slides){
+    return loadLib().then(function(){
+      // 写真スライドの画像を先に読み込んでおく
+      return Promise.all(slides.map(function(s){
+        if (s.layout !== 'photo' || !s.imageUrls || !s.imageUrls.length) return null;
+        return Promise.all(s.imageUrls.map(loadImage)).then(function(a){ s.loadedImages = a; });
+      }));
+    }).then(function(){
+      var pres = new window.PptxGenJS();
+      pres.layout = 'LAYOUT_16x9';
+      pres.title = deck.title || '';
+      pres.theme = { headFontFace: FONT, bodyFontFace: FONT, lang: 'ja-JP' };
+      var total = slides.length;
+      slides.forEach(function(s, i){
+        if (s.layout === 'cover') coverSlide(pres, s, i, total);
+        else if (s.layout === 'section') sectionSlide(pres, s, i, total);
+        else if (s.layout === 'closing') closingSlide(pres, s, i, total);
+        else if (s.layout === 'steps' || s.layout === 'stat') cardsSlide(pres, s, i, total, s.layout);
+        else if (s.layout === 'photo') photoSlide(pres, s, i, total);
+        else contentSlide(pres, s, i, total);
+      });
+      return pres.writeFile({ fileName: (deck.title || '台本') + '.pptx' });
+    });
+  }
+  window.DaihonPptx = { build: build };
+})();
+`;
+
+// スライドだけを16:9（PowerPointと同じ 254mm×142.875mm）で1枚1ページに並べた PDF 保存用ページ
+export function daihonPdfPage(deck: DaihonDeck, slides: DaihonSlide[]): string {
+  const pages = slides.map((s, i) => `<div class="dh-pg">${renderSlide(s, i, slides.length)}</div>`).join('\n');
+  return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${esc(deck.title)}</title>
+<link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
+<style>${DAIHON_CSS}
+  html,body{height:auto;background:#e5e7eb;}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .dh-pdf-bar{position:sticky;top:0;z-index:5;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;padding:12px 16px;background:#111827;color:#f9fafb;font-size:13px;font-weight:600;}
+  .dh-pdf-bar button{border:0;border-radius:8px;padding:8px 18px;background:#2563eb;color:#fff;font:700 13px/1 var(--jp);cursor:pointer;}
+  .dh-pdf-list{display:flex;flex-direction:column;align-items:center;gap:8mm;padding:8mm 0;}
+  .dh-pg{position:relative;width:254mm;height:142.875mm;overflow:hidden;container-type:size;background:#fff;box-shadow:0 4px 18px rgba(0,0,0,.18);}
+  .dh-pg .dh-slide{opacity:1;visibility:visible;transform:none;transition:none;}
+  @page{size:254mm 142.875mm;margin:0;}
+  @media print{
+    html,body{background:#fff;}
+    .dh-pdf-bar{display:none!important;}
+    .dh-pdf-list{display:block;padding:0;}
+    .dh-pg{box-shadow:none;break-after:page;page-break-after:always;}
+    .dh-pg:last-child{break-after:auto;page-break-after:auto;}
+    .dh-pg .dh-slide{position:absolute!important;inset:0!important;border:0!important;margin:0!important;min-height:0;}
+  }
+</style>
+</head><body>
+<div class="dh-pdf-bar"><span>印刷画面の送信先で「PDFに保存」を選ぶと、スライドだけのPDFになります（用紙サイズは自動で16:9）。</span><button type="button" onclick="window.print()">PDFに保存 / 印刷</button></div>
+<div class="dh-pdf-list">${pages}</div>
+<script>
+(function(){
+  function fit(el){
+    var f = el.querySelector('.dh-fit'); if(!f) return;
+    f.style.setProperty('--dhfit','1');
+    var cs = getComputedStyle(el);
+    var ch = el.clientHeight - (parseFloat(cs.paddingTop)||0) - (parseFloat(cs.paddingBottom)||0);
+    var cw = el.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0);
+    var sc = 1;
+    if(f.scrollHeight > ch && ch > 0) sc = Math.min(sc, ch/f.scrollHeight);
+    if(f.scrollWidth > cw && cw > 0) sc = Math.min(sc, cw/f.scrollWidth);
+    if(sc < 1) f.style.setProperty('--dhfit', Math.max(0.55, sc*0.97).toFixed(3));
+  }
+  function fitAll(){ Array.prototype.forEach.call(document.querySelectorAll('.dh-pg .dh-slide'), fit); }
+  window.addEventListener('load', function(){ fitAll(); setTimeout(function(){ window.print(); }, 500); });
+})();
+</script>
+</body></html>`;
+}
+
+// =====================================================================
 //  layout() でラップされる本文: 編集
 // =====================================================================
 export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPath: string, editable: boolean): string {
@@ -396,6 +811,7 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
   const accentsJson = JSON.stringify(DAIHON_ACCENTS);
   const slidesJson = JSON.stringify(slides.map((s) => ({
     id: s.id, layout: s.layout, accent: s.accent, title: s.title, subtitle: s.subtitle, body: s.body, notes: s.notes,
+    images: slideImages(s).map((k) => ({ key: k, url: daihonImageUrl(k) })),
   })));
   const deckJson = JSON.stringify({ id: deck.id, title: deck.title, subtitle: deck.subtitle, speaker: deck.speaker, intro: deck.intro });
   const backUrl = `${adminPath}/settings/study-sessions?tab=script`;
@@ -432,6 +848,12 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
     .dh-e-pv .fr{width:100%;aspect-ratio:16/9;border:1px solid #e5e7eb;border-radius:12px;background:#000;}
     .dh-e-pv .pv-bar{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
     .dh-help{font-size:11px;color:#9ca3af;margin:2px 0 10px;line-height:1.7;}
+    .dh-ph{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:9px;}
+    .dh-ph .th{position:relative;width:96px;height:64px;border-radius:7px;overflow:hidden;border:1px solid #e5e7eb;background:#f3f4f6;}
+    .dh-ph .th img{width:100%;height:100%;object-fit:cover;display:block;}
+    .dh-ph .th button{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:11px;cursor:pointer;}
+    .dh-ph label.up{display:inline-flex;align-items:center;justify-content:center;width:96px;height:64px;border:1px dashed #94a3b8;border-radius:7px;font-size:11px;font-weight:700;color:#475569;cursor:pointer;background:#f8fafc;text-align:center;line-height:1.4;}
+    .dh-ph input[type=file]{display:none;}
     .dh-ro{background:#fef3c7;border:1px solid #fde68a;color:#92400e;font-size:12px;border-radius:8px;padding:10px 12px;margin-bottom:12px;}
   </style>
   <div class="dh-e">
@@ -441,6 +863,8 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
         <a class="dh-btn ghost" href="${esc(backUrl)}">← 台本一覧</a>
         <a class="dh-btn" href="${adminPath}/daihon/${deck.id}/present" target="_blank" rel="noopener">プレゼンを開く</a>
         <a class="dh-btn ghost" href="${adminPath}/daihon/${deck.id}/print" target="_blank" rel="noopener">印刷（台本つき）</a>
+        <a class="dh-btn ghost" href="${adminPath}/daihon/${deck.id}/pdf" target="_blank" rel="noopener">PDF出力（スライドのみ）</a>
+        <button class="dh-btn ghost" type="button" id="dh-pptx" onclick="dhExportPptx()">PowerPoint書き出し</button>
         <span class="dh-e-msg" id="msg"></span>
       </div>
       ${editable ? '' : '<div class="dh-ro">閲覧のみのアカウントです。編集するにはフル権限、または「営業所ページ」の編集権限が必要です。</div>'}
@@ -458,7 +882,9 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
         ${editable ? '<button class="dh-btn" type="button" onclick="dhSaveDeck()">講座情報を保存</button>' : ''}
       </div>
 
-      <p class="dh-help">本文の書式：　行頭「■ 」＝ 小見出し（黒点なし）　／　**文字** ＝ 太字　／　空行 ＝ 余白。1行が1つの箇条書きになります。</p>
+      <p class="dh-help">本文の書式：　行頭「■ 」＝ 小見出し（黒点なし）　／　**文字** ＝ 太字　／　空行 ＝ 余白。1行が1つの箇条書きになります。<br>
+        「流れ」「数字」スライドは、1行が1枚のカードになります（「見出し｜説明」のように ｜ で区切る。最大5枚）。行頭「■ 」の行はカードの下に補足として出ます。<br>
+        「写真」スライドは、写真（最大4枚）が左、本文が右に並びます。写真はスライドの「＋ 写真を追加」から入れられます。</p>
       <div id="dh-slides"></div>
 
       ${editable ? `
@@ -478,6 +904,7 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
     </div>
   </div>
 
+  <script>${DAIHON_PPTX_JS}</script>
   <script>
   (function(){
     var ADMIN = ${JSON.stringify(adminPath)};
@@ -513,9 +940,49 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
         + '</div>'
         + '<div class="f"><label>見出し</label><input type="text" data-name="title" maxlength="120" value="'+escA(s.title)+'"'+dis+'></div>'
         + '<div class="f"><label>サブ見出し（任意）</label><input type="text" data-name="subtitle" maxlength="160" value="'+escA(s.subtitle)+'"'+dis+'></div>'
+        + (s.layout === 'photo' ? photoBox(s) : '')
         + '<div class="f"><label>本文（1行1項目）</label><textarea class="body" data-name="body"'+dis+'>'+esc(s.body)+'</textarea></div>'
         + '<div class="f"><label>台本（読み上げ用）</label><textarea class="notes" data-name="notes"'+dis+'>'+esc(s.notes)+'</textarea></div>'
         + '</div>';
+    }
+
+    function photoBox(s){
+      var imgs = s.images || [];
+      var h = '<div class="f"><label>写真（最大4枚・スライドの左側に並びます）</label><div class="dh-ph">';
+      imgs.forEach(function(im){
+        h += '<div class="th"><img src="'+escA(im.url)+'" alt="">'
+          + (EDITABLE ? '<button type="button" data-img-del="'+escA(im.key)+'" title="この写真を外す">✕</button>' : '') + '</div>';
+      });
+      if (EDITABLE && imgs.length < 4) h += '<label class="up">＋ 写真を追加<input type="file" accept="image/*" multiple data-img-add></label>';
+      return h + '</div></div>';
+    }
+    // 長辺1600pxのJPEGに縮小してからアップロード（スマホ写真でも軽くする）
+    function shrink(file){
+      return new Promise(function(res){
+        var img = new Image();
+        img.onload = function(){
+          var sc = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+          var cv = document.createElement('canvas');
+          cv.width = Math.round(img.naturalWidth * sc); cv.height = Math.round(img.naturalHeight * sc);
+          cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+          URL.revokeObjectURL(img.src);
+          cv.toBlob(function(b){ res(b || file); }, 'image/jpeg', 0.85);
+        };
+        img.onerror = function(){ res(file); };
+        img.src = URL.createObjectURL(file);
+      });
+    }
+    function uploadImages(id, files){
+      var list = Array.prototype.slice.call(files);
+      flash('写真をアップロード中…');
+      var chain = Promise.resolve();
+      list.forEach(function(f){
+        chain = chain.then(function(){ return shrink(f); }).then(function(b){
+          return fetch(ADMIN+'/api/daihon/slides/'+id+'/images',{method:'POST',headers:{'Content-Type':b.type||'image/jpeg'},body:b})
+            .then(function(r){ return r.json(); }).then(function(j){ if(!j || !j.ok) throw new Error((j&&j.error)||'アップロードに失敗しました'); });
+        });
+      });
+      chain.then(function(){ location.reload(); }).catch(function(e){ alert(e.message); location.reload(); });
     }
 
     function renderAll(){
@@ -532,9 +999,13 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
     function saveSlide(el){
       if(!EDITABLE) return;
       var id = Number(el.getAttribute('data-id'));
-      fetch(ADMIN+'/api/daihon/slides/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(collect(el))})
+      var p = collect(el);
+      var cur = slides.filter(function(x){ return x.id === id; })[0] || {};
+      var layoutChanged = (p.layout === 'photo') !== (cur.layout === 'photo');
+      fetch(ADMIN+'/api/daihon/slides/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
         .then(function(r){return r.json();}).then(function(j){
-          if(j && j.ok){ flash('保存しました'); dhReloadPv(); }
+          if(j && j.ok && layoutChanged){ location.reload(); return; }
+          if(j && j.ok){ cur.layout = p.layout; flash('保存しました'); dhReloadPv(); }
           else { flash((j&&j.error)||'保存に失敗'); }
         });
     }
@@ -542,6 +1013,15 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
       if(!EDITABLE) return;
       Array.prototype.forEach.call(el.querySelectorAll('[data-name],[data-role]'), function(inp){
         inp.addEventListener('change', function(){ saveSlide(el); });
+      });
+      var add = el.querySelector('[data-img-add]');
+      if (add) add.addEventListener('change', function(){ if (add.files && add.files.length) uploadImages(Number(el.getAttribute('data-id')), add.files); });
+      Array.prototype.forEach.call(el.querySelectorAll('[data-img-del]'), function(b){
+        b.addEventListener('click', function(){
+          if(!confirm('この写真を外しますか？')) return;
+          fetch(ADMIN+'/api/daihon/slides/'+el.getAttribute('data-id')+'/images?key='+encodeURIComponent(b.getAttribute('data-img-del')),{method:'DELETE'})
+            .then(function(){ location.reload(); });
+        });
       });
       Array.prototype.forEach.call(el.querySelectorAll('[data-act]'), function(btn){
         btn.addEventListener('click', function(){
@@ -566,6 +1046,22 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
     window.dhAddSlide = function(){
       fetch(ADMIN+'/api/daihon/decks/'+DECK.id+'/slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({layout:addSel.value,accent:'blue'})})
         .then(function(){ location.reload(); });
+    };
+    window.dhExportPptx = function(){
+      var btn = document.getElementById('dh-pptx');
+      var deck = {
+        title: (document.getElementById('d-title') || {}).value || DECK.title
+      };
+      var list = Array.prototype.map.call(wrap.querySelectorAll('.dh-s'), function(el){
+        var p = collect(el);
+        var cur = slides.filter(function(x){ return x.id === Number(el.getAttribute('data-id')); })[0] || {};
+        p.imageUrls = (cur.images || []).map(function(im){ return im.url; });
+        return p;
+      });
+      btn.disabled = true; btn.textContent = '作成中…';
+      window.DaihonPptx.build(deck, list).then(function(){ flash('PowerPointを書き出しました'); })
+        .catch(function(e){ alert((e && e.message) || 'PowerPointの作成に失敗しました'); })
+        .then(function(){ btn.disabled = false; btn.textContent = 'PowerPoint書き出し'; });
     };
     window.dhSaveDeck = function(){
       var body = {

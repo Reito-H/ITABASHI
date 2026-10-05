@@ -22,6 +22,7 @@ type StaffRow = {
   retirement_date: string | null;
   work_schedule: string | null;
   start_time: string | null;
+  start_time_note: string | null;
   car_no: string | null;
   avg_return_time: string | null;
   used_cars: string | null;
@@ -196,7 +197,7 @@ app.get('/staff', async (c) => {
   const page = Math.max(1, parseInt(c.req.query('page') ?? '1') || 1);
   const offset = (page - 1) * PAGE_SIZE;
 
-  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,car_no,enrollment_status,retirement_date,is_caution,is_active,status,exclude_retirement_candidate,is_hanchyo,hire_date,is_sales_followup FROM employees ${where} ORDER BY division, team, seq_no, id LIMIT ? OFFSET ?`);
+  const baseStmt = c.env.DB.prepare(`SELECT id,emp_no,name,name_kana,division,team,work_schedule,start_time,start_time_note,car_no,enrollment_status,retirement_date,is_caution,is_active,status,exclude_retirement_candidate,is_hanchyo,hire_date,is_sales_followup FROM employees ${where} ORDER BY division, team, seq_no, id LIMIT ? OFFSET ?`);
   const countStmt = c.env.DB.prepare(`SELECT COUNT(*) AS cnt FROM employees ${where}`);
 
   // staffRows・件数・退職クエリを並列実行
@@ -360,7 +361,7 @@ app.get('/staff', async (c) => {
       </td>
       <td data-cell="dept" data-label="課・班" style="${C}font-size:12px;color:#6b7280;white-space:nowrap;" data-val="${String(e.division ?? 99).padStart(2,'0')}${String(e.team ?? 99).padStart(2,'0')}">${e.division ? e.division + '課' : ''}${e.team ? ' ' + e.team + '班' : ''}${!e.division && !e.team ? '—' : ''}</td>
       <td data-cell="schedule" data-label="勤務体系" style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.work_schedule ?? ''}">${e.work_schedule ?? '—'}</td>
-      <td data-cell="start" data-label="出勤" style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.start_time ?? ''}">${e.start_time ?? '—'}</td>
+      <td data-cell="start" data-label="出勤" style="${C}font-size:12px;color:#374151;white-space:nowrap;" data-val="${e.start_time ?? ''}">${e.start_time ? escHtml(e.start_time) + (e.start_time_note ? `<span style="font-size:11px;color:#6b7280;">（${escHtml(e.start_time_note)}）</span>` : '') : '—'}</td>
       <td data-cell="car" data-label="車番" style="${C}font-size:12px;white-space:nowrap;" data-val="${escHtml(e.car_no ?? '')}">
         ${e.car_no ? `<span style="font-family:monospace;">${escHtml(e.car_no)}</span>` : '—'}
       </td>
@@ -1299,6 +1300,9 @@ function staffForm(emp: StaffRow | null, nav?: StaffNav, qsStr?: string, canRegi
           <select id="f-start_time" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;font-size:13px;">
             ${timeOptions(v('start_time'))}
           </select>
+          <input type="text" id="f-start_time_note" value="${escHtml(v('start_time_note'))}" maxlength="40" placeholder="曜日例外（例: 金16:00）"
+            style="width:100%;margin-top:6px;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:12px;">
+          <div style="font-size:10px;color:#9ca3af;margin-top:3px;">普段と違う曜日だけ記入。CSV取込で自動更新されます</div>
         </div>
 
         <div>
@@ -1423,6 +1427,7 @@ function collectData() {
     retirement_date: document.getElementById('f-retirement_date').value || null,
     work_schedule: document.getElementById('f-work_schedule').value || null,
     start_time: document.getElementById('f-start_time').value || null,
+    start_time_note: document.getElementById('f-start_time_note').value.trim() || null,
     car_no: carNo || null,
     enrollment_status: document.getElementById('f-enrollment_status').value || '通常',
     work_hours_type: document.getElementById('f-work_hours_type').value || null,
