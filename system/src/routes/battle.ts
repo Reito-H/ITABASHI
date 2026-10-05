@@ -346,7 +346,10 @@ battleAdminRoutes.delete('/ib2/api/questions/:id', async (c) => {
 });
 
 // ---------- 素材（画像・曲） ----------
-const MEDIA_TYPES: Record<string, { kind: 'image' | 'audio'; ext: string; max: number }> = {
+// 動画は Workers のリクエスト上限（無料プラン100MB）に収まるよう 95MB まで。メモリに載せずそのまま R2 へ流す
+const MEDIA_TYPES: Record<string, { kind: 'image' | 'audio' | 'video'; ext: string; max: number }> = {
+  'video/mp4': { kind: 'video', ext: 'mp4', max: 95 << 20 }, 'video/webm': { kind: 'video', ext: 'webm', max: 95 << 20 },
+  'video/quicktime': { kind: 'video', ext: 'mov', max: 95 << 20 },
   'image/jpeg': { kind: 'image', ext: 'jpg', max: 10 << 20 }, 'image/png': { kind: 'image', ext: 'png', max: 10 << 20 },
   'image/webp': { kind: 'image', ext: 'webp', max: 10 << 20 }, 'image/gif': { kind: 'image', ext: 'gif', max: 10 << 20 },
   'audio/mpeg': { kind: 'audio', ext: 'mp3', max: 15 << 20 }, 'audio/mp3': { kind: 'audio', ext: 'mp3', max: 15 << 20 },
@@ -358,16 +361,26 @@ battleAdminRoutes.post('/ib2/api/media', async (c) => {
   if (!(await canEdit(c))) return c.json({ error: '編集権限がありません' }, 403);
   const type = (c.req.header('Content-Type') || '').split(';')[0].trim().toLowerCase();
   const t = MEDIA_TYPES[type];
-  if (!t) return c.json({ error: '画像（JPEG/PNG/WebP/GIF）か曲（MP3/M4A/WAV/OGG）を選んでください' }, 400);
-  const buf = await c.req.arrayBuffer();
-  if (!buf.byteLength) return c.json({ error: 'ファイルが空です' }, 400);
-  if (buf.byteLength > t.max) return c.json({ error: `ファイルが大きすぎます（${t.max >> 20}MBまで）` }, 400);
+  if (!t) return c.json({ error: '画像（JPEG/PNG/WebP/GIF）、曲（MP3/M4A/WAV/OGG）、動画（MP4/WebM/MOV）を選んでください' }, 400);
+  const len = Number(c.req.header('Content-Length') || 0);
+  if (len > t.max) return c.json({ error: `ファイルが大きすぎます（${t.max >> 20}MBまで）` }, 400);
   let name = '';
   try { name = decodeURIComponent(c.req.header('X-Name') || ''); } catch { name = ''; }
   const key = `ib2/${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.${t.ext}`;
-  await c.env.DOCUMENTS_BUCKET.put(key, buf, { httpMetadata: { contentType: type } });
+  let size = 0;
+  if (t.kind === 'video' && len > 0 && c.req.raw.body) {
+    const obj = await c.env.DOCUMENTS_BUCKET.put(key, c.req.raw.body.pipeThrough(new FixedLengthStream(len)), { httpMetadata: { contentType: type } });
+    size = obj?.size ?? len;
+  } else {
+    const buf = await c.req.arrayBuffer();
+    if (!buf.byteLength) return c.json({ error: 'ファイルが空です' }, 400);
+    if (buf.byteLength > t.max) return c.json({ error: `ファイルが大きすぎます（${t.max >> 20}MBまで）` }, 400);
+    await c.env.DOCUMENTS_BUCKET.put(key, buf, { httpMetadata: { contentType: type } });
+    size = buf.byteLength;
+  }
+  if (!size) return c.json({ error: 'ファイルが空です' }, 400);
   const ins = await c.env.DB.prepare('INSERT INTO ib2_media (kind, r2_key, name, mime, size) VALUES (?, ?, ?, ?, ?)')
-    .bind(t.kind, key, S(name || key, 120), type, buf.byteLength).run();
+    .bind(t.kind, key, S(name || key, 120), type, size).run();
   return c.json({ ok: true, id: Number(ins.meta.last_row_id) });
 });
 battleAdminRoutes.delete('/ib2/api/media/:id', async (c) => {

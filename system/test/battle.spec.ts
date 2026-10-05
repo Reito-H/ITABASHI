@@ -49,6 +49,15 @@ beforeAll(async () => {
   await env.DB.prepare("INSERT INTO ib2_questions (step_id, sort_order, prompt, answer, points) VALUES (?, 0, 'この交差点は？', '大和町', 10)").bind(s1.meta.last_row_id).run();
   const s2 = await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 1, 'choice', '○×', '{\"mode\":\"all\"}')").run();
   await env.DB.prepare("INSERT INTO ib2_questions (step_id, sort_order, prompt, choices, answer, points, time_limit) VALUES (?, 0, '復唱する', '[\"○\",\"×\"]', '0', 10, 20)").bind(s2.meta.last_row_id).run();
+  await env.DB.prepare("INSERT INTO ib2_media (id, kind, r2_key, name, mime, size) VALUES (1, 'video', 'ib2/x.mp4', 'op.mp4', 'video/mp4', 10)").run();
+  await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 3, 'mygrowth', 'わたしの成長', '{}')").run();
+  await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 4, 'mysales', 'わたしの売上', '{}')").run();
+  // ホシコン側の売上（テスト用の最小テーブル）
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY, emp_no TEXT, name TEXT)').run();
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS sales_records (id INTEGER PRIMARY KEY AUTOINCREMENT, emp_id INTEGER, date TEXT, amount INTEGER, ride_count INTEGER, distance_km INTEGER, period_year INTEGER, period_month INTEGER, duty_code TEXT, start_time TEXT, return_time TEXT, labor_hours REAL)').run();
+  await env.DB.prepare("INSERT INTO employees (id, emp_no, name) VALUES (1, '1001', '山田'), (2, '1002', '佐藤')").run();
+  await env.DB.prepare("INSERT INTO sales_records (emp_id, date, amount, period_year, period_month, duty_code) VALUES (1, '2026-06-01', 10000, 2026, 6, 'a'), (1, '2026-06-02', 20000, 2026, 6, 'a'), (1, '2026-07-01', 30000, 2026, 7, 'D'), (2, '2026-06-03', 99999, 2026, 6, 'a')").run();
+  await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 2, 'video', 'オープニング映像', '{\"video_id\":1,\"autoplay\":true}')").run();
 });
 
 describe('ITABASHI BATTLE 2', () => {
@@ -119,6 +128,35 @@ describe('ITABASHI BATTLE 2', () => {
     const r = await admin.until((s) => s.phase === 'reveal');
     expect(r.teams[0].score).toBe(20);
     expect(r.teams[1].score).toBe(0);
+
+    // 動画：入った瞬間に自動再生 → 一時停止 → 最初から
+    admin.send({ t: 'next' });
+    const v1 = await admin.until((s) => s.step.kind === 'video');
+    expect(v1.video.playing).toBe(true);
+    expect(v1.step.video).toContain('/media/1');
+    await new Promise((r) => setTimeout(r, 300));
+    admin.send({ t: 'act', a: 'vpause' });
+    const v2 = await admin.until((s) => s.video && s.video.playing === false);
+    expect(v2.video.offset).toBeGreaterThan(0.2);
+    admin.send({ t: 'act', a: 'vrestart' });
+    const v3 = await admin.until((s) => s.video.playing === true && s.video.offset === 0);
+    expect(v3.bgm).toBe(v1.bgm);
+
+    // わたしの成長：本人のスマホにだけ、月度平均と前月比（6月度 15,000円 → 7月度 30,000円 = +100%）
+    admin.send({ t: 'next' });
+    const g1 = await p1.until((s) => s.step && s.step.kind === 'mygrowth' && s.mine);
+    expect(g1.mine.months.map((m: Msg) => [m.m, m.avg, m.rate])).toEqual([[6, 15000, null], [7, 30000, 100]]);
+    expect(g1.mine.days).toBeUndefined();
+    const g2 = await p2.until((s) => s.step && s.step.kind === 'mygrowth' && s.mine);
+    expect(g2.mine.months).toEqual([expect.objectContaining({ m: 6, avg: 99999 })]);
+    const ga = await admin.until((s) => s.step && s.step.kind === 'mygrowth');
+    expect(ga.mine).toBeUndefined();
+    expect(JSON.stringify(ga)).not.toContain('99999');
+    // わたしの売上：日ごとの明細も本人分だけ
+    admin.send({ t: 'next' });
+    const d1 = await p1.until((s) => s.step && s.step.kind === 'mysales' && s.mine && s.mine.days);
+    expect(d1.mine.days.map((d: Msg) => d.amount)).toEqual([10000, 20000, 30000]);
+    expect(JSON.stringify(d1)).not.toContain('99999');
 
     // 手動加点と、得点のDB保存
     admin.send({ t: 'score', team: 'B', delta: 5, reason: 'ナイス発言' });

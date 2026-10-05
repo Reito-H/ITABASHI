@@ -17,6 +17,18 @@ interface Ans { a: string; ms: number; team: TeamId; name: string }
 interface QItem { id: number; prompt: string; image_id: number | null; choices: string[]; answer: string; points: number; time_limit: number; note: string }
 interface Step { id: number; kind: string; title: string; config: Record<string, unknown>; qs: QItem[] }
 interface QBoxItem { id: number; emp: string; name: string; team: TeamId; text: string; likes: string[] }
+// 「わたしの売上」：本人のスマホにだけ送る売上データ（ホシコンの sales_records から読むだけ）
+interface SalesDay { date: string; py: number; pm: number; amount: number; rides: number | null; km: number | null; duty: string | null; start: string | null; ret: string | null; hours: number | null }
+interface SalesMonth { y: number; m: number; n: number; sum: number; avg: number; rate: number | null; partial: boolean }
+interface MySales { months: SalesMonth[]; days: SalesDay[]; latest: string | null }
+const SALES_KINDS = ['mygrowth', 'mysales'];
+// 今日が属する月度（17日締め・18日始まり。18日以降は翌月度）
+function currentPeriod(): { y: number; m: number } {
+  const d = new Date(Date.now() + 9 * 3600 * 1000);
+  let y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
+  if (d.getUTCDate() >= 18) { m++; if (m > 12) { m = 1; y++; } }
+  return { y, m };
+}
 
 interface Live {
   stage: 'lobby' | 'reveal' | 'setup' | 'step';
@@ -38,6 +50,7 @@ interface Live {
   awardedKey: string;            // 同じ問題に二重加点しないための印
   timerEnd: number;              // タイトル（休憩など）のタイマー
   seq: number;                   // 状態の版（画面側の演出の重複防止）
+  video: { playing: boolean; offset: number; at: number }; // 動画ラウンドの再生状態（offset=秒、at=再生開始のサーバー時刻）
   streakTeam: string;            // 早押しで連続正解中のチーム（コンボ演出）
   streak: number;
 }
@@ -46,12 +59,14 @@ function freshLive(): Live {
   return {
     stage: 'lobby', stepIdx: 0, phase: '', qIdx: 0, openAt: 0, deadline: 0,
     buzz: [], buzzCursor: 0, buzzLocked: [], answers: {}, survivors: null, revealN: 0, picked: null,
-    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0, streakTeam: '', streak: 0,
+    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0, streakTeam: '', streak: 0, video: { playing: false, offset: 0, at: 0 },
   };
 }
 
+// 画像・動画のURL。差し替えたら別URLになるよう版（ファイルサイズ）を付ける（配信側は1年キャッシュ）
+const mediaVer = new Map<number, number>();
 function mediaUrl(id: number | null | undefined): string | null {
-  return id ? `${BATTLE_PUBLIC_PATH}/media/${id}` : null;
+  return id ? `${BATTLE_PUBLIC_PATH}/media/${id}?v=${mediaVer.get(id) ?? 0}` : null;
 }
 
 // 問題ごとに決まった並びでシャッフル（並べ替えクイズの初期表示）
@@ -79,6 +94,7 @@ export class BattleRoom {
   private scores = new Map<TeamId, number>();
   private timeattack: Array<{ name: string; seconds: number; note: string }> = [];
   private buzzPending: Buzz[] = [];
+  private mySales = new Map<string, MySales>();
   private buzzTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(state: DurableObjectState, env: Env) {
@@ -95,6 +111,9 @@ export class BattleRoom {
     this.live = { ...freshLive(), ...((await this.state.storage.get<Live>('live')) ?? {}) };
     await this.reloadAll();
     this.loaded = true;
+    // 休止から戻ったときも「わたしの売上」ラウンド中なら本人データを読み直す
+    const cur = this.curStep();
+    if (cur && SALES_KINDS.includes(cur.kind)) await this.loadMySales(Array.from(this.players.keys()));
   }
 
   private async reloadAll(): Promise<void> {
@@ -117,6 +136,9 @@ export class BattleRoom {
     }));
     await this.reloadPeople();
     await this.reloadScores();
+    const mv = (await db.prepare('SELECT id, size FROM ib2_media').all<{ id: number; size: number }>()).results ?? [];
+    mediaVer.clear();
+    for (const m of mv) mediaVer.set(m.id, m.size);
     const ta = (await db.prepare('SELECT name, seconds, note FROM ib2_timeattack ORDER BY seconds ASC, id ASC').all<{ name: string; seconds: number; note: string }>()).results ?? [];
     this.timeattack = ta;
   }
@@ -160,6 +182,8 @@ export class BattleRoom {
       att.name = decodeURIComponent(req.headers.get('X-Name') || '');
       att.team = (req.headers.get('X-Team') || 'A') as TeamId;
       if (!this.players.has(att.emp)) await this.reloadPeople();
+      const cur = this.curStep();
+      if (cur && SALES_KINDS.includes(cur.kind) && !this.mySales.has(att.emp)) await this.loadMySales([att.emp]);
     } else {
       att.adminName = decodeURIComponent(req.headers.get('X-Admin') || '');
     }
@@ -251,6 +275,8 @@ export class BattleRoom {
     L.phase = st && ['buzzer', 'choice', 'number', 'order', 'vote'].includes(st.kind) ? 'intro' : st?.kind === 'qbox' ? 'open' : 'show';
     const bgm = st ? String(st.config.bgm || '') : '';
     if (bgm) L.bgm = bgm === 'none' ? null : bgm;
+    // 動画ラウンドは入った瞬間から再生（自動再生オフなら講師が「再生」を押す）
+    L.video = { playing: !!(st && st.kind === 'video' && st.config.autoplay !== false && st.config.video_id), offset: 0, at: Date.now() };
   }
   private async addScore(team: TeamId, delta: number, reason: string, by: string): Promise<void> {
     if (!delta || !this.scores.has(team)) return;
@@ -447,7 +473,7 @@ export class BattleRoom {
         else this.enterStep(i);
       } else if (t === 'next') {
         if (L.stage === 'lobby') { L.stage = 'reveal'; L.bgm = 'builtin:battle'; this.sfx('taiko'); this.sfx('cheer', { delay: 600 }); }
-        else if (L.stage === 'reveal') { L.stage = 'setup'; this.sfx('whoosh'); }
+        else if (L.stage === 'reveal') { L.stage = 'setup'; L.bgm = 'builtin:funk'; this.sfx('whoosh'); }
         else if (L.stage === 'setup') { if (this.steps.length) { this.enterStep(0); this.sfx('whoosh'); } }
         else if (L.stepIdx < this.steps.length - 1) { this.enterStep(L.stepIdx + 1); this.sfx('whoosh'); }
       } else {
@@ -455,11 +481,49 @@ export class BattleRoom {
         else if (L.stage === 'setup') L.stage = 'reveal';
         else if (L.stage === 'reveal') L.stage = 'lobby';
       }
+      const cur = this.curStep();
+      if (cur && SALES_KINDS.includes(cur.kind)) await this.loadMySales(Array.from(this.players.keys()));
+      else this.mySales.clear();
       await this.save();
       this.broadcast();
       return;
     }
     if (t === 'act') await this.onAct(String(m.a || ''), m, by);
+  }
+
+  // 参加者本人の売上を読み込む（月度ごとの平均と前月比も計算）。社員番号→employees.id で sales_records を引く
+  private async loadMySales(emps: string[]): Promise<void> {
+    const cp = currentPeriod();
+    for (let i = 0; i < emps.length; i += 40) {
+      const chunk = emps.slice(i, i + 40);
+      const r = await this.env.DB.prepare(
+        `SELECT e.emp_no, s.date, s.amount, s.ride_count, s.distance_km, s.period_year, s.period_month, s.duty_code, s.start_time, s.return_time, s.labor_hours
+           FROM sales_records s JOIN employees e ON e.id = s.emp_id
+          WHERE e.emp_no IN (${chunk.map(() => '?').join(',')}) ORDER BY s.date`
+      ).bind(...chunk).all<{ emp_no: string; date: string; amount: number; ride_count: number | null; distance_km: number | null; period_year: number | null; period_month: number | null; duty_code: string | null; start_time: string | null; return_time: string | null; labor_hours: number | null }>();
+      const byEmp = new Map<string, SalesDay[]>();
+      for (const x of r.results ?? []) {
+        if (!byEmp.has(x.emp_no)) byEmp.set(x.emp_no, []);
+        byEmp.get(x.emp_no)!.push({ date: x.date, py: x.period_year ?? 0, pm: x.period_month ?? 0, amount: x.amount, rides: x.ride_count, km: x.distance_km, duty: x.duty_code, start: x.start_time, ret: x.return_time, hours: x.labor_hours });
+      }
+      for (const emp of chunk) {
+        const days = byEmp.get(emp) ?? [];
+        const months: SalesMonth[] = [];
+        for (const d of days) {
+          if (!d.py || !d.pm) continue;
+          let mo = months.find((x) => x.y === d.py && x.m === d.pm);
+          if (!mo) { mo = { y: d.py, m: d.pm, n: 0, sum: 0, avg: 0, rate: null, partial: d.py === cp.y && d.pm === cp.m }; months.push(mo); }
+          mo.n++; mo.sum += d.amount;
+        }
+        months.sort((a, b) => a.y - b.y || a.m - b.m);
+        months.forEach((mo, k) => {
+          mo.avg = mo.n ? Math.round(mo.sum / mo.n) : 0;
+          const prev = months[k - 1];
+          mo.rate = prev && prev.avg ? Math.round((mo.avg / prev.avg - 1) * 1000) / 10 : null;
+        });
+        this.mySales.set(emp, { months, days, latest: days.length ? days[days.length - 1].date : null });
+      }
+    }
   }
 
   private async onAct(a: string, m: Record<string, unknown>, by: string): Promise<void> {
@@ -469,7 +533,14 @@ export class BattleRoom {
     const q = this.curQ();
     const now = Date.now();
 
-    if (a === 'timer') {
+    if (a === 'vplay' || a === 'vpause' || a === 'vrestart') {
+      if (st.kind !== 'video') return;
+      const v = L.video ?? { playing: false, offset: 0, at: now };
+      const pos = v.playing ? v.offset + (now - v.at) / 1000 : v.offset;
+      if (a === 'vplay') L.video = { playing: true, offset: pos, at: now };
+      else if (a === 'vpause') L.video = { playing: false, offset: pos, at: now };
+      else L.video = { playing: true, offset: 0, at: now };
+    } else if (a === 'timer') {
       // タイトル（休憩など）のタイマー開始・停止
       const min = Number(m.min ?? st.config.timer ?? 0);
       L.timerEnd = L.timerEnd ? 0 : (min > 0 ? now + min * 60000 : 0);
@@ -644,7 +715,9 @@ export class BattleRoom {
     if (st) {
       const cfg = st.config;
       s.step = { id: st.id, kind: st.kind, title: st.title, mode: cfg.mode || 'all', survival: !!cfg.survival, unit: cfg.unit || '', zoom: !!cfg.zoom,
-        subtitle: cfg.subtitle || '', body: cfg.body || '', image: mediaUrl(Number(cfg.image_id) || null), final: !!cfg.final, timer: cfg.timer || 0 };
+        subtitle: cfg.subtitle || '', body: cfg.body || '', image: mediaUrl(Number(cfg.image_id) || null), final: !!cfg.final, timer: cfg.timer || 0,
+        video: mediaUrl(Number(cfg.video_id) || null) };
+      if (st.kind === 'video') s.video = L.video ?? { playing: false, offset: 0, at: 0 };
       s.qIdx = L.qIdx; s.qCount = st.qs.length;
       if (q && ['buzzer', 'choice', 'number', 'order', 'vote'].includes(st.kind)) {
         const showQ = L.phase !== 'intro' && (st.kind !== 'buzzer' || L.phase !== 'ready');
@@ -688,6 +761,12 @@ export class BattleRoom {
       }
       if (st.kind === 'scoreboard') { s.revealN = L.revealN; s.total = 4; }
     }
+    if (att.role === 'player' && att.emp && st && SALES_KINDS.includes(st.kind)) {
+      // 本人のデータだけ。詳細（日ごと）は「わたしの売上」ラウンドのときだけ送る
+      const ms = this.mySales.get(att.emp);
+      s.mine = ms ? { months: ms.months, latest: ms.latest, days: st.kind === 'mysales' ? ms.days : undefined } : null;
+    }
+    if (att.role === 'admin' && st && SALES_KINDS.includes(st.kind)) s.salesLoaded = this.mySales.size;
     if (att.role === 'player' && att.emp) {
       const me = this.players.get(att.emp);
       const tm = me ? this.teams.get(me.team) : undefined;

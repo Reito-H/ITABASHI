@@ -2,7 +2,7 @@
 //   タブ: 進行 / メニュー / チーム / 素材 / 車椅子タイム / 得点履歴
 //   進行はWebSocket（BattleRoom）へ直接操作を送り、設定の保存はREST API（/ib2/api/*）。保存後は reload を送って即反映。
 import { battleHead, BATTLE_BASE_CSS, BATTLE_NET_JS } from './theme';
-import { BATTLE_AUDIO_JS, SFX_CATALOG } from './audio';
+import { BATTLE_AUDIO_JS, SFX_CATALOG, BGM_CATALOG } from './audio';
 import { STEP_KINDS } from './types';
 
 export function battleAdminPage(opts: { adminPath: string; apiBase: string; wsPath: string; screenUrl: string; joinUrl: string; qrSvg: string; editable: boolean; hoshikonUrl: string }): string {
@@ -99,6 +99,7 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
   var EDIT = ${opts.editable ? 'true' : 'false'};
   var KINDS = ${JSON.stringify(STEP_KINDS)};
   var SFX_CAT = ${JSON.stringify(SFX_CATALOG)};
+  var BGM_CAT = ${JSON.stringify(BGM_CATALOG)};
   var sfxLocal = false;
   var page = document.getElementById('page');
   var tab = 'ctl', S = null, D = null, selStep = null, cand = null;
@@ -172,6 +173,11 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
       }
       a.push('<span class="sp"></span><button class="b sm gh" data-act="prevq"' + (S.qIdx > 0 ? '' : ' disabled') + '>◀ 前の問題</button><button class="b sm c" data-act="nextq"' + (S.qIdx < S.qCount - 1 ? '' : ' disabled') + '>次の問題 ▶</button>');
     }
+    if (st.kind === 'video') {
+      var vp = S.video && S.video.playing;
+      a.push(st.video ? '<button class="b go" data-act="' + (vp ? 'vpause' : 'vplay') + '">' + (vp ? '一時停止' : '再生') + '</button><button class="b gh" data-act="vrestart">最初から再生</button>' : '<span class="hint">動画が未設定です。「メニュー」でこのラウンドに動画を選んでください</span>');
+    }
+    if (st.kind === 'mygrowth' || st.kind === 'mysales') h += '<div class="qbox">各自のスマホに本人の売上だけを表示中です（読み込み済み ' + (S.salesLoaded || 0) + ' 人）。個人の数字はこの画面やプロジェクターには出ません。</div>';
     if (st.kind === 'qbox') a.push('<button class="b y" data-act="qboxToggle">' + (ph === 'open' ? '受付を終了' : '受付を再開') + '</button>');
     if (['ranking', 'timeattack', 'scoreboard'].indexOf(st.kind) >= 0) a.push('<button class="b gh" data-act="drumroll">ドラムロール</button>', '<button class="b go" data-act="revealNext">1つ発表（' + (S.revealN || 0) + '/' + (S.total || 0) + '）</button>', '<button class="b gh" data-act="revealAll">全部発表</button>');
     h += '<div class="acts">' + a.join('') + '</div>';
@@ -202,10 +208,10 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     }).join('') + '<input class="f" id="reason" placeholder="理由（例：ディベート勝利、ナイス発言）"><input class="f" id="cst" type="number" placeholder="±の点数（例：20、-10）" style="margin-top:6px"></div>';
   }
   function bgmPanel(){
-    var opts = [['', '（BGMなし）'], ['builtin:lobby', '内蔵：ロビー'], ['builtin:battle', '内蔵：バトル'], ['builtin:think', '内蔵：シンキングタイム'], ['builtin:result', '内蔵：結果発表']]
+    var opts = [['', '（BGMなし）']].concat(BGM_CAT.map(function(b){ return [b[0], '内蔵：' + b[1]]; }))
       .concat((D.media || []).filter(function(m){ return m.kind === 'audio'; }).map(function(m){ return ['media:' + m.id, '曲：' + m.name]; }));
     return '<div class="pn" style="margin-top:12px"><h3>SOUND</h3><select class="f" id="bgmSel">' + opts.map(function(o){ return '<option value="' + o[0] + '"' + ((S.bgm || '') === o[0] ? ' selected' : '') + '>' + escH(o[1]) + '</option>'; }).join('') + '</select>'
-      + '<div class="hint" style="margin:6px 0">音はプロジェクター画面から流れます。回答受付中は内蔵BGMが自動でシンキングタイムに切り替わります。</div>'
+      + '<div class="hint" style="margin:6px 0">音はプロジェクター画面から流れます。回答受付中は内蔵BGMが自動でシンキング曲（3種類をラウンドごとに切替）になります。</div>'
       + '<label class="hint" style="display:flex;gap:6px;align-items:center;margin:4px 0 8px"><input type="checkbox" id="sfxLocal"' + (sfxLocal ? ' checked' : '') + '> この画面でも鳴らす（試聴）</label>'
       + SFX_CAT.map(function(c){ return '<div class="hint" style="margin-top:8px">' + escH(c.cat) + '</div><div class="acts" style="margin:4px 0">' + c.items.map(function(x){ return '<button class="b sm gh" data-sfx="' + x[0] + '">' + escH(x[1]) + '</button>'; }).join('') + '</div>'; }).join('') + '</div>';
   }
@@ -235,7 +241,7 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     return '<option value="">（なし）</option>' + (D.media || []).filter(function(m){ return m.kind === kind; }).map(function(m){ return '<option value="' + m.id + '"' + (String(val) === String(m.id) ? ' selected' : '') + '>' + escH(m.name) + '</option>'; }).join('');
   }
   function bgmOpts(val){
-    var o = [['', '（変えない）'], ['none', '止める'], ['builtin:lobby', '内蔵：ロビー'], ['builtin:battle', '内蔵：バトル'], ['builtin:think', '内蔵：シンキングタイム'], ['builtin:result', '内蔵：結果発表']]
+    var o = [['', '（変えない）'], ['none', '止める']].concat(BGM_CAT.map(function(b){ return [b[0], '内蔵：' + b[1]]; }))
       .concat((D.media || []).filter(function(m){ return m.kind === 'audio'; }).map(function(m){ return ['media:' + m.id, '曲：' + m.name]; }));
     return o.map(function(x){ return '<option value="' + x[0] + '"' + ((val || '') === x[0] ? ' selected' : '') + '>' + escH(x[1]) + '</option>'; }).join('');
   }
@@ -267,6 +273,7 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     if (['choice', 'number', 'order', 'vote'].indexOf(k) >= 0) h += cfgField(s, 'mode', '回答する人', 'select', '<option value="all"' + (c.mode !== 'leader' ? ' selected' : '') + '>全員（正解した人数ぶんチームに加点）</option><option value="leader"' + (c.mode === 'leader' ? ' selected' : '') + '>代表者だけ（チームで相談）</option>');
     h += '</div></div>';
     if (k === 'title') h += cfgField(s, 'subtitle', 'サブタイトル') + cfgField(s, 'body', '本文（改行可）', 'area') + '<div class="row2"><div>' + cfgField(s, 'image_id', '画像', 'select', mediaOpts('image', c.image_id)) + '</div><div>' + cfgField(s, 'timer', 'タイマー（分・休憩など）', 'number') + '</div></div>';
+    if (k === 'video') h += '<div class="row2"><div>' + cfgField(s, 'video_id', '動画（「素材」でアップロード）', 'select', mediaOpts('video', c.video_id)) + '</div><div>' + cfgField(s, 'autoplay', 'このラウンドに入ったら自動で再生', 'check') + '</div></div><div class="hint">再生中はBGMが止まり、プロジェクターに全画面で流れます。音は動画の音がそのまま出ます。</div>';
     if (k === 'buzzer') h += cfgField(s, 'zoom', '画像をズームから少しずつ引いて見せる（難易度アップ）', 'check');
     if (k === 'choice') h += '<div class="row2"><div>' + cfgField(s, 'survival', '○×サバイバル（間違えたら脱落）', 'check') + '</div><div>' + cfgField(s, 'survivalPoints', '生き残り1人あたりの得点', 'number') + '</div></div>';
     if (k === 'number') h += cfgField(s, 'unit', '単位（円・分など）');
@@ -376,11 +383,11 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
   // ================= 素材 =================
   function drawMedia(){
     var m = D.media || [];
-    page.innerHTML = '<div class="pn"><h3>MEDIA</h3><div class="hint">画像（交差点の写真・お店の写真など）と曲（BGM）をアップロードすると、メニューの各問題・ラウンドで選べるようになります。画像は自動で軽くします。曲は1ファイル15MBまで。</div>'
-      + (EDIT ? '<div class="drop" id="drop" style="margin:12px 0">ここをクリック、またはファイルをドラッグ（複数可）<input type="file" id="file" multiple accept="image/*,audio/*" style="display:none"></div>' : '')
+    page.innerHTML = '<div class="pn"><h3>MEDIA</h3><div class="hint">画像（交差点の写真・お店の写真など）、曲（BGM）、動画（オープニング映像など）をアップロードすると、メニューの各問題・ラウンドで選べるようになります。画像は自動で軽くします。曲は15MB、動画は95MBまで（MP4がおすすめ）。</div>'
+      + (EDIT ? '<div class="drop" id="drop" style="margin:12px 0">ここをクリック、またはファイルをドラッグ（複数可）<input type="file" id="file" multiple accept="image/*,audio/*,video/mp4,video/webm,video/quicktime" style="display:none"></div>' : '')
       + '<div class="media">' + m.map(function(x){
-        var src = ${JSON.stringify(opts.joinUrl.replace(/\/$/, ''))} + '/media/' + x.id;
-        return '<div class="m">' + (x.kind === 'image' ? '<img src="' + src + '">' : '<div style="font-size:30px;text-align:center">♪</div><audio controls preload="none" src="' + src + '"></audio>') + '<div style="margin-top:6px;word-break:break-all">' + escH(x.name) + '</div>' + (EDIT ? '<button class="b sm ng" data-mdel="' + x.id + '" style="margin-top:6px">削除</button>' : '') + '</div>';
+        var src = ${JSON.stringify(opts.joinUrl.replace(/\/$/, ''))} + '/media/' + x.id + '?v=' + x.size;
+        return '<div class="m">' + (x.kind === 'image' ? '<img src="' + src + '">' : x.kind === 'video' ? '<video controls preload="metadata" src="' + src + '" style="width:100%;border-radius:8px;background:#000"></video>' : '<div style="font-size:30px;text-align:center">♪</div><audio controls preload="none" src="' + src + '"></audio>') + '<div style="margin-top:6px;word-break:break-all">' + escH(x.name) + '</div>' + (EDIT ? '<button class="b sm ng" data-mdel="' + x.id + '" style="margin-top:6px">削除</button>' : '') + '</div>';
       }).join('') + '</div></div>';
     var drop = document.getElementById('drop'), file = document.getElementById('file');
     if (drop) {
@@ -401,11 +408,47 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
       img.src = URL.createObjectURL(file);
     });
   }
+  // 動画がこのブラウザで再生できる形式か確かめる（iPhoneのHEVCはChromeで映らないことが多い）
+  function checkVideo(file){
+    return new Promise(function(res){
+      if (file.type.indexOf('video/') !== 0) return res(true);
+      var v = document.createElement('video'), url = URL.createObjectURL(file), done = false;
+      var fin = function(ok){ if (done) return; done = true; URL.revokeObjectURL(url); res(ok); };
+      v.muted = true; v.preload = 'metadata';
+      v.onloadeddata = function(){ fin(v.videoWidth > 0); };
+      v.onloadedmetadata = function(){ if (!v.videoWidth) setTimeout(function(){ fin(v.videoWidth > 0); }, 1500); };
+      v.onerror = function(){ fin(false); };
+      setTimeout(function(){ fin(v.videoWidth > 0); }, 8000);
+      v.src = url;
+    });
+  }
+  var HEVC_HELP = 'この動画は、このパソコンのブラウザでは映像が再生できない形式です（iPhoneで撮影した「HEVC」形式によくあります）。'
+    + String.fromCharCode(10) + String.fromCharCode(10) + '次のどれかで「MP4（H.264）」にしてからアップロードしてください。'
+    + String.fromCharCode(10) + '・Mac：QuickTime Playerで開く →「ファイル」→「書き出す」→「1080p」→「HEVCを使用」のチェックを外して保存'
+    + String.fromCharCode(10) + '・iPhone：設定 →「カメラ」→「フォーマット」→「互換性優先」にしてから撮影・書き出し'
+    + String.fromCharCode(10) + '・動画編集アプリで「H.264」「MP4」を選んで書き出す'
+    + String.fromCharCode(10) + String.fromCharCode(10) + 'それでもこのままアップロードしますか？（プロジェクター側のパソコンでも映らない可能性が高いです）';
   function upload(files){
     var list = Array.prototype.slice.call(files || []), chain = Promise.resolve();
+    var vids = list.filter(function(f){ return f.type.indexOf('video/') === 0; });
+    if (vids.length) {
+      msg('動画の形式を確認中…');
+      Promise.all(vids.map(checkVideo)).then(function(oks){
+        var bad = vids.filter(function(_, i){ return !oks[i]; });
+        if (bad.length && !confirm(bad.map(function(f){ return '「' + f.name + '」'; }).join('') + String.fromCharCode(10) + HEVC_HELP)) list = list.filter(function(f){ return bad.indexOf(f) < 0; });
+        doUpload(list);
+      });
+      return;
+    }
+    doUpload(list);
+  }
+  function doUpload(list){
+    var chain = Promise.resolve();
+    if (!list.length) return;
     msg('アップロード中…');
     list.forEach(function(f){ chain = chain.then(function(){ return shrink(f); }).then(function(b){ return api('POST', '/media', undefined, { body: b, type: b.type || f.type, name: f.name }); }); });
     chain.then(function(){ msg('アップロードしました'); return load(); }).catch(err);
+    if (list.some(function(f){ return f.type.indexOf('video/') === 0; })) msg('動画をアップロード中…（大きいファイルは少し時間がかかります）');
   }
 
   // ================= 車椅子タイム =================

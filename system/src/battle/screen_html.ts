@@ -32,6 +32,18 @@ html,body{background:#000;}
 .sub{font-size:1.9cqw;color:var(--mute);margin-top:2cqh;line-height:1.6;}
 .bigLogo{font-family:var(--num);font-weight:900;font-size:8.6cqw;line-height:.95;letter-spacing:.04em;--glow:var(--pink);}
 .bigLogo span{display:block;font-size:4.2cqw;color:var(--cyan);--glow:var(--cyan);letter-spacing:.5em;margin-top:1cqh;}
+/* ロビーのロゴの「2」：BATTLEの横に大きく、グラデーション＋白フチ＋光の脈動で目立たせる */
+.bigLogo .two{display:inline-block;position:relative;font-size:14cqw;line-height:.7;letter-spacing:0;margin:0 0 0 1.6cqw;vertical-align:-.04em;
+  color:transparent;background:linear-gradient(160deg,#fff 0%,var(--cyan) 14%,var(--violet) 31%,var(--pink) 48%,#fff 52%,var(--cyan) 66%,var(--violet) 82%,var(--pink) 100%);background-size:100% 200%;-webkit-background-clip:text;background-clip:text;
+  -webkit-text-stroke:.22cqw rgba(255,255,255,.9);text-shadow:none;transform:skewX(-10deg);
+  filter:drop-shadow(0 0 .8cqw rgba(47,211,255,.9)) drop-shadow(0 0 2.6cqw rgba(255,59,107,.7));animation:twoFlow 3.2s linear infinite,twoPulse 2.6s ease-in-out infinite,twoFlicker 6.5s linear infinite;}
+.bigLogo .two::after{content:"";position:absolute;left:8%;right:8%;bottom:-1.2cqh;height:.5cqh;border-radius:999px;background:linear-gradient(90deg,var(--cyan),var(--pink),var(--violet),var(--cyan));background-size:300% 100%;box-shadow:0 0 1.4cqw var(--pink);animation:lineFlow 2.4s linear infinite;}
+/* グラデーションが上から下へ流れ続ける（模様は2周期ぶん並べてあるので継ぎ目なくループ） */
+@keyframes twoFlow{from{background-position:0 0;}to{background-position:0 100%;}}
+@keyframes lineFlow{from{background-position:0 0;}to{background-position:150% 0;}}
+/* ネオン管のように、ときどきチカッと点滅する */
+@keyframes twoFlicker{0%,62%,64.5%,67%,90%,100%{opacity:1;}63%{opacity:.35;}65.5%{opacity:.55;}66%{opacity:.2;}91%{opacity:.6;}}
+@keyframes twoPulse{0%,100%{filter:drop-shadow(0 0 .8cqw rgba(47,211,255,.9)) drop-shadow(0 0 2.6cqw rgba(255,59,107,.7));}50%{filter:drop-shadow(0 0 1.4cqw rgba(47,211,255,1)) drop-shadow(0 0 4.4cqw rgba(255,59,107,.95));}}
 .lobby{display:grid;grid-template-columns:1.25fr 1fr;gap:4cqw;align-items:center;width:100%;}
 .qr{background:#fff;border-radius:1.4cqw;padding:1.4cqw;width:24cqw;margin:0 auto;box-shadow:0 0 4cqw rgba(47,211,255,.45);}
 .qr svg{display:block;width:100%;height:auto;}
@@ -109,6 +121,9 @@ html,body{background:#000;}
 .pp{position:absolute;bottom:14cqh;font-family:var(--num);font-weight:900;font-size:4cqw;color:var(--tc);--glow:var(--tc);animation:floatUp 2s ease-out both;}
 @keyframes floatUp{0%{transform:translateY(2cqh) scale(.6);opacity:0;}15%{transform:translateY(0) scale(1.15);opacity:1;}100%{transform:translateY(-22cqh) scale(1);opacity:0;}}
 #confetti{position:absolute;inset:0;pointer-events:none;z-index:6;}
+.vidWrap{position:absolute;inset:0;z-index:4;background:#000;display:flex;align-items:center;justify-content:center;}
+.vidWrap video{width:100%;height:100%;object-fit:contain;background:#000;}
+.vidWrap .none{font-family:var(--num);font-size:2cqw;letter-spacing:.3em;color:var(--mute);}
 .startOv{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(0,0,0,.85);cursor:pointer;}
 .startOv div{font-family:var(--num);font-weight:900;font-size:2.4vw;letter-spacing:.3em;color:var(--cyan);text-shadow:0 0 20px var(--cyan);text-align:center;line-height:2;}
 .startOv small{display:block;font-family:var(--jp);font-size:1.1vw;letter-spacing:.05em;color:#aaa;}
@@ -150,7 +165,8 @@ html,body{background:#000;}
   function effBgm(){
     if (!S) return null;
     var k = S.bgm;
-    if (k && k.indexOf('builtin:') === 0 && S.stage === 'step' && S.step && S.phase === 'open' && ['choice', 'number', 'order', 'vote'].indexOf(S.step.kind) >= 0) return 'builtin:think';
+    if (S.stage === 'step' && S.step && S.step.kind === 'video') return null;
+    if (k && k.indexOf('builtin:') === 0 && S.stage === 'step' && S.step && S.phase === 'open' && ['choice', 'number', 'order', 'vote'].indexOf(S.step.kind) >= 0) return ['builtin:think', 'builtin:think3', 'builtin:think2'][S.stepIdx % 3];
     return k;
   }
   function popScore(team, d){
@@ -163,7 +179,7 @@ html,body{background:#000;}
   }
   var shownScore = {};
   function scoreBar(){
-    var hide = !S || S.stage !== 'step' || (S.step && S.step.kind === 'scoreboard');
+    var hide = !S || S.stage !== 'step' || (S.step && (S.step.kind === 'scoreboard' || S.step.kind === 'video'));
     sb.style.display = hide ? 'none' : '';
     main.className = hide ? 'full' : '';
     if (hide) return;
@@ -188,13 +204,29 @@ html,body{background:#000;}
     document.getElementById('round').textContent = S.stage === 'step' ? 'ROUND ' + (S.stepIdx + 1) + ' / ' + S.stepCount : (S.stage === 'lobby' ? 'ENTRY' : 'TEAM BUILDING');
     scoreBar();
     var h = view();
-    if (h !== lastHtml) { lastHtml = h; main.innerHTML = h; afterRender(); }
+    if (h !== lastHtml) {
+      lastHtml = h; main.innerHTML = h; afterRender();
+      var vv = document.getElementById('vid');
+      if (vv) { var showErr = function(){ var e = document.getElementById('vidErr'); if (e) e.style.display = ''; }; vv.addEventListener('error', showErr); vv.addEventListener('loadeddata', function(){ if (!vv.videoWidth) showErr(); }); }
+    }
+    syncVideo();
   }
+  // 動画：管理者の再生・一時停止・最初からに合わせる（ずれが1秒を超えたら位置を合わせ直す）
+  function syncVideo(){
+    var v = document.getElementById('vid');
+    if (!v || !S || !S.video) return;
+    var want = S.video.playing ? S.video.offset + (IB2N.now() - S.video.at) / 1000 : S.video.offset;
+    if (v.duration && want > v.duration) want = v.duration;
+    if (Math.abs((v.currentTime || 0) - want) > 1) { try { v.currentTime = Math.max(0, want); } catch (e) {} }
+    if (S.video.playing && v.paused && !v.ended) { var p = v.play(); if (p && p.catch) p.catch(function(){ v.muted = true; v.play().catch(function(){}); }); }
+    if (!S.video.playing && !v.paused) v.pause();
+  }
+  setInterval(syncVideo, 1000);
 
   function view(){
     if (S.stage === 'lobby') {
       var names = []; S.teams.forEach(function(t){ t.members.forEach(function(m){ names.push(m.name); }); });
-      return '<div class="lobby"><div><div class="bigLogo neon">ITABASHI<br>BATTLE<span class="neon">2</span></div>'
+      return '<div class="lobby"><div><div class="bigLogo neon">ITABASHI<br>BATTLE<b class="two">2</b></div>'
         + '<div class="sub">繁忙期勉強会　チーム対抗バトル</div><div class="cnt">参戦 <b class="neon">' + S.joined + '</b> 人</div>'
         + '<div class="names">' + names.map(function(n){ return '<span>' + escH(n) + '</span>'; }).join('') + '</div></div>'
         + '<div><div class="kick">SCAN TO JOIN</div><div class="qr">' + QR + '</div><div class="url">' + escH(JOIN) + '</div><div class="sub" style="font-size:1.5cqw">スマホで読み取って、社員番号を入力！</div></div></div>';
@@ -217,10 +249,15 @@ html,body{background:#000;}
     if (S.stage === 'step' && S.step) return stepView();
     return '';
   }
-  function kindName(st){ return { buzzer: '早押しクイズ', choice: st.survival ? '○×サバイバル' : '選択クイズ', number: 'ピタリ賞', order: '並べ替えクイズ', vote: '投票タイム', qbox: '質問箱', ranking: 'ランキング発表', timeattack: '車椅子タイムアタック', scoreboard: '得点発表', title: '' }[st.kind] || ''; }
+  function kindName(st){ return { buzzer: '早押しクイズ', choice: st.survival ? '○×サバイバル' : '選択クイズ', number: 'ピタリ賞', order: '並べ替えクイズ', vote: '投票タイム', qbox: '質問箱', mygrowth: 'わたしの成長', mysales: 'わたしの売上', ranking: 'ランキング発表', timeattack: '車椅子タイムアタック', scoreboard: '得点発表', title: '' }[st.kind] || ''; }
 
   function stepView(){
     var st = S.step, q = S.q, ph = S.phase;
+    if (st.kind === 'mygrowth' || st.kind === 'mysales') return '<div class="kick">' + (st.kind === 'mygrowth' ? 'YOUR GROWTH' : 'MY SALES') + '</div><div class="title neon pop">' + escH(st.title) + '</div>'
+      + '<div class="sub" style="font-size:3cqw;color:var(--ink);margin-top:4cqh">自分のスマホを見てみよう！</div>'
+      + '<div class="sub" style="font-size:1.8cqw">' + (st.kind === 'mygrowth' ? '1乗務あたりの平均売上が、月度ごとにどれだけ伸びたかが表示されます' : '日ごとの売上の記録を見て、CSVで保存できます') + '</div>'
+      + '<div class="sub" style="font-size:1.5cqw;margin-top:3cqh">あなたのデータは、あなたのスマホにだけ表示されます</div>';
+    if (st.kind === 'video') return st.video ? '<div class="vidWrap"><video id="vid" src="' + escH(st.video) + '" playsinline preload="auto"></video><div class="none" id="vidErr" style="display:none;position:absolute;text-align:center;line-height:2">この動画はこのブラウザでは再生できない形式です<br><small>MP4（H.264）で書き出して、アップロードし直してください</small></div></div>' : '<div class="vidWrap"><div class="none">NO VIDEO</div></div>';
     if (st.kind === 'title') {
       return '<div class="kick">ROUND ' + (S.stepIdx + 1) + '</div><div class="title neon pop">' + escH(st.title) + '</div>'
         + (st.subtitle ? '<div class="sub" style="color:var(--ink);font-size:2.6cqw">' + escH(st.subtitle) + '</div>' : '')

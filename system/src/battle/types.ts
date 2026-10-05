@@ -5,6 +5,7 @@ export const TEAM_COLORS: Record<TeamId, string> = { A: '#ff3b6b', B: '#2fd3ff',
 
 export const STEP_KINDS: Array<{ v: string; l: string; desc: string }> = [
   { v: 'title', l: 'タイトル・講座・休憩', desc: '見出し・本文・画像を表示（タイマーも使える）' },
+  { v: 'video', l: '動画', desc: 'プロジェクターで動画を全画面再生（オープニング映像など）' },
   { v: 'buzzer', l: '早押しクイズ', desc: '画像や問題文を出して早押し。講師が○×で判定' },
   { v: 'choice', l: '選択クイズ', desc: '2〜4択（○×・どっち？・OK/NG も）。自動採点。サバイバルも可' },
   { v: 'number', l: 'ピタリ賞', desc: '数字で回答（運賃・所要時間など）。近い順に得点' },
@@ -13,6 +14,8 @@ export const STEP_KINDS: Array<{ v: string; l: string; desc: string }> = [
   { v: 'qbox', l: '質問箱', desc: 'スマホから質問を投稿・いいね。講師が選んで大画面へ' },
   { v: 'ranking', l: 'ランキング発表', desc: '下位から1つずつ発表（お店ランキングなど）' },
   { v: 'timeattack', l: '車椅子タイムアタック', desc: '入力したタイムのランキングを発表' },
+  { v: 'mygrowth', l: 'わたしの成長（売上）', desc: '各自のスマホに、月度ごとの平均売上と前月比の向上率を表示（本人のデータだけ）' },
+  { v: 'mysales', l: 'わたしの売上（詳細・保存）', desc: '各自のスマホに、日ごとの売上一覧を表示しCSVで保存（本人のデータだけ）' },
   { v: 'scoreboard', l: '得点発表', desc: 'チームの順位をドラムロールつきで発表' },
 ];
 export const STEP_KIND_SET = new Set(STEP_KINDS.map((k) => k.v));

@@ -7,6 +7,7 @@ const OX = ['○', '×'];
 const OKNG = ['OK', 'NG'];
 
 export const BATTLE_PRESET: PresetStep[] = [
+  { kind: 'video', title: 'オープニング映像', config: { autoplay: true, bgm: 'none' } },
   { kind: 'title', title: 'オープニング', config: { subtitle: '繁忙期を勝ち抜け！ チーム対抗バトル', body: '1日を通してチームで得点を競います\n優勝チームには表彰あり！', bgm: 'builtin:battle' } },
   {
     kind: 'choice', title: '○×サバイバル（ウォーミングアップ）', config: { survival: true, survivalPoints: 10, mode: 'all' },
@@ -20,14 +21,14 @@ export const BATTLE_PRESET: PresetStep[] = [
   },
   { kind: 'title', title: '講座 第1部', config: { subtitle: '繁忙期の売上と出番数', body: '45分' } },
   {
-    kind: 'buzzer', title: '交差点名クイズ', config: { zoom: true },
+    kind: 'buzzer', title: '交差点名クイズ', config: { zoom: true, bgm: 'builtin:battle2' },
     qs: [
       { prompt: 'この交差点の名前は？', answer: '（講師が入力）', points: 10, note: '画像は「素材」タブでアップロードして、この問題に設定してください' },
       { prompt: 'この交差点の名前は？', answer: '（講師が入力）', points: 10 },
       { prompt: 'この交差点の名前は？', answer: '（講師が入力）', points: 10 },
     ],
   },
-  { kind: 'title', title: '休憩', config: { subtitle: '15分', timer: 15, bgm: 'builtin:lobby' } },
+  { kind: 'title', title: '休憩', config: { subtitle: '15分', timer: 15, bgm: 'builtin:chill' } },
   {
     kind: 'number', title: '運賃ピタリ賞', config: { unit: '円', mode: 'leader' },
     qs: [
@@ -37,7 +38,7 @@ export const BATTLE_PRESET: PresetStep[] = [
   },
   { kind: 'title', title: '講座 第2部', config: { subtitle: 'トラブル・クレーム防止', body: '45分' } },
   {
-    kind: 'choice', title: 'OK・NG 瞬間ジャッジ', config: { mode: 'all' },
+    kind: 'choice', title: 'OK・NG 瞬間ジャッジ', config: { mode: 'all', bgm: 'builtin:chip' },
     qs: [
       { prompt: '「知りません」', choices: OKNG, answer: '1', points: 3, time_limit: 8, note: '→「確認いたします」' },
       { prompt: '「〇〇通りでよろしいでしょうか」', choices: OKNG, answer: '0', points: 3, time_limit: 8 },
@@ -47,7 +48,7 @@ export const BATTLE_PRESET: PresetStep[] = [
       { prompt: '「お忘れ物はございませんか」', choices: OKNG, answer: '0', points: 3, time_limit: 8 },
     ],
   },
-  { kind: 'title', title: '昼休憩', config: { subtitle: '60分', timer: 60, bgm: 'builtin:lobby' } },
+  { kind: 'title', title: '昼休憩', config: { subtitle: '60分', timer: 60, bgm: 'builtin:jazz' } },
   {
     kind: 'vote', title: '付け待ち vs 流し ディベート', config: { mode: 'all', bgm: 'builtin:battle' },
     qs: [{ prompt: '繁忙期の金曜夜、稼げるのはどっち？', choices: ['付け待ち派', '流し派'], time_limit: 30 }],
@@ -71,7 +72,9 @@ export const BATTLE_PRESET: PresetStep[] = [
     ],
   },
   { kind: 'timeattack', title: '車椅子タイムアタック ランキング', config: { top: 10, bgm: 'builtin:result' } },
-  { kind: 'scoreboard', title: '最終結果発表', config: { final: true, bgm: 'builtin:result' } },
+  { kind: 'mygrowth', title: 'わたしの成長', config: { bgm: 'builtin:anthem' } },
+  { kind: 'mysales', title: 'わたしの売上', config: { bgm: 'builtin:chill' } },
+  { kind: 'scoreboard', title: '最終結果発表', config: { final: true, bgm: 'builtin:anthem' } },
 ];
 
 // 新しく作るラウンドの初期値
@@ -82,6 +85,7 @@ export function defaultStepConfig(kind: string): Record<string, unknown> {
   if (kind === 'buzzer') return { zoom: false };
   if (kind === 'timeattack') return { top: 10 };
   if (kind === 'scoreboard') return { final: false };
+  if (kind === 'video') return { autoplay: true, bgm: 'none' };
   return {};
 }
 export function defaultQuestion(kind: string): PresetQ {

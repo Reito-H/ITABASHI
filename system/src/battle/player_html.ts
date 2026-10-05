@@ -66,6 +66,20 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
 .flash{position:fixed;inset:0;pointer-events:none;background:var(--tc,#fff);opacity:0;}
 .flash.go{animation:fl .5s ease;}
 @keyframes fl{0%{opacity:.55;}100%{opacity:0;}}
+.big2{font-family:var(--num);font-weight:900;font-size:64px;line-height:1;}
+.big2.up{color:var(--green);--glow:var(--green);} .big2.down{color:var(--pink);--glow:var(--pink);}
+.mrow{display:grid;grid-template-columns:80px 1fr auto;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;text-align:left;}
+.mrow:last-child{border-bottom:0;}
+.mrow .r{font-family:var(--num);font-weight:900;font-size:15px;}
+.mrow .r.up{color:var(--green);} .mrow .r.down{color:var(--pink);}
+.priv{font-size:11px;color:var(--mute);display:flex;align-items:center;gap:6px;justify-content:center;}
+.dtbl{width:100%;border-collapse:collapse;font-size:12px;text-align:left;}
+.dtbl th,.dtbl td{padding:7px 6px;border-bottom:1px solid var(--line);white-space:nowrap;}
+.dtbl th{color:var(--mute);font-size:10.5px;position:sticky;top:0;background:#100d22;}
+.dtbl td.n{text-align:right;font-family:var(--num);}
+.scrollbox{width:100%;max-height:46vh;overflow:auto;border-radius:14px;border:1px solid var(--line);background:var(--panel);}
+.b2{border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:999px;padding:7px 12px;font:800 12px/1 var(--jp);}
+.b2.on{background:var(--ink);color:#07060f;border-color:var(--ink);}
 .stepLbl{font-family:var(--num);font-size:12px;letter-spacing:.18em;color:var(--mute);}
 </style></head><body>
 <div class="top"><span class="net" id="net"></span><span class="logo neon">ITABASHI <b>BATTLE 2</b></span><span class="chip" id="chip" style="display:none"></span></div>
@@ -78,7 +92,7 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
   var BASE = ${JSON.stringify(base)};
   var KEY = 'ib2_token';
   var app = document.getElementById('app');
-  var S = null, token = null, shownAt = 0, openKey = '', draft = { leader: '', order: null, orderKey: '', num: '' }, lastHtml = '';
+  var S = null, token = null, shownAt = 0, openKey = '', draft = { leader: '', order: null, orderKey: '', num: '', chart: 'day', sel: -1 }, lastHtml = '';
   function store(k, v){ try { if (v === undefined) return localStorage.getItem(k); if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { return null; } }
   function vib(p){ try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
   function flash(){ var f = document.getElementById('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
@@ -197,6 +211,9 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
       return '<div class="center">' + head() + '<h1 class="big">' + escH(st.title) + '</h1>' + (st.subtitle ? '<div class="sub">' + escH(st.subtitle) + '</div>' : '') + t + '</div>';
     }
     if (['ranking', 'timeattack', 'scoreboard'].indexOf(st.kind) >= 0) return waitScreen('結果発表！<br>前の画面に注目！');
+    if (st.kind === 'video') return waitScreen('映像スタート！<br>前の画面に注目！');
+    if (st.kind === 'mygrowth') return growthView();
+    if (st.kind === 'mysales') return salesView();
     if (st.kind === 'qbox') return qboxView();
     if (!q) return waitScreen();
     if (ph === 'intro') return '<div class="center">' + head() + '<h1 class="big neon pop" style="--glow:var(--pink)">まもなく開始！</h1><div class="sub">' + kindLabel(st) + '</div></div>';
@@ -289,6 +306,194 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
     return '<div class="sub">正解</div><h1 class="big neon" style="--glow:var(--green);color:var(--green)">' + escH(txt) + '</h1>' + mine + extra + (q.note ? '<div class="sub">' + escH(q.note) + '</div>' : '');
   }
 
+  function yen(n){ return Math.round(n || 0).toLocaleString('ja-JP'); }
+  function mLabel(mo){ return mo.m + '月度' + (mo.partial ? '<span style="color:var(--mute);font-size:11px">（集計中）</span>' : ''); }
+  var PRIV = '<div class="priv">この画面は、あなたのスマホにだけ表示されています</div>';
+  // 月度ごとの平均売上の棒グラフ（SVG）。棒の上に前月比
+  function growthChart(ms){
+    var W = 340, H = 180, pad = 26, n = ms.length, max = Math.max.apply(null, ms.map(function(x){ return x.avg; })) || 1, bw = Math.min(46, (W - pad * 2) / n - 10);
+    var bars = ms.map(function(x, i){
+      var cx = pad + (W - pad * 2) * (i + 0.5) / n, h = Math.max(4, (H - 60) * x.avg / max), y = H - 24 - h;
+      var col = x.partial ? 'rgba(255,255,255,.25)' : (x.rate == null || x.rate >= 0 ? 'url(#gUp)' : 'url(#gDn)');
+      return '<rect x="' + (cx - bw / 2) + '" y="' + y + '" width="' + bw + '" height="' + h + '" rx="6" fill="' + col + '"/>'
+        + '<text x="' + cx + '" y="' + (H - 8) + '" text-anchor="middle" font-size="11" fill="#9a95c4">' + x.m + '月</text>'
+        + (x.rate != null ? '<text x="' + cx + '" y="' + (y - 6) + '" text-anchor="middle" font-size="11" font-weight="900" fill="' + (x.rate >= 0 ? '#7cff6b' : '#ff3b6b') + '">' + (x.rate >= 0 ? '+' : '') + x.rate + '%</text>' : '');
+    }).join('');
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-width:420px"><defs><linearGradient id="gUp" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#2fd3ff"/><stop offset="1" stop-color="#7cff6b"/></linearGradient><linearGradient id="gDn" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#9b6bff"/><stop offset="1" stop-color="#ff3b6b"/></linearGradient></defs>' + bars + '</svg>';
+  }
+  function growthView(){
+    var d = S.mine;
+    if (!d) return '<div class="center">' + head() + '<div class="sub blink">データを読み込み中…</div></div>';
+    var ms = d.months || [];
+    if (!ms.length) return '<div class="center">' + head() + '<h1 class="big">まだ売上データがありません</h1><div class="sub">乗務が始まると、ここに成長の記録が出ます</div>' + PRIV + '</div>';
+    var done = ms.filter(function(x){ return !x.partial; }), last = done[done.length - 1] || ms[ms.length - 1], first = ms[0];
+    var rate = last.rate, up = rate == null || rate >= 0;
+    var msg = rate == null ? 'ここからスタート！' : rate >= 20 ? '絶好調！ぐんぐん伸びてる！' : rate >= 0 ? '着実にレベルアップ中！' : 'ここから巻き返そう！';
+    var times = first.avg ? Math.round(last.avg / first.avg * 10) / 10 : null;
+    return '<div class="center" style="justify-content:flex-start">' + head() + '<div class="stepLbl">YOUR GROWTH</div>'
+      + '<div class="sub" style="color:var(--ink)">' + escH(S.me.name) + ' さんの 1乗務あたり平均売上</div>'
+      + '<div class="sub">' + last.m + '月度の前月比</div>'
+      + '<div class="big2 neon pop ' + (up ? 'up' : 'down') + '">' + (rate == null ? '―' : (rate >= 0 ? '+' : '') + rate + '%') + '</div>'
+      + '<h1 class="big" style="font-size:22px">' + msg + '</h1>'
+      + (times && ms.length > 1 ? '<div class="sub">' + first.m + '月度 ' + yen(first.avg) + '円 → ' + last.m + '月度 ' + yen(last.avg) + '円<br>はじめの月度の <b class="num" style="color:var(--yellow)">' + times + '</b> 倍に！</div>' : '')
+      + '<div class="card" style="padding:10px">' + growthChart(ms) + '</div>'
+      + '<div class="card" style="padding:0">' + ms.map(function(x){ return '<div class="mrow"><span>' + mLabel(x) + '</span><span class="num">' + yen(x.avg) + '円<span style="color:var(--mute);font-size:11px">（' + x.n + '乗務）</span></span><span class="r ' + (x.rate == null ? '' : x.rate >= 0 ? 'up' : 'down') + '">' + (x.rate == null ? '―' : (x.rate >= 0 ? '+' : '') + x.rate + '%') + '</span></div>'; }).join('') + '</div>'
+      + '<button class="btn" id="dlPdf">PDFでダウンロード</button>'
+      + '<div class="sub" style="font-size:11px">平均＝その月度の売上合計 ÷ 乗務した日数。データ最終日 ' + escH(d.latest || '') + '</div>' + PRIV + '</div>';
+  }
+  function salesView(){
+    var d = S.mine;
+    if (!d) return '<div class="center">' + head() + '<div class="sub blink">データを読み込み中…</div></div>';
+    var days = d.days || [], ms = d.months || [];
+    if (!days.length) return '<div class="center">' + head() + '<h1 class="big">まだ売上データがありません</h1>' + PRIV + '</div>';
+    var total = days.reduce(function(a, x){ return a + x.amount; }, 0), best = days.reduce(function(a, x){ return x.amount > a.amount ? x : a; }, days[0]);
+    var rows = days.slice().reverse().map(function(x){ return '<tr><td>' + escH(x.date.slice(5).replace('-', '/')) + '</td><td>' + escH(x.duty || '') + '</td><td class="n">' + yen(x.amount) + '</td><td class="n">' + (x.rides == null ? '' : x.rides) + '</td><td class="n">' + (x.km == null ? '' : x.km) + '</td><td>' + escH((x.start || '') + (x.ret ? '〜' + x.ret : '')) + '</td></tr>'; }).join('');
+    return '<div class="center" style="justify-content:flex-start">' + head() + '<div class="stepLbl">MY SALES</div>'
+      + '<div class="sub" style="color:var(--ink)">' + escH(S.me.name) + ' さんの売上記録</div>'
+      + '<div class="card" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center"><div><div class="sub" style="margin:0;font-size:11px">乗務数</div><div class="num" style="font-size:22px">' + days.length + '</div></div><div><div class="sub" style="margin:0;font-size:11px">累計</div><div class="num" style="font-size:18px">' + yen(total) + '</div></div><div><div class="sub" style="margin:0;font-size:11px">最高（' + escH(best.date.slice(5).replace('-', '/')) + '）</div><div class="num" style="font-size:18px;color:var(--yellow)">' + yen(best.amount) + '</div></div></div>'
+      + trendChart(days, ms)
+      + '<div class="card" style="padding:0">' + ms.map(function(x){ return '<div class="mrow"><span>' + mLabel(x) + '</span><span class="num">計 ' + yen(x.sum) + '円</span><span class="num" style="font-size:12px;color:var(--mute)">平均 ' + yen(x.avg) + '</span></div>'; }).join('') + '</div>'
+      + '<div class="scrollbox"><table class="dtbl"><tr><th>日付</th><th>勤務</th><th style="text-align:right">売上(円)</th><th style="text-align:right">回数</th><th style="text-align:right">km</th><th>出庫〜帰庫</th></tr>' + rows + '</table></div>'
+      + '<button class="btn" id="dlPdf">PDFでダウンロード</button><button class="btn alt" id="dlCsv">CSVでダウンロード</button><div class="sub" style="font-size:11px">LINEの中で開いている場合は、右上のメニューから「ブラウザで開く」にしてから保存してください</div>' + PRIV + '</div>';
+  }
+  // 売上の推移グラフ。日ごと＝1乗務ごとの棒＋直近5乗務の平均線、月度ごと＝合計の棒。棒をタップすると金額を表示
+  function trendChart(days, months, forceMode, forPdf){
+    var W = 360, H = 220, L = 34, R = 8, T = 30, B = 26, iw = W - L - R, ih = H - T - B;
+    var mode = forceMode || draft.chart, sel = forceMode ? -1 : sel, pts = mode === 'day' ? days.map(function(x){ return { v: x.amount, lab: x.date.slice(5).replace('-', '/'), key: x.py + '-' + x.pm }; })
+      : months.map(function(x){ return { v: x.sum, lab: x.m + '月度', key: x.y + '-' + x.m, part: x.partial, n: x.n }; });
+    if (!pts.length) return '';
+    var max = Math.max.apply(null, pts.map(function(p){ return p.v; })) || 1;
+    var step = max > 400000 ? 200000 : max > 200000 ? 100000 : max > 80000 ? 20000 : 10000, top = Math.ceil(max / step) * step;
+    var y = function(v){ return T + ih - ih * v / top; }, bw = iw / pts.length;
+    var g = '';
+    for (var v = 0; v <= top; v += step) g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '" stroke="rgba(255,255,255,.08)"/><text x="' + (L - 4) + '" y="' + (y(v) + 3) + '" text-anchor="end" font-size="9" fill="#9a95c4">' + (v / 10000) + '万</text>';
+    var keys = [], bars = '';
+    pts.forEach(function(p, i){
+      if (keys.indexOf(p.key) < 0) keys.push(p.key);
+      var odd = keys.indexOf(p.key) % 2, x = L + i * bw, h = Math.max(1, ih * p.v / top), sel = sel === i;
+      var col = mode === 'day' ? (odd ? '#9b6bff' : '#2fd3ff') : (p.part ? 'rgba(255,255,255,.3)' : 'url(#tg)');
+      bars += '<rect data-bar="' + i + '" x="' + (x + bw * 0.12) + '" y="' + y(p.v) + '" width="' + Math.max(1, bw * 0.76) + '" height="' + h + '" rx="' + Math.min(4, bw * 0.3) + '" fill="' + col + '"' + (sel ? ' stroke="#fff" stroke-width="1.5"' : '') + ' opacity="' + (sel >= 0 && !sel ? 0.55 : 1) + '"/>';
+    });
+    var line = '';
+    if (mode === 'day' && pts.length > 2) {
+      var avgPts = pts.map(function(p, i){ var a = pts.slice(Math.max(0, i - 4), i + 1); var m = a.reduce(function(s, q){ return s + q.v; }, 0) / a.length; return (L + i * bw + bw / 2) + ',' + y(m); });
+      line = '<polyline points="' + avgPts.join(' ') + '" fill="none" stroke="#ffd23f" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" style="filter:drop-shadow(0 0 4px rgba(255,210,63,.7))"/>';
+    }
+    var labs = '';
+    if (mode === 'day') {
+      var seen = {};
+      pts.forEach(function(p, i){ if (!seen[p.key]) { seen[p.key] = 1; var mm = p.key.split('-')[1]; labs += '<line x1="' + (L + i * bw) + '" x2="' + (L + i * bw) + '" y1="' + T + '" y2="' + (T + ih) + '" stroke="rgba(255,255,255,.15)" stroke-dasharray="2 3"/><text x="' + (L + i * bw + 3) + '" y="' + (H - 8) + '" font-size="10" fill="#9a95c4">' + mm + '月度</text>'; } });
+    } else {
+      pts.forEach(function(p, i){ labs += '<text x="' + (L + i * bw + bw / 2) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="10" fill="#9a95c4">' + p.lab + '</text><text x="' + (L + i * bw + bw / 2) + '" y="' + (y(p.v) - 5) + '" text-anchor="middle" font-size="9.5" font-weight="900" fill="#f4f2ff">' + Math.round(p.v / 1000) / 10 + '万</text>'; });
+    }
+    var info = sel >= 0 && pts[sel] ? '<b style="color:var(--yellow)">' + escH(pts[sel].lab) + '</b>　' + yen(pts[sel].v) + '円' + (mode === 'month' ? '（' + pts[sel].n + '乗務）' : '') : (mode === 'day' ? '棒をタップすると金額が出ます　<span style="color:var(--yellow)">━</span> 直近5乗務の平均' : '月度ごとの売上合計（棒をタップで詳細）');
+    var svg = '<svg' + (forPdf ? '' : ' id="trend"') + ' viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;touch-action:manipulation"><defs><linearGradient id="tg' + (forPdf ? mode : '') + '" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#2fd3ff"/><stop offset="1" stop-color="#ff3b6b"/></linearGradient></defs>' + g + bars.split('url(#tg)').join('url(#tg' + (forPdf ? mode : '') + ')') + line + labs + '</svg>';
+    if (forPdf) return '<div class="card" style="padding:12px 10px"><div class="stepLbl" style="margin-bottom:6px">' + (mode === 'day' ? 'DAILY TREND　日ごとの推移（黄色の線＝直近5乗務の平均）' : 'MONTHLY TREND　月度ごとの売上合計') + '</div>' + svg + '</div>';
+    return '<div class="card" style="padding:10px 8px">'
+      + '<div style="display:flex;gap:6px;justify-content:center;margin-bottom:6px"><button class="b2 ' + (mode === 'day' ? 'on' : '') + '" data-chart="day">日ごとの推移</button><button class="b2 ' + (mode === 'month' ? 'on' : '') + '" data-chart="month">月度ごとの推移</button></div>'
+      + svg
+      + '<div class="sub" style="font-size:12px;margin-top:4px;min-height:18px">' + info + '</div></div>';
+  }
+
+  // ---- PDF（今の画面デザインのまま A4 に。html2canvas で描いて jsPDF でページ分割） ----
+  function loadLib(src, globalName){
+    return new Promise(function(res, rej){
+      if (window[globalName]) return res();
+      var sc = document.createElement('script'); sc.src = src; sc.onload = function(){ res(); }; sc.onerror = function(){ rej(new Error('PDF作成ツールの読み込みに失敗しました。通信状況を確認してください')); };
+      document.head.appendChild(sc);
+    });
+  }
+  function reportHtml(){
+    var d = S.mine || {}, ms = d.months || [], days = d.days || [], now = new Date();
+    var done = ms.filter(function(x){ return !x.partial; }), last = done[done.length - 1] || ms[ms.length - 1], first = ms[0];
+    var h = '<div style="display:flex;align-items:center;gap:10px;padding:4px 2px 14px;border-bottom:1px solid var(--line)"><span class="logo neon" style="font-family:var(--num);font-weight:900;font-size:15px;letter-spacing:.12em;--glow:var(--pink)">ITABASHI <b style="color:var(--pink)">BATTLE 2</b></span><span style="margin-left:auto;font-size:11px;color:var(--mute)">' + now.getFullYear() + '/' + (now.getMonth() + 1) + '/' + now.getDate() + ' 作成</span></div>';
+    h += '<div style="text-align:center;padding:18px 0 6px"><div class="stepLbl">SALES REPORT</div><h1 class="big" style="margin-top:6px">' + escH(S.me.name) + ' さんの売上レポート</h1><div class="sub">データ最終日 ' + escH(d.latest || '') + '</div></div>';
+    if (last) {
+      var rate = last.rate, up = rate == null || rate >= 0, times = first && first.avg ? Math.round(last.avg / first.avg * 10) / 10 : null;
+      h += '<div class="card" style="text-align:center;margin-bottom:12px"><div class="sub" style="margin:0">' + last.m + '月度の前月比（1乗務あたり平均売上）</div><div class="big2 neon ' + (up ? 'up' : 'down') + '" style="margin:8px 0">' + (rate == null ? '―' : (rate >= 0 ? '+' : '') + rate + '%') + '</div>'
+        + (times && ms.length > 1 ? '<div class="sub" style="margin:0">' + first.m + '月度 ' + yen(first.avg) + '円 → ' + last.m + '月度 ' + yen(last.avg) + '円（はじめの月度の <b class="num" style="color:var(--yellow)">' + times + '</b> 倍）</div>' : '') + '</div>';
+    }
+    if (days.length) {
+      var total = days.reduce(function(a, x){ return a + x.amount; }, 0), best = days.reduce(function(a, x){ return x.amount > a.amount ? x : a; }, days[0]);
+      h += '<div class="card" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin-bottom:12px"><div><div class="sub" style="margin:0;font-size:11px">乗務数</div><div class="num" style="font-size:22px">' + days.length + '</div></div><div><div class="sub" style="margin:0;font-size:11px">累計</div><div class="num" style="font-size:18px">' + yen(total) + '</div></div><div><div class="sub" style="margin:0;font-size:11px">最高（' + escH(best.date.slice(5).replace('-', '/')) + '）</div><div class="num" style="font-size:18px;color:var(--yellow)">' + yen(best.amount) + '</div></div></div>';
+      h += '<div style="margin-bottom:12px">' + trendChart(days, ms, 'day', true) + '</div><div style="margin-bottom:12px">' + trendChart(days, ms, 'month', true) + '</div>';
+    }
+    if (ms.length) {
+      h += '<div class="card" style="padding:12px 10px;margin-bottom:12px"><div class="stepLbl" style="margin-bottom:6px">GROWTH　1乗務あたり平均売上と前月比</div>' + growthChart(ms) + '</div>';
+      h += '<div class="card" style="padding:0;margin-bottom:12px">' + ms.map(function(x){ return '<div class="mrow"><span>' + mLabel(x) + '</span><span class="num">平均 ' + yen(x.avg) + '円<span style="color:var(--mute);font-size:11px">（' + x.n + '乗務・計 ' + yen(x.sum) + '円）</span></span><span class="r ' + (x.rate == null ? '' : x.rate >= 0 ? 'up' : 'down') + '">' + (x.rate == null ? '―' : (x.rate >= 0 ? '+' : '') + x.rate + '%') + '</span></div>'; }).join('') + '</div>';
+    }
+    if (days.length) {
+      h += '<div class="card" style="padding:0"><table class="dtbl"><tr><th>日付</th><th>月度</th><th>勤務</th><th style="text-align:right">売上(円)</th><th style="text-align:right">回数</th><th style="text-align:right">km</th><th>出庫〜帰庫</th></tr>'
+        + days.map(function(x){ return '<tr><td>' + escH(x.date.replace(/-/g, '/')) + '</td><td>' + x.pm + '月度</td><td>' + escH(x.duty || '') + '</td><td class="n">' + yen(x.amount) + '</td><td class="n">' + (x.rides == null ? '' : x.rides) + '</td><td class="n">' + (x.km == null ? '' : x.km) + '</td><td>' + escH((x.start || '') + (x.ret ? '〜' + x.ret : '')) + '</td></tr>'; }).join('') + '</table></div>';
+    }
+    h += '<div class="priv" style="margin-top:14px">このレポートは ' + escH(S.me.name) + ' さん本人の売上データです</div>';
+    return h;
+  }
+  function buildPdf(){
+    return loadLib('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', 'html2canvas')
+      .then(function(){ return loadLib('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', 'jspdf'); })
+      .then(function(){ return document.fonts && document.fonts.ready; })
+      .then(function(){
+        var box = document.createElement('div');
+        box.style.cssText = 'position:absolute;left:-10000px;top:0;width:760px;padding:28px 30px 34px;color:#f4f2ff;font-family:var(--jp);font-weight:700;'
+          + 'background:radial-gradient(60% 18% at 15% 3%,rgba(155,107,255,.30),transparent 70%),radial-gradient(55% 16% at 90% 12%,rgba(255,59,107,.20),transparent 70%),radial-gradient(60% 20% at 80% 60%,rgba(47,211,255,.16),transparent 70%),#07060f;';
+        box.innerHTML = reportHtml();
+        document.body.appendChild(box);
+        // ページの切れ目にしてよい位置（カード・表の行・月度の行の下端）を先に測っておく
+        var top0 = box.getBoundingClientRect().top, breaks = [];
+        Array.prototype.forEach.call(box.querySelectorAll('.card, .dtbl tr:not(:first-child), .mrow'), function(el){ breaks.push(el.getBoundingClientRect().bottom - top0 + 6); });
+        breaks.sort(function(a, b){ return a - b; });
+        var cssW = box.offsetWidth, cssH = box.offsetHeight;
+        return window.html2canvas(box, { scale: 2, backgroundColor: '#07060f', logging: false }).then(function(cv){ box.remove(); return { cv: cv, breaks: breaks, cssW: cssW, cssH: cssH }; }, function(e){ box.remove(); throw e; });
+      })
+      .then(function(r){
+        var cv = r.cv, k = cv.width / r.cssW;
+        var pdf = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
+        var pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+        var pageCss = r.cssW * ph / pw, padCss = 24, start = 0, page = 0;
+        while (start < r.cssH - 1) {
+          var room = pageCss - (page ? padCss : 0), limit = start + room, cut = limit;
+          if (limit < r.cssH) {
+            var ok = r.breaks.filter(function(b){ return b > start + 40 && b <= limit; });
+            if (ok.length) cut = ok[ok.length - 1];
+          } else cut = r.cssH;
+          var c = document.createElement('canvas');
+          c.width = cv.width; c.height = Math.round(pageCss * k);
+          var g = c.getContext('2d'); g.fillStyle = '#07060f'; g.fillRect(0, 0, c.width, c.height);
+          var sy = Math.round(start * k), sh = Math.round((cut - start) * k);
+          g.drawImage(cv, 0, sy, cv.width, sh, 0, page ? Math.round(padCss * k) : 0, cv.width, sh);
+          if (page) pdf.addPage();
+          pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pw, ph);
+          start = cut; page++;
+          if (page > 40) break;
+        }
+        return pdf;
+      });
+  }
+  window.IB2PDF = buildPdf;
+  function downloadPdf(btn){
+    btn.disabled = true; var t = btn.textContent; btn.textContent = 'PDFを作成中…';
+    buildPdf().then(function(pdf){
+      var now = new Date();
+      pdf.save('売上レポート_' + S.me.name.split(' ').join('') + '_' + now.getFullYear() + ('0' + (now.getMonth() + 1)).slice(-2) + ('0' + now.getDate()).slice(-2) + '.pdf');
+    }).catch(function(e){ alert((e && e.message) || 'PDFの作成に失敗しました'); }).then(function(){ btn.disabled = false; btn.textContent = t; });
+  }
+
+  function downloadCsv(){
+    var d = S.mine; if (!d || !d.days) return;
+    var NL = String.fromCharCode(13) + String.fromCharCode(10);
+    var head = ['日付', '月度', '勤務', '売上(円)', '回数', '距離(km)', '出庫', '帰庫', '実労働(時間)'];
+    var lines = [head.join(',')].concat(d.days.map(function(x){ return [x.date, x.py + '年' + x.pm + '月度', x.duty || '', x.amount, x.rides == null ? '' : x.rides, x.km == null ? '' : x.km, x.start || '', x.ret || '', x.hours == null ? '' : x.hours].join(','); }));
+    lines.push('');
+    lines.push(['月度', '乗務数', '売上合計(円)', '1乗務平均(円)', '前月比(%)'].join(','));
+    (d.months || []).forEach(function(x){ lines.push([x.y + '年' + x.m + '月度' + (x.partial ? '（集計中）' : ''), x.n, x.sum, x.avg, x.rate == null ? '' : x.rate].join(',')); });
+    var blob = new Blob([String.fromCharCode(0xfeff) + lines.join(NL)], { type: 'text/csv' });
+    var a = document.createElement('a'), now = new Date();
+    a.href = URL.createObjectURL(blob);
+    a.download = '売上_' + S.me.name.split(' ').join('') + '_' + now.getFullYear() + ('0' + (now.getMonth() + 1)).slice(-2) + ('0' + now.getDate()).slice(-2) + '.csv';
+    document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+
   function qboxView(){
     var open = S.phase === 'open';
     var list = (S.qbox || []).map(function(x){ return '<div class="qi"><span>' + escH(x.text) + '</span>' + (x.mine ? '<b class="num" style="color:var(--mute)">♥' + x.likes + '</b>' : '<button data-like="' + x.id + '" class="' + (x.liked ? 'on' : '') + '">聞きたい ' + x.likes + '</button>') + '</div>'; }).join('');
@@ -312,6 +517,16 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
       if (j < 0 || j >= o.length) return; var t = o[p]; o[p] = o[j]; o[j] = t; vib(15); lastHtml = ''; render(); }; });
     var so = document.getElementById('sendOrd'); if (so) so.onclick = function(){ send({ t: 'answer', a: draft.order.join(','), ms: Math.round(performance.now() - shownAt) }); };
     var sq = document.getElementById('sendQ'); if (sq) sq.onclick = function(){ var v = document.getElementById('qt').value.trim(); if (v) { send({ t: 'q', text: v }); document.getElementById('qt').value = ''; } };
+    var dl = document.getElementById('dlCsv'); if (dl) dl.onclick = downloadCsv;
+    var dp = document.getElementById('dlPdf'); if (dp) dp.onclick = function(){ downloadPdf(dp); };
+    Array.prototype.forEach.call(app.querySelectorAll('[data-chart]'), function(b){ b.onclick = function(){ draft.chart = b.getAttribute('data-chart'); draft.sel = -1; lastHtml = ''; render(); }; });
+    var tr = document.getElementById('trend');
+    if (tr) tr.addEventListener('click', function(e){
+      var t = e.target && e.target.getAttribute ? e.target.getAttribute('data-bar') : null, i;
+      if (t != null) i = Number(t);
+      else { var r = tr.getBoundingClientRect(), bars = tr.querySelectorAll('[data-bar]'); if (!bars.length) return; var x = (e.clientX - r.left) / r.width * 360; i = Math.max(0, Math.min(bars.length - 1, Math.floor((x - 34) / ((360 - 42) / bars.length)))); }
+      draft.sel = draft.sel === i ? -1 : i; lastHtml = ''; render();
+    });
     Array.prototype.forEach.call(app.querySelectorAll('[data-like]'), function(b){ b.onclick = function(){ send({ t: 'like', id: Number(b.getAttribute('data-like')) }); }; });
   }
 

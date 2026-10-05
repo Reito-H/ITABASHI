@@ -15,7 +15,7 @@ async function canEdit(c: { env: Env; get: (k: 'adminId') => number }): Promise<
   return perms === null || perms.includes('settings.kancho-wish.edit');
 }
 
-type WishSettings = { target_year: number; target_month: number; open_from: string | null; open_until: string | null };
+type WishSettings = { target_year: number; target_month: number; open_from: string | null; open_until: string | null; max_wishes: number | null };
 
 const ROLE_LABEL: Record<string, string> = {
   general_manager: '統括管理者', operations_manager: '運行管理者', vehicle_manager: '車両管理者',
@@ -25,7 +25,7 @@ const ROLE_LABEL: Record<string, string> = {
 
 // ===== ページ =====
 app.get('/settings/kancho-wish', async (c) => {
-  const settings = await c.env.DB.prepare('SELECT target_year, target_month, open_from, open_until FROM kancho_wish_settings WHERE id = 1')
+  const settings = await c.env.DB.prepare('SELECT target_year, target_month, open_from, open_until, max_wishes FROM kancho_wish_settings WHERE id = 1')
     .first<WishSettings>();
   const editable = await canEdit(c);
   const shareUrl = `https://bentenclub.com${KANCHO_WISH_PATH}`;
@@ -49,9 +49,11 @@ app.get('/settings/kancho-wish', async (c) => {
       <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
         <label style="font-size:12px;color:#6b7280;">受付開始日<div><input id="open-from" type="date" value="${settings?.open_from ?? ''}" style="border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;"></div></label>
         <label style="font-size:12px;color:#6b7280;">受付終了日<div><input id="open-until" type="date" value="${settings?.open_until ?? ''}" style="border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;"></div></label>
+        <label style="font-size:12px;color:#6b7280;">希望休の上限（全員共通）<div><input id="max-wishes" type="number" min="0" value="${settings?.max_wishes ?? ''}" placeholder="なし" style="width:80px;border:1px solid #d1d5db;border-radius:6px;padding:7px;font-size:13px;">日まで</div></label>
       </div>
       ${editable ? `<button onclick="saveSettings()" id="save-settings-btn" style="padding:9px 22px;background:#2563eb;color:white;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;">保存</button>` : ''}
-      <div style="font-size:11px;color:#9ca3af;margin-top:8px;">対象月度を保存すると、班長シフトの名簿がまだ無い月度の場合は自動で用意されます。</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:8px;">希望休の上限を空欄にすると上限なしになります。人ごとの上限は下の「提出状況」の上限欄で個別に設定できます（個別設定が優先）。</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:4px;">対象月度を保存すると、班長シフトの名簿がまだ無い月度の場合は自動で用意されます。</div>
     </div>
 
     <div style="background:white;border:1px solid #e5e7eb;border-radius:10px;padding:18px;max-width:640px;margin-bottom:16px;">
@@ -84,7 +86,8 @@ app.get('/settings/kancho-wish', async (c) => {
         target_year: parseInt(document.getElementById('tgt-year').value) || 0,
         target_month: parseInt(document.getElementById('tgt-month').value) || 0,
         open_from: document.getElementById('open-from').value || null,
-        open_until: document.getElementById('open-until').value || null
+        open_until: document.getElementById('open-until').value || null,
+        max_wishes: document.getElementById('max-wishes').value === '' ? null : parseInt(document.getElementById('max-wishes').value)
       };
       if (!body.target_year || !body.target_month) { alert('対象月度を入力してください'); return; }
       btn.disabled = true; btn.textContent = '保存中...';
@@ -121,20 +124,38 @@ app.get('/settings/kancho-wish', async (c) => {
       var d = await res.json();
       if (!d.rows || d.rows.length === 0) { document.getElementById('summary-body').innerHTML = '<div style="color:#9ca3af;">対象月度の班長名簿がありません（対象月度を保存してください）</div>'; return; }
       var html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-        + '<thead><tr style="background:#f8fafc;"><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">班長</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">希望休</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">その他要望</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;"></th></tr></thead><tbody>'
+        + '<thead><tr style="background:#f8fafc;"><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">班長</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;white-space:nowrap;">上限（個別）</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">希望休</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;">その他要望</th><th style="padding:6px 8px;text-align:left;border-bottom:2px solid #e5e7eb;"></th></tr></thead><tbody>'
         + d.rows.map(function(r) {
             var dates = (r.dates || []).map(function(dt) { return dt.slice(5).replace('-', '/'); }).join('、') || '（未提出）';
             var hasSubmission = (r.dates && r.dates.length > 0) || !!r.remark;
             var resetBtn = (hasSubmission && EDITABLE)
               ? '<button onclick="resetMember(' + r.id + ', \\'' + escH(r.name) + '\\')" style="padding:5px 12px;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">リセット</button>'
               : '';
+            var limitCell = !r.emp_no
+              ? '<span style="font-size:11px;color:#9ca3af;">社員番号未登録</span>'
+              : (EDITABLE
+                ? '<input type="number" min="0" value="' + (r.limit == null ? '' : r.limit) + '" placeholder="' + (d.default_max == null ? '共通:なし' : '共通:' + d.default_max) + '" data-emp="' + escH(r.emp_no) + '" onchange="saveLimit(this)" style="width:72px;border:1px solid #d1d5db;border-radius:6px;padding:4px 6px;font-size:12px;"> 日'
+                : escH(r.limit == null ? (d.default_max == null ? '共通（なし）' : '共通（' + d.default_max + '日）') : r.limit + '日'));
+            var cnt = (r.dates || []).length;
+            var eff = (r.limit == null) ? d.default_max : r.limit;
+            var over = (eff != null && cnt > eff) ? ' <span style="color:#dc2626;font-size:11px;font-weight:700;">上限超過</span>' : '';
             return '<tr><td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;font-weight:600;white-space:nowrap;">' + escH(r.name) + '</td>'
-              + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + escH(dates) + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap;">' + limitCell + '</td>'
+              + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;">' + escH(dates) + (cnt ? ' <span style="color:#6b7280;font-size:11px;">（' + cnt + '日）</span>' : '') + over + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;color:#6b7280;">' + escH(r.remark || '') + '</td>'
               + '<td style="padding:6px 8px;border-bottom:1px solid #f3f4f6;text-align:right;">' + resetBtn + '</td></tr>';
           }).join('')
         + '</tbody></table>';
       document.getElementById('summary-body').innerHTML = html;
+    }
+    async function saveLimit(el) {
+      var v = el.value.trim();
+      var res = await fetch(API + '/limit', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ emp_no: el.dataset.emp, max_wishes: v === '' ? null : parseInt(v) })
+      });
+      if (res.ok) loadSummary();
+      else { var d = await res.json().catch(function(){ return {}; }); alert(d.error || '保存に失敗しました'); }
     }
     async function resetMember(id, name) {
       if (!confirm(name + 'さんの提出状況（希望休・その他要望）をリセットします。よろしいですか？')) return;
@@ -150,16 +171,26 @@ app.get('/settings/kancho-wish', async (c) => {
 
 // ===== API =====
 app.get('/api/kancho-wish-settings', async (c) => {
-  const row = await c.env.DB.prepare('SELECT target_year, target_month, open_from, open_until FROM kancho_wish_settings WHERE id = 1').first<WishSettings>();
+  const row = await c.env.DB.prepare('SELECT target_year, target_month, open_from, open_until, max_wishes FROM kancho_wish_settings WHERE id = 1').first<WishSettings>();
   return c.json(row ?? { target_year: 0, target_month: 0, open_from: null, open_until: null });
 });
 
+// 上限日数の入力値を正規化（null/空=上限なし、0以上の整数のみ許可）
+function normalizeMax(v: unknown): number | null | undefined {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 31) return undefined;
+  return n;
+}
+
 app.post('/api/kancho-wish-settings', async (c) => {
-  const b = await c.req.json<{ target_year?: number; target_month?: number; open_from?: string | null; open_until?: string | null }>();
+  const b = await c.req.json<{ target_year?: number; target_month?: number; open_from?: string | null; open_until?: string | null; max_wishes?: number | null }>();
   if (!b.target_year || !b.target_month) return c.json({ error: '対象月度を入力してください' }, 400);
+  const maxWishes = normalizeMax(b.max_wishes);
+  if (maxWishes === undefined) return c.json({ error: '希望休の上限は0〜31の整数で入力してください' }, 400);
   await c.env.DB.prepare(
-    `UPDATE kancho_wish_settings SET target_year = ?, target_month = ?, open_from = ?, open_until = ?, updated_at = datetime('now','localtime') WHERE id = 1`
-  ).bind(b.target_year, b.target_month, b.open_from || null, b.open_until || null).run();
+    `UPDATE kancho_wish_settings SET target_year = ?, target_month = ?, open_from = ?, open_until = ?, max_wishes = ?, updated_at = datetime('now','localtime') WHERE id = 1`
+  ).bind(b.target_year, b.target_month, b.open_from || null, b.open_until || null, maxWishes).run();
   await ensureKanchoPeriod(c.env.DB, b.target_year, b.target_month);
   return c.json({ ok: true });
 });
@@ -186,20 +217,41 @@ app.post('/api/kancho-wish-settings/notify', async (c) => {
   return c.json({ ok: true });
 });
 
+app.post('/api/kancho-wish-settings/limit', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ emp_no?: string; max_wishes?: number | null }>();
+  const empNo = (b.emp_no ?? '').trim();
+  if (!empNo) return c.json({ error: '社員番号が必要です' }, 400);
+  const maxWishes = normalizeMax(b.max_wishes);
+  if (maxWishes === undefined) return c.json({ error: '上限は0〜31の整数で入力してください' }, 400);
+  if (maxWishes === null) {
+    await c.env.DB.prepare('DELETE FROM kancho_wish_limits WHERE emp_no = ?').bind(empNo).run();
+  } else {
+    await c.env.DB.prepare(
+      `INSERT INTO kancho_wish_limits (emp_no, max_wishes, updated_at) VALUES (?, ?, datetime('now','localtime'))
+       ON CONFLICT(emp_no) DO UPDATE SET max_wishes = excluded.max_wishes, updated_at = excluded.updated_at`
+    ).bind(empNo, maxWishes).run();
+  }
+  return c.json({ ok: true });
+});
+
 app.get('/api/kancho-wish-settings/summary', async (c) => {
-  const settings = await c.env.DB.prepare('SELECT target_year, target_month FROM kancho_wish_settings WHERE id = 1').first<WishSettings>();
+  const settings = await c.env.DB.prepare('SELECT target_year, target_month, max_wishes FROM kancho_wish_settings WHERE id = 1').first<WishSettings>();
   if (!settings?.target_year || !settings.target_month) return c.json({ rows: [] });
   const members = await c.env.DB.prepare(
-    "SELECT id, name, role FROM kancho_members WHERE section = 'main' AND is_active = 1 AND is_indoor = 1 AND year = ? AND month = ? ORDER BY sort_order, id"
-  ).bind(settings.target_year, settings.target_month).all<{ id: number; name: string; role: string | null }>();
+    "SELECT id, name, role, emp_no FROM kancho_members WHERE section = 'main' AND is_active = 1 AND is_indoor = 1 AND year = ? AND month = ? ORDER BY sort_order, id"
+  ).bind(settings.target_year, settings.target_month).all<{ id: number; name: string; role: string | null; emp_no: string | null }>();
   const memberList = members.results ?? [];
   if (memberList.length === 0) return c.json({ rows: [] });
   const ids = memberList.map(m => m.id);
   const placeholders = ids.map(() => '?').join(',');
-  const [wishes, remarks] = await Promise.all([
+  const [wishes, remarks, limits] = await Promise.all([
     c.env.DB.prepare(`SELECT member_id, date FROM kancho_wishes WHERE member_id IN (${placeholders}) ORDER BY date`).bind(...ids).all<{ member_id: number; date: string }>(),
     c.env.DB.prepare(`SELECT member_id, content FROM kancho_wish_remarks WHERE member_id IN (${placeholders})`).bind(...ids).all<{ member_id: number; content: string }>(),
+    c.env.DB.prepare('SELECT emp_no, max_wishes FROM kancho_wish_limits').all<{ emp_no: string; max_wishes: number }>(),
   ]);
+  const limitByEmp = new Map<string, number>();
+  for (const l of (limits.results ?? [])) limitByEmp.set(l.emp_no, l.max_wishes);
   const datesByMember = new Map<number, string[]>();
   for (const w of (wishes.results ?? [])) {
     if (!datesByMember.has(w.member_id)) datesByMember.set(w.member_id, []);
@@ -209,11 +261,12 @@ app.get('/api/kancho-wish-settings/summary', async (c) => {
   for (const r of (remarks.results ?? [])) remarkByMember.set(r.member_id, r.content);
 
   const rows = memberList.map(m => ({
-    id: m.id, name: m.name, role: m.role,
+    id: m.id, name: m.name, role: m.role, emp_no: m.emp_no,
+    limit: m.emp_no && limitByEmp.has(m.emp_no) ? limitByEmp.get(m.emp_no)! : null,
     dates: datesByMember.get(m.id) ?? [],
     remark: remarkByMember.get(m.id) ?? '',
   }));
-  return c.json({ rows });
+  return c.json({ rows, default_max: settings.max_wishes ?? null });
 });
 
 app.post('/api/kancho-wish-settings/reset', async (c) => {

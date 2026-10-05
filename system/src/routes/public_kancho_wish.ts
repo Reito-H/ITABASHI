@@ -11,10 +11,17 @@ import { FAVICON_DATA_URI } from '../html/layout';
 
 const app = new Hono<{ Bindings: Env }>();
 
-type WishSettings = { target_year: number; target_month: number; open_from: string | null; open_until: string | null };
+type WishSettings = { target_year: number; target_month: number; open_from: string | null; open_until: string | null; max_wishes: number | null };
 
 async function getWishSettings(db: D1Database): Promise<WishSettings | null> {
-  return db.prepare('SELECT target_year, target_month, open_from, open_until FROM kancho_wish_settings WHERE id = 1').first<WishSettings>();
+  return db.prepare('SELECT target_year, target_month, open_from, open_until, max_wishes FROM kancho_wish_settings WHERE id = 1').first<WishSettings>();
+}
+
+// 希望休の上限日数（個別設定 > 全員共通 > 上限なし(null)）
+async function getMaxWishes(db: D1Database, empNo: string, settings: WishSettings | null): Promise<number | null> {
+  const row = await db.prepare('SELECT max_wishes FROM kancho_wish_limits WHERE emp_no = ?').bind(empNo).first<{ max_wishes: number }>();
+  if (row) return row.max_wishes;
+  return settings?.max_wishes ?? null;
 }
 
 function todayStr(): string {
@@ -73,7 +80,8 @@ app.get('/api/public/kancho-wish/lookup', async (c) => {
   if (!member) return c.json({ error: '該当する班長が見つかりませんでした。社員番号をご確認ください' }, 404);
   const periodCfg = await getPeriodSettings(c.env.DB);
   const { start, end } = getPeriodRange(settings!.target_year, settings!.target_month, periodCfg);
-  return c.json({ id: member.id, name: member.name, periodStart: start, periodEnd: end });
+  const maxWishes = await getMaxWishes(c.env.DB, empNo, settings);
+  return c.json({ id: member.id, name: member.name, periodStart: start, periodEnd: end, maxWishes });
 });
 
 // member_id だけでなく、最初のlookupと同じ emp_no も毎回一致させる（他人のIDを類推しての
@@ -106,6 +114,14 @@ app.post('/api/public/kancho-wish', async (c) => {
   const empNo = toHalfWidth((b.emp_no ?? '').trim());
   const member = await resolveMember(c, b.member_id, empNo);
   if (!member) return c.json({ error: '対象の班長が見つかりません' }, 404);
+  const maxWishes = await getMaxWishes(c.env.DB, empNo, await getWishSettings(c.env.DB));
+  if (maxWishes !== null) {
+    const cnt = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM kancho_wishes WHERE member_id = ? AND date <> ?')
+      .bind(b.member_id, b.date).first<{ n: number }>();
+    if ((cnt?.n ?? 0) >= maxWishes) {
+      return c.json({ error: `希望休は${maxWishes}日までです。他の日を取り消してから選んでください` }, 400);
+    }
+  }
   await c.env.DB.prepare(
     `INSERT INTO kancho_wishes (member_id, date, note) VALUES (?, ?, '')
      ON CONFLICT(member_id, date) DO NOTHING`
@@ -268,6 +284,10 @@ app.get(KANCHO_WISH_PATH, (c) => {
     textarea:focus { outline:none; border-color:#2e1354; }
     .hint { font-size:12.5px; color:#6b7280; margin:10px 0; line-height:1.7; }
     .hint b { color:#dc2626; }
+    .notice { background:#fff7ed; border:1px solid #fdba74; border-radius:10px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#9a3412; line-height:1.7; }
+    .notice b { font-weight:800; }
+    .limit-line { font-size:13.5px; font-weight:700; color:#1e3a5f; margin-bottom:10px; }
+    .limit-line.full { color:#dc2626; }
     .step { display:none; }
     #toast {
       display:none; position:fixed; bottom:calc(24px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); background:#166534; color:white;
@@ -325,6 +345,8 @@ app.get(KANCHO_WISH_PATH, (c) => {
     <div id="step3" class="step">
       <div class="card cal-card">
         <div class="cal-title">休みたい日をタップしてください</div>
+        <div class="notice">【お願い】シフト作成のため、希望休は<b>なるべく少なく</b>していただくようご協力をお願いします。</div>
+        <div class="limit-line" id="limit-line" style="display:none;"></div>
         <div class="hint">タップした日が<b>赤く</b>なれば希望休として登録されます。もう一度タップすると解除できます。</div>
         <div class="cal-grid" id="cal-dow"></div>
         <div class="cal-grid" id="cal-grid" style="margin-top:5px;"></div>
@@ -354,6 +376,7 @@ var _member = null;      // {id, name}
 var _empNo = '';         // ロックアップ時の社員番号。以後の全リクエストで本人確認に使う
 var _periodStart = '', _periodEnd = '';
 var _wishSet = {};       // date -> wishId
+var _maxWishes = null;   // 希望休の上限日数（null=上限なし）
 
 function escH(s) { return (s == null ? '' : String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function showStep(id) {
@@ -405,6 +428,7 @@ async function lookup() {
     _member = { id: d.id, name: d.name };
     _empNo = empNo;
     _periodStart = d.periodStart; _periodEnd = d.periodEnd;
+    _maxWishes = (d.maxWishes == null) ? null : d.maxWishes;
     document.getElementById('confirm-name').textContent = d.name + ' さん';
     showStep('step2');
   } catch (e) {
@@ -432,7 +456,16 @@ async function goStep3() {
     (d.wishes || []).forEach(function(w) { _wishSet[w.date] = w.id; });
   } catch (e) { _wishSet = {}; }
   renderCal();
+  renderLimit();
   loadRemark();
+}
+function renderLimit() {
+  var el = document.getElementById('limit-line');
+  if (_maxWishes == null) { el.style.display = 'none'; return; }
+  var n = Object.keys(_wishSet).length;
+  el.style.display = 'block';
+  el.textContent = '希望休は ' + _maxWishes + '日まで選べます（現在 ' + n + '日）';
+  el.classList.toggle('full', n >= _maxWishes);
 }
 function renderCalHeader() {
   document.getElementById('cal-dow').innerHTML = WD.map(function(w) { return '<div class="cal-dow">' + w + '</div>'; }).join('');
@@ -468,6 +501,10 @@ function renderCal() {
 }
 async function toggleDate(el) {
   var date = el.dataset.date;
+  if (!_wishSet[date] && _maxWishes != null && Object.keys(_wishSet).length >= _maxWishes) {
+    alert('希望休は' + _maxWishes + '日までです。他の日を取り消してから選んでください。');
+    return;
+  }
   el.classList.add('loading');
   try {
     if (_wishSet[date]) {
@@ -488,9 +525,10 @@ async function toggleDate(el) {
       toast('登録しました');
     }
   } catch (e) {
-    alert('保存に失敗しました。もう一度お試しください。');
+    alert((e && e.message) || '保存に失敗しました。もう一度お試しください。');
   } finally {
     el.classList.remove('loading');
+    renderLimit();
   }
 }
 async function loadRemark() {
