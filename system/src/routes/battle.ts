@@ -17,6 +17,7 @@ import { battlePlayerPage } from '../battle/player_html';
 import { battleScreenPage } from '../battle/screen_html';
 import { battleAdminPage } from '../battle/admin_html';
 import { BATTLE_PRESET, defaultStepConfig, defaultQuestion } from '../battle/preset';
+import { loadBattleRecords, recordsCsv, recordsPrintPage } from '../battle/records';
 import { STEP_KIND_SET, TEAMS, parseJson, type QuestionRow, type StepRow } from '../battle/types';
 
 type AdminCtx = { Bindings: Env; Variables: { adminId: number } };
@@ -146,7 +147,7 @@ battleAdminRoutes.get('/ib2', async (c) => {
   return c.html(battleAdminPage({
     adminPath: ADMIN_PATH, apiBase: `${ADMIN_PATH}/ib2/api`, wsPath: `${ADMIN_PATH}/ib2/ws?role=admin`,
     screenUrl: `${ADMIN_PATH}/ib2/screen`, joinUrl: ju, qrSvg: qrSvg(ju), editable: await canEdit(c),
-    hoshikonUrl: `${ADMIN_PATH}/settings/study-sessions`,
+    hoshikonUrl: `${ADMIN_PATH}/settings/study-sessions`, mediaBase: BATTLE_PUBLIC_PATH,
   }));
 });
 battleAdminRoutes.get('/ib2/screen', async (c) => {
@@ -160,6 +161,25 @@ battleAdminRoutes.get('/ib2/ws', async (c) => {
   const wantAdmin = c.req.query('role') === 'admin';
   const role = wantAdmin && (await canEdit(c)) ? 'admin' : 'screen';
   return forwardWs(c.req.raw, c.env, g!.id, { 'X-Role': role, 'X-Admin': encodeURIComponent(await adminName(c.env.DB, c.get('adminId'))) });
+});
+
+// ---------- 新卒一人ひとりの記録（一覧・印刷・CSV） ----------
+battleAdminRoutes.get('/ib2/api/records', async (c) => {
+  const list = await loadBattleRecords(c.env.DB);
+  return c.json({ people: list.map((p) => ({ gameId: p.gameId, gameTitle: p.gameTitle, empNo: p.empNo, name: p.name, team: p.team, teamName: p.teamName, teamRank: p.teamRank, ta: p.ta, stats: p.stats })) });
+});
+battleAdminRoutes.get('/ib2/records/print', async (c) => {
+  const emp = c.req.query('emp') || undefined;
+  const list = await loadBattleRecords(c.env.DB, emp);
+  const title = emp && list[0] ? `${list[0].name} さんのバトル記録` : '新卒バトル記録（全員）';
+  return c.html(recordsPrintPage(list, title));
+});
+battleAdminRoutes.get('/ib2/records.csv', async (c) => {
+  const list = await loadBattleRecords(c.env.DB);
+  return new Response(recordsCsv(list), { headers: {
+    'Content-Type': 'text/csv; charset=utf-8',
+    'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent('新卒バトル記録.csv')}`,
+  } });
 });
 
 // ---------- 読み込み ----------
@@ -235,7 +255,7 @@ battleAdminRoutes.post('/ib2/api/steps', async (c) => {
   const ins = await c.env.DB.prepare('INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (?, ?, ?, ?, ?)')
     .bind(g.id, (mx?.m ?? -1) + 1, kind, S(body.title, 80) || kind, JSON.stringify(defaultStepConfig(kind))).run();
   const id = Number(ins.meta.last_row_id);
-  if (['buzzer', 'choice', 'number', 'order', 'vote', 'ranking'].includes(kind)) await insertQuestion(c.env.DB, id, 0, defaultQuestion(kind));
+  if (['buzzer', 'choice', 'number', 'order', 'vote', 'ranking', 'prizes'].includes(kind)) await insertQuestion(c.env.DB, id, 0, defaultQuestion(kind));
   await notify(c.env, g.id);
   return c.json({ ok: true, id });
 });
@@ -328,6 +348,7 @@ battleAdminRoutes.patch('/ib2/api/questions/:id', async (c) => {
   if ('points' in b) { sets.push('points = ?'); vals.push(Math.max(0, Math.min(1000, Math.round(Number(b.points) || 0)))); }
   if ('time_limit' in b) { sets.push('time_limit = ?'); vals.push(Math.max(3, Math.min(600, Math.round(Number(b.time_limit) || 20)))); }
   if ('image_id' in b) { sets.push('image_id = ?'); vals.push(b.image_id ? Number(b.image_id) : null); }
+  if ('seq' in b) { sets.push('seq = ?'); vals.push(String(b.seq ?? '').split(',').map((x) => x.trim()).filter((x, i, arr) => ['winner', 'prize', 'lines', 'image', 'full'].includes(x) && arr.indexOf(x) === i).join(',')); }
   if ('choices' in b && Array.isArray(b.choices)) { sets.push('choices = ?'); vals.push(JSON.stringify((b.choices as unknown[]).map((x) => S(x, 80)).filter((x) => x).slice(0, 10))); }
   if (!sets.length) return c.json({ error: '更新項目がありません' }, 400);
   vals.push(q.id);

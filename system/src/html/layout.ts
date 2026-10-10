@@ -107,6 +107,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/ib2?tab=media`,  label: '素材（画像・曲）' },
     { href: `${ADMIN_PATH}/ib2?tab=ta`,     label: '車椅子タイム' },
     { href: `${ADMIN_PATH}/ib2?tab=log`,    label: '得点履歴' },
+    { href: `${ADMIN_PATH}/ib2?tab=rec`,    label: '個人記録' },
     { href: `${ADMIN_PATH}/ib2/screen`,     label: 'プロジェクター画面', newTab: true },
     { href: `${BATTLE_PUBLIC_PATH}/`,       label: '参加者画面（スマホ用）', newTab: true },
   ];

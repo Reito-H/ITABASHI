@@ -15,6 +15,7 @@ const ROLE_LABELS: Record<string, string> = {
   vehicle_manager: '車番管理者',
   newcomer: '新人',
   crew_member: '乗務社員',
+  hoshi_viewer: 'R',
 };
 
 // ===================================================

@@ -7,14 +7,14 @@
 //     同タイムは裏でランダムに並べ、表示タイムには必ず差をつける（電波差・同着をうまく見せる）。
 import type { Env } from '../auth';
 import { BATTLE_PUBLIC_PATH } from '../config';
-import { TEAMS, type TeamId, type StepRow, type QuestionRow, parseJson } from './types';
+import { TEAMS, prizeSeq, prizeSteps, type TeamId, type StepRow, type QuestionRow, parseJson } from './types';
 
 const BUZZ_WINDOW_MS = 350;
 
 interface Att { role: 'player' | 'admin' | 'screen'; emp?: string; name?: string; team?: TeamId; adminName?: string }
 interface Buzz { emp: string; name: string; team: TeamId; ms: number; show: number }
 interface Ans { a: string; ms: number; team: TeamId; name: string }
-interface QItem { id: number; prompt: string; image_id: number | null; choices: string[]; answer: string; points: number; time_limit: number; note: string }
+interface QItem { id: number; prompt: string; image_id: number | null; choices: string[]; answer: string; points: number; time_limit: number; note: string; seq: string[]; steps: string[] }
 interface Step { id: number; kind: string; title: string; config: Record<string, unknown>; qs: QItem[] }
 interface QBoxItem { id: number; emp: string; name: string; team: TeamId; text: string; likes: string[] }
 // 「わたしの売上」：本人のスマホにだけ送る売上データ（ホシコンの sales_records から読むだけ）
@@ -137,7 +137,7 @@ export class BattleRoom {
       id: s.id, kind: s.kind, title: s.title, config: parseJson<Record<string, unknown>>(s.config, {}),
       qs: qs.filter((q) => q.step_id === s.id).map((q) => ({
         id: q.id, prompt: q.prompt, image_id: q.image_id, choices: parseJson<string[]>(q.choices, []),
-        answer: q.answer, points: q.points, time_limit: q.time_limit, note: q.note,
+        answer: q.answer, points: q.points, time_limit: q.time_limit, note: q.note, seq: prizeSeq(q.seq, q.points), steps: prizeSteps(prizeSeq(q.seq, q.points), q.answer),
       })),
     }));
     await this.reloadPeople();
@@ -297,7 +297,7 @@ export class BattleRoom {
     const st = this.curStep();
     L.survivors = st && st.kind === 'choice' && st.config.survival ? Array.from(this.players.keys()) : null;
     L.phase = st && ['buzzer', 'choice', 'number', 'order', 'vote'].includes(st.kind) ? 'intro' : st?.kind === 'qbox' ? 'open' : 'show';
-    const defBgm: Record<string, string> = { lobby: 'builtin:lobby', reveal: 'builtin:battle', setup: 'builtin:funk', black: 'none' };
+    const defBgm: Record<string, string> = { lobby: 'builtin:lobby', reveal: 'builtin:battle', setup: 'builtin:funk', black: 'none', formal: 'none' };
     const bgm = st ? String(st.config.bgm || defBgm[st.kind] || '') : '';
     if (bgm) L.bgm = bgm === 'none' ? null : bgm;
     // 動画ラウンドは入った瞬間から再生（自動再生オフなら講師が「再生」を押す）
@@ -397,9 +397,8 @@ export class BattleRoom {
     if (t === 'q' && st.kind === 'qbox' && L.phase === 'open') {
       const text = String(m.text || '').trim().slice(0, 120);
       if (!text || L.qbox.filter((x) => x.emp === emp).length >= 5) return;
-      const ins = await this.env.DB.prepare('INSERT INTO ib2_answers (game_id, step_id, emp_no, team, answer) VALUES (?, ?, ?, ?, ?)')
-        .bind(this.gameId, st.id, emp, team, text).run();
-      L.qbox.push({ id: Number(ins.meta.last_row_id), emp, name: me.name, team, text, likes: [] });
+      const [qid] = await this.logAnswers(st, null, [{ emp, team, name: me.name, answer: text, label: text, correctLabel: '', correct: -1, ms: null }]);
+      L.qbox.push({ id: qid, emp, name: me.name, team, text, likes: [] });
       await this.save();
       this.sfx('pop');
       this.broadcast();
@@ -409,6 +408,7 @@ export class BattleRoom {
       const it = L.qbox.find((x) => x.id === Number(m.id));
       if (!it || it.emp === emp) return;
       it.likes = it.likes.includes(emp) ? it.likes.filter((e) => e !== emp) : [...it.likes, emp];
+      await this.env.DB.prepare('UPDATE ib2_answers SET likes = ? WHERE id = ?').bind(it.likes.length, it.id).run();
       await this.save();
       this.broadcast();
     }
@@ -527,7 +527,8 @@ export class BattleRoom {
       await this.env.DB.batch([
         this.env.DB.prepare('DELETE FROM ib2_scores WHERE game_id = ?').bind(this.gameId),
         this.env.DB.prepare('DELETE FROM ib2_teams WHERE game_id = ?').bind(this.gameId),
-        this.env.DB.prepare('DELETE FROM ib2_answers WHERE game_id = ?').bind(this.gameId),
+        // 個人の記録は消さずに「無効」にして残す（リハーサル分が本番の記録に混ざらないように）
+        this.env.DB.prepare('UPDATE ib2_answers SET voided = 1 WHERE game_id = ?').bind(this.gameId),
       ]);
       if (m.players) await this.env.DB.prepare('DELETE FROM ib2_players WHERE game_id = ?').bind(this.gameId).run();
       this.live = freshLive();
@@ -546,7 +547,7 @@ export class BattleRoom {
       const nk = this.curStep()?.kind;
       if (t !== 'prev') {
         if (nk === 'reveal') { this.sfx('taiko'); this.sfx('cheer', { delay: 600 }); }
-        else if (nk !== 'black') this.sfx('whoosh');
+        else if (nk !== 'black' && nk !== 'formal') this.sfx('whoosh');
       }
       const cur = this.curStep();
       if (cur && SALES_KINDS.includes(cur.kind)) await this.loadMySales(Array.from(this.players.keys()));
@@ -601,7 +602,7 @@ export class BattleRoom {
     const now = Date.now();
 
     if (a === 'vplay' || a === 'vpause' || a === 'vrestart') {
-      if (st.kind !== 'video') return;
+      if (st.kind !== 'video' && !(st.kind === 'announce' && L.revealN >= 1)) return;
       const v = L.video ?? { playing: false, offset: 0, at: now };
       const pos = v.playing ? v.offset + (now - v.at) / 1000 : v.offset;
       if (a === 'vplay') L.video = { playing: true, offset: pos, at: now };
@@ -625,6 +626,7 @@ export class BattleRoom {
     } else if (a === 'ok' && q && st.kind === 'buzzer' && L.phase === 'judge') {
       const b = L.buzz[L.buzzCursor];
       if (!b) return;
+      await this.logAnswers(st, q, [{ emp: b.emp, team: b.team, name: b.name, answer: 'buzz', label: '早押しで回答', correctLabel: q.answer, correct: 1, ms: b.show, note: (L.buzzCursor + 1) + '番目に押した' }]);
       const key = `q${q.id}`;
       if (L.awardedKey !== key) {
         L.awardedKey = key;
@@ -638,7 +640,10 @@ export class BattleRoom {
       if (L.streak >= 2) this.sfx('combo', { delay: 700 });
     } else if (a === 'ng' && st.kind === 'buzzer' && L.phase === 'judge') {
       const b = L.buzz[L.buzzCursor];
-      if (b) L.buzzLocked.push(b.emp);
+      if (b) {
+        L.buzzLocked.push(b.emp);
+        if (q) await this.logAnswers(st, q, [{ emp: b.emp, team: b.team, name: b.name, answer: 'buzz', label: '早押しで回答', correctLabel: q.answer, correct: 0, ms: b.show, note: (L.buzzCursor + 1) + '番目に押した' }]);
+      }
       const nextIdx = L.buzz.findIndex((x, i) => i > L.buzzCursor && !L.buzzLocked.includes(x.emp));
       if (nextIdx >= 0) L.buzzCursor = nextIdx;
       else { L.phase = 'open'; L.buzzCursor = L.buzz.length; }
@@ -659,6 +664,32 @@ export class BattleRoom {
       L.qIdx = ni;
       this.resetQ();
       this.sfx('whoosh');
+    } else if ((a === 'revealNext' || a === 'revealAll') && st.kind === 'announce') {
+      // 発表：予告 → 画像・動画つきで発表（動画があればその場で再生）
+      if (L.revealN >= 1) return;
+      L.revealN = 1;
+      if (st.config.video_id) L.video = { playing: true, offset: 0, at: now };
+      this.sfx('explosion'); this.sfx('fanfare', { delay: 300 }); this.sfx('clapCheer', { delay: 800 });
+    } else if (a === 'revealReset' && st.kind === 'announce') {
+      L.revealN = 0;
+      L.video = { playing: false, offset: 0, at: now };
+    } else if ((a === 'revealNext' || a === 'revealAll' || a === 'revealPrev') && st.kind === 'prizes') {
+      // 景品発表：賞ごとに決めた演出の順番（受賞者・景品の文・画像・全画面画像）を1つずつ出す
+      const total = st.qs.reduce((n, x) => n + x.steps.length, 0);
+      if (a === 'revealPrev') { if (L.revealN > 0) L.revealN--; }
+      else {
+        if (L.revealN >= total) return;
+        L.revealN = a === 'revealAll' ? total : L.revealN + 1;
+        const cur = this.prizeCursor(st, L.revealN);
+        const part = cur ? cur.q.steps[cur.k - 1] : '';
+        const last = cur ? cur.k === cur.q.steps.length : false;
+        const isLine = part.startsWith('line');
+        if (a === 'revealAll' || part === 'winner' || ((part === 'prize' || isLine) && last)) { this.sfx('fanfare'); this.sfx('clapCheer', { delay: 500 }); }
+        else if (isLine) this.sfx(part === 'line0' ? 'reveal2' : 'pop');
+        else if (part === 'full') { this.sfx('whoosh'); this.sfx('sparkle', { delay: 400 }); }
+        else if (part === 'image') this.sfx('sparkle');
+        else this.sfx('reveal2');
+      }
     } else if (a === 'revealNext') {
       const total = st.kind === 'timeattack' ? Math.min(this.timeattack.length, Number(st.config.top || 10)) : st.kind === 'scoreboard' ? 4 : st.qs.length;
       if (L.revealN < total) {
@@ -679,7 +710,7 @@ export class BattleRoom {
       L.phase = L.phase === 'open' ? 'closed' : 'open';
     } else if (a === 'pick' && st.kind === 'qbox') {
       L.picked = L.picked === Number(m.id) ? null : Number(m.id);
-      if (L.picked) this.sfx('reveal');
+      if (L.picked) { this.sfx('reveal'); await this.env.DB.prepare('UPDATE ib2_answers SET picked = 1 WHERE id = ? AND game_id = ?').bind(L.picked, this.gameId).run(); }
     } else if (a === 'survivalAward' && st.kind === 'choice' && L.survivors) {
       const key = `surv${st.id}`;
       if (L.awardedKey !== key) {
@@ -698,6 +729,46 @@ export class BattleRoom {
     this.broadcast();
   }
 
+  // 個人記録を ib2_answers に書く。correct: 1=正解 / 0=不正解 / 2=入賞 / -1=正誤なし
+  private async logAnswers(st: Step, q: QItem | null, rows: Array<{ emp: string; team: string; name: string; answer: string; label: string; correctLabel: string; correct: number; ms: number | null; note?: string }>): Promise<number[]> {
+    const stmts = rows.map((x) => this.env.DB.prepare(
+      'INSERT INTO ib2_answers (game_id, step_id, question_id, emp_no, team, answer, correct, ms, kind, step_title, name, prompt, answer_label, correct_label, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(this.gameId, st.id, q ? q.id : null, x.emp, x.team, x.answer, x.correct, x.ms, st.kind, st.title, x.name, q ? q.prompt : '', x.label, x.correctLabel, x.note ?? ''));
+    const ids: number[] = [];
+    for (let i = 0; i < stmts.length; i += 40) {
+      const res = await this.env.DB.batch(stmts.slice(i, i + 40));
+      for (const r of res) ids.push(Number(r.meta.last_row_id));
+    }
+    return ids;
+  }
+  private async recordSettle(st: Step, q: QItem, entries: Array<[string, Ans]>): Promise<void> {
+    const unit = String(st.config.unit || '');
+    const base = (emp: string, v: Ans) => ({ emp, team: v.team, name: v.name, answer: v.a, ms: v.ms });
+    if (st.kind === 'choice' || st.kind === 'vote') {
+      const right = q.choices[Number(q.answer)] ?? '';
+      await this.logAnswers(st, q, entries.map(([emp, v]) => ({ ...base(emp, v), label: q.choices[Number(v.a)] ?? v.a,
+        correctLabel: st.kind === 'vote' ? '' : right, correct: st.kind === 'vote' ? -1 : (v.a === String(q.answer) ? 1 : 0) })));
+      return;
+    }
+    if (st.kind === 'number') {
+      const target = Number(String(q.answer).replace(/[^0-9.-]/g, ''));
+      const ok = String(q.answer).trim() !== '' && Number.isFinite(target);
+      const ranked = entries
+        .map(([emp, v]) => ({ emp, v, val: Number(String(v.a).replace(/[^0-9.-]/g, '')) }))
+        .map((x) => ({ ...x, diff: ok && Number.isFinite(x.val) ? Math.abs(x.val - target) : Infinity }))
+        .sort((a, b) => a.diff - b.diff || a.v.ms - b.v.ms);
+      await this.logAnswers(st, q, ranked.map((x, i) => ({ ...base(x.emp, x.v), label: x.v.a + unit, correctLabel: ok ? q.answer + unit : '',
+        correct: !ok ? -1 : x.diff === 0 ? 1 : i < 3 ? 2 : 0,
+        note: ok && Number.isFinite(x.diff) ? (i + 1) + '位・差 ' + x.diff.toLocaleString('ja-JP') + unit : '' })));
+      return;
+    }
+    if (st.kind === 'order') {
+      const right = q.choices.map((_, i) => String(i)).join(',');
+      const txt = (a: string) => a.split(',').map((i) => q.choices[Number(i)] ?? '?').join(' → ');
+      await this.logAnswers(st, q, entries.map(([emp, v]) => ({ ...base(emp, v), label: txt(v.a), correctLabel: q.choices.join(' → '), correct: v.a === right ? 1 : 0 })));
+    }
+  }
+
   // 正解発表時の集計と自動加点
   private async settle(st: Step, q: QItem, by: string): Promise<void> {
     const L = this.live;
@@ -709,13 +780,8 @@ export class BattleRoom {
     const award = async (team: TeamId, pts: number, why: string) => { if (!already && pts) await this.addScore(team, pts, why, by); };
     const label = `${st.title} 第${L.qIdx + 1}問`;
 
-    // 記録
-    if (!already && entries.length) {
-      const stmts = entries.map(([emp, v]) => this.env.DB.prepare(
-        'INSERT INTO ib2_answers (game_id, step_id, question_id, emp_no, team, answer, ms) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(this.gameId, st.id, q.id, emp, v.team, v.a, v.ms));
-      for (let i = 0; i < stmts.length; i += 40) await this.env.DB.batch(stmts.slice(i, i + 40));
-    }
+    // 一人ひとりの記録（その時点の問題文・答え・正解・結果を丸ごと残す）
+    if (!already && entries.length) await this.recordSettle(st, q, entries);
 
     if (st.kind === 'choice' || st.kind === 'vote') {
       const dist = q.choices.map((_, i) => entries.filter(([, v]) => v.a === String(i)).length);
@@ -761,6 +827,38 @@ export class BattleRoom {
     }
   }
 
+  // revealN 番目までで「いま発表中の賞」と、その賞で出し終えた数
+  private prizeCursor(st: Step, n: number): { i: number; q: QItem; k: number } | null {
+    let off = 0;
+    for (let i = 0; i < st.qs.length; i++) {
+      const len = st.qs[i].steps.length;
+      if (n <= off + len) return n > off ? { i, q: st.qs[i], k: n - off } : null;
+      off += len;
+    }
+    return null;
+  }
+
+  // 景品の受賞者：choices = [種類, 値]。ta=車椅子タイムN位 / team=チーム順位N位 / teamLast=最下位チーム / text=手入力
+  private prizeWinner(q: QItem): { kind: string; name: string; sub: string; team: string; members: string[]; tie?: boolean } | null {
+    const src = q.choices[0] || 'none', val = q.choices[1] || '';
+    if (src === 'text') return val ? { kind: 'text', name: val, sub: '', team: '', members: [] } : null;
+    if (src === 'ta') {
+      const n = Math.max(1, Number(val) || 1), x = this.timeattack[n - 1];
+      return x ? { kind: 'ta', name: x.name, sub: String(x.seconds), team: '', members: [] } : null;
+    }
+    if (src === 'team' || src === 'teamLast') {
+      const ranked = TEAMS.map((t) => ({ t, score: this.scores.get(t) ?? 0 })).sort((a, b) => b.score - a.score);
+      const pick = src === 'teamLast' ? ranked[ranked.length - 1] : ranked[Math.max(1, Number(val) || 1) - 1];
+      if (!pick) return null;
+      // 同点のチームは一緒に受賞
+      const tied = ranked.filter((x) => x.score === pick.score).map((x) => x.t);
+      const names = tied.map((t) => this.teams.get(t)?.name || 'チーム' + t);
+      const members = Array.from(this.players.values()).filter((p) => tied.includes(p.team)).map((p) => p.name);
+      return { kind: 'team', name: names.join('・'), sub: String(pick.score), team: tied.length > 1 ? '' : pick.t, members, tie: tied.length > 1 };
+    }
+    return null;
+  }
+
   // ---------------- 画面に送る状態 ----------------
   private view(att: Att): Record<string, unknown> {
     const L = this.live;
@@ -782,9 +880,17 @@ export class BattleRoom {
     if (st) {
       const cfg = st.config;
       s.step = { id: st.id, kind: st.kind, title: st.title, mode: cfg.mode || 'all', survival: !!cfg.survival, unit: cfg.unit || '', zoom: !!cfg.zoom,
-        subtitle: cfg.subtitle || '', body: cfg.body || '', image: mediaUrl(Number(cfg.image_id) || null), final: !!cfg.final, timer: cfg.timer || 0,
+        subtitle: cfg.subtitle || '', body: cfg.body || '', kicker: cfg.kicker || '', footer: cfg.footer || '', image: mediaUrl(Number(cfg.image_id) || null), final: !!cfg.final, timer: cfg.timer || 0,
         video: mediaUrl(Number(cfg.video_id) || null), audio: mediaUrl(Number(cfg.audio_id) || null) };
       if (st.kind === 'video') s.video = L.video ?? { playing: false, offset: 0, at: 0 };
+      if (st.kind === 'announce') {
+        // 発表前の中身は管理画面以外に送らない
+        const on = L.revealN >= 1 || att.role === 'admin';
+        Object.assign(s.step as Record<string, unknown>, { teaser: cfg.teaser || '', reveal: on ? cfg.reveal || '' : '', body: on ? cfg.body || '' : '',
+          image: on ? mediaUrl(Number(cfg.image_id) || null) : null, video: on ? mediaUrl(Number(cfg.video_id) || null) : null });
+        s.revealN = L.revealN; s.total = 1;
+        s.video = L.video ?? { playing: false, offset: 0, at: 0 };
+      }
       s.qIdx = L.qIdx; s.qCount = st.qs.length;
       if (q && ['buzzer', 'choice', 'number', 'order', 'vote'].includes(st.kind)) {
         const showQ = L.phase !== 'intro' && (st.kind !== 'buzzer' || L.phase !== 'ready');
@@ -827,6 +933,27 @@ export class BattleRoom {
           .filter((x) => att.role === 'admin' || x.rank > top - L.revealN);
       }
       if (st.kind === 'scoreboard') { s.revealN = L.revealN; s.total = 4; }
+      if (st.kind === 'prizes') {
+        // 発表前の受賞者・景品は、管理画面以外には送らない
+        s.revealN = L.revealN; s.total = st.qs.reduce((n, x) => n + x.steps.length, 0);
+        let off = 0;
+        s.items = st.qs.map((x) => {
+          // その賞で出し終えた数 k。seq の先頭 k 個だけ見せる（管理画面は全部）
+          const k = Math.max(0, Math.min(x.steps.length, L.revealN - off));
+          const start = off; off += x.steps.length;
+          const adm = att.role === 'admin';
+          const shown = (p: string) => adm || x.steps.slice(0, k).includes(p);
+          // 1行ずつの景品は、出した行までだけ送る
+          const allLines = String(x.answer || '').split('\n').filter((l) => l.trim());
+          const nLines = adm ? allLines.length : x.steps.slice(0, k).filter((p) => p.startsWith('line')).length;
+          const prizeFull = shown('prize') || (x.seq.includes('lines') && nLines >= allLines.length && nLines > 0);
+          const prizeOn = shown('prize') || nLines > 0;
+          const imgOn = x.seq.includes('image') ? shown('image') : prizeFull || shown('full');
+          return { label: x.prompt, seq: x.seq, steps: x.steps, k, start, prizeOn, imgOn, winOn: shown('winner'), full: adm ? false : shown('full'),
+            win: shown('winner') ? this.prizeWinner(x) : null, prize: !prizeOn ? null : x.seq.includes('lines') ? allLines.slice(0, nLines).join('\n') : x.answer,
+            note: prizeFull ? x.note : null, image: imgOn ? mediaUrl(x.image_id) : null };
+        });
+      }
     }
     if (att.role === 'player' && att.emp && st && SALES_KINDS.includes(st.kind)) {
       // 本人のデータだけ。詳細（日ごと）は「わたしの売上」ラウンドのときだけ送る

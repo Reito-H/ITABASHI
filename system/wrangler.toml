@@ -35,8 +35,8 @@ new_sqlite_classes = ["BattleRoom"]
 ADMIN_URL_PREFIX = "/admin"
 # リッチメニューID: PATTERN1=新人 / PATTERN2=運行管理者 / PATTERN3=統括管理者
 RICHMENU_ID_PATTERN1 = "richmenu-7ddc3e80e06b72a49103d5237a89a4ee"
-RICHMENU_ID_PATTERN2 = "richmenu-a7e9455f5aa958d9cd26e109d1946180"
-RICHMENU_ID_PATTERN3 = "richmenu-a7e9455f5aa958d9cd26e109d1946180"
+RICHMENU_ID_PATTERN2 = "richmenu-2f2cac60945f723da95f93c873807b7f"
+RICHMENU_ID_PATTERN3 = "richmenu-2f2cac60945f723da95f93c873807b7f"
 # LIFFアプリID（LINE Developers で作成後に設定）
 LIFF_ID_LOST_ITEM = "2010598812-y7oZBhGe"
 LIFF_ID_ACCIDENT = "2010598812-PaLPe9HP"
@@ -59,6 +59,8 @@ LIFF_ID_SALES = "2010598812-deTtkaIz"
 LIFF_ID_KANCHO_SHIFT = ""
 # 権限不明者（友達追加直後）用リッチメニュー。「登録はこちら」→ LIFF_ID_REGISTER の入口（未作成なら空のまま=メニューなし）
 RICHMENU_ID_UNKNOWN = "richmenu-ac5365723768242e0e61331f7e63f121"
+# ロール「R」（hoshi_viewer）用リッチメニュー。「星 予定表」ボタン1つだけ（scripts/create_richmenu_r.js で作成。空のまま=メニューなし）
+RICHMENU_ID_R = "richmenu-1f97c042c05b259a01597ef36e94ceae"
 # LINE連携登録 LIFF（氏名入力+QR読み取りで新人・運行管理者などを登録。エンドポイントURL: https://bentenclub.com/liff/register。LINE Developers で LIFF作成後に設定）
 LIFF_ID_REGISTER = "2010598812-B8nxU525"
 # PDF出力用 日本語TTFフォントのURL（動作確認済み。変える場合はTTF形式のみ・OTF/可変フォントはグリフ欠けする）

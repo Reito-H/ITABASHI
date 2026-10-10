@@ -16,7 +16,7 @@ function tokenToQrSvg(token: string): string {
 }
 
 const VALID_ROLES = [
-  'general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'crew_member',
+  'general_manager', 'operations_manager', 'vehicle_manager', 'newcomer', 'crew_member', 'hoshi_viewer',
 ];
 
 // QRコード発行

@@ -1,6 +1,9 @@
 import { SELF, env } from 'cloudflare:test';
 import { describe, expect, it, beforeAll } from 'vitest';
 import migration from '../src/db/migration_174.sql?raw';
+import migration181 from '../src/db/migration_181.sql?raw';
+import migration184 from '../src/db/migration_184.sql?raw';
+import { loadBattleRecords, recordsCsv } from '../src/battle/records';
 
 // ITABASHI BATTLE 2：参加 → チーム決め → 早押し → 選択クイズの自動採点 までを、実際の Durable Object で通す
 const PUB = '/ib2-8cbb19aa8bae80ec4652540a9cb36da1c9151104';
@@ -43,6 +46,8 @@ async function join(emp: string): Promise<string> {
 beforeAll(async () => {
   const stmts = migration.split(';').map((s) => s.replace(/--.*$/gm, '').trim()).filter((s) => s);
   for (const s of stmts) await env.DB.prepare(s).run();
+  for (const s of migration184.split(';').map((x) => x.replace(/--.*$/gm, '').trim()).filter((x) => x)) await env.DB.prepare(s).run();
+  for (const s of migration181.split(';').map((x) => x.replace(/--.*$/gm, '').trim()).filter((x) => x)) await env.DB.prepare(s).run();
   await env.DB.prepare("INSERT INTO ib2_games (id, title, is_active) VALUES (1, 'T', 1)").run();
   await env.DB.prepare("INSERT INTO ib2_roster (game_id, emp_no, name, team) VALUES (1, '1001', '山田', 'A'), (1, '1002', '佐藤', 'B'), (1, '1003', '鈴木', 'C')").run();
   // 参加受付・チーム発表・代表者決めもメニューの項目
@@ -54,6 +59,11 @@ beforeAll(async () => {
   await env.DB.prepare("INSERT INTO ib2_media (id, kind, r2_key, name, mime, size) VALUES (1, 'video', 'ib2/x.mp4', 'op.mp4', 'video/mp4', 10)").run();
   await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 3, 'mygrowth', 'わたしの成長', '{}')").run();
   await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 4, 'mysales', 'わたしの売上', '{}')").run();
+  const pz = await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 5, 'prizes', 'チーム賞', '{}')").run();
+  await env.DB.prepare("INSERT INTO ib2_questions (step_id, sort_order, prompt, choices, answer, points) VALUES (?, 0, '1位賞', '[\"team\",\"1\"]', '洗車券9枚', 0), (?, 1, '最下位賞', '[\"teamLast\"]', 'ツアー', 1), (?, 2, 'タイム1位', '[\"ta\",\"1\"]', '景品X', 0)").bind(pz.meta.last_row_id, pz.meta.last_row_id, pz.meta.last_row_id).run();
+  await env.DB.prepare("UPDATE ib2_questions SET seq = 'image,winner,prize,full' WHERE prompt = 'タイム1位'").run();
+  await env.DB.prepare("INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) VALUES (1, 6, 'announce', '打ち上げ会場', '{\"teaser\":\"最後に…\",\"reveal\":\"会場X\",\"video_id\":1}')").run();
+  await env.DB.prepare("INSERT INTO ib2_timeattack (emp_no, name, seconds) VALUES ('1002', '佐藤', 41.5), ('1001', '山田', 52.0)").run();
   // ホシコン側の売上（テスト用の最小テーブル）
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS employees (id INTEGER PRIMARY KEY, emp_no TEXT, name TEXT)').run();
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS sales_records (id INTEGER PRIMARY KEY AUTOINCREMENT, emp_id INTEGER, date TEXT, amount INTEGER, ride_count INTEGER, distance_km INTEGER, period_year INTEGER, period_month INTEGER, duty_code TEXT, start_time TEXT, return_time TEXT, labor_hours REAL)').run();
@@ -183,10 +193,85 @@ describe('ITABASHI BATTLE 2', () => {
     expect(d1.mine.days.map((d: Msg) => d.amount)).toEqual([10000, 20000, 30000]);
     expect(JSON.stringify(d1)).not.toContain('99999');
 
+    // 景品発表：受賞者は得点・タイムから自動。発表前の景品は参加者に送らない
+    admin.send({ t: 'next' });
+    const z0 = await admin.until((s) => s.step && s.step.kind === 'prizes');
+    expect(z0.items.map((x: Msg) => [x.label, x.win && x.win.name])).toEqual([['1位賞', '環七ライダーズ改'], ['最下位賞', 'チームB・チームC・チームD'], ['タイム1位', '佐藤']]);
+    expect(JSON.stringify(p1.state())).not.toContain('洗車券');
+    admin.send({ t: 'act', a: 'revealNext' });
+    const z1 = await p1.until((s) => s.step.kind === 'prizes' && s.revealN === 1);
+    expect(z1.items[0].win.name).toBe('環七ライダーズ改');
+    expect(z1.items[0].prize).toBeNull();
+    admin.send({ t: 'act', a: 'revealNext' });
+    const z2 = await p1.until((s) => s.revealN === 2);
+    expect(z2.items[0].prize).toBe('洗車券9枚');
+    expect(z2.items[1].win).toBeNull();
+    // 最下位賞は「景品 → 受賞者」：1回目で景品だけ、2回目で受賞者
+    admin.send({ t: 'act', a: 'revealNext' });
+    const z3 = await p1.until((s) => s.revealN === 3);
+    expect([z3.items[1].prize, z3.items[1].win]).toEqual(['ツアー', null]);
+    admin.send({ t: 'act', a: 'revealNext' });
+    const z4 = await p1.until((s) => s.revealN === 4);
+    expect(z4.items[1].win.name).toBe('チームB・チームC・チームD');
+    // 細かい順番：タイム1位は「画像 → 受賞者 → 景品の文 → 全画面」。画像だけ先に出て、景品の文はまだ送らない
+    expect(z4.items[2].seq).toEqual(['image', 'winner', 'prize', 'full']);
+    admin.send({ t: 'act', a: 'revealNext' });
+    const z5 = await p1.until((s) => s.revealN === 5);
+    expect([z5.items[2].imgOn, z5.items[2].prize, z5.items[2].win]).toEqual([true, null, null]);
+    admin.send({ t: 'act', a: 'revealAll' });
+    const z8 = await p1.until((s) => s.revealN === 8);
+    expect([z8.items[2].full, z8.items[2].prize, z8.items[2].win.name]).toEqual([true, '景品X', '佐藤']);
+    admin.send({ t: 'act', a: 'revealPrev' });
+    await p1.until((s) => s.revealN === 7 && s.items[2].full === false);
+    // 1行ずつ：最下位賞を「lines,winner」に。押すたびに1行ずつ届き、まだ出していない行は送らない
+    await env.DB.prepare("UPDATE ib2_questions SET seq = 'lines,winner', answer = 'なんと' || char(10) || 'ツアー' WHERE prompt = '最下位賞'").run();
+    admin.send({ t: 'reload' });
+    const l0 = await p1.until((s) => s.items && s.items[1].steps && s.items[1].steps.join() === 'line0,line1,winner');
+    expect(l0.total).toBe(9);
+    for (let i = 0; i < 5; i++) admin.send({ t: 'act', a: 'revealPrev' });
+    await p1.until((s) => s.revealN === 2);
+    admin.send({ t: 'act', a: 'revealNext' });
+    const l1 = await p1.until((s) => s.revealN === 3);
+    expect([l1.items[1].prize, l1.items[1].win]).toEqual(['なんと', null]);
+    admin.send({ t: 'act', a: 'revealNext' });
+    const l2 = await p1.until((s) => s.revealN === 4);
+    expect([l2.items[1].prize, l2.items[1].win]).toEqual(['なんと' + String.fromCharCode(10) + 'ツアー', null]);
+    admin.send({ t: 'act', a: 'revealNext' });
+    await p1.until((s) => s.revealN === 5 && s.items[1].win !== null);
+
+    // 発表：予告のうちは中身を送らず、発表で動画も再生開始
+    admin.send({ t: 'next' });
+    const an0 = await p1.until((s) => s.step && s.step.kind === 'announce');
+    expect(an0.step.teaser).toBe('最後に…');
+    expect(an0.step.reveal).toBe('');
+    expect(an0.step.video).toBeNull();
+    admin.send({ t: 'act', a: 'revealNext' });
+    const an1 = await p1.until((s) => s.revealN === 1);
+    expect(an1.step.reveal).toBe('会場X');
+    expect(an1.video.playing).toBe(true);
+
+    // 個人記録：早押し正解・選択クイズの正誤・本人の答えと正解が、問題文ごと残る
+    const recs = await loadBattleRecords(env.DB);
+    const yamada = recs.find((x) => x.empNo === '1001')!;
+    const sato = recs.find((x) => x.empNo === '1002')!;
+    expect(yamada.stats).toMatchObject({ answered: 2, correct: 2, wrong: 0, buzzOk: 1 });
+    expect(sato.stats).toMatchObject({ answered: 1, correct: 0, wrong: 1 });
+    const miss = sato.rows.find((x) => x.kind === 'choice')!;
+    expect([miss.prompt, miss.answer_label, miss.correct_label, miss.step_title]).toEqual(['復唱する', '×', '○', '○×']);
+    expect(recordsCsv(recs)).toContain('復唱する');
+    expect(await loadBattleRecords(env.DB, '1002')).toHaveLength(1);
+
     // 手動加点と、得点のDB保存
     admin.send({ t: 'score', team: 'B', delta: 5, reason: 'ナイス発言' });
     await admin.until((s) => s.teams[1].score === 5);
     const sum = await env.DB.prepare("SELECT team, SUM(delta) AS s FROM ib2_scores WHERE game_id = 1 GROUP BY team ORDER BY team").all<{ team: string; s: number }>();
     expect(sum.results).toEqual([{ team: 'A', s: 20 }, { team: 'B', s: 5 }]);
+
+    // リセットしても記録は消さずに「無効」として残る（記録画面には出ない）
+    admin.send({ t: 'reset' });
+    await admin.until((s) => s.teams[0].score === 0);
+    const left = await env.DB.prepare('SELECT COUNT(*) AS n, SUM(voided) AS v FROM ib2_answers').first<{ n: number; v: number }>();
+    expect(left!.n).toBeGreaterThan(0);
+    expect(left!.v).toBe(left!.n);
   });
 });

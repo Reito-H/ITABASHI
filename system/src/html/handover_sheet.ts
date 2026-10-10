@@ -706,6 +706,7 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
 (function(){
 const API = ${safeJson(`${ADMIN_PATH}/api/handover`)};
 const TODO_URL = ${safeJson(`${ADMIN_PATH}/todo`)};
+const HOSHI_URL = ${safeJson(`${ADMIN_PATH}/handover/hoshi`)};
 const LOGIN_URL = ${safeJson(`${ADMIN_PATH}/login`)};
 const EDITABLE = ${editable ? 'true' : 'false'};
 const MY_DIVISION = ${safeJson(myDivision)};
@@ -714,6 +715,9 @@ function lastDivision(){
   return (v >= 1 && v <= 4) ? v : 1;
 }
 function initialDivision(){
+  // 星専用シート（/handover/hoshi）のドロップダウンから ?d=N で戻ってきた場合はその課を開く
+  const qd = parseInt(new URLSearchParams(location.search).get('d'), 10);
+  if (qd >= 1 && qd <= 4) return qd;
   const md = parseInt(MY_DIVISION, 10);
   return (md >= 1 && md <= 4) ? md : lastDivision();
 }
@@ -1249,6 +1253,7 @@ function renderTabs(){
       '<button type="button" class="ho-tab-cur">板橋'+H.division+'課<span class="ho-tab-arrow">▾</span></button>' +
       '<div class="ho-tab-menu">' +
         others.map(d => '<div class="ho-tab-opt" data-d="'+d+'">板橋'+d+'課</div>').join('') +
+        '<a class="ho-tab-opt" href="'+HOSHI_URL+'" style="display:block;text-decoration:none;">星</a>' +
       '</div>' +
     '</div>';
   ['ho-tabs','ho-tabs-m'].forEach(id => {
@@ -1262,7 +1267,7 @@ function renderTabs(){
       closeTabMenus();
       if (!wasOpen) menu.classList.add('open');
     });
-    menu.querySelectorAll('.ho-tab-opt').forEach(opt => opt.addEventListener('click', (e) => {
+    menu.querySelectorAll('.ho-tab-opt[data-d]').forEach(opt => opt.addEventListener('click', (e) => {
       e.stopPropagation();
       closeTabMenus();
       switchDivision(parseInt(opt.dataset.d, 10));

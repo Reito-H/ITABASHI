@@ -2,7 +2,7 @@
 // メンテナンスモード
 //   system_settings.maintenance_mode = '1' で全機能をメンテナンス画面に切替。
 //   admin アカウント（username = 'admin'）のセッションのみ通常利用可。
-//   切替は admin のシステムステータスページから（routes/admin.ts）。
+//   切替は admin のサイバーページから（routes/admin_cyber.ts）。
 // ===================================================
 
 import type { Env } from '../auth';

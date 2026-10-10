@@ -67,6 +67,7 @@ import adminPersonalShiftRoutes from './routes/admin_personal_shift';
 import adminAttendanceBoardRoutes from './routes/admin_attendance_board';
 import adminDispatchRoutes from './routes/admin_dispatch';
 import adminHandoverRoutes from './routes/admin_handover';
+import adminHandoverHoshiRoutes from './routes/admin_handover_hoshi';
 import adminHandoverLimitsRoutes from './routes/admin_handover_limits';
 import adminAnnouncementBarRoutes, { announcementBarPublicApi } from './routes/admin_announcement_bar';
 import adminBirthdayRoutes, { birthdayPublicApi } from './routes/admin_birthday';
@@ -117,6 +118,8 @@ import publicWeatherNoticeRoutes from './routes/public_weather_notice';
 import type { Env } from './auth';
 import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
+import { clientInfo, logSecurityEventBg, isProbePath } from './utils/security';
+import adminCyberRoutes from './routes/admin_cyber';
 import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH, BATTLE_PUBLIC_PATH } from './config';
 import { FAVICON_DATA_URI } from './html/layout';
 
@@ -147,9 +150,23 @@ app.use('*', (c, next) => {
   return next();
 });
 
-// 日本国内限定アクセス
+// 日本国内限定アクセス（遮断した接続元はサイバーページ用に記録。同じIPは10分に1回だけ）
 app.use('*', async (c, next) => {
+  if (c.req.header('CF-IPCountry') !== 'JP') {
+    const info = clientInfo(c);
+    logSecurityEventBg(c, { type: 'foreign_blocked', severity: 'info', ...info, path: new URL(c.req.url).pathname }, `foreign:${info.ip}`);
+  }
   return requireJapan(c, next);
+});
+
+// 攻撃ツールが無差別に探しに来るパス（.env / wp-admin 等）へのアクセスを記録する（応答は通常どおり404）
+app.use('*', async (c, next) => {
+  const pathname = new URL(c.req.url).pathname;
+  if (isProbePath(pathname)) {
+    const info = clientInfo(c);
+    logSecurityEventBg(c, { type: 'probe', severity: 'warn', ...info, path: pathname }, `probe:${info.ip}`);
+  }
+  return next();
 });
 
 // セキュリティヘッダー
@@ -333,6 +350,10 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
     null;
 
   const deny403 = () => {
+    logSecurityEventBg(c, {
+      type: 'perm_denied', severity: 'info', ...clientInfo(c), adminId, path: subPath,
+      detail: c.req.method === 'GET' ? null : `${c.req.method}（編集操作）`,
+    }, `perm:${adminId}:${c.req.method}:${subPath}`);
     if (subPath.startsWith('/api/')) {
       return c.json({ error: 'この操作を行う権限がありません' }, 403);
     }
@@ -396,6 +417,7 @@ app.route(`/${SECRET}/admin`, adminSrRoutes);
 app.route(`/${SECRET}/admin`, adminKmPinsRoutes);
 app.route(`/${SECRET}/admin`, adminSalesStrategyRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
+app.route(`/${SECRET}/admin`, adminHandoverHoshiRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverLimitsRoutes);
 app.route(`/${SECRET}/admin`, adminAnnouncementBarRoutes);
 app.route(`/${SECRET}/admin`, adminBirthdayRoutes);
@@ -426,6 +448,7 @@ app.route(`/${SECRET}/admin`, adminWeatherNoticeRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
 app.route(`/${SECRET}/admin`, battleAdminRoutes);
 app.route(`/${SECRET}/admin`, adminNavInsightsRoutes);
+app.route(`/${SECRET}/admin`, adminCyberRoutes);
 
 // =====================
 // API（認証必須）
@@ -510,7 +533,10 @@ app.post('/api/line/webhook', async (c) => {
   const sigBytes = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
   const expectedSig = btoa(String.fromCharCode(...new Uint8Array(sigBytes)));
 
-  if (signature !== expectedSig) return c.text('Invalid signature', 401);
+  if (signature !== expectedSig) {
+    logSecurityEventBg(c, { type: 'webhook_bad_sig', severity: 'critical', ...clientInfo(c), path: '/api/line/webhook' }, `badsig:${c.req.header('CF-Connecting-IP') ?? ''}`);
+    return c.text('Invalid signature', 401);
+  }
 
   const events: Record<string, unknown>[] = JSON.parse(body)?.events ?? [];
 

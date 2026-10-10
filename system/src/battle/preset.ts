@@ -7,6 +7,9 @@ const OX = ['○', '×'];
 const OKNG = ['OK', 'NG'];
 
 export const BATTLE_PRESET: PresetStep[] = [
+  // まじめな勉強会のふりから始めて、講座のあとに「実は楽しいイベントでした！」でバトル開始
+  { kind: 'formal', title: '2026年度 新卒 繁忙期対策勉強会', config: { kicker: '', subtitle: '', footer: '' } },
+  { kind: 'formal', title: '繁忙期の売上と出番数', config: { kicker: '講座 第1部', subtitle: '', footer: '' } },
   { kind: 'lobby', title: '参加受付' },
   { kind: 'reveal', title: 'チーム発表' },
   { kind: 'setup', title: '代表者・チーム名決め' },
@@ -22,7 +25,6 @@ export const BATTLE_PRESET: PresetStep[] = [
       { prompt: '休憩は、眠くなってから取ればよい', choices: OX, answer: '1', time_limit: 10, note: '休憩は疲れる前に。眠気を感じたら迷わず仮眠' },
     ],
   },
-  { kind: 'title', title: '講座 第1部', config: { subtitle: '繁忙期の売上と出番数', body: '45分' } },
   {
     kind: 'buzzer', title: '交差点名クイズ', config: { zoom: true, bgm: 'builtin:battle2' },
     qs: [
@@ -78,6 +80,22 @@ export const BATTLE_PRESET: PresetStep[] = [
   { kind: 'mygrowth', title: 'わたしの成長', config: { bgm: 'builtin:anthem' } },
   { kind: 'mysales', title: 'わたしの売上', config: { bgm: 'builtin:chill' } },
   { kind: 'scoreboard', title: '最終結果発表', config: { final: true, bgm: 'builtin:anthem' } },
+  {
+    kind: 'prizes', title: '車椅子タイムアタック賞', config: { bgm: 'builtin:result' },
+    qs: [
+      { prompt: '1位', choices: ['ta', '1'], answer: '', points: 0 },
+      { prompt: '2位', choices: ['ta', '2'], answer: '', points: 0 },
+      { prompt: '3位', choices: ['ta', '3'], answer: '', points: 0 },
+    ],
+  },
+  {
+    kind: 'prizes', title: '板橋バトル2 チーム賞', config: { bgm: 'builtin:anthem' },
+    qs: [
+      { prompt: '1位賞', choices: ['team', '1'], points: 0, answer: 'チームに洗車券9枚\n＋（もう1つの景品を入力）' },
+      { prompt: '最下位賞', choices: ['teamLast', ''], points: 1, answer: 'なんと…！ツアーです！！\n都内を巡る…\nアンディーと\n運転補強＆座談会 1日ツアープログラム' },
+    ],
+  },
+  { kind: 'announce', title: '打ち上げ会場の発表', config: { teaser: '最後に…\n本日の打ち上げ会場を発表します！', reveal: '', body: '', bgm: 'builtin:battle' } },
 ];
 
 // 新しく作るラウンドの初期値
@@ -97,5 +115,6 @@ export function defaultQuestion(kind: string): PresetQ {
   if (kind === 'order') return { prompt: '正しい順に並べよう', choices: ['1番目', '2番目', '3番目', '4番目'], points: 10, time_limit: 45 };
   if (kind === 'number') return { prompt: '', answer: '', points: 10, time_limit: 30 };
   if (kind === 'ranking') return { prompt: '（名前）', answer: '', note: '' };
+  if (kind === 'prizes') return { prompt: '1位', choices: ['ta', '1'], answer: '', note: '', points: 0 };
   return { prompt: '', answer: '', points: 10, time_limit: 20 };
 }

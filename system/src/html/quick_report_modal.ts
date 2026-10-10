@@ -249,6 +249,7 @@ export function quickReportModalScript(): string {
     general_manager: '統括管理者', operations_manager: '運行管理者', vehicle_manager: '車番管理者',
     newcomer: '新人',
     crew_member: '乗務社員',
+    hoshi_viewer: 'R',
   };
 
   var QR_CONFIG = {

@@ -1,0 +1,10 @@
+-- ===================================================
+-- migration_182: ITABASHI BATTLE 2 — 景品発表（車椅子タイムアタック賞・チーム賞）をメニューの最後に追加
+--   景品の中身・画像・順番は管理画面「メニュー」で自由に直す。
+--   受賞者の決め方は ib2_questions.choices = [種類, 値]（ta=車椅子タイムN位 / team=チーム順位N位 / teamLast=最下位 / text=手入力）
+--   すでに景品発表が入っているゲームには何もしない。
+-- ===================================================
+INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) SELECT g.id, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ib2_steps WHERE game_id = g.id), 'prizes', '車椅子タイムアタック賞', '{"bgm":"builtin:result"}' FROM ib2_games g WHERE g.is_active = 1 AND NOT EXISTS (SELECT 1 FROM ib2_steps s WHERE s.game_id = g.id AND s.kind = 'prizes');
+INSERT INTO ib2_steps (game_id, sort_order, kind, title, config) SELECT g.id, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ib2_steps WHERE game_id = g.id), 'prizes', '板橋バトル2 チーム賞', '{"bgm":"builtin:anthem"}' FROM ib2_games g WHERE g.is_active = 1 AND NOT EXISTS (SELECT 1 FROM ib2_steps s WHERE s.game_id = g.id AND s.kind = 'prizes' AND s.title = '板橋バトル2 チーム賞');
+INSERT INTO ib2_questions (step_id, sort_order, prompt, choices, answer, points, time_limit, note) SELECT s.id, v.o, v.p, v.c, '', 0, 20, '' FROM ib2_steps s JOIN ib2_games g ON g.id = s.game_id AND g.is_active = 1, (SELECT 0 AS o, '1位' AS p, '["ta","1"]' AS c UNION ALL SELECT 1, '2位', '["ta","2"]' UNION ALL SELECT 2, '3位', '["ta","3"]') v WHERE s.kind = 'prizes' AND s.title = '車椅子タイムアタック賞' AND NOT EXISTS (SELECT 1 FROM ib2_questions q WHERE q.step_id = s.id);
+INSERT INTO ib2_questions (step_id, sort_order, prompt, choices, answer, points, time_limit, note) SELECT s.id, v.o, v.p, v.c, v.a, 0, 20, '' FROM ib2_steps s JOIN ib2_games g ON g.id = s.game_id AND g.is_active = 1, (SELECT 0 AS o, '1位賞' AS p, '["team","1"]' AS c, 'チームに洗車券9枚' || char(10) || '＋（もう1つの景品を入力）' AS a UNION ALL SELECT 1, '最下位賞', '["teamLast"]', 'なんと…！ツアーです！！' || char(10) || '都内を巡る…' || char(10) || 'アンディーと' || char(10) || '運転補強＆座談会 1日ツアープログラム') v WHERE s.kind = 'prizes' AND s.title = '板橋バトル2 チーム賞' AND NOT EXISTS (SELECT 1 FROM ib2_questions q WHERE q.step_id = s.id);

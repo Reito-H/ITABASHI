@@ -202,6 +202,8 @@ export async function handleCron(env: Env): Promise<void> {
   // 動線収集ログ（nav_events）の180日より古い行を削除（毎日3時。migration_168未適用でも他処理を止めない）
   if (currentHour === 3) {
     await env.DB.prepare("DELETE FROM nav_events WHERE created_at < datetime('now','+9 hours','-180 days')").run().catch(() => {});
+    // サイバー（security_events）も同じく180日より古い行を削除（migration_180未適用でも他処理を止めない）
+    await env.DB.prepare("DELETE FROM security_events WHERE created_at < datetime('now','+9 hours','-180 days')").run().catch(() => {});
   }
 
   const settings = await env.DB.prepare(

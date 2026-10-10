@@ -1,5 +1,5 @@
 // 社員カルテ（旧・個人データ参照＋AI売上分析(社員別)を統合）— 社員管理の一覧・詳細ページから遷移する
-// タブ構成: 概要 / 売上実績 / 売上インサイト（sales-ai権限が必要） / 安全（accidents権限が必要）
+// タブ構成: 概要 / 売上実績 / 売上インサイト（sales-ai権限が必要） / 安全（accidents権限が必要） / バトル記録（ITABASHI BATTLE 2 に参加した人だけ）
 import { Hono } from 'hono';
 import { layout, escHtml } from '../html/layout';
 import { crewPortalSubNav } from '../html/crew_portal_nav';
@@ -7,6 +7,7 @@ import { ADMIN_PATH } from '../config';
 import { getAdminPermissions } from '../permissions';
 import { resolveEmployeeMonthShifts, type MonthShiftDay } from '../data/attendance';
 import type { Env } from '../auth';
+import { loadBattleRecords, personRecordHtml, RECORD_CSS, type PersonRec } from '../battle/records';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -18,7 +19,7 @@ type EmpRow = {
   is_hanchyo: number | null; is_caution: number | null; is_sales_followup: number | null;
   status: string | null;
 };
-type TabId = 'overview' | 'sales' | 'shift' | 'insights' | 'safety';
+type TabId = 'overview' | 'sales' | 'shift' | 'insights' | 'safety' | 'battle';
 
 function calcAge(birthDate: string | null): number | null {
   if (!birthDate) return null;
@@ -98,8 +99,14 @@ app.get('/crew-portal/employee/:id', async (c) => {
   const accidentCount = accidentSummary?.cnt ?? 0;
   const accidentLastDate = accidentSummary?.last_date ?? null;
 
+  // 新卒勉強会ゲーム（ITABASHI BATTLE 2）の個人記録。参加した人だけタブを出す
+  let battleRecs: PersonRec[] = [];
+  try { if (emp.emp_no) battleRecs = await loadBattleRecords(c.env.DB, emp.emp_no); } catch { battleRecs = []; }
+  const canOpenBattle = viewerPerms === null || viewerPerms.includes('settings.study-sessions');
+
   const requestedTab = c.req.query('tab');
   const initialTab: TabId =
+    (requestedTab === 'battle' && battleRecs.length) ? 'battle' :
     (requestedTab === 'insights' && canViewInsights) ? 'insights' :
     (requestedTab === 'safety' && canViewSafety) ? 'safety' :
     (requestedTab === 'shift') ? 'shift' :
@@ -111,6 +118,7 @@ app.get('/crew-portal/employee/:id', async (c) => {
     { id: 'shift', label: 'シフト' },
     ...(canViewInsights ? [{ id: 'insights' as TabId, label: '売上インサイト' }] : []),
     ...(canViewSafety ? [{ id: 'safety' as TabId, label: '安全' }] : []),
+    ...(battleRecs.length ? [{ id: 'battle' as TabId, label: 'バトル記録' }] : []),
   ];
 
   // シフトタブ用: 当月・翌月の日別シフト（シフト優先＋勤務体系で補完）
@@ -197,6 +205,14 @@ app.get('/crew-portal/employee/:id', async (c) => {
     <div style="display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid #e5e7eb;flex-wrap:wrap;">
       ${tabs.map(t => `<button type="button" class="crew-tab-btn" data-tab="${t.id}" onclick="switchTab('${t.id}')" style="padding:9px 16px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:700;margin-bottom:-1px;border-bottom:2px solid ${t.id === initialTab ? '#1a3a5c' : 'transparent'};color:${t.id === initialTab ? '#1a3a5c' : '#9ca3af'};">${t.label}</button>`).join('')}
     </div>
+
+    ${battleRecs.length ? `
+    <!-- バトル記録タブ（新卒勉強会ゲームでの回答・質問など） -->
+    <div class="crew-tab-panel" data-tab="battle" style="display:${initialTab === 'battle' ? '' : 'none'};">
+      <style>${RECORD_CSS}</style>
+      ${canOpenBattle ? `<div style="display:flex;justify-content:flex-end;margin-bottom:10px;"><a href="${ADMIN_PATH}/ib2/records/print?emp=${encodeURIComponent(emp.emp_no)}" target="_blank" style="padding:7px 16px;background:#1a3a5c;color:white;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none;">印刷・PDF</a></div>` : ''}
+      ${battleRecs.map((p) => personRecordHtml(p)).join('<hr style="border:0;border-top:1px dashed #d1d5db;margin:20px 0;">')}
+    </div>` : ''}
 
     <!-- 概要タブ -->
     <div class="crew-tab-panel" data-tab="overview" style="display:${initialTab === 'overview' ? '' : 'none'};">

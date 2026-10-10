@@ -19,7 +19,7 @@
 //              （親 settings.study-sessions を持てば全タブ利用可）
 //   設定サブページ: settings.accounts / settings.liff / settings.line-usage /
 //              settings.notifications / settings.offices / settings.documents / settings.study-notes / settings.tutorial /
-//              settings.status / settings.nav-insights / settings.sales-strategy / settings.chosei / settings.announcement-bar / settings.birthday /
+//              settings.cyber / settings.nav-insights / settings.sales-strategy / settings.chosei / settings.announcement-bar / settings.birthday /
 //              settings.seasonal / settings.cm-popup /
 //              settings.weather-notice /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
@@ -62,7 +62,9 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // 学習ノート（管理者本人の私的な学習用ノート教材。タイトルごとにページ保存しPDF出力）
   [/^\/settings\/study-notes/,          'settings.study-notes'],
   [/^\/settings\/tutorial/,             'settings.tutorial'],
-  [/^\/settings\/status/,               'settings.status'],
+  [/^\/settings\/cyber/,                'settings.cyber'],
+  // 旧システムステータス（サイバーへ集約・リダイレクトのみ）
+  [/^\/settings\/status/,               'settings.cyber'],
   [/^\/settings\/nav-insights/,         'settings.nav-insights'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
@@ -319,7 +321,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.study-notes',      label: '学習ノート（個人用ノート教材のページ保存・PDF出力）' },
     { key: 'settings.tutorial',         label: 'チュートリアル' },
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
-    { key: 'settings.status',           label: 'システムステータス' },
+    { key: 'settings.cyber',            label: 'サイバー（不正アクセス検知・ログイン監視）', note: '強制ログアウトは編集権限、メンテナンス切替はadminのみ' },
     { key: 'settings.nav-insights',     label: '動線分析（管理画面の利用経路の匿名集計）', viewOnly: true },
     { key: 'settings.sales-strategy',   label: '営業戦略（SR分析＋乗降ピン分析）', note: '別途、専用パスワードでも保護。実在の顧客氏名等を含む場合あり' },
     { key: 'settings.wage-estimate',    label: '賃金試算設定' },

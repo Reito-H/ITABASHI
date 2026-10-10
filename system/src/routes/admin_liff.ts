@@ -22,6 +22,7 @@ export const ROLE_LABELS: Record<string, string> = {
   vehicle_manager:     '車番管理者',
   newcomer:            '新人',
   crew_member:         '乗務社員',
+  hoshi_viewer:        'R',            // LINEで星の予定表だけを閲覧できるロール（R専用リッチメニュー1ボタン）
   unknown:             '権限不明者',
 };
 
@@ -31,6 +32,7 @@ export const ROLE_COLORS: Record<string, string> = {
   vehicle_manager:     '#7c3aed',
   newcomer:            '#1d4ed8',
   crew_member:         '#d97706',
+  hoshi_viewer:        '#2f3488',
   unknown:             '#9ca3af',
 };
 
@@ -2459,6 +2461,7 @@ export function getRichMenuForRole(role: string, env: Env): string {
     case 'operations_manager':  return env.RICHMENU_ID_PATTERN2 ?? '';
     case 'general_manager':     return env.RICHMENU_ID_PATTERN3 ?? '';
     case 'crew_member':         return env.RICHMENU_ID_CREW_MEMBER ?? '';
+    case 'hoshi_viewer':        return env.RICHMENU_ID_R ?? '';
     case 'unknown':             return env.RICHMENU_ID_UNKNOWN ?? '';
     default:                    return '';
   }

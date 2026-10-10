@@ -5,7 +5,7 @@ import { battleHead, BATTLE_BASE_CSS, BATTLE_NET_JS } from './theme';
 import { BATTLE_AUDIO_JS, SFX_CATALOG, BGM_CATALOG } from './audio';
 import { STEP_KINDS } from './types';
 
-export function battleAdminPage(opts: { adminPath: string; apiBase: string; wsPath: string; screenUrl: string; joinUrl: string; qrSvg: string; editable: boolean; hoshikonUrl: string }): string {
+export function battleAdminPage(opts: { adminPath: string; apiBase: string; wsPath: string; screenUrl: string; joinUrl: string; qrSvg: string; editable: boolean; hoshikonUrl: string; mediaBase: string }): string {
   return `<!DOCTYPE html><html lang="ja"><head>${battleHead('ITABASHI BATTLE 2 ｜ 管理者')}
 <style>${BATTLE_BASE_CSS}
 html,body{overflow:auto;}
@@ -66,6 +66,13 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
 .qcard{padding:12px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--line);margin-bottom:10px;}
 .qcard .hd{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
 .qcard .hd b{font-family:var(--num);color:var(--yellow);}
+.paste{margin-top:6px;padding:12px;border:2px dashed var(--line);border-radius:10px;color:var(--mute);font-size:12px;text-align:center;cursor:text;outline:none;}
+.paste:focus{border-color:var(--cyan);color:var(--ink);background:rgba(47,211,255,.06);}
+.seqL{display:flex;flex-direction:column;gap:4px;}
+.seqR{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;background:rgba(255,255,255,.05);}
+.seqR b{font-family:var(--num);color:var(--cyan);min-width:16px;}
+.seqR span{flex:1;font-size:13px;font-weight:700;} .seqR small{display:block;font-size:10.5px;font-weight:400;color:var(--mute);}
+.pimg{max-width:220px;max-height:140px;border-radius:8px;margin-top:6px;display:block;}
 .media{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;}
 .media .m{background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:8px;font-size:12px;}
 .media .m img{width:100%;height:110px;object-fit:cover;border-radius:8px;display:block;}
@@ -90,7 +97,7 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
   <span class="net" id="net"></span><span class="logo neon">ITABASHI <b>BATTLE 2</b></span>
   <div class="tabs" id="tabs">
     <button data-tab="ctl" class="on">進行</button><button data-tab="menu">メニュー</button><button data-tab="team">チーム</button>
-    <button data-tab="media">素材（画像・曲）</button><button data-tab="ta">車椅子タイム</button><button data-tab="log">得点履歴</button>
+    <button data-tab="media">素材（画像・曲）</button><button data-tab="ta">車椅子タイム</button><button data-tab="log">得点履歴</button><button data-tab="rec">個人記録</button>
   </div>
   <span class="sp"></span>
   <a class="lk" href="${opts.screenUrl}" target="_blank" rel="noopener">プロジェクター画面を開く</a>
@@ -104,6 +111,7 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
 (function(){
   var API = ${JSON.stringify(opts.apiBase)}, WS = ${JSON.stringify(opts.wsPath)}, JOIN = ${JSON.stringify(opts.joinUrl)}, QR = ${JSON.stringify(opts.qrSvg)};
   var EDIT = ${opts.editable ? 'true' : 'false'};
+  var MEDIA = ${JSON.stringify(opts.mediaBase)};
   var KINDS = ${JSON.stringify(STEP_KINDS)};
   var SFX_CAT = ${JSON.stringify(SFX_CATALOG)};
   var BGM_CAT = ${JSON.stringify(BGM_CATALOG)};
@@ -111,7 +119,7 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
   var page = document.getElementById('page');
   var tab = 'ctl', S = null, D = null, selStep = null, cand = null;
   // ホシコンのサイドバー（板橋バトル2）から ?tab=menu などで直接開けるようにする
-  (function(){ var t = new URLSearchParams(location.search).get('tab'); if (t && ['ctl', 'menu', 'team', 'media', 'ta', 'log'].indexOf(t) >= 0) { tab = t; Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function(x){ x.classList.toggle('on', x.getAttribute('data-tab') === t); }); } })();
+  (function(){ var t = new URLSearchParams(location.search).get('tab'); if (t && ['ctl', 'menu', 'team', 'media', 'ta', 'log', 'rec'].indexOf(t) >= 0) { tab = t; Array.prototype.forEach.call(document.querySelectorAll('#tabs button'), function(x){ x.classList.toggle('on', x.getAttribute('data-tab') === t); }); } })();
   function msg(t){ var m = document.getElementById('msg'); m.textContent = t; m.classList.add('on'); clearTimeout(msg.t); msg.t = setTimeout(function(){ m.classList.remove('on'); }, 1800); }
   function api(method, path, body, raw){
     var o = { method: method, headers: {} };
@@ -137,7 +145,7 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
 
   function draw(){
     if (!D) { page.innerHTML = '<div class="hint">読み込み中…</div>'; return; }
-    if (tab === 'ctl') drawCtl(); else if (tab === 'menu') drawMenu(); else if (tab === 'team') drawTeam(); else if (tab === 'media') drawMedia(); else if (tab === 'ta') drawTA(); else drawLog();
+    if (tab === 'ctl') drawCtl(); else if (tab === 'menu') drawMenu(); else if (tab === 'team') drawTeam(); else if (tab === 'media') drawMedia(); else if (tab === 'ta') drawTA(); else if (tab === 'rec') drawRec(); else drawLog();
   }
 
   // ================= 進行 =================
@@ -195,14 +203,43 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     }
     if (st.kind === 'mygrowth' || st.kind === 'mysales') h += '<div class="qbox">各自のスマホに本人の売上だけを表示中です（読み込み済み ' + (S.salesLoaded || 0) + ' 人）。個人の数字はこの画面やプロジェクターには出ません。</div>';
     if (st.kind === 'qbox') a.push('<button class="b y" data-act="qboxToggle">' + (ph === 'open' ? '受付を終了' : '受付を再開') + '</button>');
+    if (st.kind === 'announce') {
+      var ar = (S.revealN || 0) >= 1;
+      if (!ar) a.push('<button class="b gh" data-act="drumroll">ドラムロール</button>', '<button class="b go" data-act="revealNext">発表する！</button>');
+      else {
+        a.push('<button class="b gh" data-act="revealReset">予告の画面に戻す</button>');
+        if (st.video) { var avp = S.video && S.video.playing; a.push('<button class="b go" data-act="' + (avp ? 'vpause' : 'vplay') + '">' + (avp ? '動画を一時停止' : '動画を再生') + '</button><button class="b gh" data-act="vrestart">動画を最初から</button>'); }
+      }
+      h += '<div class="qbox"><b>予告</b>　' + escH(st.teaser || '').split(String.fromCharCode(10)).join(' ') + '<br><b>発表</b>　' + escH(st.reveal || '（文字なし）') + (st.image ? '　画像あり' : '') + (st.video ? '　動画あり' : '') + (st.image || st.video ? '' : '　<span style="color:var(--pink)">画像・動画が未設定です</span>') + '</div>';
+    }
+    if (st.kind === 'prizes') {
+      var pn = S.revealN || 0, pit = (S.items || []).filter(function(x){ return pn >= x.start && pn < x.start + x.steps.length; })[0];
+      var nextL = !pit ? '発表完了' : '「' + pit.label + '」の' + stepL(pit, pit.steps[pn - pit.start]) + (pit.steps[pn - pit.start] === 'full' ? '' : 'を発表');
+      a.push('<button class="b gh" data-act="drumroll">ドラムロール</button>', '<button class="b go" data-act="revealNext"' + (!pit ? ' disabled' : '') + '>' + escH(nextL) + '</button>', '<button class="b gh" data-act="revealPrev"' + (pn ? '' : ' disabled') + '>1つ戻す</button>', '<button class="b gh" data-act="revealAll">全部発表</button>');
+    }
     if (['ranking', 'timeattack', 'scoreboard'].indexOf(st.kind) >= 0) a.push('<button class="b gh" data-act="drumroll">ドラムロール</button>', '<button class="b go" data-act="revealNext">1つ発表（' + (S.revealN || 0) + '/' + (S.total || 0) + '）</button>', '<button class="b gh" data-act="revealAll">全部発表</button>');
     h += '<div class="acts">' + a.join('') + '</div>';
     if (q && st.kind !== 'vote') h += '<div class="qbox">' + escH(q.prompt || '（問題文なし）') + (q.image ? '<br><img src="' + escH(q.image) + '" style="max-width:220px;border-radius:8px;margin-top:6px">' : '') + '<br><span class="ans">正解：' + escH(q.answerText || q.answer || '') + '</span>' + (st.kind === 'buzzer' ? '　' + q.points + 'pt' : '') + '</div>';
     if (st.kind === 'buzzer' && S.buzz && S.buzz.length) h += '<div class="qbox"><b>早押し順</b><br>' + S.buzz.map(function(b, i){ return (i === S.buzzCursor && ph === 'judge' ? '▶ ' : '　') + (i + 1) + '. ' + escH(b.name) + '（' + b.team + '）' + fmtSec(b.show) + 's' + (b.locked ? '　×' : ''); }).join('<br>') + '</div>';
     if (S.answers && S.answers.length) h += '<div class="qbox"><b>回答 ' + S.answers.length + ' / ' + (S.targets || 0) + '</b><br>' + S.answers.map(function(x){ return escH(x.name) + '（' + x.team + '）：' + escH(ansLabel(st, q, x.a)); }).join('<br>') + '</div>';
     if (st.kind === 'qbox') h += '<table class="tb" style="margin-top:10px"><tr><th>質問</th><th>チーム</th><th>♥</th><th></th></tr>' + (S.qbox || []).map(function(x){ return '<tr><td>' + escH(x.text) + '<div class="hint">' + escH(x.name || '') + '</div></td><td>' + x.team + '</td><td>' + x.likes + '</td><td style="white-space:nowrap"><button class="b sm ' + (S.picked === x.id ? 'y' : 'gh') + '" data-pick="' + x.id + '">' + (S.picked === x.id ? '表示中' : '大画面へ') + '</button> <button class="b sm ok" data-qpt="' + x.team + '">+5</button></td></tr>'; }).join('') + '</table>';
+    if (st.kind === 'prizes') h += '<table class="tb" style="margin-top:10px"><tr><th>賞</th><th>受賞者</th><th>景品</th><th></th></tr>' + (S.items || []).map(function(x, i){
+      var done = x.steps.map(function(p, j){ return '<span style="' + (j < x.k ? 'color:var(--green);font-weight:800' : 'color:var(--mute)') + '">' + stepL(x, p) + '</span>'; }).join(' → ');
+      return '<tr><td>' + escH(x.label) + '</td><td>' + winText(x.win) + '</td><td>' + (x.prize ? escH(String(x.prize).split(String.fromCharCode(10))[0]) : '<span style="color:var(--pink)">未入力</span>') + (x.image ? '　画像あり' : '') + '</td><td>' + done + '</td></tr>';
+    }).join('') + '</table>';
     if (st.kind === 'ranking' || st.kind === 'timeattack') h += '<table class="tb" style="margin-top:10px">' + (S.items || []).map(function(x){ return '<tr><td>' + x.rank + '位</td><td>' + escH(x.name) + '</td><td>' + (x.seconds != null ? fmtTA(x.seconds) : escH(x.sub || '')) + '</td><td>' + (x.rank > (S.total - (S.revealN || 0)) ? '発表済' : '') + '</td></tr>'; }).join('') + '</table>';
     return h;
+  }
+  var PART_L = { winner: '受賞者', prize: '景品の文', lines: '景品の文（1行ずつ）', image: '画像', full: '画像を全画面に' };
+  function stepL(it, p){
+    if (p && p.indexOf('line') === 0) { var i = Number(p.slice(4)), ln = String(it.prize || '').split(String.fromCharCode(10)).filter(function(x){ return x.trim(); })[i]; return '景品' + (i + 1) + '行目' + (ln ? '「' + ln.slice(0, 12) + (ln.length > 12 ? '…' : '') + '」' : ''); }
+    return PART_L[p] || p;
+  }
+  function winText(w){
+    if (!w) return '<span class="hint">（該当なし）</span>';
+    if (w.kind === 'ta') return escH(w.name) + '<span class="hint">　' + fmtTA(Number(w.sub)) + '</span>';
+    if (w.kind === 'team') return escH(w.name) + '<span class="hint">　' + (w.tie ? '同点' : 'チーム' + w.team) + '・' + w.sub + '点</span>';
+    return escH(w.name);
   }
   function ansLabel(st, q, a){
     if (st.kind === 'choice' || st.kind === 'vote') return q.choices[Number(a)] || a;
@@ -309,20 +346,57 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     if (k === 'number') h += cfgField(s, 'unit', '単位（円・分など）');
     if (k === 'timeattack') h += cfgField(s, 'top', '表示する人数（上位）', 'number') + '<div class="hint">タイムは「車椅子タイム」タブで入力します。</div>';
     if (k === 'scoreboard') h += cfgField(s, 'final', '最終結果（優勝チームを紙吹雪で発表）', 'check');
+    if (k === 'formal') h += cfgField(s, 'kicker', '上の小さい文字（例：2026年度　板橋営業所）') + cfgField(s, 'subtitle', 'サブタイトル') + cfgField(s, 'body', '本文（1行ずつ箇条書きになります。行頭を空白にすると記号なし）', 'area')
+      + '<div class="row2"><div>' + cfgField(s, 'image_id', '画像（右側に表示）', 'select', mediaOpts('image', c.image_id)) + '</div><div>' + cfgField(s, 'footer', '下の小さい文字（日付・場所など）') + '</div></div>'
+      + '<div class="hint">本文も画像もなければ表紙（タイトルを中央に大きく）、どちらかがあれば講座ページのレイアウトになります。このスライドではロゴ・ラウンド番号・得点・効果音を出さず、BGMも「変えない」のままなら止まります。</div>';
+    if (k === 'announce') {
+      h += cfgField(s, 'teaser', '予告の文（改行すると1行ずつ出ます）', 'area')
+        + cfgField(s, 'reveal', '発表する言葉（例：会場名。大きく出ます）', 'area')
+        + cfgField(s, 'body', '補足（住所・集合時間など。小さく出ます）', 'area')
+        + '<div class="row2"><div>' + cfgField(s, 'image_id', '画像', 'select', mediaOpts('image', c.image_id)) + '</div><div>' + cfgField(s, 'video_id', '動画（選ぶと発表と同時に再生。画像より優先）', 'select', mediaOpts('video', c.video_id)) + '</div></div>'
+        + (EDIT ? '<div class="paste" contenteditable="true" id="annPaste">ここをクリックして画像を貼り付け（Ctrl+V ／ Mac は ⌘+V）。画像・動画のファイルをここにドラッグしてもOK</div><label class="hint" style="display:inline-block;margin-top:4px;cursor:pointer;text-decoration:underline">ファイルから選ぶ（画像・動画）<input type="file" accept="image/*,video/mp4,video/webm,video/quicktime" id="annFile" style="display:none"></label>' : '')
+        + (c.image_id ? '<img class="pimg" src="' + escH(MEDIA + '/media/' + c.image_id) + '">' : '')
+        + '<div class="hint" style="margin-top:6px">進行画面の「発表する！」を押すと、予告の画面から画像（または動画）つきの発表に切り替わります。文字を直したら「ラウンド設定を保存」を押してください。</div>';
+    }
     if (k === 'lobby') h += '<div class="hint">最初はロゴだけを中央に表示します。進行画面の「QRを表示」で参加用QRを演出つきで出します。BGMを「変えない」にすると定番のロビー曲が流れます。</div>';
     if (k === 'reveal' || k === 'setup') h += '<div class="hint">BGMを「変えない」にすると定番の曲が流れます。</div>';
     if (k === 'black') h += '<div class="hint">プロジェクターを真っ黒にして、BGMも止めます。トラブル時は進行画面の「黒画面にする」ボタンでいつでも出せます。</div>';
     if (EDIT) h += '<div class="acts"><button class="b c" id="saveStep">ラウンド設定を保存</button><span class="sp"></span><button class="b sm ng" id="delStep">このラウンドを削除</button></div>';
-    if (['buzzer', 'choice', 'number', 'order', 'vote', 'ranking'].indexOf(k) >= 0) {
-      h += '<h3 style="margin-top:16px">' + (k === 'ranking' ? 'ランキング（上が1位）' : '問題') + '</h3>' + s.questions.map(function(q, i){ return qEditor(s, q, i); }).join('');
-      if (EDIT) h += '<button class="b gh" id="addQ">＋ ' + (k === 'ranking' ? '項目' : '問題') + 'を追加</button>';
+    if (k === 'prizes') h += '<div class="hint">「次を発表」を押すたびに、各賞の「発表の順番」に並べたものを1つずつ出します（受賞者・景品の文・画像・画像を全画面に）。たとえば最下位賞を「景品の文 → 受賞者 → 画像を全画面に」にすると、ツアーを発表 → 受賞チーム → 画像がぐっと大きくなって全画面、の流れになります。賞そのものの発表順は各賞の ↑↓ で入れ替えられます（3位から先に、など）。景品の文は改行すると1行ずつ演出つきで出ます。</div>';
+    if (['buzzer', 'choice', 'number', 'order', 'vote', 'ranking', 'prizes'].indexOf(k) >= 0) {
+      h += '<h3 style="margin-top:16px">' + (k === 'ranking' ? 'ランキング（上が1位）' : k === 'prizes' ? '景品（上から順に発表）' : '問題') + '</h3>' + s.questions.map(function(q, i){ return qEditor(s, q, i); }).join('');
+      if (EDIT) h += '<button class="b gh" id="addQ">＋ ' + (k === 'ranking' ? '項目' : k === 'prizes' ? '賞' : '問題') + 'を追加</button>';
     }
     return h;
   }
+  // 景品発表の演出の順番：「次を発表」1回につき1つずつ出る。↑↓で入れ替え、×で外す、＋で足す
+  function prizeSeqOf(q){
+    var a = String(q.seq || '').split(',').filter(function(x, i, arr){ return PART_L[x] && arr.indexOf(x) === i; });
+    return a.length ? a : (q.points === 1 ? ['prize', 'winner'] : ['winner', 'prize']);
+  }
+  function seqEditor(q){
+    var seq = prizeSeqOf(q), rest = ['winner', 'prize', 'lines', 'image', 'full'].filter(function(p){ return seq.indexOf(p) < 0; });
+    var tip = { winner: '「受賞するのは…」で引っぱってから出る', prize: '「景品は…」で引っぱってから、全部の行が順に自動で出る（画像を別にしない場合は画像も一緒）', lines: '「次を発表」を押すたびに1行ずつ出る（画像を別にしない場合は最後の行と一緒に画像も）', image: '画像だけを後から出す', full: '画像がぐっと大きくなって、画像だけの全画面表示に' };
+    return '<label class="lb">発表の順番（「次を発表」1回につき1つずつ出ます）</label><div class="seqL">' + seq.map(function(p, j){
+      return '<div class="seqR"><b>' + (j + 1) + '</b><span>' + PART_L[p] + '<small>' + tip[p] + '</small></span>'
+        + (EDIT ? '<button class="b sm gh" data-sq="' + q.id + '" data-op="up" data-p="' + p + '"' + (j ? '' : ' disabled') + '>↑</button><button class="b sm gh" data-sq="' + q.id + '" data-op="down" data-p="' + p + '"' + (j < seq.length - 1 ? '' : ' disabled') + '>↓</button><button class="b sm gh" data-sq="' + q.id + '" data-op="del" data-p="' + p + '"' + (seq.length > 1 ? '' : ' disabled') + '>×</button>' : '') + '</div>';
+    }).join('') + '</div>' + (EDIT && rest.length ? '<div class="acts" style="margin-top:4px">' + rest.map(function(p){ var sw = (p === 'lines' && seq.indexOf('prize') >= 0) ? '景品の文を1行ずつ出すに切り替え' : (p === 'prize' && seq.indexOf('lines') >= 0) ? '景品の文をまとめて出すに切り替え' : '＋ ' + PART_L[p]; return '<button class="b sm ' + (p === 'lines' && seq.indexOf('prize') >= 0 ? 'c' : 'gh') + '" data-sq="' + q.id + '" data-op="add" data-p="' + p + '">' + sw + '</button>'; }).join('') + '</div>' : '');
+  }
   function qEditor(s, q, i){
     var k = s.kind, ch = (q.choices || []).join(String.fromCharCode(10));
-    var h = '<div class="qcard" data-q="' + q.id + '"><div class="hd"><b>' + (k === 'ranking' ? (i + 1) + '位' : 'Q' + (i + 1)) + '</b><span class="sp"></span>' + (EDIT ? '<button class="b sm gh" data-qmv="' + q.id + '" data-dir="-1">↑</button><button class="b sm gh" data-qmv="' + q.id + '" data-dir="1">↓</button><button class="b sm ng" data-qdel="' + q.id + '">削除</button>' : '') + '</div>';
-    if (k === 'ranking') {
+    var h = '<div class="qcard" data-q="' + q.id + '"><div class="hd"><b>' + (k === 'ranking' ? (i + 1) + '位' : k === 'prizes' ? (i + 1) + '番目に発表' : 'Q' + (i + 1)) + '</b><span class="sp"></span>' + (EDIT ? '<button class="b sm gh" data-qmv="' + q.id + '" data-dir="-1">↑</button><button class="b sm gh" data-qmv="' + q.id + '" data-dir="1">↓</button><button class="b sm ng" data-qdel="' + q.id + '">削除</button>' : '') + '</div>';
+    if (k === 'prizes') {
+      var src = (q.choices || [])[0] || 'none', val = (q.choices || [])[1] || '';
+      var srcs = [['none', '受賞者を出さない（景品だけ発表）'], ['ta', '車椅子タイムの順位から自動'], ['team', 'チーム順位から自動'], ['teamLast', '最下位チーム（自動）'], ['text', '名前を手入力']];
+      h += '<div class="row2"><div><label class="lb">賞の名前（例：1位、最下位賞）</label><input class="f" data-f="prompt" value="' + escH(q.prompt) + '"></div><div><label class="lb">受賞者</label><div style="display:flex;gap:6px"><select class="f" data-w="src" style="flex:1">' + srcs.map(function(o){ return '<option value="' + o[0] + '"' + (o[0] === src ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>'
+        + (src === 'ta' || src === 'team' ? '<input class="f" data-w="val" type="number" min="1" style="width:80px" value="' + escH(val || '1') + '" title="何位">' : src === 'text' ? '<input class="f" data-w="val" style="width:140px" placeholder="名前" value="' + escH(val) + '">' : '') + '</div></div></div>'
+        + seqEditor(q)
+        + '<label class="lb">景品（改行すると1行ずつ出ます）</label><textarea class="f" data-f="answer" rows="4" placeholder="例：洗車券9枚">' + escH(q.answer) + '</textarea>'
+        + '<label class="lb">補足（小さく表示）</label><input class="f" data-f="note" value="' + escH(q.note) + '">'
+        + '<label class="lb">画像</label><select class="f" data-f="image_id">' + mediaOpts('image', q.image_id) + '</select>'
+        + (EDIT ? '<div class="paste" contenteditable="true" data-paste="' + q.id + '">ここをクリックして画像を貼り付け（Ctrl+V ／ Mac は ⌘+V）</div><label class="hint" style="display:inline-block;margin-top:4px;cursor:pointer;text-decoration:underline">ファイルから選ぶ<input type="file" accept="image/*" data-pfile="' + q.id + '" style="display:none"></label>' : '')
+        + (q.image_id ? '<img class="pimg" src="' + escH(MEDIA + '/media/' + q.image_id) + '">' : '');
+    } else if (k === 'ranking') {
       h += '<div class="row2"><div><label class="lb">名前（店名など）</label><input class="f" data-f="prompt" value="' + escH(q.prompt) + '"></div><div><label class="lb">ひとこと（ジャンル・エリアなど）</label><input class="f" data-f="answer" value="' + escH(q.answer) + '"></div></div>'
         + '<div class="row2"><div><label class="lb">補足</label><input class="f" data-f="note" value="' + escH(q.note) + '"></div><div><label class="lb">画像</label><select class="f" data-f="image_id">' + mediaOpts('image', q.image_id) + '</select></div></div>';
     } else {
@@ -359,6 +433,31 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
       Array.prototype.forEach.call(page.querySelectorAll('[data-cfg]'), function(el){ var k = el.getAttribute('data-cfg'); cfg[k] = el.type === 'checkbox' ? el.checked : (el.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : el.value); });
       api('PATCH', '/steps/' + s.id, { title: document.getElementById('stTitle').value, config: cfg }).then(function(){ reload(); msg('保存しました'); return load(); }).catch(err);
     };
+    // 発表ラウンド：画像・動画を貼り付け/ドラッグ/選択 → 素材にアップロードしてこのラウンドに設定（入力中の文字も一緒に保存）
+    function setAnnMedia(file){
+      if (!file) return;
+      var isVid = file.type.indexOf('video/') === 0;
+      if (!isVid && file.type.indexOf('image/') !== 0) { alert('画像か動画を選んでください'); return; }
+      msg((isVid ? '動画' : '画像') + 'をアップロード中…');
+      (isVid ? checkVideo(file).then(function(ok){ if (!ok) throw new Error('この動画はこのブラウザでは再生できない形式です（iPhoneのHEVCなど）。MP4（H.264）で書き出してからもう一度選んでください'); return file; }) : shrink(file))
+        .then(function(b){ return api('POST', '/media', undefined, { body: b, type: b.type || file.type, name: file.name && file.name !== 'image.png' ? file.name : '発表画像.png' }); })
+        .then(function(j){
+          var cfg = {}; for (var k in s.config) cfg[k] = s.config[k];
+          Array.prototype.forEach.call(page.querySelectorAll('[data-cfg]'), function(el){ var k = el.getAttribute('data-cfg'); cfg[k] = el.type === 'checkbox' ? el.checked : (el.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : el.value); });
+          if (isVid) cfg.video_id = String(j.id); else cfg.image_id = String(j.id);
+          return api('PATCH', '/steps/' + s.id, { title: document.getElementById('stTitle').value, config: cfg });
+        })
+        .then(function(){ reload(); msg('設定しました'); return load(); }).catch(err);
+    }
+    var ap = document.getElementById('annPaste');
+    if (ap) {
+      var apl = ap.textContent;
+      ap.onpaste = function(e){ e.preventDefault(); var items = (e.clipboardData && e.clipboardData.items) || [], f = null; for (var i = 0; i < items.length; i++) if (items[i].kind === 'file') { f = items[i].getAsFile(); break; } if (f) setAnnMedia(f); else alert('画像をコピーしてから貼り付けてください'); };
+      ap.oninput = function(){ ap.textContent = apl; };
+      ap.ondragover = function(e){ e.preventDefault(); };
+      ap.ondrop = function(e){ e.preventDefault(); setAnnMedia(e.dataTransfer && e.dataTransfer.files[0]); };
+    }
+    var af = document.getElementById('annFile'); if (af) af.onchange = function(){ setAnnMedia(af.files[0]); };
     var dl = document.getElementById('delStep'); if (dl) dl.onclick = function(){ if (confirm('このラウンドと問題を削除しますか？')) api('DELETE', '/steps/' + s.id).then(function(){ selStep = null; reload(); return load(); }).catch(err); };
     var aq = document.getElementById('addQ'); if (aq) aq.onclick = function(){ api('POST', '/steps/' + s.id + '/questions', {}).then(function(){ reload(); return load(); }).catch(err); };
     Array.prototype.forEach.call(page.querySelectorAll('[data-q]'), function(card){
@@ -372,6 +471,44 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
         api('PATCH', '/questions/' + qid, body).then(function(){ reload(); msg('保存しました'); if (f === 'choices') return load(); }).catch(err);
       }; });
     });
+    // 景品：演出の順番を入れ替え・追加・削除
+    Array.prototype.forEach.call(page.querySelectorAll('[data-sq]'), function(b){ b.onclick = function(){
+      var qid = Number(b.getAttribute('data-sq')), op = b.getAttribute('data-op'), p = b.getAttribute('data-p');
+      var q = s.questions.filter(function(x){ return x.id === qid; })[0]; if (!q) return;
+      var seq = prizeSeqOf(q), j = seq.indexOf(p);
+      if (op === 'add') { if (p === 'lines' || p === 'prize') { var o = seq.indexOf(p === 'lines' ? 'prize' : 'lines'); if (o >= 0) { seq[o] = p; p = null; } } if (p) seq.push(p); }
+      else if (op === 'del') { if (seq.length > 1) seq.splice(j, 1); }
+      else { var t = j + (op === 'up' ? -1 : 1); if (t < 0 || t >= seq.length) return; seq[j] = seq[t]; seq[t] = p; }
+      api('PATCH', '/questions/' + qid, { seq: seq.join(',') }).then(function(){ reload(); msg('保存しました'); return load(); }).catch(err);
+    }; });
+    // 景品：受賞者の決め方（種類＋順位/名前）はまとめて保存
+    Array.prototype.forEach.call(page.querySelectorAll('[data-w]'), function(el){ el.onchange = function(){
+      var card = el.closest('[data-q]'), qid = Number(card.getAttribute('data-q'));
+      var sv = card.querySelector('[data-w="src"]').value, vv = card.querySelector('[data-w="val"]');
+      var v = el.getAttribute('data-w') === 'src' ? ((sv === 'ta' || sv === 'team') ? '1' : '') : (vv ? vv.value.trim() : '');
+      api('PATCH', '/questions/' + qid, { choices: [sv, v] }).then(function(){ reload(); msg('保存しました'); return load(); }).catch(err);
+    }; });
+    // 景品の画像：貼り付け or ファイル選択 → 素材にアップロードしてこの賞に設定
+    function setPrizeImage(qid, file){
+      if (!file || file.type.indexOf('image/') !== 0) { alert('画像を貼り付けてください'); return; }
+      msg('画像をアップロード中…');
+      shrink(file).then(function(b){ return api('POST', '/media', undefined, { body: b, type: b.type || file.type, name: file.name && file.name !== 'image.png' ? file.name : '景品画像.png' }); })
+        .then(function(j){ return api('PATCH', '/questions/' + qid, { image_id: j.id }); })
+        .then(function(){ reload(); msg('画像を設定しました'); return load(); }).catch(err);
+    }
+    Array.prototype.forEach.call(page.querySelectorAll('[data-paste]'), function(z){
+      var label = z.textContent;
+      z.onpaste = function(e){
+        e.preventDefault();
+        var items = (e.clipboardData && e.clipboardData.items) || [], f = null;
+        for (var i = 0; i < items.length; i++) if (items[i].kind === 'file' && items[i].type.indexOf('image/') === 0) { f = items[i].getAsFile(); break; }
+        setPrizeImage(Number(z.getAttribute('data-paste')), f);
+      };
+      z.oninput = function(){ z.textContent = label; };
+      z.ondragover = function(e){ e.preventDefault(); };
+      z.ondrop = function(e){ e.preventDefault(); var f = e.dataTransfer && e.dataTransfer.files[0]; setPrizeImage(Number(z.getAttribute('data-paste')), f); };
+    });
+    Array.prototype.forEach.call(page.querySelectorAll('[data-pfile]'), function(inp){ inp.onchange = function(){ setPrizeImage(Number(inp.getAttribute('data-pfile')), inp.files[0]); }; });
     Array.prototype.forEach.call(page.querySelectorAll('[data-qdel]'), function(b){ b.onclick = function(){ if (confirm('削除しますか？')) api('DELETE', '/questions/' + b.getAttribute('data-qdel')).then(function(){ reload(); return load(); }).catch(err); }; });
     Array.prototype.forEach.call(page.querySelectorAll('[data-qmv]'), function(b){ b.onclick = function(){
       var ids = s.questions.map(function(q){ return q.id; }), id = Number(b.getAttribute('data-qmv')), i = ids.indexOf(id), j = i + Number(b.getAttribute('data-dir'));
@@ -501,6 +638,26 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
   }
 
   // ================= 得点履歴 =================
+  // ================= 個人記録（新卒一人ひとり） =================
+  function drawRec(){
+    page.innerHTML = '<div class="hint">読み込み中…</div>';
+    api('GET', '/records').then(function(j){
+      if (tab !== 'rec') return;
+      var ps = j.people || [];
+      var base = API.slice(0, API.length - 4); // API は …/ib2/api
+      var h = '<div class="pn"><h3>RECORDS（新卒一人ひとりの記録）</h3><div class="hint">クイズの答え・正解/不正解・早押し・質問箱・投票・車椅子タイムを、一人ずつ残しています。同じ記録は社員カルテの「バトル記録」タブでも見られます。「リセット」した時点までの記録は無効になり、ここには出ません（消さずに保管しています）。</div>'
+        + '<div class="acts"><a class="b c" href="' + base + '/records/print" target="_blank">全員分を印刷・PDF</a><a class="b gh" href="' + base + '/records.csv">CSVダウンロード</a></div>'
+        + '<table class="tb" style="margin-top:10px"><tr><th>チーム</th><th>氏名</th><th>回答</th><th>正解</th><th>不正解</th><th>正答率</th><th>早押し</th><th>質問</th><th>車椅子</th><th></th></tr>'
+        + (ps.length ? ps.map(function(p){ var st = p.stats;
+          return '<tr class="t' + p.team + '"><td style="color:var(--tc);font-family:var(--num);font-size:16px">' + escH(p.team) + '</td><td>' + escH(p.name) + '<div class="hint">' + escH(p.empNo) + '</div></td>'
+            + '<td>' + st.answered + '</td><td style="color:var(--green)">' + st.correct + (st.placed ? '<span class="hint">（入賞' + st.placed + '）</span>' : '') + '</td><td style="color:' + (st.wrong ? 'var(--pink)' : 'inherit') + '">' + st.wrong + '</td>'
+            + '<td>' + (st.rate == null ? '―' : st.rate + '%') + '</td><td>' + st.buzzOk + '○ ' + st.buzzNg + '×</td><td>' + st.questions + '</td><td>' + (p.ta ? fmtTA(p.ta.seconds) : '―') + '</td>'
+            + '<td><a class="b sm gh" href="' + base + '/records/print?emp=' + encodeURIComponent(p.empNo) + '" target="_blank">詳細・印刷</a></td></tr>';
+        }).join('') : '<tr><td colspan="10" class="hint">まだ記録はありません（ゲームで回答すると、ここに一人ずつ記録されます）</td></tr>')
+        + '</table></div>';
+      page.innerHTML = h;
+    }).catch(err);
+  }
   function drawLog(){
     var l = D.scores || [];
     page.innerHTML = '<div class="pn"><h3>SCORE LOG</h3><div class="hint">間違えて加点した場合は「取り消す」で戻せます。</div><table class="tb"><tr><th>時刻</th><th>チーム</th><th>点数</th><th>理由</th><th>操作者</th><th></th></tr>'

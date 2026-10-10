@@ -9,6 +9,7 @@ import { issueCaseNoIfEmpty } from '../utils/report_case_no';
 import { normalizeKana } from '../utils/kana';
 import { computeKanchoAttendance } from '../cron';
 import { FAVICON_DATA_URI } from '../html/layout';
+import { loadHoshiCalendar, buildHoshiSchedulePdf, saveHoshiShift, saveHoshiWorkTime, saveHoshiMemo } from '../utils/hoshi_schedule';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -97,6 +98,30 @@ const VEHICLE_LOOKUP_JS = `
     document.getElementById('vehicle_no').value = no;
     doVehicleLookup();
   }
+`;
+
+// 表示高速化（報告・社員照会＋で使用）: 以前は liff.init() の完了（LINEログイン確認）を待ってから画面を
+// 出していたため、開くたびに「読み込み中...」で待たされていた。画面は先に表示し、/api/liff/ への通信だけを
+// liff.init() 完了まで自動で待たせ、そのときのアクセストークンを Authorization に付け直す
+// （各fetch呼び出し側の書き換えを最小限にするため、このページ内の fetch を包む）。
+// 使い方: <script> 冒頭に埋め込み、liff.init(...) の戻り値を LIFF_READY に代入する。
+const LIFF_FAST_BOOT_JS = `
+  var LIFF_READY = null;
+  var __origFetch = window.fetch.bind(window);
+  window.fetch = function(url, opts) {
+    if (typeof url === 'string' && url.indexOf('/api/liff/') === 0 && LIFF_READY) {
+      return LIFF_READY.then(function() {
+        var o = opts || {};
+        var h = {};
+        var src = o.headers || {};
+        Object.keys(src).forEach(function(k) { h[k] = src[k]; });
+        h['Authorization'] = 'Bearer ' + (liff.getAccessToken() || '');
+        o.headers = h;
+        return __origFetch(url, o);
+      });
+    }
+    return __origFetch(url, opts);
+  };
 `;
 
 // 送信完了画面の「内容をコピー」ボタン用（報告フォーム各ページ共通で <script> 冒頭に注入）
@@ -279,6 +304,68 @@ app.get('/api/liff/kancho-attendance', async (c) => {
 
   await logLineActivity(c.env.DB, uid, 'liff', 'api', 'その他機能', '出勤班長表示');
   return c.json({ today: { date: todayStr, ...today }, tomorrow: { date: tomorrowStr, ...tomorrow } });
+});
+
+// ===== LIFF API: 星のシフト・予定表（星専用引き継ぎシートのカレンダーを閲覧のみ。PDF出力も可）=====
+// 閲覧できるのは統括管理者・運行管理者・ロール「R」。編集（シフト・出勤時間・予定メモ）は統括管理者のみ。
+// シフトの編集は管理画面と同じく班長シフトにそのまま反映される（utils/hoshi_schedule.ts の saveHoshiShift）。
+async function hoshiLiffAuth(req: Request, db: D1Database): Promise<{ uid: string; canEdit: boolean; name: string } | null> {
+  const uid = await uidFromRequest(req);
+  if (!uid) return null;
+  const liffUser = await db.prepare('SELECT role, name FROM line_liff_users WHERE line_uid = ?').bind(uid).first<{ role: string; name: string | null }>();
+  // hoshi_viewer＝ロール「R」（LINEで星の予定表だけを閲覧するためのロール。編集不可）
+  if (!liffUser || !['general_manager', 'operations_manager', 'hoshi_viewer'].includes(liffUser.role)) return null;
+  return { uid, canEdit: liffUser.role === 'general_manager', name: liffUser.name || 'LINE利用者' };
+}
+
+app.get('/api/liff/hoshi/calendar', async (c) => {
+  const auth = await hoshiLiffAuth(c.req.raw, c.env.DB);
+  if (!auth) return c.json({ error: 'forbidden' }, 403);
+  const cal = await loadHoshiCalendar(c.env.DB, parseInt(c.req.query('year') || '', 10), parseInt(c.req.query('month') || '', 10));
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'その他機能', `星 シフト・予定表示 ${cal.year}年${cal.month}月度`);
+  return c.json({ ...cal, canEdit: auth.canEdit });
+});
+
+// 1日分（シフト・出勤時間・予定メモ）をまとめて保存。送られてきた項目だけ更新する
+app.put('/api/liff/hoshi/day/:date', async (c) => {
+  const auth = await hoshiLiffAuth(c.req.raw, c.env.DB);
+  if (!auth || !auth.canEdit) return c.json({ error: '編集できるのは統括管理者のみです' }, 403);
+  const date = c.req.param('date');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: '日付の指定が不正です' }, 400);
+  const b = await c.req.json<{ code?: string; diagonal?: boolean; workTime?: string; memo?: string }>()
+    .catch(() => ({}) as { code?: string; diagonal?: boolean; workTime?: string; memo?: string });
+  const by = `${auth.name}（LINE）`;
+  if (b.code !== undefined) {
+    const r = await saveHoshiShift(c.env.DB, date, b.code, !!b.diagonal, { adminId: null, by, logName: `${auth.name}（LINE 星）` });
+    if (!r.ok) return c.json({ error: r.error }, r.status);
+  }
+  if (b.workTime !== undefined) {
+    const r = await saveHoshiWorkTime(c.env.DB, date, b.workTime, by);
+    if (!r.ok) return c.json({ error: r.error }, r.status);
+  }
+  if (b.memo !== undefined) {
+    const r = await saveHoshiMemo(c.env.DB, date, b.memo, by);
+    if (!r.ok) return c.json({ error: r.error }, r.status);
+  }
+  await logLineActivity(c.env.DB, auth.uid, 'liff', 'api', 'その他機能', `星 シフト・予定編集 ${date}`);
+  return c.json({ ok: true });
+});
+
+app.get('/api/liff/hoshi/pdf', async (c) => {
+  const auth = await hoshiLiffAuth(c.req.raw, c.env.DB);
+  if (!auth) return c.json({ error: 'forbidden' }, 403);
+  const uid = auth.uid;
+  const cal = await loadHoshiCalendar(c.env.DB, parseInt(c.req.query('year') || '', 10), parseInt(c.req.query('month') || '', 10));
+  const bytes = await buildHoshiSchedulePdf(c.env, cal);
+  if (!bytes) return c.text('PDF未設定（フォントが設定されていません）', 503);
+  await logLineActivity(c.env.DB, uid, 'liff', 'api', 'その他機能', `星 シフト・予定PDF出力 ${cal.year}年${cal.month}月度`);
+  return new Response(bytes, {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="hoshi_schedule_${cal.year}_${cal.month}.pdf"`,
+      'Cache-Control': 'no-store',
+    },
+  });
 });
 
 // ===== LIFF API: 連絡事項（クイック報告で自分が宛先に選ばれた項目のみ・直近7日）=====
@@ -2454,74 +2541,108 @@ function liffReport2Page(liffId: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>報告</title>
-  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
+    /* 2026-10 デザイン刷新（管理者リッチメニュー・星シートと同じ夜空トーン）。入力速度優先で余計な説明は置かない */
+    :root { --ink:#0f172a; --sub:#64748b; --line:#e6e8f0; --field:#f5f6fa; --accent:#4f46e5; --ok:#059669; }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-    body { margin: 0; padding: 0; background: #f0f4f8; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; }
-    #loading { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 14px; }
-    .page { max-width: 520px; margin: 0 auto; padding: 16px 16px 40px; }
-    .header { background: #1e3a5f; color: white; padding: 14px 16px; border-radius: 12px; margin-bottom: 16px; }
-    .header h1 { margin: 0; font-size: 17px; font-weight: 700; }
-    .header p { margin: 4px 0 0; font-size: 12px; opacity: 0.8; }
-    .seg { display: flex; background: #e5e7eb; border-radius: 10px; padding: 3px; margin-bottom: 16px; }
-    .seg button { flex: 1; border: none; background: transparent; padding: 11px 2px; border-radius: 8px; font-size: 13px; font-weight: 700; color: #6b7280; cursor: pointer; }
-    .seg button.active { background: white; color: #1e3a5f; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
-    .card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-    .card-title { font-size: 13px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
-    .field { margin-bottom: 12px; }
+    body { margin: 0; padding: 0; background: #eef0f6; font-family: -apple-system, 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 15px; color: var(--ink); }
+    .page { max-width: 560px; margin: 0 auto; padding: 0 0 110px; }
+    .top { position: sticky; top: 0; z-index: 20; padding: 14px 14px 12px;
+      background: linear-gradient(135deg,#0b1430 0%,#18245a 60%,#2f3488 100%); box-shadow: 0 6px 18px rgba(11,20,48,.25); }
+    .top h1 { margin: 0 0 10px; font-size: 18px; font-weight: 800; color: white; letter-spacing: .04em; display: flex; align-items: center; gap: 8px; }
+    .top h1 svg { color: #f5c451; }
+    .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .seg button { border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08); color: rgba(255,255,255,.82);
+      padding: 11px 2px; border-radius: 12px; font-size: 14px; font-weight: 800; cursor: pointer; transition: background .15s, color .15s, transform .1s; }
+    .seg button:active { transform: scale(.97); }
+    .seg button.active { color: white; border-color: transparent; box-shadow: 0 6px 16px rgba(0,0,0,.25); }
+    #seg-lost.active { background: linear-gradient(135deg,#f59e0b,#f97316); }
+    #seg-accident.active { background: linear-gradient(135deg,#fb7185,#e11d48); }
+    #seg-violation.active { background: linear-gradient(135deg,#a78bfa,#7c3aed); }
+    #seg-general.active { background: linear-gradient(135deg,#38bdf8,#2563eb); }
+    .forms { padding: 12px 12px 0; }
+    .card { background: white; border-radius: 16px; padding: 14px 14px 14px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 6px 18px rgba(15,23,42,.05); border: 1px solid rgba(15,23,42,.04); }
+    .card-title { font-size: 12px; font-weight: 800; color: var(--sub); letter-spacing: .06em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+    .card-title::before { content: ''; width: 4px; height: 14px; border-radius: 2px; background: var(--accent); }
+    .field { margin-bottom: 10px; }
     .field:last-child { margin-bottom: 0; }
-    label { display: block; font-size: 13px; color: #374151; margin-bottom: 5px; font-weight: 500; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+    .row2 .field { margin-bottom: 0; }
+    label { display: block; font-size: 12px; color: var(--sub); margin-bottom: 5px; font-weight: 700; }
     input[type=text], input[type=tel], input[type=time], input[type=date], textarea, select {
-      width: 100%; border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px;
-      font-size: 15px; font-family: inherit; background: #f9fafb; color: #111827;
-      -webkit-appearance: none; appearance: none; outline: none;
-      transition: border-color 0.15s, background 0.15s;
+      width: 100%; border: 1.5px solid transparent; border-radius: 12px; padding: 12px 12px; min-height: 48px;
+      font-size: 16px; font-family: inherit; background: var(--field); color: var(--ink);
+      -webkit-appearance: none; appearance: none; outline: none; transition: border-color .15s, background .15s, box-shadow .15s;
     }
-    input:focus, textarea:focus, select:focus { border-color: #2563eb; background: white; }
-    textarea { resize: vertical; min-height: 90px; }
+    input:focus, textarea:focus, select:focus { border-color: #a5b4fc; background: white; box-shadow: 0 0 0 4px rgba(99,102,241,.12); }
+    .veh { font-size: 20px !important; font-weight: 800; letter-spacing: .08em; text-align: center; }
+    .veh::placeholder { color: #cbd5e1; font-weight: 600; }
+    textarea { resize: vertical; min-height: 92px; }
     .emp-wrap { position: relative; }
-    .emp-suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-radius: 8px; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.12); max-height: 200px; overflow-y: auto; margin-top: 2px; display: none; }
-    .emp-item { padding: 10px 12px; font-size: 14px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+    .emp-suggestions { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid var(--line); border-radius: 12px; z-index: 30; box-shadow: 0 12px 30px rgba(15,23,42,.16); max-height: 240px; overflow-y: auto; margin-top: 4px; display: none; }
+    .emp-item { padding: 12px 14px; font-size: 15px; font-weight: 700; cursor: pointer; border-bottom: 1px solid #f1f2f6; }
     .emp-item:last-child { border-bottom: none; }
-    .emp-item:hover { background: #eff6ff; }
-    .emp-meta { font-size: 11px; color: #6b7280; margin-top: 2px; }
-    .emp-selected { font-size: 13px; color: #059669; margin-top: 4px; font-weight: 600; }
-    .toggle-group { display: flex; gap: 10px; flex-wrap: wrap; }
-    .toggle-btn { padding: 8px 16px; border: 2px solid #d1d5db; border-radius: 8px; background: white; color: #374151; font-size: 14px; font-weight: 600; cursor: pointer; }
-    .toggle-btn.active { border-color: #1e3a5f; background: #eff6ff; color: #1e3a5f; }
-    .check-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #f3f4f6; }
+    .emp-item:active { background: #eef0ff; }
+    .emp-meta { font-size: 12px; color: var(--sub); margin-top: 2px; font-weight: 500; }
+    /* 乗務員の登録済み表示（車番候補・検索どちらから選んでも同じ表示にする） */
+    .emp-picked { display: none; align-items: center; gap: 12px; padding: 12px; border-radius: 14px; background: linear-gradient(135deg,#ecfdf5,#d1fae5); border: 1.5px solid #34d399; }
+    .emp-picked.show { display: flex; animation: pick .35s ease; }
+    @keyframes pick { 0% { transform: scale(.96); opacity: .4; } 60% { transform: scale(1.02); opacity: 1; } 100% { transform: scale(1); } }
+    .ep-check { flex-shrink: 0; width: 40px; height: 40px; border-radius: 50%; background: var(--ok); color: white; display: grid; place-items: center; box-shadow: 0 4px 12px rgba(5,150,105,.35); }
+    .ep-body { flex: 1; min-width: 0; }
+    .ep-label { font-size: 11px; font-weight: 800; color: var(--ok); letter-spacing: .06em; }
+    .ep-name { font-size: 19px; font-weight: 800; color: var(--ink); line-height: 1.3; }
+    .ep-meta { font-size: 12.5px; color: #047857; font-weight: 700; margin-top: 1px; }
+    .ep-clear { flex-shrink: 0; border: 1px solid #a7f3d0; background: white; color: #047857; border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 800; cursor: pointer; }
+    .card.has-emp { border-color: #6ee7b7; }
+    /* 車番から出る候補 */
+    .vh-box { margin-top: 10px; border-radius: 14px; background: #f5f7ff; border: 1px solid #dfe3ff; padding: 10px; }
+    .vh-veh { font-size: 14px; font-weight: 800; color: var(--ink); margin-bottom: 8px; }
+    .vh-veh b { color: var(--accent); }
+    .vh-cap { font-size: 11px; font-weight: 800; color: var(--accent); margin-bottom: 6px; letter-spacing: .04em; }
+    .vh-emp { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 12px; background: white; border: 1px solid #dfe3ff; border-radius: 12px; margin-bottom: 6px; cursor: pointer; font-size: 15px; font-weight: 800; }
+    .vh-emp:last-child { margin-bottom: 0; }
+    .vh-emp:active { background: #eef0ff; }
+    .vh-emp small { color: var(--sub); font-size: 12px; font-weight: 600; }
+    .vh-emp .vh-add { flex-shrink: 0; font-size: 12px; font-weight: 800; color: var(--accent); background: #eef0ff; border-radius: 8px; padding: 5px 9px; }
+    .vh-emp.picked { background: #ecfdf5; border-color: #34d399; }
+    .vh-emp.picked .vh-add { background: var(--ok); color: white; }
+    .toggle-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .toggle-btn { flex: 1; min-width: 80px; padding: 11px 10px; border: 1.5px solid var(--line); border-radius: 12px; background: white; color: #334155; font-size: 14px; font-weight: 800; cursor: pointer; transition: all .12s; }
+    .toggle-btn.active { border-color: var(--accent); background: #eef0ff; color: var(--accent); }
+    .check-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-bottom: 1px solid #f1f2f6; }
     .check-row:last-child { border-bottom: none; }
-    .check-row label { margin: 0; flex: 1; font-weight: 400; cursor: pointer; }
-    .check-row input[type=checkbox] { width: 20px; height: 20px; accent-color: #1e3a5f; flex-shrink: 0; }
+    .check-row label { margin: 0; flex: 1; font-weight: 600; font-size: 14px; color: var(--ink); cursor: pointer; }
+    .check-row input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); flex-shrink: 0; }
     .dep-row { display: none; }
     .dep-row.visible { display: flex; }
-    .violation-info { display: none; margin-top: 8px; padding: 10px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; font-size: 14px; color: #991b1b; font-weight: 600; }
+    .violation-info { display: none; margin-top: 8px; padding: 10px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; font-size: 14px; color: #991b1b; font-weight: 700; }
     .violation-info.visible { display: block; }
-    .btn-submit { width: 100%; background: #1e3a5f; color: white; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 8px; }
-    .btn-submit:disabled { background: #9ca3af; cursor: default; }
+    .submit-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(to top, #eef0f6 70%, rgba(238,240,246,0)); }
+    .btn-submit { display: block; width: 100%; max-width: 536px; margin: 0 auto; background: linear-gradient(135deg,#18245a,#4f46e5); color: white; border: none; border-radius: 14px; padding: 16px; font-size: 17px; font-weight: 800; cursor: pointer; box-shadow: 0 10px 24px rgba(79,70,229,.35); }
+    .btn-submit:disabled { background: #9ca3af; box-shadow: none; }
     .success { text-align: center; padding: 32px 16px; }
-    .success-icon { font-size: 48px; margin-bottom: 16px; }
-    .success-title { font-size: 20px; font-weight: 700; color: #1e3a5f; margin-bottom: 8px; }
-    .success-summary { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; text-align: left; font-size: 13px; color: #374151; white-space: pre-line; margin: 16px 0; line-height: 1.7; }
-    .btn-close { background: #f3f4f6; color: #374151; border: none; border-radius: 10px; padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+    .success-icon { width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 50%; background: var(--ok); color: white; display: grid; place-items: center; }
+    .success-title { font-size: 20px; font-weight: 800; color: var(--ink); margin-bottom: 8px; }
+    .success-summary { background: white; border: 1px solid var(--line); border-radius: 14px; padding: 14px; text-align: left; font-size: 13px; color: #334155; white-space: pre-line; margin: 16px 0; line-height: 1.7; }
+    .btn-close { background: white; color: #334155; border: 1px solid var(--line); border-radius: 12px; padding: 12px 24px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 8px; }
+    #success-page .btn-submit { margin-bottom: 8px; }
   </style>
 </head>
 <body>
-  <div id="loading">読み込み中...</div>
-  <div id="app" style="display:none;">
+  <div id="app">
     <div class="page" id="form-page">
-      <div class="header">
-        <h1>報告</h1>
-        <p>上で種類を選んでください。必須項目はありません</p>
+      <div class="top">
+        <h1><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg>報告</h1>
+        <div class="seg">
+          <button type="button" id="seg-lost" class="active" onclick="switchType('lost')">忘れ物</button>
+          <button type="button" id="seg-accident" onclick="switchType('accident')">事故</button>
+          <button type="button" id="seg-violation" onclick="switchType('violation')">違反</button>
+          <button type="button" id="seg-general" onclick="switchType('general')">一般</button>
+        </div>
       </div>
-
-      <div class="seg">
-        <button type="button" id="seg-lost" class="active" onclick="switchType('lost')">忘れ物</button>
-        <button type="button" id="seg-accident" onclick="switchType('accident')">事故</button>
-        <button type="button" id="seg-violation" onclick="switchType('violation')">違反</button>
-        <button type="button" id="seg-general" onclick="switchType('general')">一般</button>
-      </div>
+      <div class="forms">
 
       <!-- ===== 忘れ物 ===== -->
       <div id="form-lost">
@@ -2534,12 +2655,11 @@ function liffReport2Page(liffId: string): string {
         </div>
         <div class="card">
           <div class="card-title">基本情報</div>
-          <div class="field"><label>受電時刻</label><input type="time" id="li-received_at"></div>
-          <div class="field">
-            <label>車番</label>
-            <input type="text" id="li-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('lost')">
-            <div id="li-vehicle-emp-hint" style="display:none;"></div>
+          <div class="row2">
+            <div class="field"><label>受電時刻</label><input type="time" id="li-received_at"></div>
+            <div class="field"><label>車番</label><input type="text" id="li-vehicle_no" class="veh" placeholder="5232" inputmode="numeric" maxlength="4" autocomplete="off" oninput="vehicleLookupDebounce('lost')"></div>
           </div>
+          <div id="li-vehicle-emp-hint" style="display:none;"></div>
         </div>
         ${empCardHtml('li', 'lost')}
         <div class="card">
@@ -2567,12 +2687,11 @@ function liffReport2Page(liffId: string): string {
       <div id="form-accident" style="display:none;">
         <div class="card">
           <div class="card-title">受電情報</div>
-          <div class="field"><label>受電時刻</label><input type="time" id="ac-received_at"></div>
-          <div class="field">
-            <label>車番</label>
-            <input type="text" id="ac-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('accident')">
-            <div id="ac-vehicle-emp-hint" style="display:none;"></div>
+          <div class="row2">
+            <div class="field"><label>受電時刻</label><input type="time" id="ac-received_at"></div>
+            <div class="field"><label>車番</label><input type="text" id="ac-vehicle_no" class="veh" placeholder="5232" inputmode="numeric" maxlength="4" autocomplete="off" oninput="vehicleLookupDebounce('accident')"></div>
           </div>
+          <div id="ac-vehicle-emp-hint" style="display:none;"></div>
         </div>
         ${empCardHtml('ac', 'accident')}
         <div class="card">
@@ -2613,12 +2732,11 @@ function liffReport2Page(liffId: string): string {
       <div id="form-violation" style="display:none;">
         <div class="card">
           <div class="card-title">基本情報</div>
-          <div class="field"><label>受電時刻</label><input type="time" id="vi-received_at"></div>
-          <div class="field">
-            <label>車番</label>
-            <input type="text" id="vi-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('violation')">
-            <div id="vi-vehicle-emp-hint" style="display:none;"></div>
+          <div class="row2">
+            <div class="field"><label>受電時刻</label><input type="time" id="vi-received_at"></div>
+            <div class="field"><label>車番</label><input type="text" id="vi-vehicle_no" class="veh" placeholder="5232" inputmode="numeric" maxlength="4" autocomplete="off" oninput="vehicleLookupDebounce('violation')"></div>
           </div>
+          <div id="vi-vehicle-emp-hint" style="display:none;"></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div class="field" style="margin-bottom:0;"><label>違反発生日</label><input type="date" id="vi-violation_date"></div>
             <div class="field" style="margin-bottom:0;"><label>違反発生時刻</label><input type="time" id="vi-violation_time"></div>
@@ -2667,12 +2785,11 @@ function liffReport2Page(liffId: string): string {
               <option value="遅延"><option value="お客様からの着電"><option value="その他連絡">
             </datalist>
           </div>
-          <div class="field"><label>受電時刻</label><input type="time" id="gr-received_at"></div>
-          <div class="field">
-            <label>車番（あれば）</label>
-            <input type="text" id="gr-vehicle_no" placeholder="例: 5232" inputmode="numeric" oninput="vehicleLookupDebounce('general')">
-            <div id="gr-vehicle-emp-hint" style="display:none;"></div>
+          <div class="row2">
+            <div class="field"><label>受電時刻</label><input type="time" id="gr-received_at"></div>
+            <div class="field"><label>車番（あれば）</label><input type="text" id="gr-vehicle_no" class="veh" placeholder="5232" inputmode="numeric" maxlength="4" autocomplete="off" oninput="vehicleLookupDebounce('general')"></div>
           </div>
+          <div id="gr-vehicle-emp-hint" style="display:none;"></div>
           <div class="field"><label>住所（あれば）</label><input type="text" id="gr-location" placeholder="例: 板橋区大山東町51-1 付近"></div>
         </div>
         <div class="card">
@@ -2692,12 +2809,13 @@ function liffReport2Page(liffId: string): string {
         <div class="card"><div class="card-title">報告内容</div><div class="field"><textarea id="gr-content" placeholder="報告したい内容を自由に入力してください"></textarea></div></div>
       </div>
 
-      <button class="btn-submit" id="btn-submit" onclick="submitForm()">送信する</button>
+      </div>
+      <div class="submit-bar"><button class="btn-submit" id="btn-submit" onclick="submitForm()">送信する</button></div>
     </div>
 
     <!-- 送信完了画面 -->
     <div class="page success" id="success-page" style="display:none;">
-      <div class="success-icon">✅</div>
+      <div class="success-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
       <div class="success-title">送信しました</div>
       <p style="color:#6b7280;font-size:14px;">下の内容をコピーして、トークに貼り付け・転送できます。</p>
       <div class="success-summary" id="summary-text"></div>
@@ -2708,8 +2826,11 @@ function liffReport2Page(liffId: string): string {
     </div>
   </div>
 
+  <!-- LIFF SDKは画面を描いた後に読み込む（head内だとダウンロード完了まで画面が真っ白になる） -->
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
   var LIFF_ACCESS_TOKEN = '';
+${LIFF_FAST_BOOT_JS}
 ${COPY_SUMMARY_JS}
   var currentType = 'lost';
   var PREFIX = { lost: 'li', accident: 'ac', violation: 'vi', general: 'gr' };
@@ -2722,11 +2843,8 @@ ${COPY_SUMMARY_JS}
   var viCarStatus = '';
   var violationTypes = [];
 
-  liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
-    .then(function() {
-      LIFF_ACCESS_TOKEN = liff.getAccessToken() || '';
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
+  // 画面は即表示（初期値もすぐ入れる）。LINEログイン確認は裏で進め、通信だけ完了を待つ（LIFF_FAST_BOOT_JS）
+  (function initDefaults() {
       var now = new Date();
       var hh = String(now.getHours()).padStart(2, '0');
       var mm = String(now.getMinutes()).padStart(2, '0');
@@ -2738,11 +2856,11 @@ ${COPY_SUMMARY_JS}
       var dd = String(now.getDate()).padStart(2, '0');
       document.getElementById('vi-violation_date').value = yyyy + '-' + mo + '-' + dd;
       document.getElementById('vi-violation_time').value = hh + ':' + mm;
-      loadViolationTypes();
-    })
-    .catch(function(err) {
-      document.getElementById('loading').textContent = 'エラー: ' + err.message;
-    });
+  })();
+  LIFF_READY = liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
+    .then(function() { LIFF_ACCESS_TOKEN = liff.getAccessToken() || ''; });
+  LIFF_READY.catch(function(err) { alert('LINEの読み込みに失敗しました: ' + err.message); });
+  loadViolationTypes();
 
   function switchType(t) {
     currentType = t;
@@ -2825,18 +2943,43 @@ ${COPY_SUMMARY_JS}
       })
       .catch(function() { sug.style.display = 'none'; });
   }
+  // 乗務員を選んだら「登録済み」をはっきり見せる（緑のカード＋チェック。検索欄は隠し、車番候補の該当行にも印を付ける）
   function selectEmp(type, e) {
     selectedEmp[type] = e;
     var p = PREFIX[type];
     document.getElementById(p + '-emp-search').value = '';
     document.getElementById(p + '-emp-suggestions').style.display = 'none';
+    document.getElementById(p + '-emp-wrap').style.display = 'none';
     var div = e.division ? e.division + '課' : '';
     var team = e.team ? e.team + '班' : '';
     var sel = document.getElementById(p + '-emp-selected');
-    sel.style.display = 'block';
-    sel.textContent = '選択中: ' + e.name + '（' + div + team + ' / ' + e.emp_no + '）';
+    sel.querySelector('.ep-name').textContent = e.name;
+    sel.querySelector('.ep-meta').textContent = [div + team, e.emp_no ? '社員番号 ' + e.emp_no : ''].filter(Boolean).join(' ・ ');
+    sel.classList.remove('show'); void sel.offsetWidth; sel.classList.add('show');
+    document.getElementById(p + '-emp-card').classList.add('has-emp');
     document.getElementById(p + '-employee_division').value = e.division || '';
     document.getElementById(p + '-employee_team').value = e.team || '';
+    markVehicleHintPicked(type);
+    if (navigator.vibrate) { try { navigator.vibrate(15); } catch (x) {} }
+  }
+  function clearEmp(type) {
+    selectedEmp[type] = null;
+    var p = PREFIX[type];
+    document.getElementById(p + '-emp-selected').classList.remove('show');
+    document.getElementById(p + '-emp-wrap').style.display = 'block';
+    document.getElementById(p + '-emp-card').classList.remove('has-emp');
+    document.getElementById(p + '-employee_division').value = '';
+    document.getElementById(p + '-employee_team').value = '';
+    markVehicleHintPicked(type);
+  }
+  function markVehicleHintPicked(type) {
+    var p = PREFIX[type];
+    var cur = selectedEmp[type];
+    document.querySelectorAll('#' + p + '-vehicle-emp-hint .vh-emp').forEach(function(el) {
+      var on = !!cur && el.getAttribute('data-empno') === String(cur.emp_no);
+      el.classList.toggle('picked', on);
+      el.querySelector('.vh-add').textContent = on ? '登録済み' : '登録';
+    });
   }
   document.addEventListener('click', function(e) {
     ['li', 'ac', 'vi', 'gr'].forEach(function(p) {
@@ -2864,21 +3007,22 @@ ${COPY_SUMMARY_JS}
         if (!v && !list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
         var html = '';
         if (v) {
-          html += '<div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">' + no + ' は <span style="color:#1d4ed8;">' + v.division + '課 ' + v.team + '班</span> の車両</div>';
+          html += '<div class="vh-veh">' + no + ' は <b>' + v.division + '課 ' + v.team + '班</b> の車両</div>';
         }
         if (list.length) {
-          html += '<div style="font-size:11px;font-weight:700;color:#1d4ed8;margin-bottom:6px;">この車番をよく使う乗務員（タップで乗務員欄にセット）</div>'
+          html += '<div class="vh-cap">この車番の乗務員候補（タップで登録）</div>'
             + list.map(function(e) {
               var div = e.division ? e.division + '課' : '';
               var team = e.team ? e.team + '班' : '';
               var meta = (div + team ? div + team + ' / ' : '') + e.emp_no + (e.hint ? ' ・ ' + e.hint : '');
-              return '<div onclick="selectEmp(&#39;' + type + '&#39;,' + JSON.stringify(e).replace(/</g,'\\u003c').replace(/"/g,'&quot;') + ')"'
-                + ' style="padding:9px 12px;background:white;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:14px;">'
-                + e.name + ' <span style="color:#6b7280;font-size:12px;">' + meta + '</span></div>';
+              return '<div class="vh-emp" data-empno="' + e.emp_no + '" onclick="selectEmp(&#39;' + type + '&#39;,' + JSON.stringify(e).replace(/</g,'\\u003c').replace(/"/g,'&quot;') + ')">'
+                + '<span>' + e.name + ' <small>' + meta + '</small></span><span class="vh-add">登録</span></div>';
             }).join('');
         }
         box.innerHTML = html;
-        box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
+        box.className = 'vh-box';
+        box.style.display = 'block';
+        markVehicleHintPicked(type);
       })
       .catch(function() { box.style.display = 'none'; });
   }
@@ -3009,19 +3153,22 @@ ${COPY_SUMMARY_JS}
 // 乗務員検索カード（報告2共通パーツ）。prefixはフィールドIDの接頭辞、typeはJS側のselectEmp用キー
 function empCardHtml(prefix: string, type: string): string {
   return `
-        <div class="card">
-          <div class="card-title">乗務員（あれば）</div>
+        <div class="card" id="${prefix}-emp-card">
+          <div class="card-title">乗務員</div>
           <div class="field">
-            <div class="emp-wrap">
+            <div class="emp-wrap" id="${prefix}-emp-wrap">
               <input type="text" id="${prefix}-emp-search" placeholder="氏名・社員番号で検索" autocomplete="off" oninput="empSearchDebounce('${type}')">
               <div class="emp-suggestions" id="${prefix}-emp-suggestions"></div>
             </div>
-            <div class="emp-selected" id="${prefix}-emp-selected" style="display:none;"></div>
+            <div class="emp-picked" id="${prefix}-emp-selected">
+              <div class="ep-check"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+              <div class="ep-body"><div class="ep-label">乗務員を登録しました</div><div class="ep-name"></div><div class="ep-meta"></div></div>
+              <button type="button" class="ep-clear" onclick="clearEmp('${type}')">変更</button>
+            </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-            <div class="field" style="margin-bottom:0;"><label>課</label><input type="text" id="${prefix}-employee_division" readonly style="background:#f3f4f6;color:#6b7280;"></div>
-            <div class="field" style="margin-bottom:0;"><label>班</label><input type="text" id="${prefix}-employee_team" readonly style="background:#f3f4f6;color:#6b7280;"></div>
-          </div>
+          <!-- 課・班は登録済みカードに表示するため画面には出さない（値の保持用） -->
+          <input type="hidden" id="${prefix}-employee_division">
+          <input type="hidden" id="${prefix}-employee_team">
         </div>`;
 }
 
@@ -3685,7 +3832,6 @@ function liffStaffLookupPlusPage(liffId: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>社員照会＋</title>
-  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <link rel="icon" type="image/svg+xml" href="${FAVICON_DATA_URI}">
 <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
@@ -3819,13 +3965,75 @@ function liffStaffLookupPlusPage(liffId: string): string {
     .btn-edit { flex: 1; background: #ede9fe; color: #5b21b6; border: none; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer; }
     .btn-save { flex: 1; background: #4f46e5; color: white; border: none; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer; }
     .btn-save:disabled { background: #9ca3af; }
+
+    /* ===== 2026-10 デザイン刷新（管理者リッチメニュー・星シートと同じ夜空トーン。構成・動作は従来どおり） ===== */
+    body, .view { background: #eef0f6; font-family: -apple-system,'Hiragino Sans','Meiryo',sans-serif; color: #0f172a; }
+    .header { background: linear-gradient(135deg,#0b1430 0%,#18245a 60%,#2f3488 100%); padding: 16px 16px 14px; }
+    .header h1 { font-size: 18px; font-weight: 800; letter-spacing: .03em; }
+    .header-sub { opacity: .7; font-weight: 700; }
+    .search-area { background: linear-gradient(135deg,#18245a 0%,#2f3488 100%); padding: 4px 14px 14px; }
+    .search-box { border-radius: 14px; padding: 0 14px; box-shadow: 0 6px 18px rgba(11,20,48,.25); }
+    .search-box input { padding: 13px 0; }
+    .search-ic { color: #94a3b8; flex-shrink: 0; display: flex; }
+    .div-badge-btn { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); }
+    .div-scroll { padding: 22px 14px; }
+    .div-lead { font-size: 13px; font-weight: 700; color: #64748b; }
+    .div-grid { gap: 12px; }
+    .div-card { position: relative; overflow: hidden; border-radius: 20px; padding: 24px 12px 20px; border: 1px solid rgba(15,23,42,.04);
+      box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 24px rgba(15,23,42,.07); transition: transform .1s; }
+    .div-card:active { transform: scale(.97); background: white; }
+    .div-card::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 5px; background: var(--dc, #4f46e5); }
+    .div-card:nth-child(1) { --dc: linear-gradient(90deg,#38bdf8,#2563eb); }
+    .div-card:nth-child(2) { --dc: linear-gradient(90deg,#34d399,#059669); }
+    .div-card:nth-child(3) { --dc: linear-gradient(90deg,#fbbf24,#f97316); }
+    .div-card:nth-child(4) { --dc: linear-gradient(90deg,#f472b6,#db2777); }
+    .div-card-num { font-size: 30px; color: #0f172a; }
+    .div-card-label { font-weight: 700; color: #64748b; }
+    .div-card-cnt { display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 800; color: #4f46e5; background: #eef0ff; border-radius: 99px; padding: 3px 10px; }
+    .div-all-btn { display: flex; align-items: center; justify-content: center; gap: 8px; border: none; color: white; border-radius: 16px; padding: 17px;
+      background: linear-gradient(135deg,#18245a,#4f46e5); box-shadow: 0 10px 24px rgba(79,70,229,.3); font-size: 15px; }
+    .div-all-btn:active { background: linear-gradient(135deg,#18245a,#4f46e5); transform: scale(.98); }
+    .team-chips { padding: 12px 14px 2px; }
+    .team-chip { border-radius: 99px; padding: 7px 14px; font-weight: 800; border-color: #e2e5ef; }
+    .team-chip.active { background: #18245a; border-color: #18245a; }
+    #results-area { padding: 10px 12px 96px; }
+    .result-count { font-weight: 700; }
+    .emp-card { border-radius: 16px; padding: 13px 14px; border: 1px solid rgba(15,23,42,.04); box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 6px 16px rgba(15,23,42,.05); }
+    .emp-card:active { background: #f5f6ff; }
+    .emp-avatar { width: 44px; height: 44px; border-radius: 14px; color: white; font-weight: 800; background: linear-gradient(135deg,#818cf8,#4f46e5); }
+    .emp-avatar.av1 { background: linear-gradient(135deg,#38bdf8,#2563eb); }
+    .emp-avatar.av2 { background: linear-gradient(135deg,#34d399,#059669); }
+    .emp-avatar.av3 { background: linear-gradient(135deg,#fbbf24,#f97316); }
+    .emp-avatar.av4 { background: linear-gradient(135deg,#f472b6,#db2777); }
+    .emp-name { font-size: 16px; font-weight: 800; }
+    .sched-time { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .emp-start-big { font-size: 19px; font-weight: 800; color: #1e40af; font-variant-numeric: tabular-nums; letter-spacing: .02em; line-height: 1; }
+    .badge { font-weight: 700; }
+    .bdg-div { background: #eef0ff; color: #4338ca; }
+    .fab { background: linear-gradient(135deg,#18245a,#4f46e5); box-shadow: 0 10px 24px rgba(79,70,229,.4); border-radius: 18px; }
+    .fcard { border-radius: 16px; border: 1px solid rgba(15,23,42,.04); box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 6px 16px rgba(15,23,42,.05); }
+    input[type=text],input[type=tel],input[type=time],input[type=date],input[type=number],select { border: 1.5px solid transparent; border-radius: 12px; background: #f5f6fa; min-height: 48px; }
+    input:focus,select:focus { border-color: #a5b4fc; background: white; box-shadow: 0 0 0 4px rgba(99,102,241,.12); }
+    .btn-primary { border-radius: 14px; background: linear-gradient(135deg,#18245a,#4f46e5); box-shadow: 0 10px 24px rgba(79,70,229,.3); }
+    #bottom-sheet { border-radius: 24px 24px 0 0; }
+    #bottom-sheet.open { box-shadow: 0 -12px 40px rgba(15,23,42,.2); }
+    .search-box input[type=text] { border: none; background: transparent; box-shadow: none; min-height: 0; border-radius: 0; padding: 13px 0; }
+    .sh-head { padding: 14px 20px 16px; }
+    .sh-name { font-size: 24px; }
+    .ds { background: #f7f8fc; border-radius: 14px; padding: 12px 14px 4px; margin-bottom: 12px; }
+    .ds-title { color: #4f46e5; font-weight: 800; }
+    .dr { border-bottom-color: #eceef5; }
+    .btn-sheet-close, .btn-cancel { border-radius: 14px; background: #f1f2f7; }
+    .btn-edit { border-radius: 14px; background: #eef0ff; color: #4338ca; }
+    .btn-retire { border-radius: 14px; }
+    .btn-save { border-radius: 14px; background: linear-gradient(135deg,#18245a,#4f46e5); }
+    .btn-exec { border-radius: 14px; }
   </style>
 </head>
 <body>
-  <div id="loading">読み込み中...</div>
 
   <!-- 課選択ビュー -->
-  <div class="view" id="view-division" style="display:none;">
+  <div class="view" id="view-division">
     <div class="header">
       <h1>社員照会＋</h1>
       <span class="header-sub">課から探す</span>
@@ -3833,12 +4041,12 @@ function liffStaffLookupPlusPage(liffId: string): string {
     <div class="div-scroll">
       <div class="div-lead">まず課を選んでください</div>
       <div class="div-grid" id="div-grid"></div>
-      <button class="div-all-btn" onclick="selectAllDivisions()">🔍 全課から検索する</button>
+      <button class="div-all-btn" onclick="selectAllDivisions()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>全課から検索する</button>
     </div>
   </div>
 
   <!-- 検索ビュー -->
-  <div class="view" id="view-search" style="display:none;">
+  <div class="view" id="view-search">
     <div class="header">
       <button class="btn-back" onclick="showDivision()">‹</button>
       <h1 id="search-title">社員照会＋</h1>
@@ -3846,9 +4054,9 @@ function liffStaffLookupPlusPage(liffId: string): string {
     </div>
     <div class="search-area">
       <div class="search-box">
-        <span style="color:#9ca3af;font-size:16px;flex-shrink:0;">🔍</span>
+        <span class="search-ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg></span>
         <input type="text" id="search-input" placeholder="氏名・ふりがな・社員番号（絞り込み）" autocomplete="off" spellcheck="false">
-        <button class="btn-clear" id="clear-btn" onclick="clearSearch()">✕</button>
+        <button class="btn-clear" id="clear-btn" onclick="clearSearch()" aria-label="消去">×</button>
       </div>
     </div>
     <div class="team-chips" id="team-chips"></div>
@@ -3861,7 +4069,7 @@ function liffStaffLookupPlusPage(liffId: string): string {
   </div>
 
   <!-- 新規追加ビュー -->
-  <div class="view" id="view-add" style="display:none;">
+  <div class="view" id="view-add">
     <div class="header">
       <button class="btn-back" onclick="showSearch()">‹</button>
       <h1>新規社員追加</h1>
@@ -3972,8 +4180,11 @@ function liffStaffLookupPlusPage(liffId: string): string {
     </div>
   </div>
 
+  <!-- LIFF SDKは画面を描いた後に読み込む（head内だとダウンロード完了まで画面が真っ白になる） -->
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
   var AT = '';
+${LIFF_FAST_BOOT_JS}
   var _list = [];
   var _cur = null;
   var _timer = null;
@@ -3990,19 +4201,17 @@ function liffStaffLookupPlusPage(liffId: string): string {
     window.visualViewport.addEventListener('scroll', function(){ window.scrollTo(0, 0); });
   }
 
-  liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
-    .then(function() {
-      AT = liff.getAccessToken() || '';
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('view-division').style.display = 'flex';
-      document.getElementById('view-search').style.display = 'flex';
-      document.getElementById('view-add').style.display = 'flex';
+  // 画面は即表示。LINEログイン確認は裏で進め、/api/liff/ の通信だけ完了を待つ（LIFF_FAST_BOOT_JS）
+  renderDivisionGrid();
+  LIFF_READY = liff.init({ liffId: ${JSON.stringify(liffId || 'LIFF_ID_NOT_SET')} })
+    .then(function() { AT = liff.getAccessToken() || ''; });
+  LIFF_READY.catch(function(e) { alert('LINEの読み込みに失敗しました: ' + e.message); });
+  (function initDefaults() {
       var t = new Date(), yyyy = t.getFullYear(), mm = String(t.getMonth()+1).padStart(2,'0'), dd = String(t.getDate()).padStart(2,'0'), today = yyyy+'-'+mm+'-'+dd;
       document.getElementById('retire-date').value = today;
       document.getElementById('a-hire').value = today;
-      loadDivisionCounts();
-    })
-    .catch(function(e) { document.getElementById('loading').textContent = 'エラー: '+e.message; });
+  })();
+  loadDivisionCounts();
 
   /* 課選択 */
   function loadDivisionCounts() {
@@ -4144,12 +4353,12 @@ function liffStaffLookupPlusPage(liffId: string): string {
     el.innerHTML = list.map(function(e,i){
       var div=e.division?e.division+'課':'', team=e.team?e.team+'班':'', loc=(div+team)||'所属未設定';
       return '<div class="emp-card" onclick="openDetail('+i+')">'
-        +'<div class="emp-avatar">'+ini(e.name)+'</div>'
+        +'<div class="emp-avatar av'+(e.division||0)+'">'+ini(e.name)+'</div>'
         +'<div style="flex:1;min-width:0;">'
         +'<div class="emp-name">'+esc(e.name)+'</div>'
         +(e.name_kana?'<div class="emp-kana">'+esc(e.name_kana)+'</div>':'')
-        +'<div class="emp-sub"><span class="badge bdg-div">'+loc+'</span><span class="badge bdg-no">No.'+esc(e.emp_no)+'</span>'+(e.is_hanchyo?'<span class="badge bdg-hanchyo">班長</span>':'')+(e.work_schedule?'<span class="badge bdg-sched">'+esc(e.work_schedule)+'</span>':'')+'</div>'
-        +(e.start_time?'<div class="emp-start">出勤 '+esc(e.start_time)+'</div>':'')
+        // 出庫時間を重視するため、出勤時間は勤務体系（H・D等）のすぐ右に大きく出す（以前は下の行に小さく表示）
+        +'<div class="emp-sub"><span class="badge bdg-div">'+loc+'</span><span class="badge bdg-no">No.'+esc(e.emp_no)+'</span>'+(e.is_hanchyo?'<span class="badge bdg-hanchyo">班長</span>':'')+((e.work_schedule||e.start_time)?'<span class="sched-time">'+(e.work_schedule?'<span class="badge bdg-sched">'+esc(e.work_schedule)+'</span>':'')+(e.start_time?'<span class="emp-start-big">'+esc(e.start_time)+'</span>':'')+'</span>':'')+'</div>'
         +'</div><div style="color:#d1d5db;font-size:14px;">›</div></div>';
     }).join('');
   }
@@ -4366,6 +4575,56 @@ function liffOtherFeaturesPage(liffId: string): string {
     .result-orange { background: linear-gradient(135deg,#c2410c,#f97316); }
     .result-pink { background: linear-gradient(135deg,#be185d,#ec4899); }
     .hint-text { font-size: 12px; color: #6b7280; text-align: center; line-height: 1.6; margin-top: 4px; }
+
+    /* 星（シフト・予定表）: 星専用引き継ぎシートのカレンダーを閲覧のみで表示 */
+    .hoshi-card { margin-top: 16px; }
+    .hoshi-btn { width: 100%; display: flex; align-items: center; gap: 14px; border: none; border-radius: 14px; padding: 18px 16px; cursor: pointer; text-align: left;
+      background: linear-gradient(135deg,#0b1430 0%,#18245a 55%,#2f3488 100%); color: white; box-shadow: 0 4px 14px rgba(24,36,90,0.25); }
+    .hoshi-btn .hb-mark { flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: rgba(255,255,255,0.12); color: #f5c451; }
+    .hoshi-btn .hb-title { font-size: 17px; font-weight: 800; }
+    .hoshi-btn .hb-sub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+    .hoshi-btn .hb-arrow { margin-left: auto; font-size: 20px; opacity: 0.6; }
+    .hs-nav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 4px; }
+    .hs-nav button { width: 38px; height: 38px; border-radius: 10px; border: 1px solid #e5e7eb; background: white; font-size: 18px; font-weight: 800; color: #374151; cursor: pointer; }
+    .hs-nav .hs-mlbl { font-size: 18px; font-weight: 800; color: #111827; min-width: 90px; text-align: center; }
+    .hs-range { text-align: center; font-size: 12px; color: #6b7280; margin-bottom: 10px; }
+    .hs-row { display: grid; grid-template-columns: 64px 54px 50px 1fr; align-items: center; gap: 4px; min-height: 42px; border-top: 1px solid #f1f2f6; padding: 0 2px; }
+    .hs-row:first-child { border-top: none; }
+    .hs-row.hs-head { min-height: 26px; font-size: 11px; font-weight: 700; color: #9ca3af; border-top: none; border-bottom: 1px solid #e5e7eb; }
+    .hs-row.wk { border-top: 1px solid #d7dbe7; }
+    .hs-row.today { background: #eef0ff; border-radius: 10px; }
+    .hs-d { font-size: 16px; font-weight: 800; color: #111827; font-variant-numeric: tabular-nums; }
+    .hs-d small { font-size: 11px; font-weight: 700; color: #6b7280; margin-left: 3px; }
+    .hs-row.sat .hs-d, .hs-row.sat .hs-d small { color: #2563eb; }
+    .hs-row.sun .hs-d, .hs-row.sun .hs-d small { color: #dc2626; }
+    .hs-chip { justify-self: center; min-width: 40px; height: 28px; padding: 0 6px; border-radius: 8px; border: 1px solid rgba(15,23,42,0.1); display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; }
+    .hs-chip.empty { color: #cbd5e1; border-style: dashed; background: white; font-weight: 600; }
+    .hs-skew { display: inline-block; transform: skewX(-14deg); }
+    .hs-t { font-size: 13px; font-weight: 800; color: #4f46e5; text-align: center; font-variant-numeric: tabular-nums; }
+    .hs-m { font-size: 14px; color: #111827; line-height: 1.45; word-break: break-word; padding: 4px 0; }
+    .hs-legend { font-size: 11px; color: #6b7280; line-height: 1.6; margin-top: 10px; }
+    .hs-pdf { display: block; width: 100%; margin-top: 12px; background: #18245a; color: white; border: none; border-radius: 10px; padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer; }
+.hs-pdf:disabled { opacity: 0.6; }
+    .hs-row.editable { cursor: pointer; }
+    .hs-row.editable:active { background: #f3f4ff; }
+    .hs-edit-hint { font-size: 12px; color: #4f46e5; font-weight: 700; text-align: center; margin-bottom: 8px; }
+    #hs-sheet-bg { position: fixed; inset: 0; background: rgba(15,23,42,0.45); z-index: 900; display: none; }
+    #hs-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 901; display: none; background: white; border-radius: 18px 18px 0 0;
+      max-height: 88vh; overflow-y: auto; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 30px rgba(15,23,42,0.2); }
+    #hs-sheet .sh-title { font-size: 18px; font-weight: 800; color: #111827; margin-bottom: 14px; }
+    #hs-sheet .sh-label { font-size: 13px; font-weight: 700; color: #6b7280; margin: 14px 0 8px; }
+    #hs-sheet .sh-note { font-size: 12px; color: #b45309; background: #fffbeb; border-radius: 8px; padding: 8px 10px; }
+    .sh-codes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .sh-code { height: 44px; border-radius: 10px; border: 1px solid rgba(15,23,42,0.12); font-size: 16px; font-weight: 800; cursor: pointer; }
+    .sh-code.sel { outline: 3px solid #4f46e5; outline-offset: 1px; }
+    .sh-time { display: flex; align-items: center; gap: 8px; }
+    .sh-time select { flex: 1; height: 46px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 17px; font-weight: 700; padding: 0 8px; background: white; }
+    #hs-sh-memo { width: 100%; min-height: 80px; border: 1px solid #d1d5db; border-radius: 10px; padding: 10px; font-size: 16px; font-family: inherit; resize: vertical; }
+    .sh-actions { display: flex; gap: 10px; margin-top: 18px; }
+    .sh-actions button { flex: 1; height: 48px; border-radius: 12px; font-size: 16px; font-weight: 800; cursor: pointer; border: none; }
+    .sh-cancel { background: #f3f4f6; color: #374151; }
+    .sh-save { background: #18245a; color: white; }
+    .sh-save:disabled { opacity: 0.6; }
   </style>
 </head>
 <body>
@@ -4402,7 +4661,42 @@ function liffOtherFeaturesPage(liffId: string): string {
           <div class="label">時間計算</div>
         </button>
       </div>
+
+      <!-- 星（星専用引き継ぎシートのシフト・予定表を閲覧） -->
+      <div class="hoshi-card">
+        <button class="hoshi-btn" onclick="showHoshi()">
+          <span class="hb-mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg></span>
+          <span><span class="hb-title" style="display:block">星</span><span class="hb-sub" style="display:block">シフト・出勤時間・予定メモ（PDF出力可）</span></span>
+          <span class="hb-arrow">›</span>
+        </button>
+      </div>
     </div>
+
+    <!-- 星 シフト・予定表 -->
+    <div class="page" id="view-hoshi" style="display:none;">
+      <div class="sub-header">
+        <button class="btn-back" onclick="showMain()">← 戻る</button>
+        <button class="btn-icon" onclick="loadHoshi(hsYm)" title="再読み込み">↻</button>
+      </div>
+      <div class="card">
+        <div class="card-title">星 シフト・予定</div>
+        <div class="hs-nav">
+          <button onclick="hsMove(-1)" aria-label="前の月度">‹</button>
+          <span class="hs-mlbl" id="hs-mlbl"></span>
+          <button onclick="hsMove(1)" aria-label="次の月度">›</button>
+        </div>
+        <div class="hs-range" id="hs-range"></div>
+        <div class="hs-edit-hint" id="hs-edit-hint" style="display:none">日付の行をタップすると編集できます（シフトは班長シフトにも反映）</div>
+        <div class="hs-row hs-head"><div>日付</div><div style="text-align:center">シフト</div><div style="text-align:center">出勤</div><div>予定メモ</div></div>
+        <div id="hs-list">読み込み中...</div>
+        <div class="hs-legend">斜体の記号＝斜め直（14:00〜翌8:00）／ 記号なしの色マス＝早日勤 ／ 赤文字＝希望休の反映</div>
+        <button class="hs-pdf" id="hs-pdf" onclick="hsPdf()">この月度をPDFで保存</button>
+      </div>
+    </div>
+
+    <!-- 星 1日分の編集シート（統括管理者のみ） -->
+    <div id="hs-sheet-bg" onclick="hsCloseSheet()"></div>
+    <div id="hs-sheet"></div>
 
     <!-- 電話番号一覧 -->
     <div class="page" id="view-offices" style="display:none;">
@@ -4486,6 +4780,9 @@ ${COPY_SUMMARY_JS}
       LIFF_ACCESS_TOKEN = liff.getAccessToken() || '';
       document.getElementById('loading').style.display = 'none';
       document.getElementById('app').style.display = 'block';
+      // ロール「R」専用リッチメニューは ?view=hoshi 付きで開く。この場合は星の予定表だけを表示し、
+      // 示達事項・電話番号一覧などのメイン画面には戻れないようにする
+      if (isHoshiOnlyView()) { HS_ONLY = true; showHoshi(); return; }
       renderNotice();
       loadReportNotices();
     })
@@ -4589,6 +4886,193 @@ ${COPY_SUMMARY_JS}
     document.getElementById('view-offices').style.display = 'none';
     document.getElementById('view-timecalc').style.display = 'none';
     document.getElementById('view-kancho').style.display = 'none';
+    document.getElementById('view-hoshi').style.display = 'none';
+  }
+
+  /* 星 シフト・予定表（閲覧のみ。表示ルールは班長シフト・星引き継ぎシートと同じ） */
+  var hsYm = null, hsLoaded = false, HS_ONLY = false;
+  // LIFFのURL（liff.line.me/ID?view=hoshi）のクエリは、初回は liff.state に包まれて届くことがあるため両方見る
+  function isHoshiOnlyView() {
+    var q = new URLSearchParams(location.search);
+    if (q.get('view') === 'hoshi') return true;
+    var st = q.get('liff.state') || '';
+    return st.indexOf('view=hoshi') >= 0;
+  }
+  var HS_WD = ['日','月','火','水','木','金','土'];
+  function showHoshi() {
+    document.getElementById('view-main').style.display = 'none';
+    document.getElementById('view-hoshi').style.display = 'block';
+    if (HS_ONLY) document.querySelector('#view-hoshi .btn-back').style.visibility = 'hidden';
+    window.scrollTo(0, 0);
+    if (!hsLoaded) { hsLoaded = true; loadHoshi(null); }
+  }
+  function hsMd(s) { var p = s.split('-'); return parseInt(p[1], 10) + '/' + parseInt(p[2], 10); }
+  function hsTextColor(bg) {
+    var m = /^#?([0-9a-f]{6})$/i.exec(bg || '');
+    if (!m) return '#0f172a';
+    var n = parseInt(m[1], 16);
+    var lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    return lum > 0.6 ? '#0f172a' : '#ffffff';
+  }
+  function loadHoshi(ym) {
+    var q = ym ? '?year=' + ym.year + '&month=' + ym.month : '';
+    document.getElementById('hs-list').textContent = '読み込み中...';
+    fetch('/api/liff/hoshi/calendar' + q, { headers: AUTH_HEADERS() })
+      .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+      .then(function(res) {
+        if (!res.ok) {
+          document.getElementById('hs-list').textContent = res.status === 403 ? '閲覧権限がありません' : '読み込みに失敗しました';
+          document.getElementById('hs-pdf').style.display = 'none';
+          return;
+        }
+        document.getElementById('hs-pdf').style.display = 'block';
+        renderHoshi(res.data);
+      })
+      .catch(function() { document.getElementById('hs-list').textContent = '読み込みに失敗しました'; });
+  }
+  var hsCal = null, hsEdit = null, hsScrolled = false;
+  function renderHoshi(cal) {
+    hsCal = cal;
+    hsYm = { year: cal.year, month: cal.month };
+    document.getElementById('hs-edit-hint').style.display = cal.canEdit ? 'block' : 'none';
+    document.getElementById('hs-mlbl').textContent = cal.month + '月度';
+    document.getElementById('hs-range').textContent = cal.year + '年 ' + hsMd(cal.start) + ' 〜 ' + hsMd(cal.end);
+    var typeColor = {};
+    (cal.types || []).forEach(function(t) { typeColor[t.code] = t.color; });
+    var html = cal.days.map(function(d, i) {
+      var w = new Date(d.date + 'T00:00:00Z').getUTCDay();
+      var day = parseInt(d.date.slice(8, 10), 10);
+      var showMonth = i === 0 || day === 1;
+      var bg = d.cl || (d.code ? (typeColor[d.code] || '#ffffff') : '');
+      var chip;
+      if (!d.code && !d.cl) chip = '<span class="hs-chip empty">－</span>';
+      else {
+        var fg = d.ws ? '#dc2626' : hsTextColor(bg);
+        var label = d.code ? (d.dg ? '<span class="hs-skew">' + esc(d.code) + '</span>' : esc(d.code)) : '&nbsp;';
+        chip = '<span class="hs-chip" style="background:' + esc(bg) + ';color:' + fg + '">' + label + '</span>';
+      }
+      var cls = 'hs-row' + (w === 6 ? ' sat' : w === 0 ? ' sun' : '') + (d.date === cal.today ? ' today' : '') + (w === 1 && i > 0 ? ' wk' : '') + (cal.canEdit ? ' editable' : '');
+      return '<div class="' + cls + '"' + (d.date === cal.today ? ' id="hs-today"' : '') + (cal.canEdit ? ' onclick="hsOpenSheet(' + i + ')"' : '') + '>' +
+        '<div class="hs-d">' + (showMonth ? parseInt(d.date.slice(5, 7), 10) + '/' : '') + day + '<small>' + HS_WD[w] + '</small></div>' +
+        chip +
+        '<div class="hs-t">' + (d.workTime ? esc(d.workTime) : '') + '</div>' +
+        '<div class="hs-m">' + esc(d.memo || '') + '</div>' +
+      '</div>';
+    }).join('');
+    document.getElementById('hs-list').innerHTML = html;
+    // 今日の行へのスクロールは最初の表示時だけ（保存後の再読み込みで位置が飛ばないように）
+    var t = document.getElementById('hs-today');
+    if (t && !hsScrolled) { hsScrolled = true; t.scrollIntoView({ block: 'center' }); }
+  }
+  /* 1日分の編集（シフト・出勤時間・予定メモ）。変更した項目だけ送る */
+  function hsOpenSheet(i) {
+    var d = hsCal.days[i];
+    hsEdit = { d: d, code: d.code, dg: !!d.dg };
+    var w = new Date(d.date + 'T00:00:00Z').getUTCDay();
+    var shiftLocked = d.locked || !hsCal.hasMember;
+    var codes = '';
+    (hsCal.types || []).forEach(function(t) {
+      var mk = function(dg) {
+        return '<button type="button" class="sh-code" data-code="' + esc(t.code) + '" data-dg="' + (dg ? 1 : 0) + '" style="background:' + esc(t.color) + ';color:' + hsTextColor(t.color) + '">' +
+          (dg ? '<span class="hs-skew">' + esc(t.code) + '</span>' : esc(t.code)) + '</button>';
+      };
+      codes += mk(false);
+      if (t.code === '直') codes += mk(true);
+    });
+    codes += '<button type="button" class="sh-code" data-code="" data-dg="0" style="background:white;color:#9ca3af">空欄</button>';
+    var h = d.workTime ? d.workTime.slice(0, 2) : '';
+    var m = d.workTime ? d.workTime.slice(3, 5) : '00';
+    var hOpts = '<option value="">なし</option>';
+    for (var x = 0; x < 24; x++) { var v = (x < 10 ? '0' : '') + x; hOpts += '<option value="' + v + '"' + (v === h ? ' selected' : '') + '>' + x + '時</option>'; }
+    var mins = []; for (var y = 0; y < 60; y += 5) mins.push((y < 10 ? '0' : '') + y);
+    if (mins.indexOf(m) < 0) { mins.push(m); mins.sort(); }
+    var mOpts = mins.map(function(v) { return '<option value="' + v + '"' + (v === m ? ' selected' : '') + '>' + v + '分</option>'; }).join('');
+    var sheet = document.getElementById('hs-sheet');
+    sheet.innerHTML =
+      '<div class="sh-title">' + hsMd(d.date) + '（' + HS_WD[w] + '）の予定</div>' +
+      '<div class="sh-label">シフト（班長シフトにも反映されます）</div>' +
+      (shiftLocked ? '<div class="sh-note">' + (d.locked ? '班長シフトで確定済みのため変更できません' : '班長シフトにこの月度の「星」の行がないため変更できません') + '</div>' : '<div class="sh-codes">' + codes + '</div>') +
+      '<div class="sh-label">出勤時間</div>' +
+      '<div class="sh-time"><select id="hs-sh-h">' + hOpts + '</select><span style="font-weight:800">:</span><select id="hs-sh-m">' + mOpts + '</select></div>' +
+      '<div class="sh-label">予定メモ</div>' +
+      '<textarea id="hs-sh-memo" maxlength="200" placeholder="例: 研修資料の準備"></textarea>' +
+      '<div class="sh-actions"><button type="button" class="sh-cancel" onclick="hsCloseSheet()">キャンセル</button><button type="button" class="sh-save" id="hs-sh-save" onclick="hsSaveSheet()">保存</button></div>';
+    document.getElementById('hs-sh-memo').value = d.memo || '';
+    sheet.querySelectorAll('.sh-code').forEach(function(b) {
+      b.addEventListener('click', function() {
+        hsEdit.code = b.getAttribute('data-code');
+        hsEdit.dg = b.getAttribute('data-dg') === '1';
+        hsMarkCode();
+      });
+    });
+    hsMarkCode();
+    document.getElementById('hs-sheet-bg').style.display = 'block';
+    sheet.style.display = 'block';
+  }
+  function hsMarkCode() {
+    document.querySelectorAll('#hs-sheet .sh-code').forEach(function(b) {
+      var same = b.getAttribute('data-code') === hsEdit.code && (b.getAttribute('data-dg') === '1') === (hsEdit.code === '直' && hsEdit.dg);
+      b.classList.toggle('sel', same);
+    });
+  }
+  function hsCloseSheet() {
+    document.getElementById('hs-sheet-bg').style.display = 'none';
+    document.getElementById('hs-sheet').style.display = 'none';
+    hsEdit = null;
+  }
+  function hsSaveSheet() {
+    if (!hsEdit) return;
+    var d = hsEdit.d;
+    var body = {};
+    var dg = hsEdit.code === '直' && hsEdit.dg;
+    if (hsEdit.code !== d.code || dg !== !!d.dg) { body.code = hsEdit.code; body.diagonal = dg; }
+    var hv = document.getElementById('hs-sh-h').value;
+    var wt = hv ? hv + ':' + document.getElementById('hs-sh-m').value : '';
+    if (wt !== (d.workTime || '')) body.workTime = wt;
+    var memo = document.getElementById('hs-sh-memo').value;
+    if (memo !== (d.memo || '')) body.memo = memo;
+    if (!Object.keys(body).length) { hsCloseSheet(); return; }
+    var btn = document.getElementById('hs-sh-save');
+    btn.disabled = true; btn.textContent = '保存中...';
+    var headers = AUTH_HEADERS(); headers['Content-Type'] = 'application/json';
+    fetch('/api/liff/hoshi/day/' + d.date, { method: 'PUT', headers: headers, body: JSON.stringify(body) })
+      .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, data: j }; }); })
+      .then(function(res) {
+        if (!res.ok) throw new Error((res.data && res.data.error) || '保存に失敗しました');
+        hsCloseSheet();
+        loadHoshi(hsYm);
+      })
+      .catch(function(err) {
+        alert(err.message || '保存に失敗しました');
+        btn.disabled = false; btn.textContent = '保存';
+      });
+  }
+  function hsMove(delta) {
+    if (!hsYm) return;
+    var idx = hsYm.year * 12 + (hsYm.month - 1) + delta;
+    loadHoshi({ year: Math.floor(idx / 12), month: idx % 12 + 1 });
+  }
+  function hsPdf() {
+    if (!hsYm) return;
+    var btn = document.getElementById('hs-pdf');
+    btn.disabled = true; btn.textContent = 'PDFを作成中...';
+    fetch('/api/liff/hoshi/pdf?year=' + hsYm.year + '&month=' + hsYm.month, { headers: AUTH_HEADERS() })
+      .then(function(res) {
+        if (!res.ok) throw new Error('PDFの作成に失敗しました');
+        return res.blob();
+      })
+      .then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'hoshi_schedule_' + hsYm.year + '_' + hsYm.month + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+      })
+      .catch(function(err) { alert(err.message || 'エラーが発生しました'); })
+      .then(function() { btn.disabled = false; btn.textContent = 'この月度をPDFで保存'; });
   }
 
   function showTimeCalc() {

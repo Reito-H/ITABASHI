@@ -35,6 +35,7 @@ export type Env = {
   LIFF_ID_SALES?: string;
   // 権限不明者（友達追加直後・未登録）用リッチメニュー。「LINE連携」ボタンでステータス選択を起動
   RICHMENU_ID_UNKNOWN?: string;
+  RICHMENU_ID_R?: string;          // ロール「R」（hoshi_viewer）用。星の予定表を開くボタン1つだけのメニュー
   // 資料センター（マニュアルPDF・就業規則等のファイル保管）
   DOCUMENTS_BUCKET: R2Bucket;
   // ITABASHI BATTLE 2 のリアルタイム進行（Durable Object・src/battle/room.ts）
@@ -159,28 +160,28 @@ export async function cleanExpiredSessions(db: D1Database): Promise<void> {
 }
 
 // ブルートフォース判定（5回/15分でロック）
+// failed_at は列の既定値 datetime('now','localtime')（'YYYY-MM-DD HH:MM:SS' 形式）で入るため、
+// 比較側も同じSQL関数で作る。以前はJSのISO文字列（'...T...Z'）と比較しており、
+// 区切り文字の違いで同じ日付の失敗が1件も数えられず、ロックが効いていなかった。
 export async function isLockedOut(db: D1Database, ip: string): Promise<boolean> {
-  const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const result = await db.prepare(
-    'SELECT COUNT(*) as cnt FROM login_attempts WHERE ip = ? AND failed_at > ?'
-  ).bind(ip, since).first<{ cnt: number }>();
+    "SELECT COUNT(*) as cnt FROM login_attempts WHERE ip = ? AND failed_at > datetime('now', 'localtime', '-15 minutes')"
+  ).bind(ip).first<{ cnt: number }>();
   return (result?.cnt ?? 0) >= 5;
 }
 
 // 残り試行回数を返す（0以下でロック）
 export async function remainingAttempts(db: D1Database, ip: string): Promise<number> {
-  const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const result = await db.prepare(
-    'SELECT COUNT(*) as cnt FROM login_attempts WHERE ip = ? AND failed_at > ?'
-  ).bind(ip, since).first<{ cnt: number }>();
+    "SELECT COUNT(*) as cnt FROM login_attempts WHERE ip = ? AND failed_at > datetime('now', 'localtime', '-15 minutes')"
+  ).bind(ip).first<{ cnt: number }>();
   return Math.max(0, 5 - (result?.cnt ?? 0));
 }
 
 // ログイン失敗記録（挿入と同時に期限切れレコードを削除）
 export async function recordFailedLogin(db: D1Database, ip: string): Promise<void> {
-  const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   await db.batch([
-    db.prepare('DELETE FROM login_attempts WHERE failed_at < ?').bind(cutoff),
+    db.prepare("DELETE FROM login_attempts WHERE failed_at < datetime('now', 'localtime', '-60 minutes')"),
     db.prepare('INSERT INTO login_attempts (ip) VALUES (?)').bind(ip),
   ]);
 }
