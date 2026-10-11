@@ -11,6 +11,7 @@ import type {
   Employee, ShiftEntry, Instructor, InstructorSchedule, ScheduleType, Coach
 } from '../html/shift';
 import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH, SIGNAGE_PUBLIC_PATH } from '../config';
+import { isAdminAccount } from '../utils/maintenance';
 import { triggerAccidentsMonitorForceRefresh } from './public_accidents_monitor';
 import { agoLabel } from './admin_line_usage';
 import { LOGIN_BG_JPEG_BASE64 } from '../assets/login_bg';
@@ -996,6 +997,8 @@ function settingGroupsHtml(groups: Array<{ heading: string; cards: SettingCard[]
 
 app.get('/settings', async (c) => {
   const ADMIN = ADMIN_PATH;
+  // 期間限定 オリジナルTシャツ: admin アカウントは詳細設定ページ、それ以外は「オリジナルTシャツオーダー」として表示
+  const tshirtTitle = (await isAdminAccount(c.env.DB, c.get('adminId'))) ? '期間限定 オリジナルTシャツ' : 'オリジナルTシャツオーダー';
   // グループごとに見出しを付けて表示。権限のないカードは自動で非表示になる
   const groups: Array<{ heading: string; cards: SettingCard[]; extraHtml?: string }> = [
     { heading: '日々の運用', cards: [
@@ -1017,6 +1020,9 @@ app.get('/settings', async (c) => {
     // 営業戦略（SR分析＋乗降ピン分析）は左サイドバーに専用項目があるため、設定一覧からは削除
     { heading: '調整', cards: [
       { href: `${ADMIN}/settings/chosei`, perm: 'settings.chosei', title: '調整' },
+    ]},
+    { heading: '期間限定', cards: [
+      { href: `${ADMIN}/settings/tshirt`, perm: 'settings.tshirt', title: tshirtTitle },
     ]},
     { heading: 'AI売上分析の設定', cards: [
       { href: `${ADMIN}/settings/wage-estimate`, perm: 'settings.wage-estimate', title: '賃金試算設定' },

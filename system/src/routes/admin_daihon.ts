@@ -16,7 +16,7 @@ import { layout } from '../html/layout';
 import { getAdminPermissions } from '../permissions';
 import {
   daihonEditPage, daihonPresentPage, daihonPrintPage, daihonPdfPage, slideImages,
-  normLayout, normAccent,
+  normLayout, normAccent, visibleSlides,
   type DaihonDeck, type DaihonSlide,
 } from '../html/daihon';
 import { daihonFlyerEditPage, daihonFlyerPrintPage, normalizeFlyer, type DaihonFlyer } from '../html/daihon_flyer';
@@ -56,6 +56,17 @@ const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 function S(v: unknown, max: number): string {
   return String(v ?? '').replace(/\r\n/g, '\n').slice(0, max);
 }
+// 問題スライドの出題設定（正解の行番号・得点・制限時間・板橋バトルでスマホ出題するか）
+function normQuiz(v: unknown): string {
+  const q = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const answer = Math.trunc(Number(q.answer));
+  return JSON.stringify({
+    answer: Number.isFinite(answer) && answer >= 0 && answer < 4 ? answer : -1,
+    points: Math.max(1, Math.min(100, Math.trunc(Number(q.points)) || 10)),
+    time: Math.max(5, Math.min(120, Math.trunc(Number(q.time)) || 20)),
+    phone: !!q.phone,
+  });
+}
 
 // =====================  ページ: ビラ  =====================
 async function loadFlyer(db: D1Database, id: number): Promise<DaihonFlyer | null> {
@@ -87,7 +98,7 @@ app.get('/daihon/:id/present', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   const deck = await loadDeck(c.env.DB, id);
   if (!deck) return c.text('台本が見つかりません', 404);
-  const slides = await loadSlides(c.env.DB, id);
+  const slides = visibleSlides(await loadSlides(c.env.DB, id));
   return c.html(daihonPresentPage(deck, slides));
 });
 
@@ -95,7 +106,7 @@ app.get('/daihon/:id/print', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   const deck = await loadDeck(c.env.DB, id);
   if (!deck) return c.text('台本が見つかりません', 404);
-  const slides = await loadSlides(c.env.DB, id);
+  const slides = visibleSlides(await loadSlides(c.env.DB, id));
   return c.html(daihonPrintPage(deck, slides));
 });
 
@@ -103,7 +114,7 @@ app.get('/daihon/:id/pdf', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
   const deck = await loadDeck(c.env.DB, id);
   if (!deck) return c.text('台本が見つかりません', 404);
-  const slides = await loadSlides(c.env.DB, id);
+  const slides = visibleSlides(await loadSlides(c.env.DB, id));
   return c.html(daihonPdfPage(deck, slides));
 });
 
@@ -229,10 +240,11 @@ app.post('/api/daihon/decks/:id/slides', async (c) => {
   if (!deck) return c.json({ error: '台本が見つかりません' }, 404);
   const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const ins = await c.env.DB.prepare(
-    'INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes) VALUES (?, 9999, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes, ref_page, quiz, links) VALUES (?, 9999, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   ).bind(
     deckId, normLayout(body.layout), normAccent(body.accent),
     S(body.title, 120), S(body.subtitle, 160), S(body.body, 4000), S(body.notes, 4000),
+    S(body.ref_page, 20).trim(), 'quiz' in body ? normQuiz(body.quiz) : '', S(body.links, 2000),
   ).run();
   const newId = Number(ins.meta.last_row_id);
 
@@ -259,6 +271,10 @@ app.patch('/api/daihon/slides/:id', async (c) => {
   if ('subtitle' in body) { fields.push('subtitle = ?'); vals.push(S(body.subtitle, 160)); }
   if ('body' in body) { fields.push('body = ?'); vals.push(S(body.body, 4000)); }
   if ('notes' in body) { fields.push('notes = ?'); vals.push(S(body.notes, 4000)); }
+  if ('hidden' in body) { fields.push('hidden = ?'); vals.push(body.hidden ? 1 : 0); }
+  if ('ref_page' in body) { fields.push('ref_page = ?'); vals.push(S(body.ref_page, 20).trim()); }
+  if ('links' in body) { fields.push('links = ?'); vals.push(S(body.links, 2000)); }
+  if ('quiz' in body) { fields.push('quiz = ?'); vals.push(normQuiz(body.quiz)); }
   if (!fields.length) return c.json({ error: '更新項目がありません' }, 400);
   vals.push(id);
   await c.env.DB.prepare(`UPDATE daihon_slides SET ${fields.join(', ')} WHERE id = ?`).bind(...vals).run();

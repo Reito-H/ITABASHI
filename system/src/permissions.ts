@@ -19,7 +19,7 @@
 //              （親 settings.study-sessions を持てば全タブ利用可）
 //   設定サブページ: settings.accounts / settings.liff / settings.line-usage /
 //              settings.notifications / settings.offices / settings.documents / settings.study-notes / settings.tutorial /
-//              settings.cyber / settings.nav-insights / settings.sales-strategy / settings.chosei / settings.announcement-bar / settings.birthday /
+//              settings.cyber / settings.nav-insights / settings.sales-strategy / settings.chosei / settings.tshirt / settings.announcement-bar / settings.birthday /
 //              settings.seasonal / settings.cm-popup /
 //              settings.weather-notice /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
@@ -75,6 +75,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // タブ単位で絞るための子キー（settings.hiyari 等）のいずれかでもページに入れる。
   [/^\/settings\/study-sessions/,       'settings.study-sessions|settings.hiyari|settings.surveys|settings.daihon|settings.office-opinions'],
   [/^\/settings\/chosei/,               'settings.chosei'],
+  // 期間限定 オリジナルTシャツ（詳細設定・注文の修正はさらに admin アカウントのみ。admin_tshirt.ts 側で判定）
+  [/^\/settings\/tshirt/,               'settings.tshirt'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
   [/^\/settings\/kancho-logic/,         'settings.kancho-logic'],
@@ -100,6 +102,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/surveys/,                   'settings.surveys|settings.study-sessions'],
   [/^\/api\/daihon/,                    'settings.daihon|settings.study-sessions'],
   [/^\/api\/chosei/,                    'settings.chosei'],
+  [/^\/api\/tshirt/,                    'settings.tshirt'],
   [/^\/api\/kancho-wish-settings/,      'settings.kancho-wish'],
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
@@ -317,6 +320,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.cm-popup',         label: '新機能お知らせポップアップ' },
     { key: 'settings.weather-notice',   label: '異常気象警報 周知サイネージ' },
     { key: 'settings.chosei',           label: '調整（日程調整）' },
+    { key: 'settings.tshirt',           label: '期間限定 オリジナルTシャツオーダー', note: '詳細設定・注文の修正はadminのみ', viewOnly: true },
     { key: 'settings.documents',        label: 'データセンター（資料・社員CSV・点検写真AI・シフトPDF）' },
     { key: 'settings.study-notes',      label: '学習ノート（個人用ノート教材のページ保存・PDF出力）' },
     { key: 'settings.tutorial',         label: 'チュートリアル' },

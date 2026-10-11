@@ -207,6 +207,7 @@ textarea.txt{width:100%;min-height:90px;font:700 16px/1.5 var(--jp);color:var(--
   function stepView(){
     var st = S.step, me = S.me, q = S.q, ph = S.phase;
     if (st.kind === 'formal') return '<div class="center"><h1 class="big" style="font-size:22px">前の画面をご覧ください</h1></div>';
+    if (st.kind === 'deck') return '<div class="center"><h1 class="big" style="font-size:22px">前の画面をご覧ください</h1><div class="sub">問題が出たら、ここに答えのボタンが出ます</div></div>';
     if (st.kind === 'title') {
       var t = S.timerEnd ? '<div class="timer neon" id="tm" data-fmt="mmss" data-end="' + S.timerEnd + '"></div><div class="sub">後に再開</div>' : '';
       return '<div class="center">' + head() + '<h1 class="big">' + escH(st.title) + '</h1>' + (st.subtitle ? '<div class="sub">' + escH(st.subtitle) + '</div>' : '') + t + '</div>';

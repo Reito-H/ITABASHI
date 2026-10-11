@@ -13,6 +13,7 @@ export function handoverHeaderTabs(): string {
     + `<div class="ho-tabs-h" id="ho-tabs"></div>`
     + `<button type="button" id="ho-meter-btn" class="ho-tokasum-btn">メーター検査</button>`
     + `<button type="button" id="ho-tokasum-btn" class="ho-tokasum-btn">当欠記録を見る</button>`
+    + `<button type="button" id="ho-wash-btn" class="ho-tokasum-btn" style="display:none">洗車券</button>`
     + `</div>`;
 }
 
@@ -535,6 +536,43 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
            font-size:12px;cursor:pointer;width:100%;border-top:none;}
 .ho-mtr-add:hover{background:#f7f7f7;}
 
+/* 洗車券（2課の公出洗車券リストの消し込み） */
+#ho-wash-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:800;display:none;
+                 align-items:center;justify-content:center;}
+#ho-wash-overlay.show{display:flex;}
+#ho-wash-modal{background:#fff;border-radius:10px;padding:18px 20px;width:520px;max-width:94vw;
+               max-height:86vh;display:flex;flex-direction:column;box-shadow:0 12px 32px rgba(0,0,0,.3);}
+.ho-wash-head{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:800;color:var(--navy);margin-bottom:10px;flex-shrink:0;}
+.ho-wash-head span{flex:1;}
+#ho-wash-print{border:1px solid var(--navy);background:#fff;color:var(--navy);border-radius:6px;padding:4px 10px;
+               font-size:12px;font-weight:700;cursor:pointer;}
+#ho-wash-close{border:none;background:transparent;font-size:18px;color:#999;cursor:pointer;padding:0 4px;line-height:1;}
+.ho-wash-sum{display:flex;gap:8px;margin-bottom:10px;flex-shrink:0;}
+.ho-wash-sum div{flex:1;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;font-size:12px;color:#555;text-align:center;}
+.ho-wash-sum b{font-size:16px;color:#111;margin:0 2px;}
+#ho-wash-q{width:100%;border:1px solid #ccc;border-radius:6px;padding:8px 10px;font-size:14px;font-family:inherit;
+           margin-bottom:8px;flex-shrink:0;}
+.ho-wash-filters{display:flex;gap:6px;margin-bottom:8px;flex-shrink:0;}
+.ho-wash-filter{flex:1;text-align:center;border:1px solid #ccc;background:#fafafa;border-radius:6px;padding:5px 0;
+                font-size:12px;font-weight:700;color:#555;cursor:pointer;}
+.ho-wash-filter.active{background:var(--navy);border-color:var(--navy);color:#fff;}
+.ho-wash-list{overflow-y:auto;flex:1;border-top:1px solid #eee;}
+.ho-wash-row{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid #f0f0f0;font-size:13px;}
+.ho-wash-row.done{color:#9ca3af;}
+.ho-wash-team{width:34px;flex-shrink:0;color:var(--muted);font-size:12px;}
+.ho-wash-name{flex:1;font-weight:700;color:#111;min-width:0;}
+.ho-wash-row.done .ho-wash-name{color:#9ca3af;text-decoration:line-through;}
+.ho-wash-no{font-size:11px;font-weight:400;color:var(--muted);margin-left:6px;}
+.ho-wash-cnt{flex-shrink:0;font-weight:800;color:var(--navy);}
+.ho-wash-cnt b{font-size:18px;margin-right:1px;}
+.ho-wash-row.done .ho-wash-cnt{color:#9ca3af;}
+.ho-wash-act{flex-shrink:0;width:92px;text-align:right;}
+.ho-wash-give{border:1px solid #2e7d32;background:#2e7d32;color:#fff;border-radius:6px;padding:5px 12px;
+              font-size:12px;font-weight:700;cursor:pointer;}
+.ho-wash-undo{border:1px solid #ccc;background:#fff;color:#555;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;}
+.ho-wash-date{display:block;font-size:10px;color:#9ca3af;margin-bottom:2px;}
+.ho-wash-empty{text-align:center;color:var(--muted);font-size:13px;padding:24px 0;}
+
 </style>
 
 <div id="ho-root">
@@ -700,6 +738,19 @@ export function handoverPage(editable: boolean, myDivision: string | null = null
   <div id="ho-mtr-modal">
     <div class="ho-mtr-head"><span id="ho-mtr-title">メーター検査</span><button type="button" id="ho-mtr-close">×</button></div>
     <div class="ho-mtr-body" id="ho-mtr-body"></div>
+  </div>
+</div>
+<div id="ho-wash-overlay">
+  <div id="ho-wash-modal">
+    <div class="ho-wash-head"><span id="ho-wash-title">洗車券</span><button type="button" id="ho-wash-print">未配布リストを印刷</button><button type="button" id="ho-wash-close">×</button></div>
+    <div class="ho-wash-sum" id="ho-wash-sum"></div>
+    <input type="search" id="ho-wash-q" placeholder="名前・フリガナ・社員番号で検索" autocomplete="off">
+    <div class="ho-wash-filters" id="ho-wash-filters">
+      <button type="button" class="ho-wash-filter active" data-f="todo">未配布</button>
+      <button type="button" class="ho-wash-filter" data-f="done">配布済み</button>
+      <button type="button" class="ho-wash-filter" data-f="all">全員</button>
+    </div>
+    <div class="ho-wash-list" id="ho-wash-list"></div>
   </div>
 </div>
 <script>
@@ -1273,11 +1324,13 @@ function renderTabs(){
       switchDivision(parseInt(opt.dataset.d, 10));
     }));
   });
+  updateWashButton();
 }
 async function switchDivision(d){
   if (d === H.division) return;
   H.division = d; H.date = null;
   closeMeterModal();
+  closeWashModal();
   try { localStorage.setItem('ho_last_division', String(d)); } catch {}
   renderTabs();
   applyFontSize();
@@ -1906,6 +1959,143 @@ document.getElementById('ho-mtr-body').addEventListener('focusout', function(ev)
     const results = el.nextElementSibling;
     if (results) results.style.display = 'none';
   }, 150);
+});
+
+// ===== 洗車券（紙の「公出洗車券リスト」の消し込み。現状は2課のみ） =====
+// 名前検索→配布対象の枚数を確認→「配布」で配布済み。配布済みの人も検索に出し、取り消しできる。
+// 印刷は未配布の人だけを紙と同じ班別・同じ並びで出す（消し込み後の最新リスト）。
+const WASH_DIVISIONS = [2];
+const WASH_KANJI = { '髙':'高', '﨑':'崎', '邊':'辺', '邉':'辺', '齋':'斎', '齊':'斎', '澤':'沢', '濵':'浜', '德':'徳', '冨':'富' };
+H.wash = { tickets: [], filter: 'todo' };
+function hoWashNorm(s){
+  return String(s || '').replace(/[ 　]/g, '').split('').map(function(ch){
+    if (WASH_KANJI[ch]) return WASH_KANJI[ch];
+    const code = ch.charCodeAt(0);
+    // ひらがな→カタカナ（フリガナ検索用）
+    return (code >= 0x3041 && code <= 0x3096) ? String.fromCharCode(code + 0x60) : ch;
+  }).join('');
+}
+function updateWashButton(){
+  document.getElementById('ho-wash-btn').style.display = WASH_DIVISIONS.includes(H.division) ? '' : 'none';
+}
+async function openWashModal(){
+  document.getElementById('ho-wash-title').textContent = '洗車券（' + H.division + '課）';
+  document.getElementById('ho-wash-overlay').classList.add('show');
+  document.getElementById('ho-wash-q').value = '';
+  document.getElementById('ho-wash-list').innerHTML = '<div class="ho-wash-empty">読み込み中…</div>';
+  await loadWashTickets();
+  document.getElementById('ho-wash-q').focus();
+}
+function closeWashModal(){
+  document.getElementById('ho-wash-overlay').classList.remove('show');
+}
+async function loadWashTickets(){
+  try {
+    const data = await api('GET', '/'+H.division+'/wash-tickets');
+    H.wash.tickets = data.tickets || [];
+    renderWash();
+  } catch(e) {
+    document.getElementById('ho-wash-list').innerHTML = '<div class="ho-wash-empty">読み込みに失敗しました</div>';
+  }
+}
+function hoWashSum(list){
+  return { people: list.length, count: list.reduce(function(a, t){ return a + (t.ticket_count || 0); }, 0) };
+}
+function renderWash(){
+  const all = H.wash.tickets;
+  const todo = hoWashSum(all.filter(function(t){ return !t.distributed_at; }));
+  const done = hoWashSum(all.filter(function(t){ return t.distributed_at; }));
+  document.getElementById('ho-wash-sum').innerHTML =
+    '<div>未配布<b>' + todo.people + '</b>人 / <b>' + todo.count + '</b>枚</div>'
+    + '<div>配布済み<b>' + done.people + '</b>人 / <b>' + done.count + '</b>枚</div>';
+
+  // 検索中は配布済みも含めて全員から探す（取り消しできるように）。未入力時はフィルタで絞る
+  const q = hoWashNorm(document.getElementById('ho-wash-q').value);
+  document.getElementById('ho-wash-filters').style.display = q ? 'none' : '';
+  const list = q
+    ? all.filter(function(t){ return hoWashNorm(t.name).includes(q) || hoWashNorm(t.name_kana).includes(q) || String(t.emp_no).includes(q); })
+    : all.filter(function(t){ return H.wash.filter === 'all' || (H.wash.filter === 'done' ? !!t.distributed_at : !t.distributed_at); });
+  const listEl = document.getElementById('ho-wash-list');
+  if (!list.length) {
+    listEl.innerHTML = '<div class="ho-wash-empty">' + (q ? '該当する人がいません（洗車券リストに載っていない可能性があります）' : '該当する人はいません') + '</div>';
+    return;
+  }
+  listEl.innerHTML = list.map(function(t){
+    let act = '';
+    if (t.distributed_at) {
+      act = '<span class="ho-wash-date">' + hoMtrEsc(String(t.distributed_at).slice(5, 10).replace('-', '/')) + ' 配布済</span>'
+        + (EDITABLE ? '<button type="button" class="ho-wash-undo" data-id="' + t.id + '">取り消し</button>' : '');
+    } else if (EDITABLE) {
+      act = '<button type="button" class="ho-wash-give" data-id="' + t.id + '">配布</button>';
+    }
+    return '<div class="ho-wash-row' + (t.distributed_at ? ' done' : '') + '">'
+      + '<span class="ho-wash-team">' + t.team + '班</span>'
+      + '<span class="ho-wash-name">' + hoMtrEsc(t.name) + '<span class="ho-wash-no">' + hoMtrEsc(t.emp_no) + '</span></span>'
+      + '<span class="ho-wash-cnt"><b>' + t.ticket_count + '</b>枚</span>'
+      + '<span class="ho-wash-act">' + act + '</span>'
+      + '</div>';
+  }).join('');
+}
+async function hoWashDistribute(id, undo){
+  const t = H.wash.tickets.find(function(x){ return String(x.id) === String(id); });
+  if (!t) return;
+  if (undo && !confirm(t.name + ' さんの配布済み（' + t.ticket_count + '枚）を取り消しますか？')) return;
+  try {
+    await api('POST', '/'+H.division+'/wash-tickets/'+id+'/distribute', { undo: !!undo });
+    toast(undo ? t.name + ' さんの配布を取り消しました' : t.name + ' さんに' + t.ticket_count + '枚 配布済みにしました');
+    await loadWashTickets();
+  } catch(e) { alert((undo ? '取り消し' : '配布') + 'に失敗しました'); }
+}
+function printWashList(){
+  const todo = H.wash.tickets.filter(function(t){ return !t.distributed_at; });
+  const teams = [];
+  todo.forEach(function(t){ if (!teams.includes(t.team)) teams.push(t.team); });
+  const now = today().replace(/-/g, '/');
+  const pages = teams.map(function(team){
+    const rows = todo.filter(function(t){ return t.team === team; });
+    const sum = hoWashSum(rows);
+    return '<section><h1>' + team + '班　公出洗車券リスト（未配布）</h1>'
+      + '<div class="sub">' + now + ' 時点　' + sum.people + '人 / ' + sum.count + '枚</div>'
+      + '<table><thead><tr><th>コード</th><th>氏名</th><th>枚数</th></tr></thead><tbody>'
+      + rows.map(function(t){
+          return '<tr><td>' + hoMtrEsc(t.emp_no) + '</td><td class="nm">' + hoMtrEsc(t.name) + '</td><td class="n">' + t.ticket_count + '</td></tr>';
+        }).join('')
+      + '<tr class="tot"><td></td><td class="nm">' + team + '班合計</td><td class="n">' + sum.count + '</td></tr>'
+      + '</tbody></table></section>';
+  }).join('');
+  const css = '@page{size:A4 portrait;margin:12mm}body{font-family:sans-serif;color:#000;margin:0}'
+    + 'section{page-break-after:always}section:last-child{page-break-after:auto}'
+    + 'h1{font-size:16pt;margin:0 0 2mm;text-align:center}.sub{text-align:center;font-size:10pt;margin-bottom:4mm}'
+    + 'table{border-collapse:collapse;margin:0 auto;font-size:10.5pt}th,td{border:1px solid #000;padding:1.2mm 3mm}'
+    + 'th{background:#eee}td.nm{width:42mm}td.n{text-align:right;width:16mm}'
+    + 'tr{page-break-inside:avoid}tr.tot td{font-weight:bold}';
+  const w = window.open('', '_blank');
+  if (!w) { alert('ポップアップがブロックされました。許可してから再度お試しください'); return; }
+  w.document.write('<html><head><meta charset="utf-8"><title>公出洗車券リスト（未配布）</title><style>' + css + '</style></head><body>'
+    + (pages || '<p>未配布の人はいません</p>') + '</body></html>');
+  w.document.close();
+  w.focus();
+  setTimeout(function(){ w.print(); }, 300);
+}
+document.getElementById('ho-wash-btn').addEventListener('click', openWashModal);
+document.getElementById('ho-wash-close').addEventListener('click', closeWashModal);
+document.getElementById('ho-wash-print').addEventListener('click', printWashList);
+document.getElementById('ho-wash-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'ho-wash-overlay') closeWashModal();
+});
+document.getElementById('ho-wash-q').addEventListener('input', renderWash);
+document.getElementById('ho-wash-filters').addEventListener('click', function(ev){
+  const b = ev.target.closest('.ho-wash-filter');
+  if (!b) return;
+  H.wash.filter = b.getAttribute('data-f');
+  document.querySelectorAll('.ho-wash-filter').forEach(function(x){ x.classList.toggle('active', x === b); });
+  renderWash();
+});
+document.getElementById('ho-wash-list').addEventListener('click', function(ev){
+  const give = ev.target.closest('.ho-wash-give');
+  if (give) { hoWashDistribute(give.getAttribute('data-id'), false); return; }
+  const undo = ev.target.closest('.ho-wash-undo');
+  if (undo) hoWashDistribute(undo.getAttribute('data-id'), true);
 });
 
 document.getElementById('ho-tokasum-btn').addEventListener('click', openTokaSummary);

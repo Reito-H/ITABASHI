@@ -145,6 +145,11 @@ zone_name = "bentenclub.com"
 pattern = "bentenclub.com/ib2-8cbb19aa8bae80ec4652540a9cb36da1c9151104*"
 zone_name = "bentenclub.com"
 
+# 期間限定 オリジナルTシャツ注文（ログイン不要の固定URL・TSHIRT_PATH）
+[[routes]]
+pattern = "bentenclub.com/ts-eb1ea85a4d61a02a88671f11baf26e48*"
+zone_name = "bentenclub.com"
+
 [[routes]]
 pattern = "bentenclub.com/robots.txt"
 zone_name = "bentenclub.com"

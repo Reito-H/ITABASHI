@@ -93,6 +93,7 @@ import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import adminChoseiRoutes from './routes/admin_chosei';
+import adminTshirtRoutes from './routes/admin_tshirt';
 import adminSignageRoutes from './routes/admin_signage';
 import adminWeatherNoticeRoutes from './routes/admin_weather_notice';
 import adminDaihonRoutes from './routes/admin_daihon';
@@ -111,6 +112,7 @@ import publicKmPinsUploadRoutes from './routes/public_km_pins_upload';
 import publicStudyNotesUploadRoutes from './routes/public_study_notes_upload';
 import publicStudySessionsRoutes from './routes/public_study_sessions';
 import publicChoseiRoutes from './routes/public_chosei';
+import publicTshirtRoutes from './routes/public_tshirt';
 import publicHiyariRoutes from './routes/public_hiyari';
 import publicHanedaFlightsRoutes from './routes/public_haneda_flights';
 import publicSignageRoutes from './routes/public_signage';
@@ -205,6 +207,8 @@ app.use('*', async (c, next) => {
   const isWasmCameraPage = isIdPhotosPage;
   // ITABASHI BATTLE 2: 参加者のスマホ画面・管理者画面・プロジェクター画面。Google Fonts・WebSocket・音声再生を許可し、
   // 管理者画面から同一オリジンでの表示も許可する
+  // 台本のプレゼン（?embed=1）は板橋バトルのプロジェクター画面・進行画面に同一オリジンで埋め込むため、フレーム表示を許可する
+  const isDaihonEmbed = /^\/[^/]+\/admin\/daihon\/\d+\/present$/.test(pathname) && reqUrl.searchParams.get('embed') === '1';
   const isBattlePage = pathname === BATTLE_PUBLIC_PATH || pathname.startsWith(BATTLE_PUBLIC_PATH + '/') || /^\/[^/]+\/admin\/ib2(\/|$)/.test(pathname);
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
@@ -258,7 +262,7 @@ app.use('*', async (c, next) => {
   } else {
     // やることリストのembedページのみ、引き継ぎシートのフローティングパネルから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    const allowSameOriginFrame = isTodoEmbed || isAutumnTefudaPrint || isSalesStrategyEmbed;
+    const allowSameOriginFrame = isTodoEmbed || isAutumnTefudaPrint || isSalesStrategyEmbed || isDaihonEmbed;
     c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -443,6 +447,7 @@ app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 app.route(`/${SECRET}/admin`, adminChoseiRoutes);
+app.route(`/${SECRET}/admin`, adminTshirtRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
 app.route(`/${SECRET}/admin`, adminWeatherNoticeRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
@@ -569,6 +574,7 @@ app.route('', publicKmPinsUploadRoutes);
 app.route('', publicStudyNotesUploadRoutes);
 app.route('', publicStudySessionsRoutes);
 app.route('', publicChoseiRoutes);
+app.route('', publicTshirtRoutes);
 app.route('', publicHiyariRoutes);
 app.route('', publicHanedaFlightsRoutes);
 app.route('', publicSignageRoutes);
