@@ -84,6 +84,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
     { href: `${ADMIN_PATH}/settings/sales-strategy`, label: '営業戦略', id: 'sales-strategy', permKey: 'settings.sales-strategy' },
     { href: 'https://km-operator.smartaxicenter.com/kmx/HS/HSHS/HSHS0199.do', label: 'スマタク', id: 'km-operator-external', public: true, newTab: true },
+    { href: `${ADMIN_PATH}/km-console`, label: '配車コンソール', id: 'km-console' },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
     // 車両検索はサイドバーから廃止（ホームの横断検索バーへ一本化）。/vehicles ルートと vehicles 権限は存置。
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },

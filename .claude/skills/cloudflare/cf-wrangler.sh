@@ -7,6 +7,10 @@
 #   .claude/skills/cloudflare/cf-wrangler.sh d1 execute staff-db --remote --file=src/db/migration_156.sql
 #   .claude/skills/cloudflare/cf-wrangler.sh secret put SR_PASSWORD
 #   .claude/skills/cloudflare/cf-wrangler.sh tail
+#
+# 別のWorkerプロジェクト（例: km-ui/cloudflare-worker）を操作する場合は CF_WRANGLER_DIR で
+# 実行ディレクトリをリポジトリ相対で指定する（この場合はバージョン自動更新をしない）:
+#   CF_WRANGLER_DIR=km-ui/cloudflare-worker .claude/skills/cloudflare/cf-wrangler.sh deploy
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,9 +32,11 @@ if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
   exit 1
 fi
 
-if [ "${1:-}" = "deploy" ]; then
+WORK_DIR="$ROOT_DIR/${CF_WRANGLER_DIR:-system}"
+
+if [ "${1:-}" = "deploy" ] && [ -z "${CF_WRANGLER_DIR:-}" ]; then
   node "$ROOT_DIR/scripts/bump_version.mjs"
 fi
 
-cd "$ROOT_DIR/system"
+cd "$WORK_DIR"
 exec npx wrangler "$@"

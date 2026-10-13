@@ -1,0 +1,23 @@
+name = "km-operator-ui"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# 新UI(../ui)を静的アセットとして配信。/kmx/* と /api/* は Worker が先に処理する。
+[assets]
+directory = "../ui"
+binding = "ASSETS"
+run_worker_first = ["/kmx/*", "/api/*"]
+not_found_handling = "single-page-application"
+
+[vars]
+ORIGIN = "https://km-operator.smartaxicenter.com"
+# "true" にすると create/update/delete/send 系と POST(ログイン以外)を 403 で止める。検証中は true 推奨。
+READ_ONLY = "true"
+# 省略時は制限なし。社内固定IPがある場合はカンマ区切りで指定。本格運用は Cloudflare Access を前段に。
+# ALLOWED_IPS = "203.0.113.10,203.0.113.11"
+
+# 独自ドメインで公開する場合(例)
+# routes = [{ pattern = "km-ui.example.com", custom_domain = true }]
+
+[observability]
+enabled = true

@@ -67,6 +67,11 @@ export type Env = {
   KM_OPERATOR_PASSWORD?: string;
   // km-operator連携: 社内PCの収集スクリプト専用キー（ACCIDENTS_UPLOAD_KEYと同じ方式）
   KM_PINS_UPLOAD_KEY?: string;
+  // 配車コンソール（km-operator 新UI組み込み）: 社内PCの cloudflared（Cloudflare Tunnel, km-relay.bentenclub.com）を
+  // 守っている Cloudflare Access のサービストークン。Worker→中継の全リクエストに付ける（utils/km_relay.ts）。
+  // ※KM_OPERATOR_LOGIN_ID / KM_OPERATOR_PASSWORD は配車コンソールの自動ログインで Worker 側でも使うようになった。
+  KM_RELAY_ACCESS_ID?: string;
+  KM_RELAY_ACCESS_SECRET?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

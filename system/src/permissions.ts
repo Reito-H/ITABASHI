@@ -10,7 +10,7 @@
 // 権限キーの一覧・階層は下部の PERMISSION_TREE（アカウント権限編集UIのカタログ）を参照。
 // 主なもの:
 //   サイドバー: home / kancho-shift / kanri-kobo / handover / newcomers / staff /
-//               kacho-mission / sales-ai / accidents / vehicles / inspection /
+//               kacho-mission / sales-ai / accidents / vehicles / inspection / km-console /
 //               announcements / line / requests / crew-portal / tantosha / todo / crew-shift / shift
 //   「全アカウント共通だった機能」に付けた閲覧ON/OFFキー: benri / garage / shuttle / signage / cc-list
 //     （いずれも編集はフル権限アカウントのみ。index.ts で「キーがあれば通す」形で判定）
@@ -53,6 +53,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/offices/,              'settings.offices'],
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
   // 営業戦略（SR分析＋km-operator連携ピンデータ分析を統合。ページ権限に加え、開くたび専用パスワードも必要）
+  // 配車コンソール（km-operator 新UI組み込み・読み取り専用）
+  [/^\/km-console/,                    'km-console'],
   [/^\/settings\/sales-strategy/,       'settings.sales-strategy'],
   // SR分析・乗降ピン分析は営業戦略ページからiframeで埋め込む内部ページ。権限キーは統合済み（旧settings.sr/settings.km-pinsは廃止）
   [/^\/settings\/sr/,                   'settings.sales-strategy'],
@@ -300,6 +302,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'tantosha',    label: '担当車表' },
     { key: 'todo',        label: 'やることリスト' },
     { key: 'crew-shift',  label: '乗務員シフト・個人別シフト・配車管理・夏季稼働' },
+    { key: 'km-console',  label: '配車コンソール（スマタク新UI・読み取り専用）', note: '実在の顧客氏名・電話番号等を扱う', viewOnly: true },
   ]},
 
   { label: '全アカウント共通だった機能（閲覧のON/OFF）', note: 'いずれも編集はフル権限アカウントのみ', children: [

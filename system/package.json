@@ -10,6 +10,7 @@
     "db:seed": "wrangler d1 execute benten-db --local --file=src/db/seed.sql",
     "setup-admin": "wrangler d1 execute benten-db --local --file=src/db/setup_admin.sql",
     "test": "vitest run",
+    "build:km-console": "node scripts/build_km_console_assets.mjs",
     "build:pdf-parsers-bundle": "node scripts/build_pdf_parsers_bundle.mjs"
   },
   "dependencies": {
