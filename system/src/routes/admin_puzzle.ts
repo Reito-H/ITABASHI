@@ -79,6 +79,8 @@ app.get('/settings/puzzle', async (c) => {
       <td><input class="pz-in pz-num" data-f="hp" type="number" min="1" max="9999" value="${a.hp}"${dis}></td>
       <td><input class="pz-in pz-num" data-f="atk" type="number" min="1" max="999" value="${a.atk}"${dis}></td>
       <td><select class="pz-in" data-f="element"${dis}>${elOptions(a.element)}</select></td>
+      <td style="min-width:150px;"><input class="pz-in" data-f="skill_name" type="text" maxlength="20" placeholder="必殺技名" value="${esc(a.skill_name)}"${dis}>
+        <div style="display:flex;gap:4px;margin-top:3px;"><select class="pz-in" data-f="skill_type" style="width:70px;"${dis}><option value="attack"${a.skill_type !== 'heal' ? ' selected' : ''}>攻撃</option><option value="heal"${a.skill_type === 'heal' ? ' selected' : ''}>回復</option></select><input class="pz-in pz-num" data-f="skill_power" type="number" min="1" max="999" value="${a.skill_power}" title="攻撃: 攻撃力×(威力/10) ／ 回復: 最大HPの威力%" style="width:60px;"${dis}></div></td>
       <td style="text-align:center;">${a.kind === 'art' ? `<input class="pz-in" data-f="in_gacha" type="checkbox"${a.in_gacha ? ' checked' : ''}${dis}>` : '-'}</td>
       <td style="text-align:center;"><input class="pz-in" data-f="is_active" type="checkbox"${a.is_active ? ' checked' : ''}${dis}></td>
       <td style="white-space:nowrap;">${editable ? `<button class="pz-mv" data-dir="-1" title="上へ"${i === 0 ? ' disabled' : ''}>▲</button><button class="pz-mv" data-dir="1" title="下へ"${i === allies.length - 1 ? ' disabled' : ''}>▼</button> <button class="pz-del" style="color:#dc2626;">削除</button>` : ''}</td>
@@ -183,10 +185,11 @@ app.get('/settings/puzzle', async (c) => {
       </div>
       <div class="pz-help">
         「社員」はバースデーモードの写真を<b>コピー</b>したもの（バースデー側は変わりません）で、全員が最初から使えます。「キャラ」はガチャで手に入ります（「ガチャ」にチェックがある★3〜5のキャラが出ます）。
-        変えた所はその場で保存されます。属性: 火は木に強い／木は水に強い／水は火に強い／光と闇はおたがいに強い。
+        変えた所はその場で保存されます。属性: 火は木に強い／木は水に強い／水は火に強い／光と闇はおたがいに強い。<br>
+        <b>必殺技</b>: バトル中、そのキャラの属性の玉を消すとゲージがたまり、満タンでキャラをタップすると発動。攻撃＝攻撃力×(威力÷10)の大ダメージ、回復＝最大HPの威力%を回復。技名は自由に。
       </div>
-      <table class="pz-tbl" id="pz-allies"><thead><tr><th>画像</th><th>種別</th><th>表示名・説明</th><th>レア</th><th>HP</th><th>攻撃</th><th>属性</th><th>ガチャ</th><th>出す</th><th>並び</th></tr></thead>
-        <tbody>${allyRows || '<tr><td colspan="10" style="color:#9ca3af;text-align:center;padding:16px;">まだ味方キャラがいません</td></tr>'}</tbody></table>
+      <table class="pz-tbl" id="pz-allies"><thead><tr><th>画像</th><th>種別</th><th>表示名・説明</th><th>レア</th><th>HP</th><th>攻撃</th><th>属性</th><th>必殺技（名前・種類・威力）</th><th>ガチャ</th><th>出す</th><th>並び</th></tr></thead>
+        <tbody>${allyRows || '<tr><td colspan="11" style="color:#9ca3af;text-align:center;padding:16px;">まだ味方キャラがいません</td></tr>'}</tbody></table>
     </div>
 
     <div style="${box}">
@@ -391,6 +394,9 @@ async function updateRow(c: { env: Env; req: { json: <T>() => Promise<T> } }, ta
   if ('is_active' in b) { sets.push('is_active = ?'); vals.push(toInt(b.is_active, 0, 1, 1)); }
   if (table === 'puzzle_allies') {
     if ('rarity' in b) { sets.push('rarity = ?'); vals.push(toInt(b.rarity, 1, 5, 3)); }
+    if ('skill_name' in b) { sets.push('skill_name = ?'); vals.push(String(b.skill_name ?? '').trim().slice(0, 20)); }
+    if ('skill_type' in b) { sets.push('skill_type = ?'); vals.push(String(b.skill_type) === 'heal' ? 'heal' : 'attack'); }
+    if ('skill_power' in b) { sets.push('skill_power = ?'); vals.push(toInt(b.skill_power, 1, 999, 100)); }
     if ('in_gacha' in b) { sets.push('in_gacha = ?'); vals.push(toInt(b.in_gacha, 0, 1, 0)); }
   } else {
     if ('is_boss' in b) { sets.push('is_boss = ?'); vals.push(toInt(b.is_boss, 0, 1, 0)); }

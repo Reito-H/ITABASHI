@@ -364,6 +364,34 @@ export function puzzlePageHtml(): string {
   @keyframes cutimg { 0% { transform: scale(0.2) rotate(-10deg); opacity: 0; filter: brightness(4) blur(10px); } 60% { transform: scale(1.08); opacity: 1; filter: brightness(1.5) blur(0); } 100% { transform: scale(1); filter: none; } }
   .cutin-name { font-size: 20px; font-weight: 900; color: #fff7d6; text-shadow: 0 2px 10px rgba(0,0,0,0.8); animation: fadein 0.5s 0.6s both; }
 
+  /* ===== 必殺技 ===== */
+  .team .m .ph { cursor: pointer; }
+  .team .m .gauge { position: absolute; inset: -5px; border-radius: 18px; padding: 2px; pointer-events: none;
+    background: conic-gradient(var(--gc, #fbbf24) calc(var(--p, 0) * 1%), rgba(255,255,255,0.08) 0); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; transition: --p 0.3s; }
+  .team .m .ph.ready { animation: ready 0.9s ease-in-out infinite alternate; }
+  @keyframes ready { from { box-shadow: 0 0 10px 2px rgba(251,191,36,0.6), 0 6px 14px rgba(0,0,0,0.4); transform: scale(1); } to { box-shadow: 0 0 26px 8px rgba(251,191,36,1), 0 6px 14px rgba(0,0,0,0.4); transform: scale(1.06); } }
+  .team .m .ph .rb { position: absolute; left: 50%; top: -12px; transform: translateX(-50%); background: linear-gradient(180deg, #fff3a3, #fbbf24); color: #7c2d12; font-size: 9px; font-weight: 900; padding: 1px 7px; border-radius: 999px; white-space: nowrap; display: none; box-shadow: 0 2px 6px rgba(0,0,0,0.5); z-index: 3; }
+  .team .m .ph.ready .rb { display: block; animation: pulse 0.6s ease-in-out infinite; }
+  .team .m .sk { font-size: 9px; color: #cbd5e1; margin-top: 2px; max-width: 90px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+  .skillm { background: rgba(0,0,0,0.78); overflow: hidden; z-index: 60; }
+  .speedlines { position: absolute; left: 50%; top: 50%; width: 220vmax; height: 220vmax; margin: -110vmax 0 0 -110vmax; opacity: 0.8;
+    background: repeating-conic-gradient(from 0deg, rgba(255,255,255,0) 0 2.5deg, rgba(255,255,255,0.35) 2.5deg 3.2deg, rgba(255,255,255,0) 3.2deg 7deg); animation: spin 0.9s linear infinite, zoomin 0.4s ease-out; }
+  @keyframes spin { to { transform: rotate(40deg); } }
+  @keyframes zoomin { from { transform: scale(0.3); opacity: 0; } }
+  .skill-body { position: relative; text-align: center; width: 100%; }
+  .skill-img { width: min(70vw, 300px); height: min(70vw, 300px); border-radius: 50%; margin: 0 auto; background: #1e293b center/cover no-repeat; border: 5px solid var(--sc, #fbbf24);
+    box-shadow: 0 0 60px var(--sc, #fbbf24), 0 0 140px var(--sc, #fbbf24), 0 20px 60px rgba(0,0,0,0.8); animation: slam 0.5s cubic-bezier(.2,.9,.3,1.3) both; }
+  @keyframes slam { 0% { transform: translateX(-120vw) rotate(-30deg) scale(0.6); } 70% { transform: translateX(6vw) rotate(4deg) scale(1.08); } 100% { transform: none; } }
+  .skill-name { font-family: 'M PLUS Rounded 1c', 'Rubik', sans-serif; font-weight: 900; font-size: clamp(30px, 11vw, 54px); font-style: italic; color: #fff; margin-top: 14px; line-height: 1.1; padding: 0 10px;
+    text-shadow: 0 0 20px var(--sc, #fbbf24), 0 0 40px var(--sc, #fbbf24), 0 4px 0 #000; animation: namein 0.5s 0.25s cubic-bezier(.2,.9,.3,1.2) both; }
+  @keyframes namein { 0% { transform: translateX(120vw) skewX(-25deg); letter-spacing: 0.5em; } 100% { transform: skewX(-8deg); letter-spacing: 0.02em; } }
+  .skill-user { font-size: 14px; color: #fde68a; margin-top: 8px; animation: fadein 0.4s 0.5s both; }
+  .skillm.hit::after { content: ''; position: absolute; inset: 0; background: #fff; animation: flash 0.5s ease-out; }
+  .dmg.ult { font-size: 68px; color: #fff; text-shadow: 0 0 24px #fbbf24, 0 0 60px #ff6a00, 0 4px 0 #7f1d1d; animation-duration: 1.3s; }
+  .shock.big { width: 40px; height: 40px; margin: -20px 0 0 -20px; border-width: 6px; animation-duration: 0.8s; }
+  .d-skill { display: flex; justify-content: center; align-items: center; gap: 10px; }
+  .d-skill .ph { width: 56px; height: 56px; border-radius: 14px; background: #334155; border: 3px solid #fbbf24; box-shadow: 0 0 18px #fbbf24; animation: ready 0.9s infinite alternate; position: relative; }
+
   /* ===== 結果・ランキング ===== */
   .res .ttl { text-align: center; font-size: 20px; font-weight: 900; }
   .res .big { font-family: 'Rubik', sans-serif; font-size: 48px; font-weight: 900; text-align: center; margin: 8px 0 2px; line-height: 1.1;
@@ -595,7 +623,17 @@ ${ORB_DEFS}
 </div>
 <div class="float" id="float"></div>
 <div class="cheatbar" id="cheatbar">
-  <button data-c="kill">一撃必殺</button><button data-c="heal">HP全回復</button><button data-c="god">無敵ON/OFF</button><button data-c="skip">ステージスキップ</button>
+  <button data-c="kill">一撃必殺</button><button data-c="heal">HP全回復</button><button data-c="god">無敵ON/OFF</button><button data-c="skip">ステージスキップ</button><button data-c="gauge">必殺ゲージMAX</button>
+</div>
+
+<!-- 必殺技 -->
+<div class="modal skillm" id="skill">
+  <div class="speedlines"></div>
+  <div class="skill-body">
+    <div class="skill-img" id="skill-img"></div>
+    <div class="skill-name" id="skill-name"></div>
+    <div class="skill-user" id="skill-user"></div>
+  </div>
 </div>
 
 <!-- チュートリアル -->
@@ -764,6 +802,8 @@ ${ORB_DEFS}
       demo: '<div class="tut-demo"><div class="tile heart">${orbUse('heart')}</div><span class="cnt soon" style="font-size:14px;">あと1手</span></div>' },
     { h: 'ガチャと育成', say: 'バトルでコインと経験値がもらえるよ。', p: 'コインで<b>ガチャ</b>を引くと新しい味方が仲間に。<b>育成</b>でレベルを上げるとHPと攻撃がアップ。負けても強くなって再挑戦！',
       demo: '<div class="tut-demo"><span class="coin" style="font-size:18px;">500</span><span style="font-size:22px;color:#fbbf24;margin:0 8px;">→</span><div class="capsule" style="width:48px;height:48px;"></div></div>' },
+    { h: '必殺技！', say: 'ゲージがたまったら、キャラをタップ！', p: '味方と<b>同じ色の玉を消すとゲージ</b>がたまります。満タンになって光ったら、<b>そのキャラをタップ</b>で必殺技。大ダメージか、大回復！',
+      demo: '<div class="tut-demo d-skill"><div class="ph"><span class="rb" style="display:block;position:absolute;left:50%;top:-12px;transform:translateX(-50%);background:#fbbf24;color:#7c2d12;font-size:9px;font-weight:900;padding:1px 7px;border-radius:999px;">必殺!</span></div><span style="font-size:22px;color:#fbbf24;">→</span><span style="font-family:Rubik,sans-serif;font-weight:900;font-size:22px;color:#fff;text-shadow:0 0 14px #fbbf24;font-style:italic;">黄金のロングラン!!</span></div>' },
     { h: '敵を順番にたおそう', say: 'ボスの先に、何かが待っている…。', p: 'ステージの敵をぜんぶたおすと<b>全クリア</b>。たおした数・残りHP・手数でスコアが決まり、ランキングにのります。',
       demo: '<div class="tut-demo"><span style="font-family:Rubik,sans-serif;font-size:26px;font-weight:900;background:linear-gradient(180deg,#fff7d6,#fbbf24 60%,#d97706);-webkit-background-clip:text;background-clip:text;color:transparent;">LET&#39;S BATTLE!</span></div>' }
   ];
@@ -800,7 +840,7 @@ ${ORB_DEFS}
     return '<div class="ch r' + a.rarity + (extraCls || '') + '" data-id="' + a.id + '" style="' + (o ? '' : 'opacity:0.45;') + '">' + (inner || '') +
       '<span class="ring" style="background:' + EL_COLOR[a.element] + '"></span>' + allyPh(a, 'ph') +
       (a.kind === 'art' ? '<div class="rr">' + stars(a.rarity) + '</div>' : '') +
-      '<span class="lv">Lv.' + s.lv + '</span><div class="nm">' + esc(a.name) + '</div><div class="st">' + elDot(a.element) + ' HP' + s.hp + ' 攻' + s.atk + '</div></div>';
+      '<span class="lv">Lv.' + s.lv + '</span><div class="nm">' + esc(a.name) + '</div><div class="st">' + elDot(a.element) + ' HP' + s.hp + ' 攻' + s.atk + '</div><div class="st" style="color:#fde68a;padding-top:0;">' + (a.skill && a.skill.type === 'heal' ? '癒' : '技') + ' ' + esc(a.skill ? a.skill.name : '') + '</div></div>';
   }
   function renderGrid(){
     var n = Math.min(CFG.team_size, STATE.chars.length);
@@ -873,6 +913,7 @@ ${ORB_DEFS}
       return '<div class="cl' + (o ? '' : ' lock') + '" data-id="' + a.id + '"><div class="ph" style="' + phStyle(a) + '"></div><div class="info">' +
         '<div class="n">' + (a.kind === 'art' ? stars(a.rarity) + ' ' : '') + esc(a.name) + '</div>' +
         '<div class="s">' + elDot(a.element) + ' Lv.' + s.lv + '　HP ' + s.hp + '　攻 ' + s.atk + (o ? (s.lv >= CFG.max_level ? '　MAX' : '　次まで ' + (nextExp - exp) + 'exp') : '　（未入手・ガチャで出ます）') + '</div>' +
+        (a.skill ? '<div class="s" style="color:#fde68a;">必殺技: ' + esc(a.skill.name) + (a.skill.type === 'heal' ? '（回復 ' + a.skill.power + '%）' : '（攻撃力×' + (a.skill.power / 10) + '）') + '</div>' : '') +
         (a.desc ? '<div class="s" style="color:#cbd5e1;">' + esc(a.desc) + '</div>' : '') +
         (o ? '<div class="xp"><i style="width:' + pct + '%"></i></div>' : '') + '</div>' +
         (o ? '<button class="tr"' + (s.lv >= CFG.max_level ? ' disabled' : '') + '>強化<br><span style="font-size:10px;font-weight:700;">' + CFG.train_cost + '</span></button>' : '') + '</div>';
@@ -896,8 +937,10 @@ ${ORB_DEFS}
   function startBattle(){
     loadTeam(); if (!TEAM.length) { openTeam(); return; }
     var maxHp = 0; TEAM.forEach(function(a){ maxHp += statOf(a).hp; });
-    G = { stage: 0, hp: maxHp, maxHp: maxHp, moves: 0, enemyHp: 0, cnt: CFG.enemy_interval, busy: true, over: false, board: [], maxCombo: 0, cheated: false };
-    $('bt-team').innerHTML = TEAM.map(function(a, i){ return '<div class="m">' + allyPh(a, 'ph', true).replace('class="ph"', 'class="ph" data-i="' + i + '"') + '<span class="lv">Lv.' + statOf(a).lv + '</span></div>'; }).join('');
+    G = { stage: 0, hp: maxHp, maxHp: maxHp, moves: 0, enemyHp: 0, cnt: CFG.enemy_interval, busy: true, over: false, board: [], maxCombo: 0, cheated: false, gauge: TEAM.map(function(){ return 0; }), skills: 0 };
+    $('bt-team').innerHTML = TEAM.map(function(a, i){ return '<div class="m">' + allyPh(a, 'ph', true).replace('class="ph"', 'class="ph" data-i="' + i + '"').replace('</div>', '<span class="rb">必殺!</span><div class="gauge" style="--gc:' + EL_COLOR[a.element] + '"></div></div>') + '<span class="lv">Lv.' + statOf(a).lv + '</span><span class="sk">' + esc(a.skill ? a.skill.name : '') + '</span></div>'; }).join('');
+    document.querySelectorAll('#bt-team .ph').forEach(function(ph){ ph.addEventListener('click', function(){ useSkill(parseInt(ph.getAttribute('data-i'), 10)); }); });
+    drawGauges();
     newBoard(); show('scr-battle'); stageIntro();
   }
   function enemy(){ return CFG.enemies[G.stage]; }
@@ -1102,8 +1145,43 @@ ${ORB_DEFS}
     void p.offsetWidth; p.style.transform = 'translate(' + (b.x - a.x) + 'px,' + (b.y - a.y) + 'px) scale(1.4)';
     setTimeout(function(){ p.remove(); cb(); }, 330);
   }
+  var GAUGE_MAX = 12;
+  function drawGauges(){
+    TEAM.forEach(function(a, i){ var ph = document.querySelector('#bt-team .ph[data-i="' + i + '"]'); if (!ph) return; var g = ph.querySelector('.gauge'); var pct = Math.min(100, Math.round(G.gauge[i] / GAUGE_MAX * 100)); g.style.setProperty('--p', pct); ph.classList.toggle('ready', G.gauge[i] >= GAUGE_MAX); });
+  }
+  function useSkill(i){
+    if (!G || G.busy || G.over) return; if (G.gauge[i] < GAUGE_MAX) { floatMsg('ゲージがたまっていません', true); return; }
+    var a = TEAM[i]; var sk = a.skill || { name: '必殺技', type: 'attack', power: 100 }; var e = enemy();
+    G.busy = true; G.gauge[i] = 0; G.skills++; drawGauges(); vibrate([30, 40, 30, 40, 120]);
+    var ov = $('skill'); ov.classList.remove('hit'); ov.style.setProperty('--sc', EL_COLOR[a.element]);
+    $('skill-img').style.backgroundImage = 'url(' + imgUrl(a) + ')'; $('skill-img').style.setProperty('--sc', EL_COLOR[a.element]);
+    $('skill-name').textContent = sk.name; $('skill-name').style.setProperty('--sc', EL_COLOR[a.element]); $('skill-user').textContent = a.name + ' の必殺技！';
+    ov.classList.add('on');
+    setTimeout(function(){
+      ov.classList.add('hit'); vibrate(80);
+      setTimeout(function(){
+        ov.classList.remove('on'); ov.classList.remove('hit');
+        if (sk.type === 'heal') {
+          var heal = Math.round(G.maxHp * sk.power / 100); var healed = Math.min(heal, G.maxHp - G.hp); G.hp += healed;
+          var tc = centerOf($('bt-team')); popDmg('+' + healed, 'heal', tc.x, tc.y - 20); particles(tc.x, tc.y, '#86efac', 30, true); shockwave(tc.x, tc.y, '#86efac');
+          drawHud(); G.busy = false; return;
+        }
+        var dmg = Math.round(statOf(a).atk * sk.power / 10 * adv(a.element, e.element));
+        G.enemyHp -= dmg; var c = centerOf($('en-ph'));
+        $('en-ph').classList.add('hit'); setTimeout(function(){ $('en-ph').classList.remove('hit'); }, 400);
+        shakeScreen(); $('arena').classList.add('flash'); setTimeout(function(){ $('arena').classList.remove('flash'); }, 300);
+        particles(c.x, c.y, EL_COLOR[a.element], 40, true); var sw = document.createElement('span'); sw.className = 'shock big'; sw.style.left = c.x + 'px'; sw.style.top = c.y + 'px'; sw.style.borderColor = EL_COLOR[a.element]; $('fx').appendChild(sw); setTimeout(function(){ sw.remove(); }, 800);
+        popDmg('-' + dmg, 'ult', c.x, c.y - 40);
+        drawHud();
+        if (G.enemyHp <= 0) { setTimeout(function(){ onEnemyDown(e); }, 500); return; }
+        G.busy = false;
+      }, 450);
+    }, 1400);
+  }
   function afterMove(groups, combos){
     var e = enemy(); var mult = 1 + 0.25 * Math.max(0, combos - 1);
+    groups.forEach(function(g){ TEAM.forEach(function(a, i){ if (a.element === g.type) G.gauge[i] = Math.min(GAUGE_MAX, G.gauge[i] + g.cells.length); }); });
+    drawGauges();
     var perEl = {}; var heal = 0;
     groups.forEach(function(g){
       var n = g.cells.length; var sizeMult = 1 + 0.25 * (n - 3);
@@ -1249,6 +1327,7 @@ ${ORB_DEFS}
       else if (c === 'heal') { G.hp = G.maxHp; var tc = centerOf($('bt-team')); popDmg('全回復', 'heal', tc.x, tc.y - 10); drawHud(); }
       else if (c === 'god') { CHEAT.god = !CHEAT.god; floatMsg(CHEAT.god ? '無敵 ON' : '無敵 OFF'); }
       else if (c === 'skip') { G.busy = true; G.enemyHp = 0; onEnemyDown(enemy()); }
+      else if (c === 'gauge') { G.gauge = G.gauge.map(function(){ return GAUGE_MAX; }); drawGauges(); }
     };
   });
 })();

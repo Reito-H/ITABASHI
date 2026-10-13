@@ -39,11 +39,11 @@ export async function loadPuzzleSettings(db: D1Database): Promise<PuzzleSettings
   };
 }
 
-export type AllyRow = { id: number; name: string; kind: string; rarity: number; in_gacha: number; description: string; art_prompt: string; photo_r2_key: string | null; photo_offset_x: number; photo_offset_y: number; photo_scale: number; hp: number; atk: number; element: string; is_active: number; sort_order: number };
+export type AllyRow = { id: number; name: string; kind: string; rarity: number; in_gacha: number; description: string; art_prompt: string; skill_name: string; skill_type: string; skill_power: number; photo_r2_key: string | null; photo_offset_x: number; photo_offset_y: number; photo_scale: number; hp: number; atk: number; element: string; is_active: number; sort_order: number };
 export type EnemyRow = { id: number; name: string; photo_r2_key: string | null; hp: number; atk: number; element: string; is_boss: number; is_final: number; description: string; art_prompt: string; is_active: number; sort_order: number };
 
 export async function loadAllies(db: D1Database, activeOnly: boolean): Promise<AllyRow[]> {
-  const r = await db.prepare(`SELECT id, name, kind, rarity, in_gacha, description, art_prompt, photo_r2_key, photo_offset_x, photo_offset_y, photo_scale, hp, atk, element, is_active, sort_order
+  const r = await db.prepare(`SELECT id, name, kind, rarity, in_gacha, description, art_prompt, skill_name, skill_type, skill_power, photo_r2_key, photo_offset_x, photo_offset_y, photo_scale, hp, atk, element, is_active, sort_order
     FROM puzzle_allies ${activeOnly ? 'WHERE is_active = 1' : ''} ORDER BY sort_order ASC, id ASC`).all<AllyRow>();
   return r.results ?? [];
 }
@@ -138,6 +138,7 @@ app.get('/api/public/puzzle/config', async (c) => {
   const s = await loadPuzzleSettings(c.env.DB);
   const allies = (await loadAllies(c.env.DB, true)).map(a => ({
     id: a.id, name: a.name, kind: a.kind, rarity: a.rarity, in_gacha: !!a.in_gacha, desc: a.description, hp: a.hp, atk: a.atk, element: a.element, img: !!a.photo_r2_key,
+    skill: { name: a.skill_name || '必殺技', type: a.skill_type === 'heal' ? 'heal' : 'attack', power: a.skill_power || 100 },
     ox: a.photo_offset_x, oy: a.photo_offset_y, sc: a.photo_scale,
   }));
   const enemies = (await loadEnemies(c.env.DB, true)).map(e => ({ id: e.id, name: e.name, hp: e.hp, atk: e.atk, element: e.element, boss: !!e.is_boss, final: !!e.is_final, desc: e.description, img: !!e.photo_r2_key }));
