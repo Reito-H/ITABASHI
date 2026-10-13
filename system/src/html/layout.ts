@@ -864,6 +864,7 @@ export function layout(title: string, content: string, activePage: string = '', 
   <!-- 乗務員クイック検索（右下）。ホシコンの中継APIを使う（配車コンソールのパスワードは不要） -->
   <script>window.DRIVER_FINDER = { refreshSec: 60, transport: function(path, params) {
     var base = ${JSON.stringify(ADMIN_PATH)} + '/api/driver-finder/';
+    if (path === 'employees/search') return fetch(base + 'employees?q=' + encodeURIComponent(params.q || ''), { credentials: 'include' }).then(function(r){ return r.json(); });
     if (path === 'map_vehicles/get_map_vehicle') return fetch(base + 'vehicles', { credentials: 'include' }).then(function(r){ return r.json(); });
     if (path === 'trip_infos/get_address') return fetch(base + 'address?lat=' + encodeURIComponent(params.latitude) + '&lon=' + encodeURIComponent(params.longitude), { credentials: 'include' }).then(function(r){ return r.json(); });
     return Promise.resolve({ isSuccess: false });
