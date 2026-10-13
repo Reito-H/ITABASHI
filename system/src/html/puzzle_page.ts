@@ -235,13 +235,14 @@ export function puzzlePageHtml(): string {
   .rate { font-size: 11px; color: var(--muted); text-align: center; margin-top: 8px; }
 
   /* ===== バトル（パズドラ風レイアウト） ===== */
-  #scr-battle { position: fixed; inset: 0; display: none; flex-direction: column; max-width: 480px; margin: 0 auto; padding: calc(8px + var(--sat)) 10px calc(8px + var(--sab)); }
+  #scr-battle { position: fixed; inset: 0; height: 100dvh; overflow-y: auto; overflow-x: hidden; display: none; flex-direction: column; max-width: 480px; margin: 0 auto; padding: max(14px, calc(8px + var(--sat))) 10px calc(8px + var(--sab)); }
   #scr-battle.on { display: flex; }
   body.battle .wrap { display: none; }
-  .top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #cbd5e1; padding: 2px 4px; }
+  .top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #cbd5e1; padding: 2px 4px; min-height: 40px; position: relative; z-index: 3; flex-shrink: 0; }
   .top b { color: var(--gold); font-size: 14px; }
-  .top .gu { background: none; border: 1px solid #3b4968; color: #cbd5e1; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-family: inherit; font-weight: 700; }
-  .arena { flex: 1; min-height: 150px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6px;
+  .top .gu { background: #1e293b; border: 1.5px solid #4b5a7a; color: #e2e8f0; border-radius: 999px; padding: 9px 16px; min-height: 40px; font-size: 14px; font-family: inherit; font-weight: 900; cursor: pointer; box-shadow: 0 3px 8px rgba(0,0,0,0.4); }
+  .top .gu:active { transform: scale(0.96); }
+  .arena { flex: 1 0 auto; min-height: 0; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 6px; overflow: visible;
     background: radial-gradient(ellipse 70% 50% at 50% 100%, rgba(251,191,36,0.14), transparent 70%); }
   .arena.boss { background: radial-gradient(ellipse 80% 60% at 50% 100%, rgba(239,68,68,0.25), transparent 70%); }
   .arena.flash::before { content: ''; position: absolute; inset: 0; background: #fff; animation: flash 0.25s ease-out; pointer-events: none; }
@@ -250,9 +251,9 @@ export function puzzlePageHtml(): string {
   .bossbanner { position: absolute; top: 6px; left: 0; right: 0; text-align: center; font-family: 'Rubik', sans-serif; font-weight: 900; font-size: 26px; letter-spacing: 0.3em; color: #ff5a5f; text-shadow: 0 0 16px rgba(255,90,95,0.8); display: none; animation: pulse 1.2s ease-in-out infinite; }
   .arena.boss .bossbanner { display: block; }
   .enemy { display: flex; flex-direction: column; align-items: center; width: 100%; }
-  .enemy .ph { width: min(42vw, 180px); height: min(42vw, 180px); border-radius: 50%; background: #1e293b center/cover no-repeat; border: 4px solid rgba(255,255,255,0.14);
+  .enemy .ph { width: min(42vw, 180px, 22dvh); height: min(42vw, 180px, 22dvh); border-radius: 50%; background: #1e293b center/cover no-repeat; border: 4px solid rgba(255,255,255,0.14);
     box-shadow: 0 0 0 6px rgba(0,0,0,0.25), 0 18px 40px rgba(0,0,0,0.5), 0 0 60px rgba(182,109,255,0.25); display: flex; align-items: center; justify-content: center; font-size: 40px; animation: float 3s ease-in-out infinite; position: relative; }
-  .arena.boss .enemy .ph { width: min(52vw, 220px); height: min(52vw, 220px); border-color: rgba(255,90,95,0.5); }
+  .arena.boss .enemy .ph { width: min(52vw, 220px, 28dvh); height: min(52vw, 220px, 28dvh); border-color: rgba(255,90,95,0.5); }
   @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
   .enemy .ph.hit { animation: shake 0.35s; filter: brightness(1.8); }
   @keyframes shake { 0%,100% { transform: translateX(0) rotate(0); } 20% { transform: translateX(-10px) rotate(-3deg); } 40% { transform: translateX(10px) rotate(3deg); } 60% { transform: translateX(-6px); } 80% { transform: translateX(6px); } }
@@ -269,9 +270,9 @@ export function puzzlePageHtml(): string {
   .bar.me > i { background: linear-gradient(90deg, #16a34a, #4ade80 60%, #bbf7d0); }
   .bar.low > i { background: linear-gradient(90deg, #991b1b, #ef4444); }
   .enemy .bar { max-width: 320px; }
-  .team { display: flex; gap: 6px; margin: 8px 0 4px; }
+  .team { display: flex; gap: 6px; margin: 8px 0 4px; flex-shrink: 0; }
   .team .m { flex: 1; display: flex; flex-direction: column; align-items: center; }
-  .team .m .ph { width: 56px; height: 56px; border-radius: 14px; background: #1e293b center/cover no-repeat; border: 3px solid #2b3650; position: relative; box-shadow: 0 6px 14px rgba(0,0,0,0.4); }
+  .team .m .ph { width: min(56px, 7dvh); height: min(56px, 7dvh); border-radius: 14px; background: #1e293b center/cover no-repeat; border: 3px solid #2b3650; position: relative; box-shadow: 0 6px 14px rgba(0,0,0,0.4); }
   .team .m .ph.atk { animation: lunge 0.4s; }
   @keyframes lunge { 30% { transform: translateY(-14px) scale(1.08); } }
   .team .m .ph .ring { position: absolute; right: -5px; bottom: -5px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #0b1020; }
@@ -279,7 +280,7 @@ export function puzzlePageHtml(): string {
   .teamhp { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; margin: 4px 0 6px; }
   .teamhp b { color: #bbf7d0; min-width: 72px; text-align: right; font-size: 13px; }
 
-  #board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; touch-action: none; user-select: none; padding: 10px; border-radius: 20px;
+  #board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; touch-action: none; user-select: none; padding: 10px; border-radius: 20px; width: min(100%, calc((100dvh - 430px) * 1.2)); min-width: 240px; margin: 0 auto;
     background: radial-gradient(120% 80% at 50% 0%, rgba(99,102,241,0.18), transparent 60%), linear-gradient(180deg, rgba(15,23,42,0.95), rgba(2,6,23,0.98));
     border: 1px solid rgba(148,163,184,0.25); box-shadow: inset 0 2px 14px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.04), 0 -10px 34px rgba(0,0,0,0.35); position: relative; }
   #board::before { content: ''; position: absolute; inset: 0; border-radius: 20px; pointer-events: none;
