@@ -98,6 +98,7 @@ import adminSignageRoutes from './routes/admin_signage';
 import adminWeatherNoticeRoutes from './routes/admin_weather_notice';
 import adminDaihonRoutes from './routes/admin_daihon';
 import adminTutorialRoutes from './routes/admin_tutorial';
+import adminPuzzleRoutes from './routes/admin_puzzle';
 import { battlePublicRoutes, battleAdminRoutes } from './routes/battle';
 export { BattleRoom } from './battle/room';
 import adminSrRoutes from './routes/admin_sr';
@@ -114,6 +115,7 @@ import publicStudyNotesUploadRoutes from './routes/public_study_notes_upload';
 import publicStudySessionsRoutes from './routes/public_study_sessions';
 import publicChoseiRoutes from './routes/public_chosei';
 import publicTshirtRoutes from './routes/public_tshirt';
+import publicPuzzleRoutes from './routes/public_puzzle';
 import publicHiyariRoutes from './routes/public_hiyari';
 import publicHanedaFlightsRoutes from './routes/public_haneda_flights';
 import publicSignageRoutes from './routes/public_signage';
@@ -123,7 +125,7 @@ import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
 import { clientInfo, logSecurityEventBg, isProbePath } from './utils/security';
 import adminCyberRoutes from './routes/admin_cyber';
-import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH, BATTLE_PUBLIC_PATH } from './config';
+import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH, BATTLE_PUBLIC_PATH, PUZZLE_PATH } from './config';
 import { FAVICON_DATA_URI } from './html/layout';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -210,7 +212,9 @@ app.use('*', async (c, next) => {
   // 管理者画面から同一オリジンでの表示も許可する
   // 台本のプレゼン（?embed=1）は板橋バトルのプロジェクター画面・進行画面に同一オリジンで埋め込むため、フレーム表示を許可する
   const isDaihonEmbed = /^\/[^/]+\/admin\/daihon\/\d+\/present$/.test(pathname) && reqUrl.searchParams.get('embed') === '1';
-  const isBattlePage = pathname === BATTLE_PUBLIC_PATH || pathname.startsWith(BATTLE_PUBLIC_PATH + '/') || /^\/[^/]+\/admin\/ib2(\/|$)/.test(pathname);
+  const isBattlePage = pathname === BATTLE_PUBLIC_PATH || pathname.startsWith(BATTLE_PUBLIC_PATH + '/') || /^\/[^/]+\/admin\/ib2(\/|$)/.test(pathname)
+    // ホシコンパズル（ログイン不要のゲーム画面）も Google Fonts を使うため同じ分類にする
+    || pathname === PUZZLE_PATH;
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   // 中身が変わらない配信物（URLにバージョンを含むPDF解析バンドル・ログイン背景画像）は、
@@ -453,6 +457,7 @@ app.route(`/${SECRET}/admin`, adminSignageRoutes);
 app.route(`/${SECRET}/admin`, adminWeatherNoticeRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
 app.route(`/${SECRET}/admin`, adminTutorialRoutes);
+app.route(`/${SECRET}/admin`, adminPuzzleRoutes);
 app.route(`/${SECRET}/admin`, battleAdminRoutes);
 app.route(`/${SECRET}/admin`, adminNavInsightsRoutes);
 app.route(`/${SECRET}/admin`, adminCyberRoutes);
@@ -577,6 +582,7 @@ app.route('', publicStudyNotesUploadRoutes);
 app.route('', publicStudySessionsRoutes);
 app.route('', publicChoseiRoutes);
 app.route('', publicTshirtRoutes);
+app.route('', publicPuzzleRoutes);
 app.route('', publicHiyariRoutes);
 app.route('', publicHanedaFlightsRoutes);
 app.route('', publicSignageRoutes);

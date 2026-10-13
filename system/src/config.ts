@@ -24,6 +24,10 @@ export const CHOSEI_PATH = '/cs-4e9b1d7a6c0f42e8b3a95172d84c0f6e';
 // 開いた先で社員番号（ない人は名前）→ サイズ を選んで登録する。
 export const TSHIRT_PATH = '/ts-eb1ea85a4d61a02a88671f11baf26e48';
 
+// ホシコンパズル（暇つぶし用パズルゲーム・ログイン不要・完全公開）の秘密パス。共有URLはこの1本だけ。
+// 開いた先で 社員番号（ない人はニックネーム）で参戦し、味方チームを組んで敵と戦う。管理は 設定 → バトル設定。
+export const PUZZLE_PATH = '/pz-7c41e9a2d08b4f6e9a3d15c7b2e8f0a4';
+
 // ヒヤリハット収集フォーム（ログイン不要・完全公開）の秘密パス。
 // 全ポスター/QRがこの1本を指す。開いた先で社員番号を入れて1件ずつ投稿する。
 export const HIYARI_PATH = '/hh-2738ceac08eac11269d76dc733598ba6';

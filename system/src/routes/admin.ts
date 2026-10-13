@@ -1023,6 +1023,7 @@ app.get('/settings', async (c) => {
     ]},
     { heading: '期間限定', cards: [
       { href: `${ADMIN}/settings/tshirt`, perm: 'settings.tshirt', title: tshirtTitle },
+      { href: `${ADMIN}/settings/puzzle`, perm: 'settings.puzzle', title: 'バトル設定（ホシコンパズル）', desc: '味方キャラ・敵キャラ・ランキング' },
     ]},
     { heading: 'AI売上分析の設定', cards: [
       { href: `${ADMIN}/settings/wage-estimate`, perm: 'settings.wage-estimate', title: '賃金試算設定' },

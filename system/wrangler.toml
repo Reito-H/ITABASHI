@@ -150,6 +150,11 @@ zone_name = "bentenclub.com"
 pattern = "bentenclub.com/ts-eb1ea85a4d61a02a88671f11baf26e48*"
 zone_name = "bentenclub.com"
 
+# ホシコンパズル（ログイン不要の固定URL・PUZZLE_PATH）
+[[routes]]
+pattern = "bentenclub.com/pz-7c41e9a2d08b4f6e9a3d15c7b2e8f0a4*"
+zone_name = "bentenclub.com"
+
 [[routes]]
 pattern = "bentenclub.com/robots.txt"
 zone_name = "bentenclub.com"
