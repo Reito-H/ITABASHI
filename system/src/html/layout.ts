@@ -1,5 +1,6 @@
 // 共通HTMLレイアウト
 import { ADMIN_PATH, APP_VERSION, BATTLE_PUBLIC_PATH, BATTLE_NAV_UNTIL } from '../config';
+import { DRIVER_FINDER_VERSION } from '../assets/km_console_ui';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
 import { announcementBarHtml, announcementBarScript } from './announcement_bar';
 import { birthdayPopupHtml, birthdayPopupScript } from './birthday_popup';
@@ -860,6 +861,15 @@ export function layout(title: string, content: string, activePage: string = '', 
     ${showReportFab ? quickReportModalScript() : ''}
     ${NAV_LOG_SCRIPT}
   </script>
+  <!-- 乗務員クイック検索（右下）。ホシコンの中継APIを使う（配車コンソールのパスワードは不要） -->
+  <script>window.DRIVER_FINDER = { refreshSec: 60, transport: function(path, params) {
+    var base = ${JSON.stringify(ADMIN_PATH)} + '/api/driver-finder/';
+    if (path === 'map_vehicles/get_map_vehicle') return fetch(base + 'vehicles', { credentials: 'include' }).then(function(r){ return r.json(); });
+    if (path === 'trip_infos/get_address') return fetch(base + 'address?lat=' + encodeURIComponent(params.latitude) + '&lon=' + encodeURIComponent(params.longitude), { credentials: 'include' }).then(function(r){ return r.json(); });
+    return Promise.resolve({ isSuccess: false });
+  } };</script>
+  <script src="${ADMIN_PATH}/driver-finder.js?v=${DRIVER_FINDER_VERSION}"></script>
+  <style>.dfw{right:170px}@media (max-width:700px){.dfw{right:16px;bottom:84px}}</style>
 </body>
 </html>`;
 }

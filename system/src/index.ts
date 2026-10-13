@@ -49,6 +49,7 @@ import studyNotesApi from './routes/api/study_notes';
 import adminKachoMissionRoutes from './routes/admin_kacho_mission';
 import adminFluVaccinationRoutes from './routes/admin_flu_vaccination';
 import adminTakconSyncRoutes from './routes/admin_takcon_sync';
+import adminDriverFinderRoutes from './routes/admin_driver_finder';
 import adminKachoHiyariRoutes from './routes/admin_kacho_hiyari';
 import adminSummerSafety2026Routes from './routes/admin_summer_safety_2026';
 import adminAutumnSafety2026Routes from './routes/admin_autumn_safety_2026';
@@ -355,6 +356,8 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   if (subPath.startsWith('/api/kancho-personal/')) return next();
   // 動線収集（匿名）: どのアカウントの画面遷移も集計対象にするため、ページ権限に関わらず記録を受け付ける（ログインは必須）
   if (subPath === '/api/nav-log') return next();
+  // 乗務員クイック検索（全ページ右下）: ログイン済みなら誰でも（ページ権限に関わらず）使える
+  if (subPath.startsWith('/api/driver-finder/') || subPath === '/driver-finder.js') return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -423,6 +426,7 @@ app.route(`/${SECRET}/admin`, adminStudyNotesRoutes);
 app.route(`/${SECRET}/admin`, adminKachoMissionRoutes);
 app.route(`/${SECRET}/admin`, adminFluVaccinationRoutes);
 app.route(`/${SECRET}/admin`, adminTakconSyncRoutes);
+app.route(`/${SECRET}/admin`, adminDriverFinderRoutes);
 app.route(`/${SECRET}/admin`, adminKachoHiyariRoutes);
 app.route(`/${SECRET}/admin`, adminSummerSafety2026Routes);
 app.route(`/${SECRET}/admin`, adminAutumnSafety2026Routes);

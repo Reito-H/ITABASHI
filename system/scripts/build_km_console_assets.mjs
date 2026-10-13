@@ -21,6 +21,7 @@ const files = {
   MAP_JS: 'map.js',
   LIVE_JS: 'live.js',
 };
+const extra = { DRIVER_FINDER_JS: 'driver-finder.js' };
 
 let out = '// 自動生成ファイル（scripts/build_km_console_assets.mjs）。直接編集せず km-ui/ui/ を直して再生成すること。\n';
 out += '// km-operator 配車コンソール（新UI）の静的ファイル一式。\n\n';
@@ -31,5 +32,11 @@ for (const [name, file] of Object.entries(files)) {
   out += `export const KM_CONSOLE_${name} = ${JSON.stringify(text)};\n\n`;
 }
 out += `export const KM_CONSOLE_VERSION = ${JSON.stringify(hash.digest('hex').slice(0, 12))};\n`;
+// 乗務員クイック検索（管理画面全ページの右下。routes/admin_driver_finder.ts が配信）
+for (const [name, file] of Object.entries(extra)) {
+  const text = readFileSync(join(uiDir, file), 'utf8');
+  out += `\nexport const ${name} = ${JSON.stringify(text)};\n`;
+  out += `export const ${name.replace(/_JS$/, '_VERSION')} = ${JSON.stringify(createHash('sha256').update(text).digest('hex').slice(0, 12))};\n`;
+}
 writeFileSync(outFile, out);
 console.log('wrote', outFile);
