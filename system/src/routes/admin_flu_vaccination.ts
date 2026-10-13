@@ -324,11 +324,17 @@ app.get('/kacho-mission/flu', (c) => {
       return rows;
     }
     function renderList(kind){
-      var rows = listRows(kind); var f = filt[kind];
-      var divOpts = ['', '1', '2', '3', '4'].map(function(d){ return '<option value="' + d + '"' + (f.div === d ? ' selected' : '') + '>' + (d ? d + '課' : '全課') + '</option>'; }).join('');
-      var html = '<div class="flu-tools"><input type="text" placeholder="名前・フリガナ・社員番号で絞り込み" value="' + esc(f.q) + '" data-k="' + kind + '" class="lq"><select data-k="' + kind + '" class="ldiv">' + divOpts + '</select>' +
-        '<span class="flu-note">' + rows.length + '人</span><span style="flex:1"></span>' +
-        '<a class="flu-btn" target="_blank" rel="noopener" href="' + BASE + '/print?list=' + kind + (f.div ? '&div=' + f.div : '') + '">この一覧をPDF（印刷）</a></div>' +
+      var panel = $('p-' + kind); var f = filt[kind];
+      // 入力欄（検索・課）は最初の1回だけ作る。文字入力のたびに作り直すと日本語入力（変換中）が途切れるため、以降は表だけ更新する
+      if (!panel.querySelector('.flu-tools')) {
+        var divOpts = ['', '1', '2', '3', '4'].map(function(d){ return '<option value="' + d + '">' + (d ? d + '課' : '全課') + '</option>'; }).join('');
+        panel.innerHTML = '<div class="flu-tools"><input type="text" placeholder="名前・フリガナ・社員番号で絞り込み" data-k="' + kind + '" class="lq" autocomplete="off"><select data-k="' + kind + '" class="ldiv">' + divOpts + '</select>' +
+          '<span class="flu-note lcount"></span><span style="flex:1"></span><a class="flu-btn lpdf" target="_blank" rel="noopener" href="#">この一覧をPDF（印刷）</a></div><div class="lbody"></div>';
+      }
+      var rows = listRows(kind);
+      panel.querySelector('.lcount').textContent = rows.length + '人';
+      panel.querySelector('.lpdf').setAttribute('href', BASE + '/print?list=' + kind + (f.div ? '&div=' + f.div : ''));
+      panel.querySelector('.lbody').innerHTML =
         '<div class="tablewrap"><table class="flu"><thead><tr><th>#</th><th>氏名</th><th>課/班</th><th>状況</th><th>操作</th><th>社員番号</th><th>フリガナ</th><th class="num">年齢</th><th>健診日</th><th>他院等の記録</th></tr></thead><tbody>' +
         rows.map(function(p, i){
           var act = p.status === 'manual' ? '<button type="button" class="flu-btn danger btnDel" data-emp="' + esc(p.empNo) + '" data-name="' + esc(p.name) + '">取消</button>'
@@ -337,7 +343,6 @@ app.get('/kacho-mission/flu', (c) => {
           return '<tr><td>' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b></td><td>' + esc(divTeam(p)) + '</td><td><span class="st ' + p.status + '">' + esc(p.statusLabel) + '</span></td><td>' + act + '</td>' +
             '<td>' + esc(p.empNo) + '</td><td>' + esc(p.kana) + '</td><td class="num">' + (p.age == null ? '' : p.age) + '</td><td>' + esc(fmtDate(p.checkupDate)) + '</td><td>' + esc(manual) + '</td></tr>';
         }).join('') + '</tbody></table></div>';
-      $('p-' + kind).innerHTML = html;
     }
     function renderRoster(){
       var s = D.summary;
@@ -351,7 +356,10 @@ app.get('/kacho-mission/flu', (c) => {
     // タブ
     $('tabs').addEventListener('click', function(e){ var b = e.target.closest('button'); if (!b) return; document.querySelectorAll('#tabs button').forEach(function(x){ x.classList.toggle('active', x === b); }); document.querySelectorAll('.flu-panel').forEach(function(p){ p.classList.toggle('active', p.id === 'p-' + b.dataset.tab); }); });
     // 絞り込み
-    document.addEventListener('input', function(e){ var t = e.target; if (t.classList.contains('lq')) { filt[t.dataset.k].q = t.value; var pos = t.selectionStart; renderList(t.dataset.k); var n = document.querySelector('#p-' + t.dataset.k + ' .lq'); n.focus(); n.setSelectionRange(pos, pos); } });
+    var lt = {};
+    function onFilterInput(t){ filt[t.dataset.k].q = t.value; clearTimeout(lt[t.dataset.k]); lt[t.dataset.k] = setTimeout(function(){ renderList(t.dataset.k); }, 120); }
+    document.addEventListener('input', function(e){ var t = e.target; if (t.classList.contains('lq') && !e.isComposing) onFilterInput(t); });
+    document.addEventListener('compositionend', function(e){ var t = e.target; if (t.classList && t.classList.contains('lq')) onFilterInput(t); });
     document.addEventListener('change', function(e){ var t = e.target; if (t.classList.contains('ldiv')) { filt[t.dataset.k].div = t.value; renderList(t.dataset.k); } });
     // 行の操作
     document.addEventListener('click', function(e){
