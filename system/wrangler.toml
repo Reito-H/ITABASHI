@@ -23,6 +23,10 @@ binding = "STUDY_NOTES_BUCKET"
 bucket_name = "benten-study-notes"
 
 # ITABASHI BATTLE 2（新卒 繁忙期勉強会のゲームアプリ）のリアルタイム進行。無料プランで使える SQLite 型の Durable Object
+# Workers AI（バジル&ドラゴンズ: キャラ・敵の画像生成 flux-1-schnell。設定→バトル設定の「AIで作る」）
+[ai]
+binding = "AI"
+
 [[durable_objects.bindings]]
 name = "BATTLE_ROOM"
 class_name = "BattleRoom"

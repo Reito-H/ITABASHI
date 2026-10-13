@@ -3,9 +3,8 @@
   "configurations": [
     {
       "name": "hoshikon-dev",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["wrangler", "dev", "--port", "8787", "--local-protocol", "https"],
-      "cwd": "system",
+      "runtimeExecutable": ".claude/skills/cloudflare/cf-wrangler.sh",
+      "runtimeArgs": ["dev", "--port", "8787", "--local-protocol", "https"],
       "port": 8787,
       "url": "https://localhost:8787"
     }

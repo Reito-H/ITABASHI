@@ -38,6 +38,8 @@ export type Env = {
   RICHMENU_ID_R?: string;          // ロール「R」（hoshi_viewer）用。星の予定表を開くボタン1つだけのメニュー
   // 資料センター（マニュアルPDF・就業規則等のファイル保管）
   DOCUMENTS_BUCKET: R2Bucket;
+  // Workers AI（バジル&ドラゴンズのキャラ・敵画像の生成に使用。wrangler.toml の [ai]）
+  AI: Ai;
   // ITABASHI BATTLE 2 のリアルタイム進行（Durable Object・src/battle/room.ts）
   BATTLE_ROOM: DurableObjectNamespace;
   // 乗務員証 証明写真の一時保存（30日で自動削除）
