@@ -3,6 +3,7 @@
 --   ・酔客対応シミュレーション／泥酔客の乗車拒否Q&A／酔客への聞き方Q&A／忘れ物対応リレー／付け待ちvs流しディベート
 --   ・恵比寿駅西口 優良乗り場／東京駅八重洲口乗り場／渋谷駅西口乗り場
 --   ・銀座乗車禁止地区（とは・規制日時・年末も規制Q&A・2026年版地図・銀座1号乗り場）→ 仮の銀座スライドは削除
+--   ・教材集デッキは本番で「繁忙期勉強会 教材集」に改名されているため両方の名前で探す。
 --   ・コピー元のデッキは変更しない。画像はコピー元と同じR2キーを参照。すでに拡張済みなら何もしない。
 -- ===================================================
 
@@ -25,7 +26,7 @@ UPDATE daihon_slides SET sort_order = 12 WHERE deck_id = (SELECT id FROM daihon_
 UPDATE daihon_slides SET sort_order = 13 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND sort_order = 1013;
 INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes, images, hidden, ref_page, quiz, links)
 SELECT (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026'), 14, layout, accent, title, subtitle, body, notes, images, 0, ref_page, quiz, links FROM daihon_slides
-WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '年末年始勉強会 教材集') AND sort_order = 27 AND NOT EXISTS (SELECT 1 FROM daihon_slides x WHERE x.deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND x.sort_order = 14);
+WHERE deck_id = (SELECT id FROM daihon_decks WHERE title IN ('年末年始勉強会 教材集','繁忙期勉強会 教材集') ORDER BY id LIMIT 1) AND sort_order = 27 AND NOT EXISTS (SELECT 1 FROM daihon_slides x WHERE x.deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND x.sort_order = 14);
 INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes, images, hidden, ref_page, quiz, links)
 SELECT (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026'), 15, layout, accent, title, subtitle, body, notes, images, 0, ref_page, quiz, links FROM daihon_slides
 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = 'タクシー街頭営業ハンドブック 解説') AND sort_order = 13 AND NOT EXISTS (SELECT 1 FROM daihon_slides x WHERE x.deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND x.sort_order = 15);
@@ -42,12 +43,12 @@ UPDATE daihon_slides SET sort_order = 19 WHERE deck_id = (SELECT id FROM daihon_
 UPDATE daihon_slides SET sort_order = 20 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND sort_order = 1015;
 INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes, images, hidden, ref_page, quiz, links)
 SELECT (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026'), 21, layout, accent, title, subtitle, body, notes, images, 0, ref_page, quiz, links FROM daihon_slides
-WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '年末年始勉強会 教材集') AND sort_order = 28 AND NOT EXISTS (SELECT 1 FROM daihon_slides x WHERE x.deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND x.sort_order = 21);
+WHERE deck_id = (SELECT id FROM daihon_decks WHERE title IN ('年末年始勉強会 教材集','繁忙期勉強会 教材集') ORDER BY id LIMIT 1) AND sort_order = 28 AND NOT EXISTS (SELECT 1 FROM daihon_slides x WHERE x.deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND x.sort_order = 21);
 UPDATE daihon_slides SET sort_order = 22 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND sort_order = 1016;
 UPDATE daihon_slides SET sort_order = 23 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND sort_order = 1017;
 INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes, images, hidden, ref_page, quiz, links)
 SELECT (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026'), 24, layout, accent, title, subtitle, body, notes, images, 0, ref_page, quiz, links FROM daihon_slides
-WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '年末年始勉強会 教材集') AND sort_order = 38 AND NOT EXISTS (SELECT 1 FROM daihon_slides x WHERE x.deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND x.sort_order = 24);
+WHERE deck_id = (SELECT id FROM daihon_decks WHERE title IN ('年末年始勉強会 教材集','繁忙期勉強会 教材集') ORDER BY id LIMIT 1) AND sort_order = 38 AND NOT EXISTS (SELECT 1 FROM daihon_slides x WHERE x.deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND x.sort_order = 24);
 UPDATE daihon_slides SET sort_order = 25 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND sort_order = 1018;
 UPDATE daihon_slides SET sort_order = 26 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND sort_order = 1019;
 UPDATE daihon_slides SET sort_order = 27 WHERE deck_id = (SELECT id FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026') AND sort_order = 1020;
