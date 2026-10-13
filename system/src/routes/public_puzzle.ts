@@ -11,6 +11,7 @@ import { getSessionFromCookie, validateSession } from '../auth';
 import { PUZZLE_PATH } from '../config';
 import { isAdminAccount } from '../utils/maintenance';
 import { puzzlePageHtml } from '../html/puzzle_page';
+import { PUZZLE_EFFECTS, EFFECT_MAP } from '../data/puzzle_effects';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -39,11 +40,11 @@ export async function loadPuzzleSettings(db: D1Database): Promise<PuzzleSettings
   };
 }
 
-export type AllyRow = { id: number; name: string; kind: string; rarity: number; in_gacha: number; description: string; art_prompt: string; skill_name: string; skill_type: string; skill_power: number; photo_r2_key: string | null; photo_offset_x: number; photo_offset_y: number; photo_scale: number; hp: number; atk: number; element: string; is_active: number; sort_order: number };
+export type AllyRow = { id: number; name: string; kind: string; rarity: number; in_gacha: number; description: string; art_prompt: string; skill_name: string; skill_type: string; skill_power: number; skill_effect: string; photo_r2_key: string | null; photo_offset_x: number; photo_offset_y: number; photo_scale: number; hp: number; atk: number; element: string; is_active: number; sort_order: number };
 export type EnemyRow = { id: number; name: string; photo_r2_key: string | null; hp: number; atk: number; element: string; is_boss: number; is_final: number; description: string; art_prompt: string; is_active: number; sort_order: number };
 
 export async function loadAllies(db: D1Database, activeOnly: boolean): Promise<AllyRow[]> {
-  const r = await db.prepare(`SELECT id, name, kind, rarity, in_gacha, description, art_prompt, skill_name, skill_type, skill_power, photo_r2_key, photo_offset_x, photo_offset_y, photo_scale, hp, atk, element, is_active, sort_order
+  const r = await db.prepare(`SELECT id, name, kind, rarity, in_gacha, description, art_prompt, skill_name, skill_type, skill_power, skill_effect, photo_r2_key, photo_offset_x, photo_offset_y, photo_scale, hp, atk, element, is_active, sort_order
     FROM puzzle_allies ${activeOnly ? 'WHERE is_active = 1' : ''} ORDER BY sort_order ASC, id ASC`).all<AllyRow>();
   return r.results ?? [];
 }
@@ -138,12 +139,13 @@ app.get('/api/public/puzzle/config', async (c) => {
   const s = await loadPuzzleSettings(c.env.DB);
   const allies = (await loadAllies(c.env.DB, true)).map(a => ({
     id: a.id, name: a.name, kind: a.kind, rarity: a.rarity, in_gacha: !!a.in_gacha, desc: a.description, hp: a.hp, atk: a.atk, element: a.element, img: !!a.photo_r2_key,
-    skill: { name: a.skill_name || '必殺技', type: a.skill_type === 'heal' ? 'heal' : 'attack', power: a.skill_power || 100 },
+    skill: { name: a.skill_name || '必殺技', type: a.skill_type === 'heal' ? 'heal' : 'attack', power: a.skill_power || 100, effect: EFFECT_MAP[a.skill_effect] ? a.skill_effect : (a.skill_type === 'heal' ? 'heal_m' : 'atk_m') },
     ox: a.photo_offset_x, oy: a.photo_offset_y, sc: a.photo_scale,
   }));
   const enemies = (await loadEnemies(c.env.DB, true)).map(e => ({ id: e.id, name: e.name, hp: e.hp, atk: e.atk, element: e.element, boss: !!e.is_boss, final: !!e.is_final, desc: e.description, img: !!e.photo_r2_key }));
   const guide = await c.env.DOCUMENTS_BUCKET.head(GUIDE_IMG_KEY).catch(() => null);
-  return c.json({ title: s.title, open: !!s.is_open, team_size: s.team_size, enemy_interval: s.enemy_interval, gacha_cost: s.gacha_cost, train_cost: s.train_cost, max_level: MAX_LEVEL, guide_img: !!guide, allies, enemies });
+  const effects = PUZZLE_EFFECTS.map(e => ({ id: e.id, name: e.name, cat: e.cat, desc: e.desc, ops: e.ops }));
+  return c.json({ title: s.title, open: !!s.is_open, team_size: s.team_size, enemy_interval: s.enemy_interval, gacha_cost: s.gacha_cost, train_cost: s.train_cost, max_level: MAX_LEVEL, guide_img: !!guide, allies, enemies, effects });
 });
 
 // 案内人 妖精バジルの画像（管理画面の「AIで作る」で R2 に保存。無ければ 404 → 画面側はSVGのまま）
@@ -324,6 +326,56 @@ app.post('/api/public/puzzle/result', async (c) => {
   const rank = await c.env.DB.prepare(`SELECT COUNT(*) + 1 AS r FROM (SELECT player_id, MAX(score) AS m FROM puzzle_scores WHERE cheated = 0 GROUP BY player_id) t WHERE t.m > ?`)
     .bind(best?.score ?? 0).first<{ r: number }>();
   return c.json({ ok: true, score, best, rank: rank?.r ?? 1, is_best: !cheated && (best?.score ?? 0) === score, coins_earned: coins, coins: p.coins + coins, exp_gain: expGain, level_ups: levelUps, cheated });
+});
+
+// ===== API: ストーリー =====
+type StageRow = { id: number; chapter_id: number; number: number; enemy_id: number; pre_text: string; post_text: string; reward_coins: number };
+app.post('/api/public/puzzle/story', async (c) => {
+  const b = await c.req.json<{ token?: string }>().catch(() => ({} as { token?: string }));
+  const p = await playerByToken(c.env.DB, String(b.token ?? ''));
+  if (!p) return c.json({ error: '未登録' }, 404);
+  const chapters = (await c.env.DB.prepare('SELECT id, number, title, subtitle, intro FROM puzzle_chapters WHERE is_active = 1 ORDER BY number').all<{ id: number; number: number; title: string; subtitle: string; intro: string }>()).results ?? [];
+  const stages = (await c.env.DB.prepare('SELECT id, chapter_id, number, enemy_id, pre_text, post_text, reward_coins FROM puzzle_stages ORDER BY chapter_id, number').all<StageRow>()).results ?? [];
+  const prog = new Map((((await c.env.DB.prepare('SELECT stage_id, clears, best_hp FROM puzzle_progress WHERE player_id = ?').bind(p.id).all<{ stage_id: number; clears: number; best_hp: number }>()).results) ?? []).map(r => [r.stage_id, r]));
+  const parse = (t: string) => { try { const v = JSON.parse(t); return Array.isArray(v) ? v : []; } catch { return []; } };
+  return c.json({
+    chapters: chapters.map(ch => ({
+      id: ch.id, number: ch.number, title: ch.title, subtitle: ch.subtitle, intro: ch.intro,
+      stages: stages.filter(st => st.chapter_id === ch.id).map(st => ({ id: st.id, number: st.number, enemy_id: st.enemy_id, pre: parse(st.pre_text), post: parse(st.post_text), reward: st.reward_coins, clears: prog.get(st.id)?.clears ?? 0, best_hp: prog.get(st.id)?.best_hp ?? 0 })),
+    })),
+  });
+});
+
+// ステージの結果（クリアで進行を保存。報酬は初回クリアが大きい）
+app.post('/api/public/puzzle/story/result', async (c) => {
+  const b = await c.req.json<{ token?: string; stage_id?: number; cleared?: boolean; hp_left?: number; moves?: number; team?: number[]; cheated?: boolean; bonus_coin?: number; bonus_exp?: number }>().catch(() => ({} as Record<string, never>));
+  const p = await playerByToken(c.env.DB, String(b.token ?? ''));
+  if (!p) return c.json({ error: '未登録' }, 404);
+  const st = await c.env.DB.prepare('SELECT id, chapter_id, number, enemy_id, reward_coins FROM puzzle_stages WHERE id = ?').bind(Number(b.stage_id)).first<StageRow>();
+  if (!st) return c.json({ error: 'ステージが見つかりません' }, 404);
+  const cheated = !!b.cheated;
+  const toInt = (v: unknown, min: number, max: number) => Math.min(max, Math.max(min, Math.floor(Number(v) || 0)));
+  const hpLeft = toInt(b.hp_left, 0, 100);
+  const team = Array.isArray(b.team) ? b.team.filter(x => Number.isInteger(x)).slice(0, 6) as number[] : [];
+  const bonusCoin = toInt(b.bonus_coin, 0, 200), bonusExp = toInt(b.bonus_exp, 0, 200);
+  if (!b.cleared) return c.json({ ok: true, cleared: false, coins_earned: 0, exp_gain: 0, coins: p.coins, level_ups: [] });
+  const prev = await c.env.DB.prepare('SELECT clears, best_hp FROM puzzle_progress WHERE player_id = ? AND stage_id = ?').bind(p.id, st.id).first<{ clears: number; best_hp: number }>();
+  const first = !prev;
+  const coins = cheated ? 0 : Math.round((st.reward_coins * (first ? 1 : 0.4)) * (1 + bonusCoin / 100));
+  const expGain = cheated ? 0 : Math.round((90 + st.number * 20 + (first ? 150 : 0)) * (1 + bonusExp / 100));
+  const stmts: D1PreparedStatement[] = [
+    c.env.DB.prepare('INSERT INTO puzzle_progress (player_id, stage_id, clears, best_hp) VALUES (?, ?, 1, ?) ON CONFLICT(player_id, stage_id) DO UPDATE SET clears = clears + 1, best_hp = MAX(best_hp, ?), cleared_at = datetime(\'now\',\'localtime\')').bind(p.id, st.id, hpLeft, hpLeft),
+    c.env.DB.prepare("UPDATE puzzle_players SET last_played_at = datetime('now','localtime'), coins = coins + ? WHERE id = ?").bind(coins, p.id),
+  ];
+  const before = new Map<number, number>();
+  if (expGain > 0 && team.length) {
+    const rows = (await c.env.DB.prepare(`SELECT ally_id, exp FROM puzzle_player_chars WHERE player_id = ? AND ally_id IN (${team.map(() => '?').join(',')})`).bind(p.id, ...team).all<{ ally_id: number; exp: number }>()).results ?? [];
+    rows.forEach(r => before.set(r.ally_id, r.exp));
+    for (const id of team) stmts.push(c.env.DB.prepare('INSERT INTO puzzle_player_chars (player_id, ally_id, exp) VALUES (?, ?, ?) ON CONFLICT(player_id, ally_id) DO UPDATE SET exp = exp + ?').bind(p.id, id, expGain, expGain));
+  }
+  await c.env.DB.batch(stmts);
+  const levelUps = team.map(id => { const e0 = before.get(id) ?? 0; return { id, from: expToLevel(e0), to: expToLevel(e0 + expGain) }; }).filter(x => x.to > x.from);
+  return c.json({ ok: true, cleared: true, first, coins_earned: coins, exp_gain: expGain, coins: p.coins + coins, level_ups: levelUps, cheated });
 });
 
 app.get('/api/public/puzzle/ranking', async (c) => {

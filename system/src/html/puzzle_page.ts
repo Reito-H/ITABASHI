@@ -392,6 +392,47 @@ export function puzzlePageHtml(): string {
   .d-skill { display: flex; justify-content: center; align-items: center; gap: 10px; }
   .d-skill .ph { width: 56px; height: 56px; border-radius: 14px; background: #334155; border: 3px solid #fbbf24; box-shadow: 0 0 18px #fbbf24; animation: ready 0.9s infinite alternate; position: relative; }
 
+  /* ===== ストーリー ===== */
+  body.story .endless-only { display: none !important; }
+  .chap { position: relative; background: linear-gradient(135deg, #1a2342, #0f162d); border: 1px solid rgba(251,191,36,0.35); border-radius: 18px; padding: 16px 16px 14px; margin-bottom: 12px; cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,0.4); transition: transform 0.12s; overflow: hidden; }
+  .chap::before { content: ''; position: absolute; right: -30px; top: -30px; width: 140px; height: 140px; border-radius: 50%; background: radial-gradient(circle, rgba(251,191,36,0.25), transparent 70%); }
+  .chap:active { transform: scale(0.98); }
+  .chap.lock { opacity: 0.45; filter: grayscale(0.6); }
+  .chap.done { border-color: rgba(134,239,172,0.6); }
+  .chap-no { font-family: 'Rubik', sans-serif; font-size: 12px; letter-spacing: 0.3em; color: var(--gold); }
+  .chap-t { font-size: 22px; font-weight: 900; margin: 2px 0; }
+  .chap-s { font-size: 12px; color: #cbd5e1; }
+  .chap-p { height: 6px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; margin-top: 10px; }
+  .chap-p > i { display: block; height: 100%; background: linear-gradient(90deg, #fbbf24, #86efac); }
+  .chap-n { font-size: 11px; color: var(--muted); margin-top: 4px; text-align: right; }
+  .stg { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 8px 10px; margin-bottom: 8px; cursor: pointer; }
+  .stg.lock { opacity: 0.45; } .stg.done { border-color: rgba(251,191,36,0.4); } .stg.boss { border-color: rgba(255,90,95,0.6); background: linear-gradient(90deg, rgba(127,29,29,0.5), var(--panel)); }
+  .stg-no { font-family: 'Rubik', sans-serif; font-weight: 900; color: var(--gold); width: 24px; text-align: center; }
+  .stg-ph { width: 54px; height: 54px; border-radius: 50%; background: #1e293b center/cover no-repeat; border: 2px solid #2b3650; flex-shrink: 0; }
+  .stg-info { flex: 1; min-width: 0; }
+  .stg-n { font-size: 14px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stg-b { font-family: 'Rubik', sans-serif; font-size: 10px; color: #ff5a5f; letter-spacing: 0.2em; }
+  .stg-s { font-size: 11px; color: var(--muted); }
+  .stg-r { font-size: 12px; font-weight: 900; color: #1f1300; background: linear-gradient(180deg, #ffe08a, #f59e0b); padding: 6px 10px; border-radius: 999px; flex-shrink: 0; }
+  .stg.lock .stg-r { background: #334155; color: #94a3b8; }
+  .talk { align-items: flex-end; background: rgba(2,6,23,0.55); z-index: 55; padding-bottom: calc(24px + var(--sab)); }
+  .talk-box { position: relative; width: 100%; max-width: 480px; display: flex; gap: 12px; align-items: flex-end; background: linear-gradient(180deg, rgba(17,24,48,0.98), rgba(10,14,30,0.98)); border: 2px solid rgba(251,191,36,0.6); border-radius: 18px; padding: 14px; box-shadow: 0 20px 50px rgba(0,0,0,0.7); animation: fadein 0.25s; }
+  .talk-box.enemy { border-color: rgba(255,90,95,0.7); } .talk-box.ally { border-color: rgba(63,169,255,0.7); }
+  .talk-ph { width: 92px; height: 92px; border-radius: 16px; background: #1e293b center/cover no-repeat; border: 2px solid rgba(255,255,255,0.2); flex-shrink: 0; box-shadow: 0 8px 20px rgba(0,0,0,0.5); }
+  .talk-ph .basil-svg { width: 88px; height: 88px; display: block; }
+  .talk-body { flex: 1; min-width: 0; }
+  .talk-name { font-size: 12px; font-weight: 900; color: var(--gold); letter-spacing: 0.1em; }
+  .talk-box.enemy .talk-name { color: #ff8a8e; } .talk-box.ally .talk-name { color: #93c5fd; }
+  .talk-text { font-size: 15px; line-height: 1.7; min-height: 3.4em; margin-top: 2px; }
+  .talk-hint { font-size: 10px; color: var(--muted); text-align: right; animation: pulse 1.2s infinite; }
+  .talk-skip { position: absolute; right: 12px; top: -14px; background: #334155; color: #cbd5e1; border: 1px solid #475569; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-family: inherit; font-weight: 700; }
+  .status { display: flex; flex-wrap: wrap; gap: 4px; min-height: 18px; margin: -2px 0 4px; }
+  .stb { font-size: 10px; font-weight: 900; padding: 1px 7px; border-radius: 999px; background: #1e293b; border: 1px solid #334155; color: #cbd5e1; }
+  .stb.good { border-color: rgba(134,239,172,0.6); color: #bbf7d0; } .stb.bad { border-color: rgba(255,90,95,0.6); color: #fecaca; } .stb.sleep { border-color: rgba(182,109,255,0.6); color: #e9d5ff; }
+  .zzz { position: relative; }
+  .zzz::after { content: 'Zzz'; position: absolute; right: -6px; top: -14px; font-family: 'Rubik', sans-serif; font-weight: 900; color: #e9d5ff; text-shadow: 0 0 10px #a855f7; animation: zzz 1.4s ease-in-out infinite; z-index: 4; }
+  @keyframes zzz { 0% { transform: translateY(0) scale(0.8); opacity: 0.3; } 50% { opacity: 1; } 100% { transform: translateY(-16px) scale(1.2); opacity: 0; } }
+
   /* ===== 結果・ランキング ===== */
   .res .ttl { text-align: center; font-size: 20px; font-weight: 900; }
   .res .big { font-family: 'Rubik', sans-serif; font-size: 48px; font-weight: 900; text-align: center; margin: 8px 0 2px; line-height: 1.1;
@@ -498,7 +539,8 @@ ${ORB_DEFS}
       <div class="row" style="justify-content:space-between;"><h2 style="margin:0;">チーム</h2><button class="back" id="btn-team">チームを組む</button></div>
       <div class="team" id="home-team" style="margin-top:10px;"></div>
     </div>
-    <button class="btn" id="btn-start">バトル開始</button>
+    <button class="btn" id="btn-story">ストーリー<span class="sub">チャプターを進めて物語を追う</span></button>
+    <button class="btn sec" id="btn-start">ランキングバトル（全敵連戦）</button>
     <div class="btn2">
       <button class="btn pink" id="btn-gacha">ガチャ<span class="sub" id="gacha-cost-lbl"></span></button>
       <button class="btn green" id="btn-chars">キャラ・育成<span class="sub">強化・レベルアップ</span></button>
@@ -548,6 +590,19 @@ ${ORB_DEFS}
     </div>
   </div>
 
+  <!-- ストーリー：章 -->
+  <div class="scr" id="scr-story">
+    <div class="topbar"><button class="back" id="btn-story-back">← 戻る</button><span class="coin" id="story-coins">0</span></div>
+    <div class="guide">${BASIL_SVG}<div class="basil-img"></div><div class="bubble"><span class="nm">案内人 バジル</span>章を選んでね。上から順番にしか進めないよ。</div></div>
+    <div id="story-list"></div>
+  </div>
+  <!-- ストーリー：ステージ -->
+  <div class="scr" id="scr-stages">
+    <div class="topbar"><button class="back" id="btn-stages-back">← 章一覧</button><span class="coin" id="stages-coins">0</span></div>
+    <div class="card"><h2 id="stages-title"></h2><div class="help" id="stages-intro"></div></div>
+    <div id="stages-list"></div>
+  </div>
+
   <!-- 結果 -->
   <div class="scr" id="scr-result">
     <div class="card res">
@@ -557,17 +612,17 @@ ${ORB_DEFS}
       <div class="reward" id="res-reward"></div>
       <div class="lvup" id="res-lvup"></div>
       <table>
-        <tr><td>たおした敵</td><td style="text-align:right" id="res-stages"></td></tr>
+        <tr><td id="res-stages-label">たおした敵</td><td style="text-align:right" id="res-stages"></td></tr>
         <tr><td>残りHP</td><td style="text-align:right" id="res-hp"></td></tr>
         <tr><td>手数</td><td style="text-align:right" id="res-moves"></td></tr>
         <tr><td>最大コンボ</td><td style="text-align:right" id="res-combo"></td></tr>
-        <tr><td>自己ベスト</td><td style="text-align:right" id="res-best"></td></tr>
-        <tr><td>いまの順位</td><td style="text-align:right" id="res-rank"></td></tr>
+        <tr class="endless-only"><td>自己ベスト</td><td style="text-align:right" id="res-best"></td></tr>
+        <tr class="endless-only"><td>いまの順位</td><td style="text-align:right" id="res-rank"></td></tr>
       </table>
     </div>
     <button class="btn" id="btn-again">もう一回</button>
     <div class="btn2"><button class="btn pink" id="btn-res-gacha">ガチャへ</button><button class="btn green" id="btn-res-chars">育成へ</button></div>
-    <button class="btn ghost" id="btn-res-rank">ランキングを見る</button>
+    <button class="btn ghost endless-only" id="btn-res-rank">ランキングを見る</button>
     <button class="link" id="btn-res-home" style="display:block;margin:10px auto 0;">ホームへ</button>
   </div>
 
@@ -598,6 +653,7 @@ ${ORB_DEFS}
   </div>
   <div class="team" id="bt-team"></div>
   <div class="teamhp"><div class="bar me" id="me-barwrap"><i id="me-bar"></i></div><b id="me-hp"></b></div>
+  <div class="status" id="status"></div>
   <div class="dragbar" id="dragbar"><i id="dragbar-i"></i></div>
   <div id="board"></div>
   <div class="msg" id="msg"></div>
@@ -624,6 +680,20 @@ ${ORB_DEFS}
 <div class="float" id="float"></div>
 <div class="cheatbar" id="cheatbar">
   <button data-c="kill">一撃必殺</button><button data-c="heal">HP全回復</button><button data-c="god">無敵ON/OFF</button><button data-c="skip">ステージスキップ</button><button data-c="gauge">必殺ゲージMAX</button>
+</div>
+
+<!-- 会話 -->
+<div class="modal talk" id="talk">
+  <div class="talk-box basil" id="talk-box">
+    <div class="talk-ph" id="talk-ph"></div>
+    <div class="talk-body"><div class="talk-name" id="talk-name"></div><div class="talk-text" id="talk-text"></div><div class="talk-hint">タップで次へ</div></div>
+    <button class="talk-skip" id="talk-skip">スキップ</button>
+  </div>
+</div>
+<!-- 再開 -->
+<div class="modal" id="resume">
+  <div class="tut-box"><div class="tag">CONTINUE</div><h3>ゲームの続きから再開しますか？</h3><p id="resume-desc"></p>
+    <div class="tut-nav"><button class="btn ghost" id="resume-no">最初から</button><button class="btn" id="resume-yes">続きから再開</button></div></div>
 </div>
 
 <!-- 必殺技 -->
@@ -701,7 +771,7 @@ ${ORB_DEFS}
   function charState(id){ if (!STATE) return null; for (var i = 0; i < STATE.chars.length; i++) if (STATE.chars[i].id === id) return STATE.chars[i]; return null; }
   function owned(a){ return !!charState(a.id); }
   function statOf(a){ var cs = charState(a.id); var lv = cs ? levelOf(cs.exp) : 1; var m = 1 + 0.05 * (lv - 1); return { lv: lv, hp: Math.round(a.hp * m), atk: Math.round(a.atk * m) }; }
-  function setCoins(n){ if (STATE) STATE.coins = n; ['home-coins','team-coins','gacha-coins','chars-coins'].forEach(function(id){ $(id).textContent = (n || 0).toLocaleString(); }); }
+  function setCoins(n){ if (STATE) STATE.coins = n; ['home-coins','team-coins','gacha-coins','chars-coins','story-coins','stages-coins'].forEach(function(id){ $(id).textContent = (n || 0).toLocaleString(); }); }
 
   // ---------- 起動 ----------
   fetch(API + '/config').then(function(r){ return r.json(); }).then(function(cfg){
@@ -711,7 +781,7 @@ ${ORB_DEFS}
     $('pull1-cost').textContent = cfg.gacha_cost + ' コイン'; $('pull10-cost').textContent = (cfg.gacha_cost * 9) + ' コイン';
     if (!cfg.open) { show('scr-closed'); return; }
     var tok = null; try { tok = localStorage.getItem(LS_TOKEN); } catch(e) {}
-    if (tok) { loadState(tok).then(function(ok){ if (ok) goHome(); else show('scr-reg'); }); }
+    if (tok) { loadState(tok).then(function(ok){ if (ok) { goHome(); offerResume(); } else show('scr-reg'); }); }
     else show('scr-reg');
   });
   function loadState(tok){
@@ -743,7 +813,7 @@ ${ORB_DEFS}
     post('/register', { nickname: $('nick0').value }).then(function(j){ if (j.error) { $('err-reg2').textContent = j.error; return; } enter(j.token, true); });
   };
   function saveToken(t){ try { localStorage.setItem(LS_TOKEN, t); } catch(e) {} }
-  $('btn-logout').onclick = function(){ try { localStorage.removeItem(LS_TOKEN); localStorage.removeItem(LS_TEAM); } catch(e) {} ME = null; STATE = null; TEAM = []; $('emp').value = ''; show('scr-reg'); };
+  $('btn-logout').onclick = function(){ try { localStorage.removeItem(LS_TOKEN); localStorage.removeItem(LS_TEAM); localStorage.removeItem(LS_SAVE); } catch(e) {} ME = null; STATE = null; TEAM = []; $('emp').value = ''; show('scr-reg'); };
   $('btn-rename').onclick = function(){
     var n = prompt('新しいニックネーム（12文字まで）', ME.nickname); if (n === null) return;
     post('/nickname', { token: ME.token, nickname: n }).then(function(j){ if (j.error) { alert(j.error); return; } ME.nickname = j.nickname; goHome(); });
@@ -777,15 +847,14 @@ ${ORB_DEFS}
     if (CFG.enemies.length === 0) $('btn-start').textContent = '敵がまだいません（準備中）';
     else if (n === 0) $('btn-start').textContent = '味方がまだいません（準備中）';
     else if (TEAM.length < n) $('btn-start').textContent = 'まずチームを組もう';
-    else $('btn-start').textContent = 'バトル開始';
+    else $('btn-start').textContent = 'ランキングバトル（全敵連戦）';
     show('scr-home');
   }
   $('btn-team').onclick = openTeam;
-  $('btn-start').onclick = function(){ if ($('btn-start').disabled) return; if (!tutSeen()) { openTut(false, startBattle); return; } startBattle(); };
+  $('btn-start').onclick = function(){ if ($('btn-start').disabled) return; var go = function(){ startBattle('endless', CFG.enemies); }; if (!tutSeen()) { openTut(false, go); return; } go(); };
   $('btn-rank').onclick = openRank; $('btn-res-rank').onclick = openRank;
   $('btn-rank-back').onclick = function(){ goHome(); };
   $('btn-res-home').onclick = function(){ goHome(); };
-  $('btn-again').onclick = startBattle;
   $('btn-howto').onclick = function(){ openTut(false); };
   $('btn-gacha').onclick = openGacha; $('btn-res-gacha').onclick = openGacha; $('btn-gacha-back').onclick = function(){ goHome(); };
   $('btn-chars').onclick = openChars; $('btn-res-chars').onclick = openChars; $('btn-chars-back').onclick = function(){ goHome(); };
@@ -931,19 +1000,121 @@ ${ORB_DEFS}
     });
   }
 
+  // ---------- ストーリー ----------
+  var STORY = null, CUR = null;   // CUR = { ch, st } 挑戦中のステージ
+  function enemyById(id){ for (var i = 0; i < CFG.enemies.length; i++) if (CFG.enemies[i].id === id) return CFG.enemies[i]; return null; }
+  function allyByName(n){ for (var i = 0; i < CFG.allies.length; i++) if (CFG.allies[i].name === n) return CFG.allies[i]; return null; }
+  function loadStory(){ return post('/story', { token: ME.token }).then(function(j){ if (j.chapters) STORY = j.chapters; return STORY; }); }
+  function chapterCleared(ch){ return ch.stages.length > 0 && ch.stages.every(function(s){ return s.clears > 0; }); }
+  function chapterUnlocked(i){ return i === 0 || chapterCleared(STORY[i - 1]); }
+  function openStory(){
+    loadStory().then(function(){
+      $('story-list').innerHTML = STORY.map(function(ch, i){
+        var done = ch.stages.filter(function(s){ return s.clears > 0; }).length; var un = chapterUnlocked(i);
+        return '<div class="chap' + (un ? '' : ' lock') + (chapterCleared(ch) ? ' done' : '') + '" data-i="' + i + '"><div class="chap-no">CHAPTER ' + ch.number + '</div><div class="chap-t">' + esc(ch.title) + '</div><div class="chap-s">' + esc(ch.subtitle) + '</div>' +
+          '<div class="chap-p"><i style="width:' + Math.round(done / Math.max(1, ch.stages.length) * 100) + '%"></i></div><div class="chap-n">' + (un ? done + ' / ' + ch.stages.length + ' クリア' : '前の章をクリアで解放') + '</div></div>';
+      }).join('');
+      document.querySelectorAll('#story-list .chap').forEach(function(el){ el.onclick = function(){ var i = parseInt(el.getAttribute('data-i'), 10); if (!chapterUnlocked(i)) { floatMsg('前の章をクリアしてね', true); return; } openStages(i); }; });
+      show('scr-story');
+    });
+  }
+  function openStages(i){
+    var ch = STORY[i];
+    $('stages-title').textContent = 'CHAPTER ' + ch.number + '　' + ch.title; $('stages-intro').textContent = ch.intro;
+    $('stages-list').innerHTML = ch.stages.map(function(st, k){
+      var e = enemyById(st.enemy_id) || { name: '？？？', boss: false, final: false, element: 'dark' };
+      var un = k === 0 || ch.stages[k - 1].clears > 0;
+      return '<div class="stg' + (un ? '' : ' lock') + (st.clears > 0 ? ' done' : '') + (e.boss ? ' boss' : '') + '" data-k="' + k + '">' +
+        '<div class="stg-no">' + st.number + '</div><div class="stg-ph" style="background-image:url(' + API + '/img/enemy/' + st.enemy_id + ')' + (e.final && !st.clears ? ';filter:brightness(0.08)' : '') + '"></div>' +
+        '<div class="stg-info"><div class="stg-n">' + (e.final && !st.clears ? '？？？' : esc(e.name)) + (e.boss ? ' <span class="stg-b">BOSS</span>' : '') + '</div><div class="stg-s">' + elDot(e.element) + ' HP ' + e.hp + '　攻 ' + e.atk + (st.clears > 0 ? '　<span style="color:#fbbf24">★ クリア' + (st.clears > 1 ? ' ×' + st.clears : '') + '</span>' : '') + '</div></div>' +
+        '<div class="stg-r">' + (un ? (st.clears > 0 ? '再挑戦' : '挑戦') : 'LOCK') + '</div></div>';
+    }).join('');
+    document.querySelectorAll('#stages-list .stg').forEach(function(el){ el.onclick = function(){ var k = parseInt(el.getAttribute('data-k'), 10); if (k > 0 && !ch.stages[k - 1].clears) { floatMsg('前のステージをクリアしてね', true); return; } startStage(i, k); }; });
+    show('scr-stages');
+  }
+  $('btn-story').onclick = function(){ if (!TEAM.length) { openTeam(); return; } openStory(); };
+  $('btn-story-back').onclick = function(){ goHome(); };
+  $('btn-stages-back').onclick = function(){ openStory(); };
+  function startStage(ci, k){
+    loadTeam(); if (!TEAM.length) { openTeam(); return; }
+    var ch = STORY[ci], st = ch.stages[k]; var e = enemyById(st.enemy_id); if (!e) { floatMsg('敵が見つかりません', true); return; }
+    CUR = { ci: ci, k: k, ch: ch, st: st };
+    var go = function(){ showTalk(st.pre, e, function(){ startBattle('story', [e]); }); };
+    if (!tutSeen()) openTut(false, go); else go();
+  }
+  // 会話オーバーレイ（タップで次へ）
+  var talkQ = [], talkDone = null, talkEnemy = null;
+  function showTalk(lines, e, done){
+    if (!lines || !lines.length) { done(); return; }
+    talkQ = lines.slice(); talkDone = done; talkEnemy = e; $('talk').classList.add('on'); nextTalk();
+  }
+  function nextTalk(){
+    if (!talkQ.length) { $('talk').classList.remove('on'); var d = talkDone; talkDone = null; if (d) d(); return; }
+    var l = talkQ.shift(); var who = String(l.who || 'basil'); var name = 'バジル', img = CFG.guide_img ? API + '/img/guide' : '', cls = 'basil';
+    if (who === 'enemy') { name = talkEnemy ? (talkEnemy.final && CUR && !CUR.st.clears && talkQ.length > 0 ? '？？？' : talkEnemy.name) : '敵'; img = talkEnemy ? API + '/img/enemy/' + talkEnemy.id : ''; cls = 'enemy'; }
+    else if (who.indexOf('ally:') === 0) { var a = allyByName(who.slice(5)); name = who.slice(5); img = a ? imgUrl(a) : ''; cls = 'ally'; }
+    $('talk-name').textContent = name; $('talk-box').className = 'talk-box ' + cls;
+    var ph = $('talk-ph'); ph.style.backgroundImage = img ? 'url(' + img + ')' : 'none'; ph.innerHTML = (!img && cls === 'basil') ? ${JSON.stringify(BASIL_SVG)} : '';
+    var tx = $('talk-text'); tx.textContent = ''; var full = String(l.text || ''); var i = 0;
+    clearInterval(talkTimer); talkTimer = setInterval(function(){ i++; tx.textContent = full.slice(0, i); if (i >= full.length) clearInterval(talkTimer); }, 28);
+  }
+  var talkTimer = null;
+  $('talk').onclick = function(){ var tx = $('talk-text'); if (talkTimer && tx.textContent.length < (talkQ.length >= 0 ? 9999 : 0) && tx.getAttribute('data-full')) {} clearInterval(talkTimer); nextTalk(); };
+  $('talk-skip').onclick = function(ev){ ev.stopPropagation(); clearInterval(talkTimer); talkQ = []; nextTalk(); };
+
   // ---------- バトル ----------
   var G = null;
   var DRAG_MS = 5000;       // なぞり操作の制限時間
-  function startBattle(){
+  function newStatus(){ return { eSleep: 0, sSleep: 0, shield: 0, reflect: 0, atkup: { n: 0, mult: 1 }, elemup: { elem: '', n: 0, mult: 1 }, combo: 0, defdown: { n: 0, mult: 1 }, poison: { n: 0, pct: 0 }, time: { n: 0, sec: 0 }, atkdown: { n: 0, mult: 1 }, revive: 0, coinB: 0, expB: 0 }; }
+  function startBattle(mode, enemies){
     loadTeam(); if (!TEAM.length) { openTeam(); return; }
+    mode = mode || 'endless'; enemies = enemies || CFG.enemies;
+    if (!enemies.length) { floatMsg('敵がいません', true); return; }
     var maxHp = 0; TEAM.forEach(function(a){ maxHp += statOf(a).hp; });
-    G = { stage: 0, hp: maxHp, maxHp: maxHp, moves: 0, enemyHp: 0, cnt: CFG.enemy_interval, busy: true, over: false, board: [], maxCombo: 0, cheated: false, gauge: TEAM.map(function(){ return 0; }), skills: 0 };
-    $('bt-team').innerHTML = TEAM.map(function(a, i){ return '<div class="m">' + allyPh(a, 'ph', true).replace('class="ph"', 'class="ph" data-i="' + i + '"').replace('</div>', '<span class="rb">必殺!</span><div class="gauge" style="--gc:' + EL_COLOR[a.element] + '"></div></div>') + '<span class="lv">Lv.' + statOf(a).lv + '</span><span class="sk">' + esc(a.skill ? a.skill.name : '') + '</span></div>'; }).join('');
-    document.querySelectorAll('#bt-team .ph').forEach(function(ph){ ph.addEventListener('click', function(){ useSkill(parseInt(ph.getAttribute('data-i'), 10)); }); });
-    drawGauges();
+    G = { mode: mode, enemies: enemies, stage: 0, hp: maxHp, maxHp: maxHp, moves: 0, enemyHp: 0, cnt: CFG.enemy_interval, busy: true, over: false, board: [], maxCombo: 0, cheated: false, gauge: TEAM.map(function(){ return 0; }), skills: 0, st: newStatus(), freeMove: false };
+    buildTeamUI();
     newBoard(); show('scr-battle'); stageIntro();
   }
-  function enemy(){ return CFG.enemies[G.stage]; }
+  function buildTeamUI(){
+    $('bt-team').innerHTML = TEAM.map(function(a, i){ return '<div class="m">' + allyPh(a, 'ph', true).replace('class="ph"', 'class="ph" data-i="' + i + '"').replace('</div>', '<span class="rb">必殺!</span><div class="gauge" style="--gc:' + EL_COLOR[a.element] + '"></div></div>') + '<span class="lv">Lv.' + statOf(a).lv + '</span><span class="sk">' + esc(a.skill ? a.skill.name : '') + '</span></div>'; }).join('');
+    document.querySelectorAll('#bt-team .ph').forEach(function(ph){ ph.addEventListener('click', function(){ useSkill(parseInt(ph.getAttribute('data-i'), 10)); }); });
+    drawGauges(); drawStatus();
+  }
+  // ---- 続きから再開（バトル中の状態を端末に保存） ----
+  var LS_SAVE = 'hoshikon_puzzle_save';
+  function saveBattle(){
+    if (!G || G.over) return;
+    try { localStorage.setItem(LS_SAVE, JSON.stringify({ v: 1, t: Date.now(), mode: G.mode, enemyIds: G.enemies.map(function(e){ return e.id; }), stage: G.stage, hp: G.hp, maxHp: G.maxHp, moves: G.moves, enemyHp: G.enemyHp, cnt: G.cnt, board: G.board, maxCombo: G.maxCombo, cheated: G.cheated, gauge: G.gauge, skills: G.skills, st: G.st, team: TEAM.map(function(a){ return a.id; }), cur: CUR ? { ci: CUR.ci, k: CUR.k } : null })); } catch(e) {}
+  }
+  function clearSave(){ try { localStorage.removeItem(LS_SAVE); } catch(e) {} }
+  function loadSave(){ try { var j = JSON.parse(localStorage.getItem(LS_SAVE) || 'null'); if (!j || j.v !== 1 || Date.now() - j.t > 86400000) return null; return j; } catch(e) { return null; } }
+  function offerResume(){
+    var sv = loadSave(); if (!sv || !ME) return;
+    var desc = sv.mode === 'story' && sv.cur ? 'ストーリー CHAPTER ' + (sv.cur.ci + 1) + ' - ' + (sv.cur.k + 1) : 'ランキングバトル ステージ ' + (sv.stage + 1);
+    $('resume-desc').textContent = desc + '　（手数 ' + sv.moves + '・チームHP ' + Math.max(0, sv.hp) + '/' + sv.maxHp + '）';
+    $('resume').classList.add('on');
+    $('resume-no').onclick = function(){ $('resume').classList.remove('on'); clearSave(); };
+    $('resume-yes').onclick = function(){ $('resume').classList.remove('on'); resumeBattle(sv); };
+  }
+  function resumeBattle(sv){
+    TEAM = sv.team.map(allyById).filter(function(a){ return a && owned(a); });
+    if (!TEAM.length) { clearSave(); floatMsg('チームが見つからなかったので最初から', true); return; }
+    var go = function(enemies){
+      if (!enemies.length || sv.stage >= enemies.length) { clearSave(); floatMsg('続きのデータが古いので最初から', true); return; }
+      G = { mode: sv.mode, enemies: enemies, stage: sv.stage, hp: sv.hp, maxHp: sv.maxHp, moves: sv.moves, enemyHp: sv.enemyHp, cnt: sv.cnt, busy: true, over: false, board: sv.board, maxCombo: sv.maxCombo, cheated: !!sv.cheated, gauge: sv.gauge || TEAM.map(function(){ return 0; }), skills: sv.skills || 0, st: sv.st || newStatus(), freeMove: false };
+      while (G.gauge.length < TEAM.length) G.gauge.push(0);
+      buildTeamUI(); renderBoard(true); show('scr-battle');
+      var hp = G.enemyHp, cnt = G.cnt; loadStage(); G.enemyHp = hp; G.cnt = cnt; drawHud(); drawStatus();
+      if (G.st.eSleep > 0) $('en-ph').classList.add('zzz'); if (G.st.sSleep > 0) $('bt-team').classList.add('zzz');
+      floatMsg('続きから再開！'); setTimeout(function(){ if (!hasMove()) newBoard(); G.busy = false; }, 600);
+    };
+    if (sv.mode === 'story' && sv.cur) {
+      loadStory().then(function(){ var ch = STORY[sv.cur.ci]; var st = ch && ch.stages[sv.cur.k]; if (!st) { clearSave(); return; } CUR = { ci: sv.cur.ci, k: sv.cur.k, ch: ch, st: st }; var e = enemyById(st.enemy_id); go(e ? [e] : []); });
+    } else {
+      var list = sv.enemyIds.map(enemyById).filter(Boolean); go(list.length === sv.enemyIds.length ? list : CFG.enemies);
+    }
+  }
+  function enemy(){ return G.enemies[G.stage]; }
   // ステージ開始の演出（VS画面 → 敵の登場）
   function stageIntro(){
     var e = enemy(); G.busy = true;
@@ -961,12 +1132,12 @@ ${ORB_DEFS}
       loadStage();
       var ph = $('en-ph'); ph.classList.add('enter'); setTimeout(function(){ ph.classList.remove('enter'); }, 700);
       if (e.final) { setTimeout(function(){ floatMsg('まさか…バジル！？', true, 'boss'); $('en-nm').textContent = e.name; shakeScreen(); }, 900); }
-      setTimeout(function(){ G.busy = false; if (!hasMove()) newBoard(); }, e.final ? 2400 : 800);
+      setTimeout(function(){ G.busy = false; if (!hasMove()) newBoard(); saveBattle(); }, e.final ? 2400 : 800);
     }, e.boss ? 2200 : 1500);
   }
   function loadStage(){
     var e = enemy(); G.enemyHp = e.hp; G.cnt = CFG.enemy_interval;
-    $('stage-lbl').innerHTML = 'ステージ <b>' + (G.stage + 1) + '</b> / ' + CFG.enemies.length;
+    $('stage-lbl').innerHTML = (G.mode === 'story' && CUR ? 'CH' + CUR.ch.number + '-' + CUR.st.number : 'ステージ <b>' + (G.stage + 1) + '</b> / ' + G.enemies.length);
     $('en-nm').textContent = e.final ? '？？？' : e.name; $('en-el').innerHTML = elDot(e.element);
     var ph = $('en-ph'); ph.className = 'ph'; ph.style.backgroundImage = 'url(' + API + '/img/enemy/' + e.id + ')'; ph.textContent = '';
     ph.style.boxShadow = '0 0 0 6px rgba(0,0,0,0.25), 0 18px 40px rgba(0,0,0,0.5), 0 0 70px ' + EL_COLOR[e.element] + '77';
@@ -1078,8 +1249,9 @@ ${ORB_DEFS}
   $('board').addEventListener('pointercancel', endDrag);
   function startDragTimer(){
     var bar = $('dragbar'); bar.classList.add('on'); var i = $('dragbar-i'); i.style.transition = 'none'; i.style.width = '100%';
-    void i.offsetWidth; i.style.transition = 'width ' + DRAG_MS + 'ms linear'; i.style.width = '0%';
-    clearTimeout(dragTimer); dragTimer = setTimeout(function(){ if (drag) { floatMsg('タイムアップ', true); release(); } }, DRAG_MS);
+    void i.offsetWidth;
+    var ms = DRAG_MS + (G.st && G.st.time.n > 0 ? G.st.time.sec * 1000 : 0); i.style.transition = 'width ' + ms + 'ms linear'; i.style.width = '0%';
+    clearTimeout(dragTimer); dragTimer = setTimeout(function(){ if (drag) { floatMsg('タイムアップ', true); release(); } }, ms);
   }
   function release(){
     clearTimeout(dragTimer); $('dragbar').classList.remove('on');
@@ -1149,39 +1321,133 @@ ${ORB_DEFS}
   function drawGauges(){
     TEAM.forEach(function(a, i){ var ph = document.querySelector('#bt-team .ph[data-i="' + i + '"]'); if (!ph) return; var g = ph.querySelector('.gauge'); var pct = Math.min(100, Math.round(G.gauge[i] / GAUGE_MAX * 100)); g.style.setProperty('--p', pct); ph.classList.toggle('ready', G.gauge[i] >= GAUGE_MAX); });
   }
+  // ---- 状態（バフ・眠り・毒など）の表示 ----
+  function drawStatus(){
+    if (!G) return; var s = G.st; var b = [];
+    if (s.eSleep > 0) b.push('<span class="stb sleep">敵 眠り ' + s.eSleep + '手</span>');
+    if (s.sSleep > 0) b.push('<span class="stb sleep">味方 眠り ' + s.sSleep + '手</span>');
+    if (s.shield > 0) b.push('<span class="stb good">無効 ' + s.shield + '手</span>');
+    if (s.reflect > 0) b.push('<span class="stb good">反射 ' + s.reflect + '手</span>');
+    if (s.atkup.n > 0) b.push('<span class="stb good">攻撃×' + s.atkup.mult + ' ' + s.atkup.n + '手</span>');
+    if (s.elemup.n > 0) b.push('<span class="stb good">' + (EL_LABEL[s.elemup.elem] || '') + '×' + s.elemup.mult + ' ' + s.elemup.n + '手</span>');
+    if (s.combo > 0) b.push('<span class="stb good">次コンボ+' + s.combo + '</span>');
+    if (s.defdown.n > 0) b.push('<span class="stb bad">敵防御↓ ' + s.defdown.n + '手</span>');
+    if (s.poison.n > 0) b.push('<span class="stb bad">毒 ' + s.poison.n + '手</span>');
+    if (s.time.n > 0) b.push('<span class="stb good">時間+' + s.time.sec + '秒 ' + s.time.n + '手</span>');
+    if (s.atkdown.n > 0) b.push('<span class="stb bad">敵攻撃↓ ' + s.atkdown.n + '手</span>');
+    if (s.revive > 0) b.push('<span class="stb good">復活待機</span>');
+    $('status').innerHTML = b.join('');
+  }
+  function tickBuffs(){
+    var s = G.st;
+    ['atkup', 'elemup', 'defdown', 'time', 'atkdown'].forEach(function(k){ if (s[k].n > 0) s[k].n--; });
+    drawStatus();
+  }
+
+  // ---- 必殺技：効果エンジン ----
+  function effectOf(a){ var id = a.skill && a.skill.effect; var list = CFG.effects || []; for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return { id: 'atk_m', name: '強撃', ops: [{ op: 'dmg', mult: 10 }] }; }
+  function hitEnemy(dmg, color, big){
+    G.enemyHp -= dmg; var c = centerOf($('en-ph'));
+    $('en-ph').classList.remove('hit'); void $('en-ph').offsetWidth; $('en-ph').classList.add('hit');
+    $('arena').classList.remove('flash'); void $('arena').offsetWidth; $('arena').classList.add('flash');
+    particles(c.x, c.y, color, big ? 40 : 14, true); var sw = document.createElement('span'); sw.className = 'shock' + (big ? ' big' : ''); sw.style.left = c.x + 'px'; sw.style.top = c.y + 'px'; sw.style.borderColor = color; $('fx').appendChild(sw); setTimeout(function(){ sw.remove(); }, 800);
+    popDmg('-' + dmg, big ? 'ult' : 'big', c.x, c.y - 40); if (big) shakeScreen(); vibrate(big ? 70 : 35); drawHud();
+  }
+  function healTeam(amount, label){
+    var healed = Math.min(amount, G.maxHp - G.hp); G.hp += healed; var tc = centerOf($('bt-team'));
+    popDmg('+' + healed, 'heal', tc.x, tc.y - 20); particles(tc.x, tc.y, '#86efac', 24, true); shockwave(tc.x, tc.y, '#86efac'); drawHud(); return healed;
+  }
+  function dmgMult(elem){
+    var s = G.st; var m = 1; if (s.atkup.n > 0) m *= s.atkup.mult; if (s.elemup.n > 0 && s.elemup.elem === elem) m *= s.elemup.mult; if (s.defdown.n > 0) m *= s.defdown.mult; return m;
+  }
+  // 盤面のマスを消して攻撃（全消し・行・列・自属性消し）。消した玉は属性ごとにグループ扱い
+  function clearCells(cells){
+    if (!cells.length) return false;
+    var byT = {}; cells.forEach(function(c){ var t = G.board[c[1]][c[0]]; (byT[t] = byT[t] || []).push(c); });
+    var groups = Object.keys(byT).map(function(t){ return { type: t, cells: byT[t] }; });
+    G.freeMove = true; G.busy = true; resolve(groups, 1, []); return true;
+  }
+  function runOps(ops, a, done){
+    var e = enemy(); var s = G.st; var color = EL_COLOR[a.element]; var i = 0; var atk = statOf(a).atk;
+    function next(){
+      if (i >= ops.length) { done(); return; }
+      var o = ops[i++]; var delay = 420;
+      switch (o.op) {
+        case 'dmg': { var d = Math.round(atk * o.mult * adv(a.element, e.element) * dmgMult(a.element)); hitEnemy(d, color, true); if (o.drain) healTeam(Math.round(d * o.drain / 100)); break; }
+        case 'dmg_all': { hitEnemy(Math.round(atk * o.mult * dmgMult(a.element)), color, true); break; }
+        case 'hits': { var k = 0; var per = Math.round(atk * o.mult * adv(a.element, e.element) * dmgMult(a.element)); var iv = setInterval(function(){ hitEnemy(per, color, false); if (++k >= o.n) { clearInterval(iv); setTimeout(next, 300); } }, 160); return; }
+        case 'pct': { var base = o.cur ? Math.max(0, G.enemyHp) : e.hp; var d2 = Math.round(base * o.pct / 100 * (e.boss && !o.cur ? 0.5 : 1)); hitEnemy(d2, color, true); if (o.drain) healTeam(Math.round(d2 * o.drain / 100)); break; }
+        case 'heal': { healTeam(Math.round(G.maxHp * o.pct / 100)); break; }
+        case 'shield': s.shield = Math.max(s.shield, o.n); floatMsg('敵の攻撃を' + o.n + '手無効！'); break;
+        case 'reflect': s.reflect = Math.max(s.reflect, o.n); floatMsg(o.n + '手のあいだ反射！'); break;
+        case 'esleep': s.eSleep = Math.max(s.eSleep, o.n); floatMsg(e.name + ' は眠ってしまった'); $('en-ph').classList.add('zzz'); break;
+        case 'ssleep': s.sSleep = Math.max(s.sSleep, o.n); floatMsg('…みんなも眠ってしまった', true); $('bt-team').classList.add('zzz'); break;
+        case 'atkup': s.atkup = { n: o.n, mult: o.mult }; floatMsg('攻撃力アップ！'); break;
+        case 'elemup': s.elemup = { elem: o.elem === 'self' ? a.element : o.elem, n: o.n, mult: o.mult }; floatMsg((EL_LABEL[o.elem === 'self' ? a.element : o.elem] || '') + '属性 強化！'); break;
+        case 'combo': s.combo += o.n; floatMsg('次の手 コンボ+' + o.n); break;
+        case 'defdown': s.defdown = { n: o.n, mult: o.mult }; floatMsg('敵の防御ダウン！'); break;
+        case 'poison': s.poison = { n: o.n, pct: o.pct }; floatMsg(e.name + ' に毒！'); break;
+        case 'convert': {
+          var to = o.to === 'self' ? a.element : o.to; var from = o.from;
+          if (from === 'random') { var cand = TYPES.filter(function(t){ return t !== to; }); from = cand[rnd(cand.length)]; }
+          var n = 0;
+          if (from === 'half') { for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) if (Math.random() < 0.5 && G.board[y][x] !== to) { G.board[y][x] = to; n++; } }
+          else { for (var y2 = 0; y2 < H; y2++) for (var x2 = 0; x2 < W; x2++) if (G.board[y2][x2] === from) { G.board[y2][x2] = to; n++; } }
+          renderBoard(true); floatMsg(n + '個を' + (EL_LABEL[to] || '') + 'に変えた'); break;
+        }
+        case 'hearts': { var idx = []; for (var p = 0; p < W * H; p++) if (G.board[Math.floor(p / W)][p % W] !== 'heart') idx.push(p); for (var h = 0; h < o.n && idx.length; h++) { var j = idx.splice(rnd(idx.length), 1)[0]; G.board[Math.floor(j / W)][j % W] = 'heart'; } renderBoard(true); break; }
+        case 'shuffle': newBoard(); floatMsg('盤面シャッフル'); break;
+        case 'clear': { var cells = []; var el = o.elem === 'self' ? a.element : o.elem; for (var y3 = 0; y3 < H; y3++) for (var x3 = 0; x3 < W; x3++) if (el === 'all' || G.board[y3][x3] === el) cells.push([x3, y3]); if (clearCells(cells)) return; break; }
+        case 'row': { var r = o.index < 0 ? rnd(H) : o.index; var rc = []; for (var x4 = 0; x4 < W; x4++) rc.push([x4, r]); if (clearCells(rc)) return; break; }
+        case 'col': { var cidx = o.index < 0 ? rnd(W) : o.index; var cc = []; for (var y4 = 0; y4 < H; y4++) cc.push([cidx, y4]); if (clearCells(cc)) return; break; }
+        case 'gauge': TEAM.forEach(function(b, bi){ if (b !== a) G.gauge[bi] = Math.min(GAUGE_MAX, G.gauge[bi] + Math.round(GAUGE_MAX * o.n / 100)); }); drawGauges(); floatMsg('味方のゲージ+' + o.n + '%'); break;
+        case 'time': s.time = { n: o.n, sec: o.sec }; floatMsg('なぞり時間+' + o.sec + '秒'); break;
+        case 'cntreset': G.cnt = CFG.enemy_interval; floatMsg('敵のカウントを戻した'); drawHud(); break;
+        case 'cntminus': G.cnt = Math.max(1, G.cnt - o.n); drawHud(); break;
+        case 'atkdown': s.atkdown = { n: o.n, mult: o.mult }; floatMsg('敵の攻撃力ダウン！'); break;
+        case 'coin': s.coinB += o.n; floatMsg('コイン+' + o.n + '%'); break;
+        case 'exp': s.expB += o.n; floatMsg('経験値+' + o.n + '%'); break;
+        case 'crit': { var hit = Math.random() * 100 < o.prob; floatMsg(hit ? 'クリティカル！！' : 'はずれ…', !hit); hitEnemy(Math.round(atk * (hit ? o.mult : o.mult2) * adv(a.element, e.element) * dmgMult(a.element)), color, hit); break; }
+        case 'gamble': { if (Math.random() < 0.5) { floatMsg('大当たり！'); hitEnemy(Math.round(atk * o.mult * adv(a.element, e.element) * dmgMult(a.element)), color, true); } else { floatMsg('失敗…HPが半分に', true); G.hp = Math.max(1, Math.round(G.hp / 2)); drawHud(); } break; }
+        case 'revive': s.revive = Math.max(s.revive, o.pct); floatMsg('復活の加護'); break;
+        case 'maxhp': { var add = Math.round(G.maxHp * o.pct / 100); G.maxHp += add; G.hp += add; floatMsg('最大HP+' + o.pct + '%'); drawHud(); break; }
+        case 'execute': { if (G.enemyHp <= e.hp * o.pct / 100) { floatMsg('とどめ！'); hitEnemy(G.enemyHp, color, true); done(); return; } floatMsg('まだ耐えている…', true); break; }
+        case 'selfdmg': G.hp = Math.max(1, G.hp - Math.round(G.maxHp * o.pct / 100)); drawHud(); break;
+        case 'lowhp': { var ratio = 1 - G.hp / G.maxHp; hitEnemy(Math.round(atk * (4 + (o.mult - 4) * ratio) * adv(a.element, e.element) * dmgMult(a.element)), color, true); break; }
+        default: break;
+      }
+      drawStatus(); setTimeout(next, delay);
+    }
+    next();
+  }
   function useSkill(i){
     if (!G || G.busy || G.over) return; if (G.gauge[i] < GAUGE_MAX) { floatMsg('ゲージがたまっていません', true); return; }
-    var a = TEAM[i]; var sk = a.skill || { name: '必殺技', type: 'attack', power: 100 }; var e = enemy();
+    if (G.st.sSleep > 0) { floatMsg('眠っていて動けない…', true); return; }
+    var a = TEAM[i]; var sk = a.skill || { name: '必殺技' }; var ef = effectOf(a);
     G.busy = true; G.gauge[i] = 0; G.skills++; drawGauges(); vibrate([30, 40, 30, 40, 120]);
     var ov = $('skill'); ov.classList.remove('hit'); ov.style.setProperty('--sc', EL_COLOR[a.element]);
     $('skill-img').style.backgroundImage = 'url(' + imgUrl(a) + ')'; $('skill-img').style.setProperty('--sc', EL_COLOR[a.element]);
-    $('skill-name').textContent = sk.name; $('skill-name').style.setProperty('--sc', EL_COLOR[a.element]); $('skill-user').textContent = a.name + ' の必殺技！';
+    $('skill-name').textContent = sk.name; $('skill-name').style.setProperty('--sc', EL_COLOR[a.element]); $('skill-user').textContent = a.name + ' の必殺技！　' + (ef.desc || '');
     ov.classList.add('on');
     setTimeout(function(){
       ov.classList.add('hit'); vibrate(80);
       setTimeout(function(){
         ov.classList.remove('on'); ov.classList.remove('hit');
-        if (sk.type === 'heal') {
-          var heal = Math.round(G.maxHp * sk.power / 100); var healed = Math.min(heal, G.maxHp - G.hp); G.hp += healed;
-          var tc = centerOf($('bt-team')); popDmg('+' + healed, 'heal', tc.x, tc.y - 20); particles(tc.x, tc.y, '#86efac', 30, true); shockwave(tc.x, tc.y, '#86efac');
-          drawHud(); G.busy = false; return;
-        }
-        var dmg = Math.round(statOf(a).atk * sk.power / 10 * adv(a.element, e.element));
-        G.enemyHp -= dmg; var c = centerOf($('en-ph'));
-        $('en-ph').classList.add('hit'); setTimeout(function(){ $('en-ph').classList.remove('hit'); }, 400);
-        shakeScreen(); $('arena').classList.add('flash'); setTimeout(function(){ $('arena').classList.remove('flash'); }, 300);
-        particles(c.x, c.y, EL_COLOR[a.element], 40, true); var sw = document.createElement('span'); sw.className = 'shock big'; sw.style.left = c.x + 'px'; sw.style.top = c.y + 'px'; sw.style.borderColor = EL_COLOR[a.element]; $('fx').appendChild(sw); setTimeout(function(){ sw.remove(); }, 800);
-        popDmg('-' + dmg, 'ult', c.x, c.y - 40);
-        drawHud();
-        if (G.enemyHp <= 0) { setTimeout(function(){ onEnemyDown(e); }, 500); return; }
-        G.busy = false;
+        runOps(ef.ops || [], a, function(){
+          if (G.over) return;
+          if (G.enemyHp <= 0) { setTimeout(function(){ onEnemyDown(enemy()); }, 400); return; }
+          if (!G.freeMove) { if (!hasMove()) newBoard(); G.busy = false; saveBattle(); }
+        });
       }, 450);
     }, 1400);
   }
   function afterMove(groups, combos){
-    var e = enemy(); var mult = 1 + 0.25 * Math.max(0, combos - 1);
+    var e = enemy(); var s = G.st;
+    if (s.combo > 0 && groups.length) { combos += s.combo; floatMsg('コンボ+' + s.combo + '！'); s.combo = 0; if (combos > G.maxCombo) G.maxCombo = combos; showCombo(combos); }
+    var mult = 1 + 0.25 * Math.max(0, combos - 1);
     groups.forEach(function(g){ TEAM.forEach(function(a, i){ if (a.element === g.type) G.gauge[i] = Math.min(GAUGE_MAX, G.gauge[i] + g.cells.length); }); });
     drawGauges();
+    if (s.sSleep > 0) { floatMsg('みんな眠っている…（あと' + s.sSleep + '手）', true); finishAttack(0, 0, combos); return; }
     var perEl = {}; var heal = 0;
     groups.forEach(function(g){
       var n = g.cells.length; var sizeMult = 1 + 0.25 * (n - 3);
@@ -1191,7 +1457,7 @@ ${ORB_DEFS}
     });
     var order = Object.keys(perEl);
     var total = 0; var enemyEl = $('en-ph');
-    var steps = order.map(function(t){ var d = Math.round(perEl[t] * mult * adv(t, e.element)); total += d; return { t: t, d: d }; });
+    var steps = order.map(function(t){ var d = Math.round(perEl[t] * mult * adv(t, e.element) * dmgMult(t)); total += d; return { t: t, d: d }; });
     var i = 0;
     function fireNext(){
       if (i >= steps.length) { finishAttack(total, heal, combos); return; }
@@ -1215,8 +1481,13 @@ ${ORB_DEFS}
     setTimeout(fireNext, heal > 0 ? 300 : 0);
   }
   function finishAttack(total, heal, combos){
-    var e = enemy();
+    var e = enemy(); var s = G.st;
     if (G.enemyHp <= 0) { onEnemyDown(e); return; }
+    if (G.freeMove) { G.freeMove = false; drawHud(); if (!hasMove()) newBoard(); G.busy = false; return; }   // 必殺技による消去は手数を進めない
+    if (s.poison.n > 0) { var pd = Math.round(e.hp * s.poison.pct / 100); s.poison.n--; hitEnemy(pd, '#a3e635', false); if (G.enemyHp <= 0) { onEnemyDown(e); return; } }
+    if (s.sSleep > 0) s.sSleep--; if (s.sSleep === 0) $('bt-team').classList.remove('zzz');
+    tickBuffs();
+    if (s.eSleep > 0) { s.eSleep--; if (s.eSleep === 0) { $('en-ph').classList.remove('zzz'); floatMsg(e.name + ' が目を覚ました', true); } drawStatus(); drawHud(); endTurn(); return; }
     G.cnt--;
     if (G.cnt <= 0) { G.cnt = CFG.enemy_interval; enemyAttack(e); return; }
     drawHud(); endTurn();
@@ -1224,34 +1495,48 @@ ${ORB_DEFS}
   function endTurn(){
     if (G.over) return;
     if (!hasMove()) { $('msg').textContent = '動かせる玉がないので並べ直し'; newBoard(); }
-    G.busy = false;
+    G.busy = false; saveBattle();
   }
   function enemyAttack(e){
-    var ph = $('en-ph'); ph.classList.add('lunge');
+    var s = G.st; var ph = $('en-ph'); ph.classList.add('lunge');
     setTimeout(function(){
       ph.classList.remove('lunge');
       var sl = $('slash'); sl.classList.remove('on'); void sl.offsetWidth; sl.classList.add('on');
-      $('arena').classList.add('hurt'); $('bt-team').classList.add('shake'); shakeScreen(); vibrate([40, 30, 80]);
-      var dmg = CHEAT.god ? 0 : e.atk; G.hp -= dmg;
-      var tc = centerOf($('bt-team')); popDmg(CHEAT.god ? '無敵' : '-' + dmg, CHEAT.god ? 'heal' : 'me', tc.x, tc.y - 10);
-      floatMsg(e.name + ' の攻撃！', true);
-      setTimeout(function(){ $('arena').classList.remove('hurt'); $('bt-team').classList.remove('shake'); }, 420);
-      drawHud();
-      if (G.hp <= 0) { setTimeout(function(){ finish(false); }, 1100); return; }
+      var atk = Math.round(e.atk * (s.atkdown.n > 0 ? s.atkdown.mult : 1));
+      var tc = centerOf($('bt-team'));
+      if (s.shield > 0) { s.shield--; popDmg('無効！', 'heal', tc.x, tc.y - 10); floatMsg(e.name + ' の攻撃を防いだ！'); }
+      else if (s.reflect > 0) { s.reflect--; popDmg('反射！', 'heal', tc.x, tc.y - 10); floatMsg('攻撃を跳ね返した！'); setTimeout(function(){ hitEnemy(atk, '#fff', true); }, 300); }
+      else {
+        $('arena').classList.add('hurt'); $('bt-team').classList.add('shake'); shakeScreen(); vibrate([40, 30, 80]);
+        var dmg = CHEAT.god ? 0 : atk; G.hp -= dmg;
+        popDmg(CHEAT.god ? '無敵' : '-' + dmg, CHEAT.god ? 'heal' : 'me', tc.x, tc.y - 10);
+        floatMsg(e.name + ' の攻撃！', true);
+        setTimeout(function(){ $('arena').classList.remove('hurt'); $('bt-team').classList.remove('shake'); }, 420);
+      }
+      drawStatus(); drawHud();
+      if (G.hp <= 0) {
+        if (s.revive > 0) { var pct = s.revive; s.revive = 0; G.hp = Math.round(G.maxHp * pct / 100); floatMsg('復活！'); particles(tc.x, tc.y, '#fde68a', 40, true); drawHud(); drawStatus(); setTimeout(endTurn, 800); return; }
+        setTimeout(function(){ finish(false); }, 1100); return;
+      }
       setTimeout(endTurn, 500);
     }, 320);
   }
   function onEnemyDown(e){
+    if (G.over) return;
     G.enemyHp = 0; drawHud(); G.stage++;
     var ph = $('en-ph'); var c = centerOf(ph);
-    ph.classList.add('die'); particles(c.x, c.y, EL_COLOR[e.element], e.boss ? 40 : 22, true); shockwave(c.x, c.y, '#fff');
+    ph.classList.add('die'); ph.classList.remove('zzz'); particles(c.x, c.y, EL_COLOR[e.element], e.boss ? 40 : 22, true); shockwave(c.x, c.y, '#fff');
     $('arena').classList.add('flash'); setTimeout(function(){ $('arena').classList.remove('flash'); }, 400);
     if (e.boss) shakeScreen();
-    if (G.stage >= CFG.enemies.length) { floatMsg('全クリア！'); vibrate([30, 50, 80, 50, 120]); setTimeout(function(){ finish(true); }, 1400); return; }
+    G.st.eSleep = 0; G.st.poison = { n: 0, pct: 0 }; G.st.defdown = { n: 0, mult: 1 }; drawStatus();
+    if (G.stage >= G.enemies.length) {
+      floatMsg(G.mode === 'story' ? (e.boss ? 'BOSS 撃破！！' : '撃破！') : '全クリア！'); vibrate([30, 50, 80, 50, 120]);
+      setTimeout(function(){ if (G.mode === 'story' && CUR) { G.over = true; showTalk(CUR.st.post, e, function(){ finish(true); }); } else finish(true); }, 1400); return;
+    }
     floatMsg(e.boss ? 'BOSS 撃破！！' : e.name + ' をたおした！'); vibrate([20, 40, 20]);
     setTimeout(function(){ stageIntro(); }, e.boss ? 1500 : 1100);
   }
-  $('btn-giveup').onclick = function(){ if (G && !G.over && confirm('ここであきらめますか？（ここまでの記録は残ります）')) finish(false); };
+  $('btn-giveup').onclick = function(){ if (G && !G.over && confirm('ここであきらめますか？' + (G.mode === 'story' ? '' : '（ここまでの記録は残ります）'))) finish(false); };
 
   function countUp(el, to, ms, suffix){
     var t0 = performance.now();
@@ -1259,15 +1544,33 @@ ${ORB_DEFS}
     requestAnimationFrame(step);
   }
   function finish(cleared){
-    G.over = true; G.busy = true;
+    G.over = true; G.busy = true; $('talk').classList.remove('on'); clearSave();
     var hpPct = Math.round(Math.max(0, G.hp) / G.maxHp * 100);
+    $('res-score').textContent = '…'; $('res-nb').textContent = ''; $('res-reward').innerHTML = ''; $('res-lvup').textContent = '';
+    $('res-hp').textContent = hpPct + '%'; $('res-moves').textContent = G.moves + ' 手'; $('res-combo').textContent = G.maxCombo + ' コンボ';
+    document.body.classList.toggle('story', G.mode === 'story');
+    show('scr-result');
+    if (G.mode === 'story') {
+      var st = CUR.st; var e = enemy() || enemyById(st.enemy_id);
+      $('res-ttl').textContent = cleared ? ((e && e.boss) ? 'BOSS撃破！ ステージクリア！' : 'ステージクリア！') : 'ざんねん… もう一度挑戦しよう';
+      $('res-stages-label').textContent = 'ステージ'; $('res-stages').textContent = 'CHAPTER ' + CUR.ch.number + ' - ' + st.number;
+      $('res-score').textContent = cleared ? 'CLEAR' : 'LOSE';
+      var nextExists = CUR.k + 1 < CUR.ch.stages.length;
+      $('btn-again').textContent = cleared ? (nextExists ? '次のステージへ' : (CUR.ci + 1 < STORY.length ? '次の章へ' : 'ステージ一覧へ')) : 'もう一度挑戦';
+      post('/story/result', { token: ME.token, stage_id: st.id, cleared: cleared, hp_left: hpPct, moves: G.moves, team: TEAM.map(function(a){ return a.id; }), cheated: G.cheated, bonus_coin: G.st.coinB, bonus_exp: G.st.expB }).then(function(j){
+        if (j.error) { $('res-nb').textContent = '保存できませんでした'; return; }
+        if (cleared) { st.clears++; $('res-nb').textContent = j.cheated ? '（チート中なので報酬なし）' : (j.first ? '初クリアボーナス！' : ''); }
+        $('res-reward').innerHTML = cleared ? '<span class="coin">+' + j.coins_earned + '</span><span>経験値 +' + j.exp_gain + '（チーム全員）</span>' : '';
+        if (j.level_ups && j.level_ups.length) { $('res-lvup').textContent = 'LEVEL UP! ' + j.level_ups.map(function(l){ var a = allyById(l.id); return (a ? a.name : '') + ' Lv.' + l.from + '→' + l.to; }).join('　'); vibrate([30, 40, 60]); }
+        setCoins(j.coins);
+        if (cleared) TEAM.forEach(function(a){ var cs = charState(a.id); if (cs) cs.exp += j.exp_gain; else STATE.chars.push({ id: a.id, exp: j.exp_gain, level: 1 }); });
+      });
+      return;
+    }
     var body = { token: ME.token, stages_cleared: G.stage, hp_left: hpPct, moves: G.moves, cleared: cleared, team: TEAM.map(function(a){ return a.id; }), cheated: G.cheated };
     $('res-ttl').textContent = cleared ? '全クリア！おめでとう！' : (G.stage > 0 ? 'ざんねん… でも ' + G.stage + '体たおした！' : 'ざんねん…');
-    $('res-score').textContent = '…'; $('res-nb').textContent = ''; $('res-reward').innerHTML = ''; $('res-lvup').textContent = '';
-    $('res-stages').textContent = G.stage + ' / ' + CFG.enemies.length + ' 体';
-    $('res-hp').textContent = hpPct + '%'; $('res-moves').textContent = G.moves + ' 手'; $('res-combo').textContent = G.maxCombo + ' コンボ';
-    $('res-best').textContent = '…'; $('res-rank').textContent = '…';
-    show('scr-result');
+    $('res-stages-label').textContent = 'たおした敵'; $('res-stages').textContent = G.stage + ' / ' + G.enemies.length + ' 体';
+    $('res-best').textContent = '…'; $('res-rank').textContent = '…'; $('btn-again').textContent = 'もう一回';
     post('/result', body).then(function(j){
       if (j.error) { $('res-score').textContent = '保存できませんでした'; return; }
       countUp($('res-score'), j.score, 1000, ' 点');
@@ -1282,6 +1585,14 @@ ${ORB_DEFS}
       TEAM.forEach(function(a){ var cs = charState(a.id); if (cs) cs.exp += j.exp_gain; else STATE.chars.push({ id: a.id, exp: j.exp_gain, level: 1 }); });
     });
   }
+  $('btn-again').onclick = function(){
+    if (G && G.mode === 'story' && CUR) {
+      if ($('btn-again').textContent === 'もう一度挑戦') { startStage(CUR.ci, CUR.k); return; }
+      if (CUR.k + 1 < CUR.ch.stages.length) { startStage(CUR.ci, CUR.k + 1); return; }
+      loadStory().then(function(){ if (CUR.ci + 1 < STORY.length) openStages(CUR.ci + 1); else openStory(); }); return;
+    }
+    startBattle('endless', CFG.enemies);
+  };
 
   // ---------- ランキング ----------
   function openRank(){

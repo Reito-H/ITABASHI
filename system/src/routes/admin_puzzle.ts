@@ -13,6 +13,7 @@ import { settingsSubHeader } from './admin';
 import { ADMIN_PATH, PUZZLE_PATH } from '../config';
 import { getAdminPermissions } from '../permissions';
 import { loadPuzzleSettings, loadAllies, loadEnemies, ELEMENTS, ELEMENT_LABEL, CHEAT_COMMAND, GUIDE_IMG_KEY, GUIDE_PROMPT } from './public_puzzle';
+import { PUZZLE_EFFECTS, EFFECT_MAP, EFFECT_CATS } from '../data/puzzle_effects';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -49,6 +50,8 @@ app.get('/settings/puzzle', async (c) => {
     GROUP BY p.id ORDER BY score DESC, MIN(s.id) ASC LIMIT 100`).all<{ nickname: string; real_name: string; emp_no: string; coins: number; is_cheater: number; score: number; cleared: number; plays: number; last: string }>()).results ?? [];
   const players = (await c.env.DB.prepare('SELECT COUNT(*) AS n FROM puzzle_players').first<{ n: number }>())?.n ?? 0;
   const celebrants = (await c.env.DB.prepare('SELECT COUNT(*) AS n FROM birthday_celebrants WHERE is_active = 1').first<{ n: number }>())?.n ?? 0;
+  const chapters = (await c.env.DB.prepare('SELECT id, number, title, subtitle FROM puzzle_chapters ORDER BY number').all<{ id: number; number: number; title: string; subtitle: string }>()).results ?? [];
+  const stageRows = (await c.env.DB.prepare('SELECT id, chapter_id, number, enemy_id, pre_text, post_text, reward_coins FROM puzzle_stages ORDER BY chapter_id, number').all<{ id: number; chapter_id: number; number: number; enemy_id: number; pre_text: string; post_text: string; reward_coins: number }>()).results ?? [];
 
   const box = 'background:white;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:16px;max-width:1100px;';
   const btn = (bg: string, bd: string, fg: string) => `padding:7px 14px;background:${bg};border:1px solid ${bd};color:${fg};border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;`;
@@ -56,6 +59,7 @@ app.get('/settings/puzzle', async (c) => {
     ? `<span style="background:#dcfce7;color:#166534;font-weight:700;font-size:12px;padding:3px 10px;border-radius:999px;">公開中</span>`
     : `<span style="background:#f3f4f6;color:#6b7280;font-weight:700;font-size:12px;padding:3px 10px;border-radius:999px;">準備中（参戦できません）</span>`;
   const elOptions = (cur: string) => ELEMENTS.map(e => `<option value="${e}"${e === cur ? ' selected' : ''}>${ELEMENT_LABEL[e]}</option>`).join('');
+  const effectOptions = (cur: string) => EFFECT_CATS.map(cat => `<optgroup label="${esc(cat)}">${PUZZLE_EFFECTS.filter(e => e.cat === cat).map(e => `<option value="${e.id}"${e.id === cur ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</optgroup>`).join('');
   const dis = editable ? '' : ' disabled';
   const noImg = allies.filter(a => a.kind === 'art' && !a.photo_r2_key).length + enemies.filter(e => !e.photo_r2_key).length;
   const guideImg = !!(await c.env.DOCUMENTS_BUCKET.head(GUIDE_IMG_KEY).catch(() => null));
@@ -80,7 +84,8 @@ app.get('/settings/puzzle', async (c) => {
       <td><input class="pz-in pz-num" data-f="atk" type="number" min="1" max="999" value="${a.atk}"${dis}></td>
       <td><select class="pz-in" data-f="element"${dis}>${elOptions(a.element)}</select></td>
       <td style="min-width:150px;"><input class="pz-in" data-f="skill_name" type="text" maxlength="20" placeholder="必殺技名" value="${esc(a.skill_name)}"${dis}>
-        <div style="display:flex;gap:4px;margin-top:3px;"><select class="pz-in" data-f="skill_type" style="width:70px;"${dis}><option value="attack"${a.skill_type !== 'heal' ? ' selected' : ''}>攻撃</option><option value="heal"${a.skill_type === 'heal' ? ' selected' : ''}>回復</option></select><input class="pz-in pz-num" data-f="skill_power" type="number" min="1" max="999" value="${a.skill_power}" title="攻撃: 攻撃力×(威力/10) ／ 回復: 最大HPの威力%" style="width:60px;"${dis}></div></td>
+        <select class="pz-in" data-f="skill_effect" style="margin-top:3px;font-size:11px;" title="${esc(EFFECT_MAP[a.skill_effect]?.desc ?? '')}"${dis}>${effectOptions(a.skill_effect)}</select>
+        <div style="font-size:10px;color:#6b7280;margin-top:2px;" class="pz-effdesc">${esc(EFFECT_MAP[a.skill_effect]?.desc ?? '（効果を選んでください）')}</div></td>
       <td style="text-align:center;">${a.kind === 'art' ? `<input class="pz-in" data-f="in_gacha" type="checkbox"${a.in_gacha ? ' checked' : ''}${dis}>` : '-'}</td>
       <td style="text-align:center;"><input class="pz-in" data-f="is_active" type="checkbox"${a.is_active ? ' checked' : ''}${dis}></td>
       <td style="white-space:nowrap;">${editable ? `<button class="pz-mv" data-dir="-1" title="上へ"${i === 0 ? ' disabled' : ''}>▲</button><button class="pz-mv" data-dir="1" title="下へ"${i === allies.length - 1 ? ' disabled' : ''}>▼</button> <button class="pz-del" style="color:#dc2626;">削除</button>` : ''}</td>
@@ -186,9 +191,9 @@ app.get('/settings/puzzle', async (c) => {
       <div class="pz-help">
         「社員」はバースデーモードの写真を<b>コピー</b>したもの（バースデー側は変わりません）で、全員が最初から使えます。「キャラ」はガチャで手に入ります（「ガチャ」にチェックがある★3〜5のキャラが出ます）。
         変えた所はその場で保存されます。属性: 火は木に強い／木は水に強い／水は火に強い／光と闇はおたがいに強い。<br>
-        <b>必殺技</b>: バトル中、そのキャラの属性の玉を消すとゲージがたまり、満タンでキャラをタップすると発動。攻撃＝攻撃力×(威力÷10)の大ダメージ、回復＝最大HPの威力%を回復。技名は自由に。
+        <b>必殺技</b>: バトル中、そのキャラの属性の玉を消すとゲージがたまり、満タンでキャラをタップすると発動。技名は自由、効果は${PUZZLE_EFFECTS.length}パターンから選べます（攻撃・回復・守り・眠り・時間・強化・盤面・報酬・特殊）。
       </div>
-      <table class="pz-tbl" id="pz-allies"><thead><tr><th>画像</th><th>種別</th><th>表示名・説明</th><th>レア</th><th>HP</th><th>攻撃</th><th>属性</th><th>必殺技（名前・種類・威力）</th><th>ガチャ</th><th>出す</th><th>並び</th></tr></thead>
+      <table class="pz-tbl" id="pz-allies"><thead><tr><th>画像</th><th>種別</th><th>表示名・説明</th><th>レア</th><th>HP</th><th>攻撃</th><th>属性</th><th>必殺技（名前・効果）</th><th>ガチャ</th><th>出す</th><th>並び</th></tr></thead>
         <tbody>${allyRows || '<tr><td colspan="11" style="color:#9ca3af;text-align:center;padding:16px;">まだ味方キャラがいません</td></tr>'}</tbody></table>
     </div>
 
@@ -206,6 +211,25 @@ app.get('/settings/puzzle', async (c) => {
         <label class="pz-lbl">画像（任意・あとでAIでも作れます）<input id="ne-img" type="file" accept="image/*" style="margin-top:3px;font-size:12px;"></label>
         <button onclick="pzAddEnemy(this)" style="${btn('#1e3a5f', '#1e3a5f', '#fff')}">敵を追加</button>
       </div>` : ''}
+    </div>
+
+    <div style="${box}">
+      <div class="pz-sec-title">ストーリー<span style="font-size:12px;color:#6b7280;font-weight:400;">${chapters.length}章・${stageRows.length}ステージ</span></div>
+      <div class="pz-help">チャプターごとに敵が1体ずつ並び、戦う前後に会話が出ます。会話は1行1セリフで「話す人｜セリフ」（話す人: バジル／敵／キャラ名）。変えた所はその場で保存されます。</div>
+      ${chapters.map(ch => `
+      <div style="margin-bottom:12px;border:1px solid #e5e7eb;border-radius:8px;padding:10px;">
+        <div style="font-weight:700;color:#1e3a5f;margin-bottom:6px;">第${ch.number}章　${esc(ch.title)}<span style="font-weight:400;color:#6b7280;font-size:12px;margin-left:8px;">${esc(ch.subtitle)}</span></div>
+        <table class="pz-tbl"><thead><tr><th>#</th><th>敵</th><th>戦う前の会話</th><th>勝ったあとの会話</th><th>初回コイン</th></tr></thead><tbody>
+        ${stageRows.filter(st => st.chapter_id === ch.id).map(st => `
+          <tr data-id="${st.id}" data-kind="stages">
+            <td>${st.number}</td>
+            <td><select class="pz-in" data-f="enemy_id" style="min-width:140px;"${dis}>${enemies.map(e => `<option value="${e.id}"${e.id === st.enemy_id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></td>
+            <td><textarea class="pz-in" data-f="pre_text" rows="3" style="min-width:220px;font-size:11px;"${dis}>${esc(dialogToText(st.pre_text))}</textarea></td>
+            <td><textarea class="pz-in" data-f="post_text" rows="3" style="min-width:220px;font-size:11px;"${dis}>${esc(dialogToText(st.post_text))}</textarea></td>
+            <td><input class="pz-in pz-num" data-f="reward_coins" type="number" min="0" max="99999" value="${st.reward_coins}"${dis}></td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>`).join('')}
     </div>
 
     <div style="${box}">
@@ -310,7 +334,13 @@ app.get('/settings/puzzle', async (c) => {
       var gup = document.getElementById('pz-guide-up');
       if (gup) gup.addEventListener('change', async function(){ if (!gup.files[0]) return; var fd = new FormData(); fd.append('photo', gup.files[0]); try { await pzSend('POST', PZ_API + '/guide/photo', fd, true); location.reload(); } catch (e) { alert(e.message); } });
       pzBindRows('pz-allies', 'allies');
+      document.querySelectorAll('tr[data-kind="stages"]').forEach(function(tr){
+        var id = tr.getAttribute('data-id');
+        tr.querySelectorAll('.pz-in').forEach(function(inp){ inp.addEventListener('change', async function(){ var body = {}; body[inp.getAttribute('data-f')] = inp.value; try { await pzSend('POST', PZ_API + '/stages/' + id, body); inp.classList.add('saved'); setTimeout(function(){ inp.classList.remove('saved'); }, 1200); } catch (e) { alert(e.message); } }); });
+      });
       pzBindRows('pz-enemies', 'enemies');
+      var PZ_EFFECTS = ${safeJson(Object.fromEntries(PUZZLE_EFFECTS.map(e => [e.id, e.desc])))};
+      document.querySelectorAll('select[data-f="skill_effect"]').forEach(function(sel){ sel.addEventListener('change', function(){ var d = sel.parentElement.querySelector('.pz-effdesc'); if (d) d.textContent = PZ_EFFECTS[sel.value] || ''; }); });
       async function pzAddEnemy(b) {
         var fd = new FormData();
         fd.append('name', document.getElementById('ne-name').value);
@@ -397,6 +427,7 @@ async function updateRow(c: { env: Env; req: { json: <T>() => Promise<T> } }, ta
     if ('skill_name' in b) { sets.push('skill_name = ?'); vals.push(String(b.skill_name ?? '').trim().slice(0, 20)); }
     if ('skill_type' in b) { sets.push('skill_type = ?'); vals.push(String(b.skill_type) === 'heal' ? 'heal' : 'attack'); }
     if ('skill_power' in b) { sets.push('skill_power = ?'); vals.push(toInt(b.skill_power, 1, 999, 100)); }
+    if ('skill_effect' in b) { const e = String(b.skill_effect); if (!EFFECT_MAP[e]) return { error: '効果が不正です' }; sets.push('skill_effect = ?'); vals.push(e); }
     if ('in_gacha' in b) { sets.push('in_gacha = ?'); vals.push(toInt(b.in_gacha, 0, 1, 0)); }
   } else {
     if ('is_boss' in b) { sets.push('is_boss = ?'); vals.push(toInt(b.is_boss, 0, 1, 0)); }
@@ -425,6 +456,33 @@ async function readPhoto(form: FormData, prefix: string): Promise<{ key: string;
   const mime = /^image\/(jpeg|png|gif|webp)$/.test(photo.type) ? photo.type : (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`);
   return { key: `puzzle/${prefix}/${crypto.randomUUID()}.${ext}`, mime };
 }
+
+// ストーリーの会話: JSON [{who,text}] ⇔ テキスト「話す人｜セリフ」（1行1セリフ）
+function dialogToText(json: string): string {
+  try { const v = JSON.parse(json); if (!Array.isArray(v)) return ''; return v.map((l: { who?: string; text?: string }) => (String(l.who ?? 'basil') === 'basil' ? 'バジル' : String(l.who) === 'enemy' ? '敵' : String(l.who).replace(/^ally:/, '')) + '｜' + String(l.text ?? '')).join('\n'); } catch { return ''; }
+}
+function textToDialog(text: string): string {
+  const lines = String(text ?? '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(0, 12).map(l => {
+    const i = l.indexOf('｜') >= 0 ? l.indexOf('｜') : l.indexOf('|');
+    const who = i >= 0 ? l.slice(0, i).trim() : 'バジル'; const t = (i >= 0 ? l.slice(i + 1) : l).trim().slice(0, 120);
+    const w = who === 'バジル' || who === 'basil' ? 'basil' : (who === '敵' || who === 'enemy') ? 'enemy' : 'ally:' + who.replace(/^ally:/, '');
+    return { who: w, text: t };
+  });
+  return JSON.stringify(lines);
+}
+app.post('/api/puzzle/stages/:id', async (c) => {
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const id = parseInt(c.req.param('id'), 10);
+  const b = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+  const sets: string[] = []; const vals: unknown[] = [];
+  if ('enemy_id' in b) { sets.push('enemy_id = ?'); vals.push(toInt(b.enemy_id, 1, 999999, 1)); }
+  if ('pre_text' in b) { sets.push('pre_text = ?'); vals.push(textToDialog(String(b.pre_text ?? ''))); }
+  if ('post_text' in b) { sets.push('post_text = ?'); vals.push(textToDialog(String(b.post_text ?? ''))); }
+  if ('reward_coins' in b) { sets.push('reward_coins = ?'); vals.push(toInt(b.reward_coins, 0, 99999, 100)); }
+  if (!sets.length) return c.json({ error: '変更がありません' }, 400);
+  await c.env.DB.prepare(`UPDATE puzzle_stages SET ${sets.join(', ')} WHERE id = ?`).bind(...vals, id).run();
+  return c.json({ ok: true });
+});
 
 // Workers AI で画像生成 → R2 保存 → photo_r2_key 更新
 async function generateImage(env: Env, table: 'puzzle_allies' | 'puzzle_enemies', id: number): Promise<{ ok: true } | { error: string }> {
