@@ -7,7 +7,7 @@
 function activateLive(K, transport){
 const $=id=>document.getElementById(id);
 const base=(K.apiBase||'')+'/kmx/api/v1/';
-const call=transport||(async(path,params)=>{const u=new URL(base+path,location.origin);Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,Array.isArray(v)?v.join(','):(v??'')));u.searchParams.set('_',Date.now());const r=await fetch(u,{credentials:'include'});return r.json()});
+const call=transport||(async(path,params)=>{const u=new URL(base+path,location.origin);Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,Array.isArray(v)?v.join(','):(v??'')));u.searchParams.set('_',Date.now());const r=await fetch(u,{credentials:'include',headers:window.__KMX_TOKEN?{'X-KM-Token':window.__KMX_TOKEN}:{}});return r.json()});
 const LAT0=35.7865,LON0=139.6835; // 板橋営業所付近を原点にした簡易平面(m)
 const toXY=(lat,lon)=>[(+lon-LON0)*Math.cos(LAT0*Math.PI/180)*111320,-(+lat-LAT0)*110540];
 const toLL=(x,y)=>[LAT0-y/110540,LON0+x/(Math.cos(LAT0*Math.PI/180)*111320)];
@@ -120,7 +120,7 @@ if(typeof search==='function')search(1);
     // km-operator へのログインはホシコンのサーバーが自動で行うので、利用者はホシコンにログインしていれば良い。
     const HB=window.__KMX_BASE||'';
     if(HB||location.protocol==='https:'||/[?&]live=1/.test(location.search)){
-      fetch(HB?HB+'/session':'/api/session',{credentials:'include'}).then(r=>r.ok?r.json():r.json().catch(()=>null).then(j=>Object.assign({loggedIn:false,httpStatus:r.status},j||{}))).then(s=>{
+      fetch(HB?HB+'/session':'/api/session',{credentials:'include',headers:window.__KMX_TOKEN?{'X-KM-Token':window.__KMX_TOKEN}:{}}).then(r=>r.ok?r.json():r.json().catch(()=>null).then(j=>Object.assign({loggedIn:false,httpStatus:r.status},j||{}))).then(s=>{
         if(s&&s.loggedIn){window.__KMX={operatorId:s.operatorId,loginName:s.loginName,accountId:s.accountId,roleId:s.roleId,officeName:s.officeName,apiBase:HB};activateLive(window.__KMX)}
         else if(HB){const el=document.createElement('span');el.className='pill crit';el.textContent=(s&&s.message)||'km-operator に接続できません';document.getElementById('notices').prepend(el)}
         else if(s===null||!s.loggedIn){const a=document.createElement('a');a.className='linkbtn';a.href='/kmx/HS/HSHS/HSHS0199.do';a.textContent='ログインして実データに接続';document.querySelector('.user').prepend(a)}

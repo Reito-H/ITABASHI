@@ -190,7 +190,7 @@ if((location.hash||'').includes('map')){mv.resize();mv.draw()}
 (async function initZenrin(){
   const HB=window.__KMX_BASE;if(!HB)return;
   try{
-    const r=await fetch(HB+'/zenrin-key',{credentials:'include'});const j=await r.json().catch(()=>({}));
+    const r=await fetch(HB+'/zenrin-key',{credentials:'include',headers:window.__KMX_TOKEN?{'X-KM-Token':window.__KMX_TOKEN}:{}});const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok||!j.key)throw new Error(j.message||'ZENRIN の地図キーを取得できません');
     // ローダー本体は常に js.zmaps-api.com から(km-operator 設定の zenrinDomain は maps_loader 側のホストなのでここでは使わない)
     const host='https://js.zmaps-api.com';

@@ -17,10 +17,11 @@ import { ADMIN_PATH } from '../config';
 import { KM_CONSOLE_INDEX_HTML, KM_CONSOLE_SCREENS_JS, KM_CONSOLE_MAP_JS, KM_CONSOLE_LIVE_JS, KM_CONSOLE_VERSION } from '../assets/km_console_ui';
 import { ensureSession, kmApiGet, clearSession } from '../utils/km_relay';
 
-// 簡易パスワード（ホシコンのログインに加えて、開くたびに1回聞く）。wrangler secret put KM_CONSOLE_PASSWORD で変更可。未設定なら 0724
+// 簡易パスワード（ホシコンのログインに加えて、画面を開くたびに必ず聞く）。wrangler secret put KM_CONSOLE_PASSWORD で変更可。未設定なら 0724
+// Cookie は使わない: 正しいパスワードで POST されたときだけ画面を返し、その画面に埋め込んだ使い捨てトークン（HMAC署名・12時間）を
+// API 呼び出しのヘッダー X-KM-Token で検証する。ページを開き直す／再読み込みすると再びパスワード入力になる。
 const DEFAULT_CONSOLE_PASSWORD = '0724';
-const PW_COOKIE = 'km_console_pw';
-const PW_COOKIE_MAX_AGE = 12 * 60 * 60; // 12時間（開き直しても同じ日のうちは聞かない）
+const TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
 
@@ -34,15 +35,26 @@ function consolePassword(env: Env): string {
   return env.KM_CONSOLE_PASSWORD || DEFAULT_CONSOLE_PASSWORD;
 }
 
-// Cookie に入れる値 = パスワードのハッシュ。パスワードを変えると過去の Cookie は無効になる
-async function pwToken(env: Env): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('km-console:' + consolePassword(env)));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+async function hmacHex(env: Env, data: string): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode('km-console-token:' + consolePassword(env)), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 画面に埋め込む使い捨てトークン: <有効期限ms>.<乱数>.<署名>
+async function issueToken(env: Env): Promise<string> {
+  const exp = Date.now() + TOKEN_TTL_MS;
+  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(8))).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const body = `${exp}.${nonce}`;
+  return `${body}.${await hmacHex(env, body)}`;
 }
 
 async function isUnlocked(c: { req: { header: (n: string) => string | undefined }; env: Env }): Promise<boolean> {
-  const m = (c.req.header('Cookie') ?? '').match(new RegExp(`(?:^|;\\s*)${PW_COOKIE}=([0-9a-f]+)`));
-  return !!m && m[1] === (await pwToken(c.env));
+  const t = c.req.header('X-KM-Token') ?? '';
+  const m = t.match(/^(\d+)\.([0-9a-f]+)\.([0-9a-f]+)$/);
+  if (!m) return false;
+  if (Date.now() > Number(m[1])) return false;
+  return (await hmacHex(c.env, `${m[1]}.${m[2]}`)) === m[3];
 }
 
 function gatePage(error: boolean): string {
@@ -57,30 +69,28 @@ a{display:block;margin-top:14px;font-size:12px;color:#6b7280}</style></head>
 <button type="submit">開く</button><a href="${ADMIN_PATH}">ホシコンに戻る</a></form></body></html>`;
 }
 
-function buildIndexHtml(): string {
+function buildIndexHtml(token: string): string {
   let html = KM_CONSOLE_INDEX_HTML;
   // Google Fonts はホシコンの CSP で許可していないので外す（システムフォントで表示）
   html = html.replace(/<link rel="stylesheet" href="https:\/\/fonts\.googleapis\.com[^>]*>\s*/g, '');
   // 同梱スクリプトをホシコン配下のパスに
   html = html.replace(/<script src="(screens|map|live)\.js"><\/script>/g, (_m, n: string) => `<script src="${BASE}/asset/${n}.js?v=${KM_CONSOLE_VERSION}"></script>`);
   // ベースパスを埋め込む（live.js がこれを見てホシコンの中継 API を使う）＋ ホシコンへ戻るリンク
-  const boot = `<script>window.__KMX_BASE=${JSON.stringify(BASE)};document.addEventListener('DOMContentLoaded',function(){var u=document.querySelector('.user');if(!u)return;var a=document.createElement('a');a.className='linkbtn';a.href=${JSON.stringify(ADMIN_PATH)};a.textContent='ホシコンへ戻る';u.prepend(a);var lo=u.querySelector('button:last-of-type');if(lo&&lo.textContent==='ログアウト')lo.remove();});</script>`;
+  const boot = `<script>window.__KMX_BASE=${JSON.stringify(BASE)};window.__KMX_TOKEN=${JSON.stringify(token)};history.replaceState(null,'',${JSON.stringify(BASE)});document.addEventListener('DOMContentLoaded',function(){var u=document.querySelector('.user');if(!u)return;var a=document.createElement('a');a.className='linkbtn';a.href=${JSON.stringify(ADMIN_PATH)};a.textContent='ホシコンへ戻る';u.prepend(a);var lo=u.querySelector('button:last-of-type');if(lo&&lo.textContent==='ログアウト')lo.remove();});</script>`;
   html = html.replace('<title>', `${boot}\n<title>`);
   html = html.replace('<title>km 配車コンソール</title>', '<title>配車コンソール - ホシコン</title>');
   return html;
 }
 
-app.get('/km-console', async (c) => {
-  if (!(await isUnlocked(c))) return c.html(gatePage(c.req.query('e') === '1'));
-  return c.html(buildIndexHtml());
-});
+// 画面を開くたびにパスワード入力ページ（Cookie で記憶しない）
+app.get('/km-console', (c) => c.html(gatePage(c.req.query('e') === '1')));
 
 app.post('/km-console/unlock', async (c) => {
   const form = await c.req.parseBody();
   const pw = typeof form.password === 'string' ? form.password.trim() : '';
   if (pw !== consolePassword(c.env)) return c.redirect(`${BASE}?e=1`);
-  c.header('Set-Cookie', `${PW_COOKIE}=${await pwToken(c.env)}; Path=${BASE}; Max-Age=${PW_COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Lax`);
-  return c.redirect(BASE);
+  // 正しいときだけ画面本体を返す（URL は history.replaceState で /km-console に戻す。再読み込みすると再びパスワード入力）
+  return c.html(buildIndexHtml(await issueToken(c.env)), 200, { 'Cache-Control': 'no-store' });
 });
 
 app.get('/km-console/asset/:name', (c) => {
@@ -96,7 +106,7 @@ app.get('/km-console/asset/:name', (c) => {
 });
 
 app.get('/km-console/session', async (c) => {
-  if (!(await isUnlocked(c))) return c.json({ loggedIn: false, message: 'パスワード未入力です。ページを開き直してください。' }, 401);
+  if (!(await isUnlocked(c))) return c.json({ loggedIn: false, message: 'パスワード認証が切れました。ページを開き直してください。' }, 401);
   const r = await ensureSession(c.env, c.env.DB);
   if (!r.ok) return c.json({ loggedIn: false, message: r.message }, 503);
   const u = r.session.user ?? {};
@@ -111,7 +121,7 @@ app.get('/km-console/session', async (c) => {
 // ZENRIN 地図の鍵（Referer 認証方式の公開用キー）だけを取り出して返す。
 // 同じ応答に入っている経路探索CGIのID/パスワード類はブラウザへ渡さない。
 app.get('/km-console/zenrin-key', async (c) => {
-  if (!(await isUnlocked(c))) return c.json({ ok: false, message: 'パスワード未入力です' }, 401);
+  if (!(await isUnlocked(c))) return c.json({ ok: false, message: 'パスワード認証が切れました' }, 401);
   const r = await kmApiGet(c.env, c.env.DB, 'tickets/get_init_display_data', '');
   if (!r.ok) return c.json({ ok: false, message: r.message }, r.status as 502 | 503);
   try {
@@ -134,7 +144,7 @@ app.post('/km-console/relogin', async (c) => {
 });
 
 app.all('/km-console/kmx/api/v1/*', async (c) => {
-  if (!(await isUnlocked(c))) return c.json({ isSuccess: false, msgs: [{ type: 'ERROR', msg: 'パスワード未入力です。ページを開き直してください。' }] }, 401);
+  if (!(await isUnlocked(c))) return c.json({ isSuccess: false, msgs: [{ type: 'ERROR', msg: 'パスワード認証が切れました。ページを開き直してください。' }] }, 401);
   if (c.req.method !== 'GET') {
     return c.json({ isSuccess: false, msgs: [{ type: 'INVALID', msg: '配車コンソールは読み取り専用です（書き込み操作は中継しません）' }] }, 403);
   }
