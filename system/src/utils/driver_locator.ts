@@ -100,3 +100,60 @@ export function findByVehicleNo(list: LiveVehicle[], no: string): LiveVehicle | 
 }
 
 export function minutesAgo(at: number): number { return Math.max(0, Math.round((Date.now() - at) / 60000)); }
+
+// ---------- 営業履歴（trip_infos/search）と乗務員名簿（trip_infos/search_driver） ----------
+// trip_infos/search は「無線番号（＝車番）」か「userName（km-operator のログイン名＝半角英数）」と日時で、
+// その日時に乗務していたシフト1本分の乗降記録を返す。名前で探すには search_driver の名簿（氏名・カナ→ログイン名）を使う。
+export type KmDriver = { name: string; kana: string; loginName: string };
+let driverDir: { at: number; list: KmDriver[] } | null = null;
+
+export async function driverDirectory(env: Env): Promise<KmDriver[]> {
+  if (driverDir && Date.now() - driverDir.at < 30 * 60 * 1000) return driverDir.list;
+  const r = await kmApiGet(env, env.DB, 'trip_infos/search_driver', '?lastNameKana=&firstNameKana=');
+  if (!r.ok) throw new Error(r.message);
+  const body = JSON.parse(r.body) as { isSuccess?: boolean; driverInfoList?: Array<Record<string, string>> };
+  if (!body.isSuccess) throw new Error('乗務員名簿を取得できませんでした');
+  const list = (body.driverInfoList ?? []).map((d) => ({ name: String(d.driverName ?? '').trim(), kana: String(d.driverNameKana ?? '').trim(), loginName: String(d.loginName ?? '').trim() })).filter((d) => d.name && d.loginName);
+  driverDir = { at: Date.now(), list };
+  return list;
+}
+
+export function findDrivers(list: KmDriver[], q: string, limit = 8): KmDriver[] {
+  const k = norm(q);
+  if (!k) return [];
+  const hira = (s: string) => s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+  const kh = hira(k);
+  return list.filter((d) => norm(d.name).includes(k) || hira(norm(d.kana)).includes(kh) || d.loginName.toLowerCase() === k.toLowerCase()).slice(0, limit);
+}
+
+export type TripRow = {
+  onAt: string | null; outAt: string | null; onLat: number | null; onLon: number | null; outLat: number | null; outLon: number | null;
+  fare: number | null; distanceM: number | null; driveMin: number | null; ticketNumber: string | null; ticketStatus: string | null; customer: string | null;
+  statuses: Array<{ date: string; status: string }>;
+};
+export type TripSearch =
+  | { ok: true; driverName: string | null; radio: string | null; shift: string | null; expectedCloseAt: string | null; tripCount: number | null; totalSales: number | null; trips: TripRow[] }
+  | { ok: false; message: string; notFound?: boolean };
+
+// date: "YYYY/MM/DD HH:mm"（JST）
+export async function searchTrips(env: Env, key: { radio?: string; loginName?: string }, date: string): Promise<TripSearch> {
+  const q = `?wirelessLineNumber=${encodeURIComponent(key.radio ?? '')}&userName=${encodeURIComponent(key.loginName ?? '')}&date=${encodeURIComponent(date)}`;
+  const r = await kmApiGet(env, env.DB, 'trip_infos/search', q);
+  if (!r.ok) return { ok: false, message: r.message };
+  let body: Record<string, unknown>;
+  try { body = JSON.parse(r.body) as Record<string, unknown>; } catch { return { ok: false, message: '応答を解析できませんでした' }; }
+  if (!body.isSuccess) {
+    const msg = ((body.msgs as Array<{ msg?: string }> | undefined) ?? []).map((m) => m.msg).filter(Boolean).join(' ');
+    return { ok: false, message: msg || '検索できませんでした', notFound: /見つかりません/.test(msg) };
+  }
+  const num = (v: unknown) => { const n = Number(v); return v == null || v === '' || !Number.isFinite(n) ? null : n; };
+  const str = (v: unknown) => (v == null || v === '' ? null : String(v));
+  const trips: TripRow[] = ((body.tripInfoList as Array<Record<string, unknown>> | undefined) ?? [])
+    .filter((t) => t.onServiceAt || t.outServiceAt || (Array.isArray(t.tripStatusList) && t.tripStatusList.length))
+    .map((t) => ({
+      onAt: str(t.onServiceAt), outAt: str(t.outServiceAt), onLat: num(t.onServiceLatitude), onLon: num(t.onServiceLongitude), outLat: num(t.outServiceLatitude), outLon: num(t.outServiceLongitude),
+      fare: num(t.fare), distanceM: num(t.distance), driveMin: num(t.driveMin), ticketNumber: str(t.ticketNumber), ticketStatus: str(t.ticketStatus), customer: str(t.customerFullNameKana ?? t.passengerNameKana),
+      statuses: ((t.tripStatusList as Array<Record<string, unknown>> | undefined) ?? []).map((s) => ({ date: String(s.date ?? ''), status: String(s.status ?? '') })),
+    }));
+  return { ok: true, driverName: str(body.driverName), radio: str(body.wirelessLineNumber), shift: str(body.shift), expectedCloseAt: str(body.expectedCloseAt), tripCount: num(body.tripCount), totalSales: num(body.totalSales), trips };
+}

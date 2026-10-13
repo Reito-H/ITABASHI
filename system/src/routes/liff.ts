@@ -4,7 +4,7 @@
 
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import { liveVehicles, resolveAddress, findByName, findByVehicleNo, minutesAgo, type LiveVehicle } from '../utils/driver_locator';
+import { liveVehicles, resolveAddress, findByName, findByVehicleNo, minutesAgo, driverDirectory, findDrivers, searchTrips, type LiveVehicle } from '../utils/driver_locator';
 import type { Env } from '../auth';
 import { logLineActivity } from '../utils/activity_log';
 import { issueCaseNoIfEmpty } from '../utils/report_case_no';
@@ -605,6 +605,47 @@ app.get('/api/liff/driver-finder/by-vehicle', async (c) => {
     if (rows.results.length === 1) employee = rows.results[0];
   }
   return c.json({ ok: true, vehicle: { ...liveVehicleJson(v, live.fetchedAt), address: await resolveAddress(c.env, v.lat, v.lon), employee } });
+});
+
+// ===== LIFF API: 営業履歴（報告画面の「営業」タブ。車番 or 名前 と 日時 → そのシフトの乗降記録。運行管理者・統括管理者のみ）=====
+app.get('/api/liff/trips/drivers', async (c) => {
+  const denied = await liffDriverFinderGuard(c); if (denied) return denied;
+  const q = (c.req.query('q') ?? '').trim();
+  if (!q) return c.json({ ok: true, results: [] });
+  try {
+    const list = await driverDirectory(c.env);
+    return c.json({ ok: true, results: findDrivers(list, q).map((d) => ({ name: d.name, kana: d.kana, loginName: d.loginName })) });
+  } catch (e) { return c.json({ ok: false, message: e instanceof Error ? e.message : String(e), results: [] }); }
+});
+app.get('/api/liff/trips/search', async (c) => {
+  const denied = await liffDriverFinderGuard(c); if (denied) return denied;
+  const no = (c.req.query('no') ?? '').trim(); const login = (c.req.query('login') ?? '').trim(); const at = (c.req.query('at') ?? '').trim();
+  if (!no && !login) return c.json({ ok: false, message: '車番か名前を指定してください' });
+  if (no && !/^\d{2,4}$/.test(no)) return c.json({ ok: false, message: '車番は2〜4桁の数字です' });
+  if (login && !/^[A-Za-z0-9_.-]{1,40}$/.test(login)) return c.json({ ok: false, message: '乗務員の指定が不正です' });
+  // at: "YYYY-MM-DDTHH:mm"（省略時は現在・JST）
+  let date: string;
+  const m = at.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (m) date = `${m[1]}/${m[2]}/${m[3]} ${m[4]}:${m[5]}`;
+  else { const n = new Date(Date.now() + 9 * 3600 * 1000); const p = (x: number) => String(x).padStart(2, '0'); date = `${n.getUTCFullYear()}/${p(n.getUTCMonth() + 1)}/${p(n.getUTCDate())} ${p(n.getUTCHours())}:${p(n.getUTCMinutes())}`; }
+  const r = await searchTrips(c.env, no ? { radio: no } : { loginName: login }, date);
+  if (!r.ok) return c.json(r);
+  // 直近（新しい順）の数件は住所まで付ける。残りは画面側で必要なときに /trips/address で引く
+  const trips = [...r.trips].sort((a, b) => String(b.onAt ?? b.statuses[0]?.date ?? '').localeCompare(String(a.onAt ?? a.statuses[0]?.date ?? '')));
+  const withAddr = await Promise.all(trips.map(async (t, i) => {
+    if (i >= 6) return { ...t, onAddress: null as string | null, outAddress: null as string | null };
+    const [onAddress, outAddress] = await Promise.all([
+      t.onLat != null && t.onLon != null ? resolveAddress(c.env, t.onLat, t.onLon) : Promise.resolve(null),
+      t.outLat != null && t.outLon != null ? resolveAddress(c.env, t.outLat, t.outLon) : Promise.resolve(null),
+    ]);
+    return { ...t, onAddress, outAddress };
+  }));
+  return c.json({ ...r, date, trips: withAddr });
+});
+app.get('/api/liff/trips/address', async (c) => {
+  const denied = await liffDriverFinderGuard(c); if (denied) return denied;
+  const a = await resolveAddress(c.env, Number(c.req.query('lat')), Number(c.req.query('lon')));
+  return c.json({ ok: !!a, address: a ?? '' });
 });
 
 // ===== LIFF API: 車番→担当乗務員検索（報告フォームの車番入力から課・班を自動表示）=====
@@ -2642,7 +2683,10 @@ function liffReport2Page(liffId: string): string {
       background: linear-gradient(135deg,#0b1430 0%,#18245a 60%,#2f3488 100%); box-shadow: 0 6px 18px rgba(11,20,48,.25); }
     .top h1 { margin: 0 0 10px; font-size: 18px; font-weight: 800; color: white; letter-spacing: .04em; display: flex; align-items: center; gap: 8px; }
     .top h1 svg { color: #f5c451; }
-    .seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .seg { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    #seg-sales.active { background: linear-gradient(135deg,#0f766e,#14b8a6); }
+    .seg.no-sales { grid-template-columns: repeat(4, 1fr); }
+    .seg.no-sales #seg-sales { display: none; }
     .seg button { border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08); color: rgba(255,255,255,.82);
       padding: 11px 2px; border-radius: 12px; font-size: 14px; font-weight: 800; cursor: pointer; transition: background .15s, color .15s, transform .1s; }
     .seg button:active { transform: scale(.97); }
@@ -2730,9 +2774,33 @@ function liffReport2Page(liffId: string): string {
           <button type="button" id="seg-accident" onclick="switchType('accident')">事故</button>
           <button type="button" id="seg-violation" onclick="switchType('violation')">違反</button>
           <button type="button" id="seg-general" onclick="switchType('general')">一般</button>
+          <button type="button" id="seg-sales" onclick="switchType('sales')">営業</button>
         </div>
       </div>
       <div class="forms">
+
+      <!-- ===== 営業（営業履歴の検索。運行管理者・統括管理者のみ） ===== -->
+      <div id="form-sales" style="display:none;">
+        <div class="card">
+          <div class="card-title">営業履歴を探す</div>
+          <div class="row2">
+            <div class="field"><label>車番</label><input type="text" id="sl-vehicle_no" class="veh" placeholder="5232" inputmode="numeric" maxlength="4" autocomplete="off" oninput="slOnVehicleInput()"></div>
+            <div class="field"><label>日時（この時刻に乗務していた分）</label><input type="datetime-local" id="sl-at"></div>
+          </div>
+          <div class="field" style="position:relative;">
+            <label>または 乗務員名（漢字・フリガナ）</label>
+            <input type="text" id="sl-driver" placeholder="名前を入力して候補から選ぶ" autocomplete="off" oninput="slDriverDebounce()">
+            <div id="sl-driver-sug" style="display:none;position:absolute;left:0;right:0;z-index:5;background:white;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.12);max-height:220px;overflow:auto;"></div>
+            <div id="sl-driver-picked" style="display:none;margin-top:6px;font-size:13px;font-weight:700;color:#0f766e;"></div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="btn-submit" style="margin:0;padding:12px;font-size:15px;background:linear-gradient(135deg,#0f766e,#14b8a6);box-shadow:0 8px 20px rgba(20,184,166,.3);" onclick="slSearch()">検索</button>
+            <button type="button" class="btn-submit" style="margin:0;padding:12px;font-size:15px;width:auto;flex:0 0 auto;background:#e5e7eb;color:#374151;box-shadow:none;" onclick="slClear()">クリア</button>
+          </div>
+          <div id="sl-msg" style="display:none;margin-top:10px;font-size:13px;color:#b91c1c;"></div>
+        </div>
+        <div id="sl-result"></div>
+      </div>
 
       <!-- ===== 忘れ物 ===== -->
       <div id="form-lost">
@@ -2954,11 +3022,90 @@ ${COPY_SUMMARY_JS}
 
   function switchType(t) {
     currentType = t;
-    ['lost', 'accident', 'violation', 'general'].forEach(function(k) {
+    ['lost', 'accident', 'violation', 'general', 'sales'].forEach(function(k) {
       document.getElementById('seg-' + k).className = (k === t) ? 'active' : '';
       document.getElementById('form-' + k).style.display = (k === t) ? 'block' : 'none';
     });
+    // 営業タブは報告ではないので「送信する」は出さない
+    var sb = document.querySelector('.submit-bar'); if (sb) sb.style.display = (t === 'sales') ? 'none' : '';
+    if (t === 'sales' && !document.getElementById('sl-at').value) slSetNow();
   }
+
+  /* ===== 営業タブ: 車番 or 乗務員名 ＋ 日時 → そのシフトの営業履歴（スマタク trip_infos）。運行管理者・統括管理者のみ ===== */
+  var slDriver = null, slTimer = null, slSeq = 0;
+  function slPad(n) { return String(n).padStart(2, '0'); }
+  function slSetNow() { var d = new Date(); document.getElementById('sl-at').value = d.getFullYear() + '-' + slPad(d.getMonth() + 1) + '-' + slPad(d.getDate()) + 'T' + slPad(d.getHours()) + ':' + slPad(d.getMinutes()); }
+  function slOnVehicleInput() { if (document.getElementById('sl-vehicle_no').value.trim()) { slDriver = null; document.getElementById('sl-driver').value = ''; document.getElementById('sl-driver-picked').style.display = 'none'; } }
+  function slDriverDebounce() {
+    clearTimeout(slTimer); slDriver = null; document.getElementById('sl-driver-picked').style.display = 'none';
+    var q = document.getElementById('sl-driver').value.trim(); var sug = document.getElementById('sl-driver-sug');
+    if (!q) { sug.style.display = 'none'; return; }
+    slTimer = setTimeout(function() {
+      var my = ++slSeq;
+      fetch('/api/liff/trips/drivers?q=' + encodeURIComponent(q), { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (my !== slSeq) return;
+          var list = (d && d.results) || [];
+          if (!list.length) { sug.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--sub);">該当する乗務員がいません</div>'; sug.style.display = 'block'; return; }
+          sug.innerHTML = list.map(function(x, i) { return '<div class="emp-item" data-i="' + i + '" style="padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;"><div>' + x.name + '</div><div class="emp-meta" style="font-size:11px;color:var(--sub);">' + x.kana + '</div></div>'; }).join('');
+          sug.style.display = 'block';
+          sug.querySelectorAll('[data-i]').forEach(function(el) { el.onclick = function() { slPickDriver(list[+el.getAttribute('data-i')]); }; });
+        })
+        .catch(function() { sug.style.display = 'none'; });
+    }, 250);
+  }
+  function slPickDriver(d) {
+    slDriver = d; document.getElementById('sl-driver').value = d.name; document.getElementById('sl-driver-sug').style.display = 'none';
+    document.getElementById('sl-vehicle_no').value = '';
+    var p = document.getElementById('sl-driver-picked'); p.textContent = '選択: ' + d.name + (d.kana ? '（' + d.kana + '）' : ''); p.style.display = 'block';
+    slSearch();
+  }
+  function slClear() { slDriver = null; ['sl-vehicle_no', 'sl-driver'].forEach(function(id) { document.getElementById(id).value = ''; }); document.getElementById('sl-driver-picked').style.display = 'none'; document.getElementById('sl-driver-sug').style.display = 'none'; document.getElementById('sl-result').innerHTML = ''; document.getElementById('sl-msg').style.display = 'none'; slSetNow(); }
+  function slFmt(s) { if (!s) return ''; var m = String(s).match(/(\d{2}):(\d{2})$/); return m ? m[1] + ':' + m[2] : s; }
+  function slYen(n) { return n == null ? '' : Number(n).toLocaleString('ja-JP') + '円'; }
+  function slSearch() {
+    var no = document.getElementById('sl-vehicle_no').value.trim(); var at = document.getElementById('sl-at').value;
+    var msg = document.getElementById('sl-msg'); var out = document.getElementById('sl-result');
+    msg.style.display = 'none';
+    if (!no && !slDriver) { msg.textContent = '車番を入れるか、乗務員名を入力して候補から選んでください'; msg.style.display = 'block'; return; }
+    if (no && !/^[0-9]{2,4}$/.test(no)) { msg.textContent = '車番は2〜4桁の数字で入力してください'; msg.style.display = 'block'; return; }
+    out.innerHTML = '<div class="card" style="text-align:center;color:var(--sub);">検索中...</div>';
+    var qs = (no ? 'no=' + encodeURIComponent(no) : 'login=' + encodeURIComponent(slDriver.loginName)) + '&at=' + encodeURIComponent(at || '');
+    fetch('/api/liff/trips/search?' + qs, { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+      .then(function(r) { if (r.status === 403) throw new Error('この機能は運行管理者・統括管理者のみ使えます'); return r.json(); })
+      .then(function(d) {
+        if (!d.ok) { out.innerHTML = ''; msg.textContent = d.notFound ? 'その日時に乗務していた記録が見つかりません（出庫前・公休・別の日時の可能性）' : (d.message || '検索できませんでした'); msg.style.display = 'block'; return; }
+        var head = '<div class="card"><div class="card-title">乗務情報</div>'
+          + '<div style="font-size:16px;font-weight:800;color:var(--ink);">' + (d.driverName || '（氏名不明）') + '　<span style="font-size:13px;color:var(--sub);font-weight:600;">車番 ' + (d.radio || no || '') + (d.shift ? '・' + d.shift : '') + '</span></div>'
+          + '<div style="display:flex;gap:14px;margin-top:8px;font-size:13px;color:var(--ink);"><span>乗車回数 <b>' + (d.tripCount != null ? d.tripCount : d.trips.length) + '</b> 回</span><span>売上 <b>' + slYen(d.totalSales) + '</b></span>' + (d.expectedCloseAt ? '<span>帰庫予定 ' + d.expectedCloseAt.slice(5) + '</span>' : '') + '</div>'
+          + '<div style="font-size:11px;color:var(--sub);margin-top:4px;">検索日時 ' + d.date + ' のシフト・新しい順</div></div>';
+        if (!d.trips.length) { out.innerHTML = head + '<div class="card" style="color:var(--sub);">このシフトの乗降記録はまだありません</div>'; return; }
+        var rows = d.trips.map(function(t, i) {
+          var onA = t.onAddress, outA = t.outAddress;
+          var line1 = '<div style="display:flex;align-items:baseline;gap:8px;"><b style="font-size:15px;">' + slFmt(t.onAt) + (t.outAt ? ' → ' + slFmt(t.outAt) : '') + '</b>'
+            + (t.fare != null ? '<span style="margin-left:auto;font-size:15px;font-weight:800;color:#0f766e;">' + slYen(t.fare) + '</span>' : '') + '</div>';
+          var meta = [t.distanceM != null ? (t.distanceM / 1000).toFixed(1) + 'km' : '', t.driveMin != null ? t.driveMin + '分' : '', t.ticketNumber ? '配車 ' + t.ticketNumber + (t.ticketStatus ? '（' + t.ticketStatus + '）' : '') : '流し'].filter(Boolean).join(' ・ ');
+          var addr = '<div id="sl-addr-' + i + '" style="font-size:12px;color:var(--ink);margin-top:4px;line-height:1.5;">'
+            + (onA || outA ? '乗車: ' + (onA || '—') + '<br>降車: ' + (outA || '—') : (t.onLat != null ? '<span style="color:#1d4ed8;cursor:pointer;" onclick="slLoadAddr(' + i + ')">住所を表示</span>' : '')) + '</div>';
+          return '<div class="card" style="padding:12px 14px;">' + line1 + '<div style="font-size:12px;color:var(--sub);margin-top:2px;">' + meta + '</div>' + addr + '</div>';
+        }).join('');
+        out.innerHTML = head + rows;
+        window.__slTrips = d.trips;
+      })
+      .catch(function(e) { out.innerHTML = ''; msg.textContent = e.message || '通信に失敗しました'; msg.style.display = 'block'; });
+  }
+  function slLoadAddr(i) {
+    var t = (window.__slTrips || [])[i]; var el = document.getElementById('sl-addr-' + i); if (!t || !el) return;
+    el.textContent = '住所を取得中...';
+    var get = function(lat, lon) { return (lat == null) ? Promise.resolve('—') : fetch('/api/liff/trips/address?lat=' + lat + '&lon=' + lon, { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } }).then(function(r) { return r.json(); }).then(function(d) { return d.address || '—'; }).catch(function() { return '—'; }); };
+    Promise.all([get(t.onLat, t.onLon), get(t.outLat, t.outLon)]).then(function(a) { el.innerHTML = '乗車: ' + a[0] + '<br>降車: ' + a[1]; });
+  }
+  // 権限が無い人（乗務員など）には営業タブ自体を出さない
+  (function() {
+    var probe = function() { return fetch('/api/liff/trips/search', { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } }).then(function(r) { if (r.status === 403 || r.status === 401) document.querySelector('.seg').classList.add('no-sales'); }).catch(function() {}); };
+    if (LIFF_READY && LIFF_READY.then) LIFF_READY.then(probe); else setTimeout(probe, 1500);
+  })();
 
   function liSetType(t) {
     liType = t;
