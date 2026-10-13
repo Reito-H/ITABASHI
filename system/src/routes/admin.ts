@@ -10,7 +10,8 @@ import type { Env } from '../auth';
 import type {
   Employee, ShiftEntry, Instructor, InstructorSchedule, ScheduleType, Coach
 } from '../html/shift';
-import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH, SIGNAGE_PUBLIC_PATH } from '../config';
+import { ADMIN_PATH, MONITOR_ACCIDENTS_PATH, SIGNAGE_PUBLIC_PATH, PUZZLE_PATH } from '../config';
+import qrcode from 'qrcode-generator';
 import { isAdminAccount } from '../utils/maintenance';
 import { triggerAccidentsMonitorForceRefresh } from './public_accidents_monitor';
 import { agoLabel } from './admin_line_usage';
@@ -318,6 +319,8 @@ app.get('/', async (c) => {
   // 「当直・出勤班長／引き継ぎシート／対応中の報告／今日のイベント」の4行＋シャトルバス運行ブロック。
   // 点呼行・締切リミット・月次の統計は出さない。
   const wdJa = ['日', '月', '火', '水', '木', '金', '土'][jstNow.getUTCDay()];
+  const puzzleQr = qrcode(0, 'M'); puzzleQr.addData(`https://bentenclub.com${PUZZLE_PATH}`); puzzleQr.make();
+  const puzzleQrSvg = puzzleQr.createSvgTag({ cellSize: 4, margin: 0, scalable: true }).replace(/black/g, '#1a1033').replace(/white/g, '#ffffff');
   const todayLabel = `${jstNow.getUTCFullYear()}年${jstNow.getUTCMonth() + 1}月${jstNow.getUTCDate()}日（${wdJa}）`;
   const nowHHMM = jstNow.toISOString().slice(11, 16);
   const hhmmToMin = (s: string) => { const [h, m] = s.split(':').map(Number); return (h || 0) * 60 + (m || 0); };
@@ -420,6 +423,21 @@ app.get('/', async (c) => {
   .today-search svg { flex:none; color:#94a3b8; }
   .today-search input { flex:1; min-width:0; border:none; outline:none; font-size:15px; padding:2px 0; background:transparent; color:var(--color-text, #141d2c); }
   .today-search input::placeholder { color:#9aa6ba; }
+  /* 隠しコマンド（検索バーに 111111）で出るバジル&ドラゴンズ起動パネル */
+  .bd-panel { display:none; margin:-12px 0 22px; padding:16px 18px; border-radius:16px; color:#fff;
+    background:linear-gradient(135deg,#1a1033,#2b1a5e 55%,#0f2a4a); border:1px solid rgba(255,255,255,0.18); box-shadow:0 10px 30px rgba(43,26,94,.35);
+    animation:bd-in .35s ease; }
+  .bd-panel.on { display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+  @keyframes bd-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+  .bd-qr { width:118px; height:118px; flex:none; background:#fff; border-radius:12px; padding:6px; box-sizing:border-box; }
+  .bd-qr svg { width:100%; height:100%; display:block; }
+  .bd-body { flex:1; min-width:200px; }
+  .bd-title { font-size:17px; font-weight:900; letter-spacing:.04em; margin-bottom:4px; }
+  .bd-sub { font-size:12px; color:rgba(255,255,255,.75); line-height:1.6; margin-bottom:12px; }
+  .bd-btn { display:inline-block; font-size:14px; font-weight:800; color:#1a1033; text-decoration:none; padding:10px 22px; border-radius:999px;
+    background:linear-gradient(135deg,#fde68a,#f59e0b); box-shadow:0 6px 18px rgba(245,158,11,.4); transition:transform .08s; }
+  .bd-btn:hover { transform:translateY(-1px); }
+  .bd-close { background:none; border:1px solid rgba(255,255,255,.35); color:#fff; border-radius:999px; font-size:12px; padding:5px 12px; cursor:pointer; margin-left:10px; }
   /* オペレーション行 */
   .op-list { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
   .op-row {
@@ -554,6 +572,15 @@ app.get('/', async (c) => {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
     <input id="hm-q" type="text" placeholder="社員名・車番・案件ID・ページ名を検索（Enter）" autocomplete="off" />
   </div>
+  <div id="bd-panel" class="bd-panel">
+    <div class="bd-qr">${puzzleQrSvg}</div>
+    <div class="bd-body">
+      <div class="bd-title">バジル&ドラゴンズ</div>
+      <div class="bd-sub">暇つぶし用のパズルゲームです。このブラウザで開くか、QRコードをスマホで読み取ってください。<br>進み具合はブラウザごとに保存されます（スマホとPCは別々）。</div>
+      <a class="bd-btn" href="${PUZZLE_PATH}" target="_blank" rel="noopener">バジドラを開く</a>
+      <button type="button" class="bd-close" onclick="document.getElementById('bd-panel').classList.remove('on')">閉じる</button>
+    </div>
+  </div>
   <script>
   (function(){
     var i = document.getElementById('hm-q');
@@ -567,6 +594,12 @@ app.get('/', async (c) => {
       if (/^[0-9]{2,6}$/.test(s)) return A + '/vehicles?q=' + encodeURIComponent(s);
       return A + '/staff?q=' + encodeURIComponent(s);
     }
+    // 隠しコマンド: 111111 でバジル&ドラゴンズ起動パネルを表示
+    i.addEventListener('input', function(){
+      var p = document.getElementById('bd-panel');
+      if (!p) return;
+      if (i.value.trim() === '111111') { p.classList.add('on'); i.value = ''; i.blur(); }
+    });
     i.addEventListener('keydown', function(e){
       if (e.key !== 'Enter') return;
       e.preventDefault();
