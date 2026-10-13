@@ -208,6 +208,9 @@ app.use('*', async (c, next) => {
   // 乗務員証 証明写真: MediaPipe(WebAssembly)による顔検出とカメラ撮影のため、
   // このページのみ CSP に wasm-unsafe-eval / blob: を、Permissions-Policy にカメラ許可を追加する。
   const isIdPhotosPage = pathname === `/${SECRET}/admin/kacho-mission/id-photos`;
+  // 配車コンソール（km-operator 新UI）: ZENRIN 地図（*.zmaps-api.com）をブラウザから直接読む。
+  // ZENRIN の鍵は Referer 認証なので、このページだけ Referrer-Policy を origin 送信に緩める
+  const isKmConsolePage = pathname === `/${SECRET}/admin/km-console`;
   const isWasmCameraPage = isIdPhotosPage;
   // ITABASHI BATTLE 2: 参加者のスマホ画面・管理者画面・プロジェクター画面。Google Fonts・WebSocket・音声再生を許可し、
   // 管理者画面から同一オリジンでの表示も許可する
@@ -233,6 +236,16 @@ app.use('*', async (c, next) => {
       "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net https://static.cloudflareinsights.com blob:; " +
       "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
       "connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net blob: data:; " +
+      "worker-src 'self' blob:; frame-ancestors 'none';"
+    );
+  } else if (isKmConsolePage) {
+    c.res.headers.set('X-Frame-Options', 'DENY');
+    c.res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.zmaps-api.com blob:; " +
+      "style-src 'self' 'unsafe-inline' https://*.zmaps-api.com; font-src 'self' data: https://*.zmaps-api.com; " +
+      "img-src 'self' data: blob: https://*.zmaps-api.com; connect-src 'self' https://*.zmaps-api.com; " +
       "worker-src 'self' blob:; frame-ancestors 'none';"
     );
   } else if (isBattlePage) {

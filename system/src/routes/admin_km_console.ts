@@ -108,6 +108,24 @@ app.get('/km-console/session', async (c) => {
   });
 });
 
+// ZENRIN 地図の鍵（Referer 認証方式の公開用キー）だけを取り出して返す。
+// 同じ応答に入っている経路探索CGIのID/パスワード類はブラウザへ渡さない。
+app.get('/km-console/zenrin-key', async (c) => {
+  if (!(await isUnlocked(c))) return c.json({ ok: false, message: 'パスワード未入力です' }, 401);
+  const r = await kmApiGet(c.env, c.env.DB, 'tickets/get_init_display_data', '');
+  if (!r.ok) return c.json({ ok: false, message: r.message }, r.status as 502 | 503);
+  try {
+    const body = JSON.parse(r.body) as { companyConfigAdmin?: { companyConfigAdminList?: Array<Record<string, unknown>> } };
+    const cfg = body.companyConfigAdmin?.companyConfigAdminList?.[0] ?? {};
+    const key = typeof cfg.zenrinKey === 'string' ? cfg.zenrinKey : '';
+    const domain = typeof cfg.zenrinDomain === 'string' ? cfg.zenrinDomain : '';
+    if (!key) return c.json({ ok: false, message: 'ZENRIN の地図キーが取得できませんでした' }, 404);
+    return c.json({ ok: true, key, domain }, 200, { 'Cache-Control': 'no-store' });
+  } catch {
+    return c.json({ ok: false, message: 'km-operator の設定応答を解析できませんでした' }, 502);
+  }
+});
+
 app.post('/km-console/relogin', async (c) => {
   await clearSession(c.env.DB);
   const r = await ensureSession(c.env, c.env.DB, true);
@@ -122,6 +140,10 @@ app.all('/km-console/kmx/api/v1/*', async (c) => {
   }
   const url = new URL(c.req.url);
   const apiPath = url.pathname.slice(`${BASE}/kmx/api/v1/`.length);
+  // get_init_display_data は ZENRIN の経路探索CGIのID/パスワード等まで丸ごと含むので素通しにしない（地図鍵だけ /zenrin-key で渡す）
+  if (apiPath === 'tickets/get_init_display_data') {
+    return c.json({ isSuccess: false, msgs: [{ type: 'INVALID', msg: 'この応答は認証情報を含むため配車コンソールでは中継しません' }] }, 403);
+  }
   if (!apiPath || WRITE_API.test(apiPath)) {
     return c.json({ isSuccess: false, msgs: [{ type: 'INVALID', msg: '配車コンソールは読み取り専用です: ' + apiPath }] }, 403);
   }

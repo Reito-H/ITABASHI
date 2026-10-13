@@ -1,10 +1,22 @@
-/* map.js — 地図・範囲検索 と 走行軌跡。Canvas の模式地図(本番は ZENRIN zmaps に差し替え)。
-   座標は 板橋営業所(35.7865,139.6835) を原点とした簡易平面(メートル)。 */
+/* map.js — 地図・範囲検索 と 走行軌跡。
+   内部の座標は 板橋営業所(35.7865,139.6835) を原点とした簡易平面(メートル)で統一。
+   既定は Canvas の模式地図。ホシコン組み込み(window.__KMX_BASE)で ZENRIN の鍵が取れた時は、
+   同じ Canvas を ZENRIN 地図(ZDC.Map)の上に透明レイヤーとして重ね、車両・範囲・軌跡だけを描く
+   (座標変換を ZDC の latlngToPoint / pointToLatLng に差し替えるだけで、検索ロジックはそのまま)。 */
 (function(){
 const $=id=>document.getElementById(id);
 const rr=seeded(99); const pk=a=>a[Math.floor(rr()*a.length)];
 const CSS=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const COL={空車:'#1f8f4e',迎車:'#2b5fb3',実車:'#c0392b',支払:'#b26b00',回送:'#b26b00',休憩:'#7a8699',配車指示中:'#8e44ad'};
+// 簡易平面(m) ⇔ 緯度経度(live.js と同じ式)
+const LAT0=35.7865,LON0=139.6835;
+const toXY=(lat,lon)=>[(+lon-LON0)*Math.cos(LAT0*Math.PI/180)*111320,-(+lat-LAT0)*110540];
+const toLL=(x,y)=>[LAT0-y/110540,LON0+x/(Math.cos(LAT0*Math.PI/180)*111320)];
+// scale(px/m) ⇔ ZENRIN のズームレベル(Web メルカトル: 1px = 156543.03*cos(lat)/2^z m)
+const zoomToScale=(z,lat)=>Math.pow(2,z)/(156543.03*Math.cos(lat*Math.PI/180));
+const scaleToZoom=(sc,lat)=>Math.log2(sc*156543.03*Math.cos(lat*Math.PI/180));
+const llLat=l=>(l&&(l.lat!==undefined?l.lat:l.latitude));const llLng=l=>(l&&(l.lng!==undefined?l.lng:(l.lon!==undefined?l.lon:l.longitude)));
+const ZEN={ready:false,opts:null,failed:null};
 // 車両に位置を付与(半径 6km)
 VEH.forEach(v=>{const a=rr()*Math.PI*2,d=Math.sqrt(rr())*6000;v.x=Math.cos(a)*d;v.y=Math.sin(a)*d;v.heading=rr()*360});
 const STANDS=[['板橋駅',600,-900,3],['成増駅',-3800,-1200,0],['大山駅',1200,-200,2],['高島平駅',-1500,2600,1],['赤羽駅',3500,1800,4],['池袋駅',2600,-3600,6]].map(s=>({name:s[0],x:s[1],y:s[2],n:s[3],shortage:s[3]===0}));
@@ -32,8 +44,44 @@ function makeView(canvas){
   canvas.addEventListener('wheel',e=>{e.preventDefault();v.zoom(e.deltaY<0?1.2:1/1.2)},{passive:false});
   v.zoom=f=>{v.scale=Math.min(1,Math.max(0.015,v.scale*f));v.draw()};
   v.ev=e=>{const r=canvas.getBoundingClientRect();return v.toWorld(e.clientX-r.left,e.clientY-r.top)};
+  v.setView=(x,y,sc)=>{v.cx=x;v.cy=y;v.scale=sc;v.draw()};
+  v.setCapture=()=>{}; // 模式地図は常に Canvas がポインタを受ける
   new ResizeObserver(()=>{v.resize();v.draw()}).observe(canvas);
-  v.resize();return v;
+  v.resize();
+
+  /* ---- ZENRIN 地図への切り替え(ホシコン組み込み時のみ) ----
+     Canvas を透明にして ZDC.Map の上に重ね、座標変換だけ ZDC に委ねる。cx/cy/scale は地図の中心・ズームから算出する accessor になる */
+  v.attachZenrin=(mapOptions)=>{
+    if(v.map||typeof ZDC==='undefined')return;
+    const box=canvas.parentElement;box.classList.add('zenrin');const note=box.querySelector('.mapnote');if(note)note.remove();
+    const div=document.createElement('div');div.className='zmap';div.style.cssText='position:absolute;inset:0;';box.insertBefore(div,canvas);
+    const ll=toLL(v.cx,v.cy);const z0=Math.max(3,Math.min(22,scaleToZoom(v.scale,ll[0])));
+    const opts=Object.assign({},mapOptions||{},{center:new ZDC.LatLng(ll[0],ll[1]),zoom:z0,mouseWheelReverseZoom:false});
+    let map;
+    try{map=new ZDC.Map(div,opts,()=>{
+      v.map=map;
+      try{map.addControl(new ZDC.ZoomButton('bottom-right'));map.addControl(new ZDC.ScaleBar('bottom-left'))}catch(e){}
+      // 座標変換を ZDC に差し替え
+      v.toPx=(x,y)=>{const l=toLL(x,y);const p=map.latlngToPoint(new ZDC.LatLng(l[0],l[1]));return [p.x,p.y]};
+      v.toWorld=(px,py)=>{const l=map.pointToLatLng(new ZDC.Point(px,py));if(!l){const c=map.getCenter();const w=toXY(llLat(c),llLng(c));return [w[0]+(px-v.w/2)/v.scale,w[1]+(py-v.h/2)/v.scale]}return toXY(llLat(l),llLng(l))};
+      Object.defineProperty(v,'cx',{get(){const c=map.getCenter();return toXY(llLat(c),llLng(c))[0]},set(x){const c=map.getCenter();const w=toXY(llLat(c),llLng(c));const l=toLL(x,w[1]);map.setCenter(new ZDC.LatLng(l[0],l[1]))},configurable:true});
+      Object.defineProperty(v,'cy',{get(){const c=map.getCenter();return toXY(llLat(c),llLng(c))[1]},set(y){const c=map.getCenter();const w=toXY(llLat(c),llLng(c));const l=toLL(w[0],y);map.setCenter(new ZDC.LatLng(l[0],l[1]))},configurable:true});
+      Object.defineProperty(v,'scale',{get(){const c=map.getCenter();return zoomToScale(map.getZoom(),llLat(c))},set(sc){const c=map.getCenter();map.setZoom(Math.max(3,Math.min(22,scaleToZoom(sc,llLat(c)))))},configurable:true});
+      v.setView=(x,y,sc)=>{const l=toLL(x,y);map.setCenter(new ZDC.LatLng(l[0],l[1]));map.setZoom(Math.max(3,Math.min(22,scaleToZoom(sc,l[0]))));v.draw()};
+      v.zoom=f=>{map.setZoom(Math.max(3,Math.min(22,map.getZoom()+Math.log2(f))));v.draw()};
+      v.base=()=>{const c=v.ctx;c.setTransform(v.dpr,0,0,v.dpr,0,0);c.clearRect(0,0,v.w,v.h)};
+      const origResize=v.resize;v.resize=()=>{origResize();try{map.refreshSize()}catch(e){}};
+      // 矩形指定のときだけ Canvas がドラッグを受け取る(それ以外は地図のパン/ズーム)
+      v.setCapture=on=>{canvas.style.pointerEvents=on?'auto':'none'};v.setCapture(false);
+      // 地図のクリック → 従来の onClick(クライアント座標に変換)
+      map.addEventListener('click',e=>{if(!v.onClick||!e.latlng)return;const p=map.latlngToPoint(e.latlng);const r=canvas.getBoundingClientRect();v.onClick({clientX:r.left+p.x,clientY:r.top+p.y})});
+      const redraw=()=>v.draw();['idle','extentchange','center_changed','zoom_changed','resize'].forEach(n=>map.addEventListener(n,redraw));
+      map.addEventListener('idle',()=>{if(v.onIdle)v.onIdle()});
+      v.resize();v.draw();
+    },()=>{toast('ZENRIN 地図の生成に失敗しました。模式地図で表示します');div.remove();box.classList.remove('zenrin')})}
+    catch(e){toast('ZENRIN 地図を初期化できません: '+e.message);div.remove();box.classList.remove('zenrin')}
+  };
+  return v;
 }
 function drawVehicle(c,v,p,sel){c.save();c.translate(p[0],p[1]);c.rotate(v.heading*Math.PI/180);c.fillStyle=COL[v.status]||'#888';c.beginPath();c.moveTo(0,-7);c.lineTo(5,6);c.lineTo(-5,6);c.closePath();c.fill();if(sel){c.strokeStyle=CSS('--fg');c.lineWidth=2;c.stroke()}c.restore()}
 
@@ -80,7 +128,7 @@ function runSearch(){const st=statuses();const g=$('mapGrade').value;
   renderList();mv.draw()}
 function renderList(){$('vlist').innerHTML=S.result.map(v=>`<div class="v ${S.sel.has(v.radio)?'sel':''}" data-r="${v.radio}"><input type="checkbox" ${S.sel.has(v.radio)?'checked':''}><div><b>${v.radio}</b> ${v.driver}<br><small>${v.grade} / ${Math.round(v.dist)} m / 約${v.eta}分</small></div><span class="st ${({空車:'done',迎車:'go',実車:'ng'})[v.status]||''}">${v.status}</span></div>`).join('')||'<div class="empty">地図上で範囲を指定してください</div>'}
 $('vlist').addEventListener('click',e=>{const d=e.target.closest('.v');if(!d)return;S.sel.has(d.dataset.r)?S.sel.delete(d.dataset.r):S.sel.add(d.dataset.r);renderList();mv.draw()});
-$('mapMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;[...e.currentTarget.children].forEach(x=>x.setAttribute('aria-pressed',x===b));S.mode=b.dataset.m;S.center=null;S.rect=null;S.poly=[];S.result=[];renderList();mv.draw();
+$('mapMode').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;[...e.currentTarget.children].forEach(x=>x.setAttribute('aria-pressed',x===b));S.mode=b.dataset.m;S.center=null;S.rect=null;S.poly=[];S.result=[];renderList();mv.setCapture(S.mode==='rect');mv.draw();
   $('mapHint').textContent={radius:'地図をクリックして中心を指定',rect:'地図上でドラッグして矩形を指定',poly:'地図を順にクリックして頂点を指定'}[S.mode]});
 ['mapStatus','mapLayers'].forEach(id=>$(id).addEventListener('click',()=>setTimeout(()=>{S.result.length||S.center||S.rect||S.poly.length?runSearch():mv.draw()},0)));
 ['mapRadius','mapMinutes','mapGrade'].forEach(id=>$(id).addEventListener('input',()=>{if(S.center||S.rect||S.poly.length)runSearch()}));
@@ -88,8 +136,8 @@ $('mapSearch').addEventListener('click',()=>{if(!(S.center||S.rect||S.poly.lengt
 $('mapClear').addEventListener('click',()=>{S.center=null;S.rect=null;S.poly=[];S.result=[];S.sel.clear();renderList();mv.draw()});
 $('mapAll').addEventListener('click',()=>{S.showAll=!S.showAll;$('mapAll').textContent=S.showAll?'全車両表示':'該当車両のみ';mv.draw()});
 $('mapStyle').addEventListener('click',()=>{document.documentElement.toggleAttribute('data-theme');document.documentElement.setAttribute('data-theme',document.documentElement.hasAttribute('data-theme')?'dark':'light');mv.draw();toast('地図デザインを切り替えました(本番ではZENRINの地図スタイル切替)')});
-$('mapRadio').addEventListener('change',()=>{const v=VEH.find(x=>x.radio===$('mapRadio').value.trim());if(!v){toast('該当する無線番号がありません');return}mv.cx=v.x;mv.cy=v.y;mv.scale=0.15;S.sel.add(v.radio);renderList();mv.draw()});
-$('zoomIn').addEventListener('click',()=>mv.zoom(1.3));$('zoomOut').addEventListener('click',()=>mv.zoom(1/1.3));$('zoomFit').addEventListener('click',()=>{mv.cx=0;mv.cy=0;mv.scale=0.06;mv.draw()});
+$('mapRadio').addEventListener('change',()=>{const v=VEH.find(x=>x.radio===$('mapRadio').value.trim());if(!v){toast('該当する無線番号がありません');return}S.sel.add(v.radio);renderList();mv.setView(v.x,v.y,0.15)});
+$('zoomIn').addEventListener('click',()=>mv.zoom(1.3));$('zoomOut').addEventListener('click',()=>mv.zoom(1/1.3));$('zoomFit').addEventListener('click',()=>mv.setView(0,0,0.06));
 $('mapDispatch').addEventListener('click',()=>{if(!S.sel.size){toast('車両を選択してください');return}modal('配車依頼',`<p>選択した ${S.sel.size} 台に配車依頼を送ります。</p><div class="chips">${[...S.sel].map(r=>`<span class="chip" aria-pressed="true">${r}</span>`).join('')}</div>`+`<div class="row"><div class="f"><label>伝票</label><input value="新規伝票(お迎え: ${document.getElementById('from').value})" readonly></div><div class="f"><label>了解待ち秒数</label><input type="number" value="8"></div></div>`,[{label:'依頼する',primary:true,onClick:()=>toast('配車依頼を送信しました')}])});
 renderList();
 
@@ -102,8 +150,8 @@ function genPath(){const from=new Date($('pathFrom').value),to=new Date($('pathT
   const segs=[];PATH.forEach((p,i)=>{if(!i||p.status!==PATH[i-1].status)segs.push({status:p.status,from:p.t,to:p.t,km:0});const s=segs[segs.length-1];s.to=p.t;if(i)s.km+=Math.hypot(p.x-PATH[i-1].x,p.y-PATH[i-1].y)/1000});
   $('pathCnt').textContent=segs.length;$('pathTook').textContent=`${PATH.length} 点`;
   $('pathSteps').innerHTML=segs.map(s=>`<div class="step"><time>${fmt(s.from).slice(11)}–${fmt(s.to).slice(11)}</time><div><span class="st ${({実車:'ng',迎車:'go',空車:'done'})[s.status]||''}">${s.status}</span> ${s.km.toFixed(1)} km</div></div>`).join('');
-  if(PATH.length){pv.cx=PATH.reduce((a,p)=>a+p.x,0)/PATH.length;pv.cy=PATH.reduce((a,p)=>a+p.y,0)/PATH.length;const ex=Math.max(...PATH.map(p=>Math.abs(p.x-pv.cx)),...PATH.map(p=>Math.abs(p.y-pv.cy)));pv.scale=Math.min(0.5,Math.max(0.015,(Math.min(pv.w,pv.h)/2-30)/ex))}
-  pv.draw()}
+  fitPath();pv.draw()}
+function fitPath(){if(!PATH.length)return;const cx=PATH.reduce((a,p)=>a+p.x,0)/PATH.length,cy=PATH.reduce((a,p)=>a+p.y,0)/PATH.length;const ex=Math.max(1,...PATH.map(p=>Math.abs(p.x-cx)),...PATH.map(p=>Math.abs(p.y-cy)));pv.setView(cx,cy,Math.min(0.5,Math.max(0.015,(Math.min(pv.w,pv.h)/2-30)/ex)))}
 pv.draw=()=>{pv.base();const c=pv.ctx;const opts=[...document.querySelectorAll('#pathOpts .chip[aria-pressed="true"]')].map(b=>b.dataset.v);
   c.lineWidth=3;c.lineCap='round';for(let i=1;i<PATH.length;i++){const a=PATH[i-1],b=PATH[i];c.strokeStyle=opts.includes('speed')?(b.speed<15?'#c0392b':b.speed<30?'#b26b00':'#1f8f4e'):COL[b.status]||'#888';c.beginPath();c.moveTo(...pv.toPx(a.x,a.y));c.lineTo(...pv.toPx(b.x,b.y));c.stroke()}
   PATH.forEach((p,i)=>{const q=pv.toPx(p.x,p.y);if(opts.includes('status')&&(i===0||p.status!==PATH[i-1].status)){c.fillStyle=COL[p.status]||'#888';c.beginPath();c.arc(q[0],q[1],5,0,7);c.fill();c.strokeStyle=CSS('--surface');c.lineWidth=1.5;c.stroke();c.fillStyle=CSS('--fg');c.font='10px '+CSS('--mono');c.fillText(fmt(p.t).slice(11)+' '+p.status,q[0]+7,q[1]+3)}
@@ -123,16 +171,36 @@ async function liveLoadMap(){
     $('mapHint').textContent=`表示範囲内 ${VEH.length} 台 / 待機場所 ${STANDS.length}`;if(S.center||S.rect||S.poly.length>2)runSearch();else mv.draw()}
   catch(e){$('mapHint').textContent='取得エラー: '+e.message}
 }
-{let t;const sched=()=>{if(!window.LIVE)return;clearTimeout(t);t=setTimeout(liveLoadMap,500)};mv.canvas.addEventListener('pointerup',sched);mv.canvas.addEventListener('wheel',sched);$('zoomIn').addEventListener('click',sched);$('zoomOut').addEventListener('click',sched);$('zoomFit').addEventListener('click',sched);setInterval(()=>{if(window.LIVE&&!$('s-map').hidden)liveLoadMap()},20000);
+{let t;const sched=()=>{if(!window.LIVE)return;clearTimeout(t);t=setTimeout(liveLoadMap,500)};mv.canvas.addEventListener('pointerup',sched);mv.canvas.addEventListener('wheel',sched);mv.onIdle=sched;$('zoomIn').addEventListener('click',sched);$('zoomOut').addEventListener('click',sched);$('zoomFit').addEventListener('click',sched);setInterval(()=>{if(window.LIVE&&!$('s-map').hidden)liveLoadMap()},20000);
   const origGen=genPath;genPath=async function(){if(!window.LIVE)return origGen();const t0=performance.now();$('pathTook').textContent='取得中…';
     try{PATH=await LIVE.path($('pathRadio').value.trim(),$('pathFrom').value,$('pathTo').value);
       const kind=[...$('pathKind').children].findIndex(b=>b.getAttribute('aria-pressed')==='true');if(kind===1)PATH=PATH.filter(p=>p.status==='実車');if(kind===2)PATH=PATH.filter(p=>p.status==='空車');
       const segs=[];PATH.forEach((p,i)=>{if(!i||p.status!==PATH[i-1].status)segs.push({status:p.status,from:p.t,to:p.t,km:0});const s=segs[segs.length-1];s.to=p.t;if(i)s.km+=Math.hypot(p.x-PATH[i-1].x,p.y-PATH[i-1].y)/1000});
       $('pathCnt').textContent=segs.length;$('pathTook').textContent=`${PATH.length} 点 / ${Math.round(performance.now()-t0)} ms${PATH[0]?' / '+PATH[0].driver:''}`;
       $('pathSteps').innerHTML=segs.map(s=>`<div class="step"><time>${fmt(s.from).slice(11)}–${fmt(s.to).slice(11)}</time><div><span class="st ${({実車:'ng',迎車:'go',空車:'done'})[s.status]||''}">${s.status}</span> ${s.km.toFixed(1)} km</div></div>`).join('')||'<div class="hint">該当する走行データがありません</div>';
-      if(PATH.length){pv.cx=PATH.reduce((a,p)=>a+p.x,0)/PATH.length;pv.cy=PATH.reduce((a,p)=>a+p.y,0)/PATH.length;const ex=Math.max(1,...PATH.map(p=>Math.abs(p.x-pv.cx)),...PATH.map(p=>Math.abs(p.y-pv.cy)));pv.scale=Math.min(0.5,Math.max(0.015,(Math.min(pv.w,pv.h)/2-30)/ex))}
-      pv.draw()}catch(e){$('pathTook').textContent='エラー: '+e.message;toast(e.message)}}}
+      fitPath();pv.draw()}catch(e){$('pathTook').textContent='エラー: '+e.message;toast(e.message)}}}
 
-document.addEventListener('screen',e=>{const r=e.detail.route;if(r==='map'){mv.resize();mv.draw();liveLoadMap()}if(r==='path'){pv.resize();PATH.length?pv.draw():genPath()}});
+function ensureZenrin(v){if(ZEN.ready&&!v.map)v.attachZenrin(ZEN.opts);else if(v.map){try{v.map.refreshSize()}catch(e){}}}
+document.addEventListener('screen',e=>{const r=e.detail.route;if(r==='map'){mv.resize();ensureZenrin(mv);mv.draw();liveLoadMap()}if(r==='path'){pv.resize();ensureZenrin(pv);PATH.length?pv.draw():genPath()}});
 if((location.hash||'').includes('map')){mv.resize();mv.draw()}
+
+/* ---------- ZENRIN 地図(ホシコン組み込み時) ----------
+   鍵はホシコンの中継 API(<base>/zenrin-key)から取得(km-operator の設定から地図鍵だけを取り出したもの)。
+   Referer 認証なので、ZENRIN 側でホシコンのドメインが許可されていない場合は失敗 → 模式地図のまま。 */
+(async function initZenrin(){
+  const HB=window.__KMX_BASE;if(!HB)return;
+  try{
+    const r=await fetch(HB+'/zenrin-key',{credentials:'include'});const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok||!j.key)throw new Error(j.message||'ZENRIN の地図キーを取得できません');
+    // ローダー本体は常に js.zmaps-api.com から(km-operator 設定の zenrinDomain は maps_loader 側のホストなのでここでは使わない)
+    const host='https://js.zmaps-api.com';
+    await new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=host+'/zma_loader.js?auth=referer&key='+encodeURIComponent(j.key);sc.onload=res;sc.onerror=()=>rej(new Error('ZENRIN のローダーを読み込めません'));document.head.appendChild(sc)});
+    if(typeof ZMALoader==='undefined')throw new Error('ZENRIN のローダーが初期化されません');
+    ZMALoader.setOnLoad((opts,err)=>{
+      if(err){ZEN.failed=err;console.warn('ZENRIN auth failed',err);toast('ZENRIN 地図を利用できません(このドメインが ZENRIN 側で許可されていない可能性)。模式地図で表示します');return}
+      ZEN.ready=true;ZEN.opts=opts;
+      if(!$('s-map').hidden)ensureZenrin(mv);if(!$('s-path').hidden)ensureZenrin(pv);
+    });
+  }catch(e){ZEN.failed=e;console.warn(e);toast(e.message+'。模式地図で表示します')}
+})();
 })();
