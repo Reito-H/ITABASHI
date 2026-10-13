@@ -72,6 +72,8 @@ export type Env = {
   // ※KM_OPERATOR_LOGIN_ID / KM_OPERATOR_PASSWORD は配車コンソールの自動ログインで Worker 側でも使うようになった。
   KM_RELAY_ACCESS_ID?: string;
   KM_RELAY_ACCESS_SECRET?: string;
+  // 配車コンソールを開くときの簡易パスワード（未設定なら routes/admin_km_console.ts の既定値）
+  KM_CONSOLE_PASSWORD?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回
