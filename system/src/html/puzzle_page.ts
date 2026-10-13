@@ -59,7 +59,7 @@ function orbSymbol(id: string, hi: string, mid: string, deep: string, icon: stri
     <circle cx="50" cy="50" r="48" fill="url(#og-${id})"/>
     <circle cx="50" cy="50" r="48" fill="url(#or-${id})"/>
     <circle cx="50" cy="58" r="30" fill="url(#oc-${id})"/>
-    <g fill="#fff" opacity="0.92" transform="translate(50 52) scale(1.55) translate(-12 -12)" filter="url(#orb-glow)">${icon}</g>
+    <g fill="#fff" opacity="0.95" transform="translate(50 53) scale(2.05) translate(-12 -12)" filter="url(#orb-glow)">${icon}</g>
     <ellipse cx="36" cy="27" rx="19" ry="11" fill="url(#ohl-${id})" transform="rotate(-18 36 27)"/>
     <circle cx="28" cy="24" r="4.5" fill="#fff" opacity="0.95"/>
     <ellipse cx="62" cy="80" rx="18" ry="6" fill="#fff" opacity="0.14"/>
@@ -74,7 +74,7 @@ const ORB_ICONS: Record<string, string> = {
   heart: '<path d="M12 21s-7-4.5-9.5-9C.5 8 3 4 7 4c2 0 3.5 1 5 3 1.5-2 3-3 5-3 4 0 6.5 4 4.5 8C19 16.5 12 21 12 21z"/>',
 };
 const ORB_DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-  <filter id="orb-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="0.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="orb-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.1" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
   ${orbSymbol('fire', '#ffd1d1', '#ff4d55', '#8a0f1c', ORB_ICONS.fire)}
   ${orbSymbol('water', '#d2ecff', '#2f9bff', '#0b3f9e', ORB_ICONS.water)}
   ${orbSymbol('wood', '#d6ffe0', '#2fd06a', '#0f5a2a', ORB_ICONS.wood)}
