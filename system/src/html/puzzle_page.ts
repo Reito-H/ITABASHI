@@ -48,6 +48,42 @@ const BASIL_SVG = `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"
   <g fill="#fff"><circle cx="20" cy="30" r="2"><animate attributeName="opacity" values="0;1;0" dur="1.6s" repeatCount="indefinite"/></circle><circle cx="100" cy="24" r="1.6"><animate attributeName="opacity" values="1;0;1" dur="2s" repeatCount="indefinite"/></circle><circle cx="96" cy="96" r="2"><animate attributeName="opacity" values="0;1;0" dur="1.3s" repeatCount="indefinite"/></circle></g>
 </svg>`;
 
+
+// 玉（オーブ）: 水晶球風。多層の放射グラデ＋ガラスのハイライト＋内側の光＋属性シンボル。各マスは <use> で参照する
+function orbSymbol(id: string, hi: string, mid: string, deep: string, icon: string): string {
+  return `<symbol id="orb-${id}" viewBox="0 0 100 100">
+    <radialGradient id="og-${id}" cx="38%" cy="32%" r="72%"><stop offset="0" stop-color="${hi}"/><stop offset="0.38" stop-color="${mid}"/><stop offset="0.82" stop-color="${deep}"/><stop offset="1" stop-color="#000" stop-opacity="0.85"/></radialGradient>
+    <radialGradient id="oc-${id}" cx="50%" cy="58%" r="40%"><stop offset="0" stop-color="#fff" stop-opacity="0.55"/><stop offset="0.5" stop-color="${hi}" stop-opacity="0.35"/><stop offset="1" stop-color="${mid}" stop-opacity="0"/></radialGradient>
+    <radialGradient id="or-${id}" cx="50%" cy="50%" r="50%"><stop offset="0.78" stop-color="#fff" stop-opacity="0"/><stop offset="0.92" stop-color="${hi}" stop-opacity="0.55"/><stop offset="1" stop-color="#fff" stop-opacity="0.15"/></radialGradient>
+    <linearGradient id="ohl-${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <circle cx="50" cy="50" r="48" fill="url(#og-${id})"/>
+    <circle cx="50" cy="50" r="48" fill="url(#or-${id})"/>
+    <circle cx="50" cy="58" r="30" fill="url(#oc-${id})"/>
+    <g fill="#fff" opacity="0.92" transform="translate(50 52) scale(1.55) translate(-12 -12)" filter="url(#orb-glow)">${icon}</g>
+    <ellipse cx="36" cy="27" rx="19" ry="11" fill="url(#ohl-${id})" transform="rotate(-18 36 27)"/>
+    <circle cx="28" cy="24" r="4.5" fill="#fff" opacity="0.95"/>
+    <ellipse cx="62" cy="80" rx="18" ry="6" fill="#fff" opacity="0.14"/>
+  </symbol>`;
+}
+const ORB_ICONS: Record<string, string> = {
+  fire: '<path d="M12 2c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4-.2 2 .6 3 1.5 3 1.2 0 2-1.2 1.5-3C11.3 6 12 4 12 2z"/>',
+  water: '<path d="M12 2.5C9 7 6 10 6 14a6 6 0 0 0 12 0c0-4-3-7-6-11.5z"/><ellipse cx="9.3" cy="14.5" rx="1.4" ry="2.4" fill="#000" opacity="0.18"/>',
+  wood: '<path d="M20 4C10 4 4 10 4 20c10 0 16-6 16-16zM6.5 17.5l9-9" stroke="#1b5e20" stroke-width="1.2" fill="#fff"/>',
+  light: '<path d="M12 1.5l2.2 6.3 6.3 2.2-6.3 2.2L12 18.5l-2.2-6.3-6.3-2.2 6.3-2.2z"/><circle cx="12" cy="10" r="2.2" opacity="0.9"/>',
+  dark: '<path d="M15.5 3a9 9 0 1 0 6 15.5A8 8 0 0 1 15.5 3z"/><circle cx="18" cy="6" r="1.2" opacity="0.8"/>',
+  heart: '<path d="M12 21s-7-4.5-9.5-9C.5 8 3 4 7 4c2 0 3.5 1 5 3 1.5-2 3-3 5-3 4 0 6.5 4 4.5 8C19 16.5 12 21 12 21z"/>',
+};
+const ORB_DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <filter id="orb-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="0.6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  ${orbSymbol('fire', '#ffd1d1', '#ff4d55', '#8a0f1c', ORB_ICONS.fire)}
+  ${orbSymbol('water', '#d2ecff', '#2f9bff', '#0b3f9e', ORB_ICONS.water)}
+  ${orbSymbol('wood', '#d6ffe0', '#2fd06a', '#0f5a2a', ORB_ICONS.wood)}
+  ${orbSymbol('light', '#fff9c9', '#ffd21f', '#9a6a00', ORB_ICONS.light)}
+  ${orbSymbol('dark', '#ead9ff', '#a855f7', '#3b0a7a', ORB_ICONS.dark)}
+  ${orbSymbol('heart', '#ffd9ea', '#ff5fa8', '#8a0f4a', ORB_ICONS.heart)}
+</defs></svg>`;
+const orbUse = (t: string) => `<svg class="orb"><use href="#orb-${t}"/></svg>`;
+
 export function puzzlePageHtml(): string {
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -232,18 +268,18 @@ export function puzzlePageHtml(): string {
   .teamhp { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #cbd5e1; margin: 4px 0 6px; }
   .teamhp b { color: #bbf7d0; min-width: 72px; text-align: right; font-size: 13px; }
 
-  #board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; touch-action: none; user-select: none; padding: 8px; border-radius: 18px;
-    background: linear-gradient(180deg, rgba(15,23,42,0.9), rgba(2,6,23,0.95)); border: 1px solid var(--line); box-shadow: inset 0 2px 12px rgba(0,0,0,0.6), 0 -8px 30px rgba(0,0,0,0.3); position: relative; }
-  .tile { aspect-ratio: 1; border-radius: 50%; position: relative; transition: transform 0.12s; box-shadow: inset 0 -6px 10px rgba(0,0,0,0.35), inset 0 2px 4px rgba(255,255,255,0.25), 0 4px 8px rgba(0,0,0,0.5); }
-  .tile::after { content: ''; position: absolute; left: 22%; top: 12%; width: 32%; height: 22%; border-radius: 50%; background: rgba(255,255,255,0.55); filter: blur(1px); }
-  .tile.fire { background: radial-gradient(circle at 40% 35%, #ffb3b5, var(--fire) 55%, #b91c1c); }
-  .tile.water { background: radial-gradient(circle at 40% 35%, #b6ddff, var(--water) 55%, #1d4ed8); }
-  .tile.wood { background: radial-gradient(circle at 40% 35%, #b8f5cf, var(--wood) 55%, #15803d); }
-  .tile.light { background: radial-gradient(circle at 40% 35%, #fff4b8, var(--light) 55%, #ca8a04); }
-  .tile.dark { background: radial-gradient(circle at 40% 35%, #e3c6ff, var(--dark) 55%, #6d28d9); }
-  .tile.heart { background: radial-gradient(circle at 40% 35%, #ffc4dd, var(--heart) 55%, #be185d); }
-  .tile.heart::before { content: '♥'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; opacity: 0.9; font-size: 22px; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
-  .tile.pick { transform: scale(1.18); box-shadow: 0 0 0 3px #fff, 0 0 18px rgba(255,255,255,0.8), 0 4px 8px rgba(0,0,0,0.5); z-index: 2; }
+  #board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; touch-action: none; user-select: none; padding: 10px; border-radius: 20px;
+    background: radial-gradient(120% 80% at 50% 0%, rgba(99,102,241,0.18), transparent 60%), linear-gradient(180deg, rgba(15,23,42,0.95), rgba(2,6,23,0.98));
+    border: 1px solid rgba(148,163,184,0.25); box-shadow: inset 0 2px 14px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.04), 0 -10px 34px rgba(0,0,0,0.35); position: relative; }
+  #board::before { content: ''; position: absolute; inset: 0; border-radius: 20px; pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px); background-size: calc((100% - 20px) / 6 + 1px) calc((100% - 20px) / 5 + 1px); background-position: 10px 10px; }
+  .tile { aspect-ratio: 1; border-radius: 50%; position: relative; transition: transform 0.12s; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.6)); }
+  .tile .orb { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .tile::after { content: ''; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+    background: linear-gradient(115deg, transparent 38%, rgba(255,255,255,0.35) 48%, rgba(255,255,255,0) 58%); background-size: 260% 100%; background-position: 120% 0; animation: sheen 5s ease-in-out infinite; }
+  @keyframes sheen { 0%, 60% { background-position: 120% 0; } 85%, 100% { background-position: -40% 0; } }
+  .tile:nth-child(3n)::after { animation-delay: -1.7s; } .tile:nth-child(3n+1)::after { animation-delay: -3.4s; }
+  .tile.pick { transform: scale(1.18); filter: drop-shadow(0 0 10px #fff) drop-shadow(0 0 18px rgba(255,255,255,0.9)); z-index: 2; }
   .tile.gone { animation: burst 0.3s forwards; }
   @keyframes burst { 40% { transform: scale(1.25); filter: brightness(2); } 100% { transform: scale(0); opacity: 0; } }
   .tile.new { animation: drop 0.3s cubic-bezier(.2,.8,.2,1.2); }
@@ -327,6 +363,7 @@ export function puzzlePageHtml(): string {
 </style>
 </head>
 <body>
+${ORB_DEFS}
 <div class="wrap">
   <div class="logo" id="logo">${LOGO_SVG}<div class="s">PUZZLE &amp; TAXI BATTLE</div></div>
 
@@ -640,13 +677,13 @@ export function puzzlePageHtml(): string {
   // ---------- チュートリアル（バジルが案内） ----------
   var TUT = [
     { h: 'となりの玉と入れかえよう', say: 'わたしはバジル。あそびかたを教えるね！', p: '玉を<b>となりの玉の方へスワイプ</b>（または2回タップ）すると入れかわります。<br>同じ色が<b>3つ以上</b>ならぶと消えます。',
-      demo: '<div class="tut-demo d1"><div class="tile fire r"></div><div class="tile fire r"></div><div class="tile water a"></div><div class="tile fire b r"></div><div class="tile wood"></div></div>' },
+      demo: '<div class="tut-demo d1"><div class="tile fire r">${orbUse('fire')}</div><div class="tile fire r">${orbUse('fire')}</div><div class="tile water a">${orbUse('water')}</div><div class="tile fire b r">${orbUse('fire')}</div><div class="tile wood">${orbUse('wood')}</div></div>' },
     { h: '色 ＝ 味方の属性', say: '消した色と同じ属性の味方が攻撃するよ。', p: 'その色の味方がいないと攻撃できないので、チームの色はばらけさせましょう。',
-      demo: '<div class="tut-demo d2"><div class="tile fire"></div><div class="arrow">→</div><div class="ph">火</div><div class="arrow">→</div><div class="foe">敵</div></div><div class="tut-badges"><span>火は木に強い</span><span>木は水に強い</span><span>水は火に強い</span><span>光と闇はおたがいに強い</span></div>' },
+      demo: '<div class="tut-demo d2"><div class="tile fire">${orbUse('fire')}</div><div class="arrow">→</div><div class="ph">火</div><div class="arrow">→</div><div class="foe">敵</div></div><div class="tut-badges"><span>火は木に強い</span><span>木は水に強い</span><span>水は火に強い</span><span>光と闇はおたがいに強い</span></div>' },
     { h: 'コンボでダメージアップ', say: '続けて消えると気持ちいいよね！', p: '消えたあとに上から玉が落ちてきて、<b>続けて消えるとコンボ</b>。コンボが増えるほどダメージが大きくなります。',
       demo: '<div class="tut-demo"><span style="font-family:Rubik,sans-serif;font-size:30px;font-weight:900;color:#fff;text-shadow:0 0 14px #fbbf24;">3 COMBO!</span></div>' },
     { h: 'ハートで回復・敵の反撃に注意', say: '「あと1手」が出たら身構えて！', p: '<b>ピンクのハート</b>を消すとチームのHPが回復。<br>敵の「あと○手」が0になると攻撃してきます。チームHPが0になると負け。',
-      demo: '<div class="tut-demo"><div class="tile heart"></div><span class="cnt soon" style="font-size:14px;">あと1手</span></div>' },
+      demo: '<div class="tut-demo"><div class="tile heart">${orbUse('heart')}</div><span class="cnt soon" style="font-size:14px;">あと1手</span></div>' },
     { h: 'ガチャと育成', say: 'バトルでコインと経験値がもらえるよ。', p: 'コインで<b>ガチャ</b>を引くと新しい味方が仲間に。<b>育成</b>でレベルを上げるとHPと攻撃がアップ。負けても強くなって再挑戦！',
       demo: '<div class="tut-demo"><span class="coin" style="font-size:18px;">500</span><span style="font-size:22px;color:#fbbf24;margin:0 8px;">→</span><div class="capsule" style="width:48px;height:48px;"></div></div>' },
     { h: '敵を順番にたおそう', say: 'ボスの先に、何かが待っている…。', p: 'ステージの敵をぜんぶたおすと<b>全クリア</b>。たおした数・残りHP・手数でスコアが決まり、ランキングにのります。',
@@ -808,7 +845,7 @@ export function puzzlePageHtml(): string {
   }
   function renderBoard(anim){
     var html = '';
-    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) html += '<div class="tile ' + G.board[y][x] + (anim ? ' new' : '') + '" data-x="' + x + '" data-y="' + y + '"' + (anim ? ' style="animation-delay:' + ((H - y) * 40) + 'ms"' : '') + '></div>';
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) html += '<div class="tile ' + G.board[y][x] + (anim ? ' new' : '') + '" data-x="' + x + '" data-y="' + y + '"' + (anim ? ' style="animation-delay:' + ((H - y) * 40) + 'ms"' : '') + '><svg class="orb"><use href="#orb-' + G.board[y][x] + '"></use></svg></div>';
     $('board').innerHTML = html + '<div class="combo" id="combo"></div>';
   }
   function tileAt(x, y){ return $('board').children[y * W + x]; }
