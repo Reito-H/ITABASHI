@@ -445,6 +445,14 @@ export function puzzlePageHtml(): string {
   .zzz::after { content: 'Zzz'; position: absolute; right: -6px; top: -14px; font-family: 'Rubik', sans-serif; font-weight: 900; color: #e9d5ff; text-shadow: 0 0 10px #a855f7; animation: zzz 1.4s ease-in-out infinite; z-index: 4; }
   @keyframes zzz { 0% { transform: translateY(0) scale(0.8); opacity: 0.3; } 50% { opacity: 1; } 100% { transform: translateY(-16px) scale(1.2); opacity: 0; } }
 
+  /* コンボ演出 */
+  #board.bump { animation: bump 0.18s ease-out; }
+  @keyframes bump { 50% { transform: scale(1.02); } }
+  .combo.on { animation: combo 0.45s cubic-bezier(.2,.9,.3,1.4); }
+  .float span.combo-big { font-size: 40px; letter-spacing: 0.04em; background: linear-gradient(180deg, #fff3a3, #ff9f1c 50%, #ff3d00); box-shadow: 0 0 60px rgba(255,120,0,0.8), 0 10px 30px rgba(0,0,0,0.6); text-shadow: 0 3px 0 #7f1d1d, 0 0 20px #fff; animation: combobig 1s forwards; }
+  .float span.combo-big.c6, .float span.combo-big.c7 { font-size: 48px; } .float span.combo-big.c8, .float span.combo-big.c9, .float span.combo-big.c10 { font-size: 56px; }
+  @keyframes combobig { 0% { transform: scale(0.3) rotate(-6deg); opacity: 0; } 20% { transform: scale(1.15) rotate(2deg); opacity: 1; } 35% { transform: scale(1); } 80% { opacity: 1; } 100% { transform: scale(1.1); opacity: 0; } }
+
   /* ===== 結果・ランキング ===== */
   .res .ttl { text-align: center; font-size: 20px; font-weight: 900; }
   .res .big { font-family: 'Rubik', sans-serif; font-size: 48px; font-weight: 900; text-align: center; margin: 8px 0 2px; line-height: 1.1;
@@ -1082,7 +1090,7 @@ ${ORB_DEFS}
 
   // ---------- バトル ----------
   var G = null;
-  var DRAG_MS = 5000;       // なぞり操作の制限時間
+  var DRAG_MS = 7000;       // なぞり操作の制限時間
   function newStatus(){ return { eSleep: 0, sSleep: 0, shield: 0, reflect: 0, atkup: { n: 0, mult: 1 }, elemup: { elem: '', n: 0, mult: 1 }, combo: 0, defdown: { n: 0, mult: 1 }, poison: { n: 0, pct: 0 }, time: { n: 0, sec: 0 }, atkdown: { n: 0, mult: 1 }, revive: 0, coinB: 0, expB: 0 }; }
   function startBattle(mode, enemies){
     loadTeam(); if (!TEAM.length) { openTeam(); return; }
@@ -1176,10 +1184,16 @@ ${ORB_DEFS}
     $('moves').textContent = G.moves;
   }
   function rnd(n){ return Math.floor(Math.random() * n); }
+  // 玉の出現確率: 味方の属性は出やすく（コンボが組みやすい）、それ以外は少なめ、ハートはほどほど
+  function randType(){
+    var w = []; var tot = 0;
+    TYPES.forEach(function(t){ var k = t === 'heart' ? 1.2 : (TEAM.some(function(a){ return a.element === t; }) ? 4 : 0.5); w.push(k); tot += k; });
+    var r = Math.random() * tot; for (var i = 0; i < TYPES.length; i++) { r -= w[i]; if (r <= 0) return TYPES[i]; } return TYPES[TYPES.length - 1];
+  }
   function newBoard(){
     var b = [];
     for (var y = 0; y < H; y++) { b[y] = []; for (var x = 0; x < W; x++) {
-      var t; do { t = TYPES[rnd(TYPES.length)]; } while ((x >= 2 && b[y][x-1] === t && b[y][x-2] === t) || (y >= 2 && b[y-1][x] === t && b[y-2][x] === t));
+      var t; do { t = randType(); } while ((x >= 2 && b[y][x-1] === t && b[y][x-2] === t) || (y >= 2 && b[y-1][x] === t && b[y-2][x] === t));
       b[y][x] = t;
     } }
     G.board = b; if (!hasMove()) { newBoard(); return; } renderBoard(true);
@@ -1298,29 +1312,42 @@ ${ORB_DEFS}
   function shockwave(px, py, color){ var r = document.createElement('span'); r.className = 'shock'; r.style.left = px + 'px'; r.style.top = py + 'px'; r.style.borderColor = color; $('fx').appendChild(r); setTimeout(function(){ r.remove(); }, 500); }
   function showCombo(n){ var c = $('combo'); if (!c) return; c.textContent = n + ' COMBO'; c.className = 'combo on c' + Math.min(n, 6); void c.offsetWidth; }
   function resolve(groups, combo, allGroups){
-    groups.forEach(function(g, gi){
+    var gi = 0;
+    function clearNext(){
+      if (gi >= groups.length) { setTimeout(dropAndRefill, 320); return; }
+      var g = groups[gi]; var n = combo + gi; gi++;
       var cx = 0, cy = 0;
-      g.cells.forEach(function(c){ var el = tileAt(c[0], c[1]); el.classList.add('gone'); var p = boardPoint(c[0], c[1]); cx += p.x; cy += p.y; particles(p.x, p.y, EL_COLOR[g.type] || '#ff6fae', 6, false); });
+      g.cells.forEach(function(c){ var el = tileAt(c[0], c[1]); el.classList.add('gone'); var p = boardPoint(c[0], c[1]); cx += p.x; cy += p.y; particles(p.x, p.y, EL_COLOR[g.type] || '#ff6fae', 7, false); });
       shockwave(cx / g.cells.length, cy / g.cells.length, EL_COLOR[g.type] || '#ff6fae');
-      allGroups.push(g);
-      var n = combo + gi; showCombo(n); if (n > G.maxCombo) G.maxCombo = n;
-    });
-    vibrate(combo >= 3 ? 30 : 15);
+      allGroups.push(g); showCombo(n); if (n > G.maxCombo) G.maxCombo = n;
+      vibrate(n >= 5 ? 35 : n >= 3 ? 22 : 12);
+      if (n >= 4) { var bd = $('board'); bd.classList.remove('bump'); void bd.offsetWidth; bd.classList.add('bump'); }
+      setTimeout(clearNext, Math.max(90, 170 - n * 8));
+    }
     var nextCombo = combo + groups.length;
-    setTimeout(function(){
+    function dropAndRefill(){
       var m = {}; groups.forEach(function(g){ g.cells.forEach(function(c){ m[c[1] * W + c[0]] = 1; }); });
       var fell = {};
       for (var x = 0; x < W; x++) {
         var col = [];
         for (var y = H - 1; y >= 0; y--) { if (!m[y * W + x]) col.push(G.board[y][x]); }
-        for (var y2 = H - 1; y2 >= 0; y2--) { if (col.length) G.board[y2][x] = col.shift(); else { G.board[y2][x] = TYPES[rnd(TYPES.length)]; fell[y2 * W + x] = 1; } }
+        for (var y2 = H - 1; y2 >= 0; y2--) { if (col.length) G.board[y2][x] = col.shift(); else { G.board[y2][x] = randType(); fell[y2 * W + x] = 1; } }
       }
       renderBoard(false);
       Object.keys(fell).forEach(function(k){ var el = $('board').children[k]; if (el) el.classList.add('new'); });
       var next = findGroups();
-      if (next.length) { setTimeout(function(){ resolve(next, nextCombo, allGroups); }, 140); return; }
-      afterMove(allGroups, nextCombo - 1);
-    }, 340);
+      if (next.length) { setTimeout(function(){ resolve(next, nextCombo, allGroups); }, 160); return; }
+      var total = nextCombo - 1;
+      if (total >= 4) { comboFinish(total); setTimeout(function(){ afterMove(allGroups, total); }, 700); return; }
+      afterMove(allGroups, total);
+    }
+    clearNext();
+  }
+  // 大コンボの締め演出
+  function comboFinish(n){
+    var f = $('float'); f.innerHTML = '<span class="combo-big c' + Math.min(n, 10) + '">' + n + ' COMBO!!</span>'; setTimeout(function(){ f.innerHTML = ''; }, 1000);
+    shakeScreen(); vibrate([30, 30, 60]);
+    var bd = $('board').getBoundingClientRect(); particles(bd.left + bd.width / 2, bd.top + bd.height / 2, '#fbbf24', Math.min(60, n * 8), true);
   }
 
   // ---- 攻撃（味方→敵）、回復、敵の反撃 ----
@@ -1468,7 +1495,7 @@ ${ORB_DEFS}
     if (s.sSleep > 0) { floatMsg('みんな眠っている…（あと' + s.sSleep + '手）', true); finishAttack(0, 0, combos); return; }
     var perEl = {}; var heal = 0;
     groups.forEach(function(g){
-      var n = g.cells.length; var sizeMult = 1 + 0.25 * (n - 3);
+      var n = g.cells.length; var sizeMult = 0.8 * (1 + 0.25 * (n - 3));
       if (g.type === 'heart') { heal += Math.round(G.maxHp * 0.05 * sizeMult); return; }
       var atk = 0; TEAM.forEach(function(a){ if (a.element === g.type) atk += statOf(a).atk; });
       if (atk > 0) perEl[g.type] = (perEl[g.type] || 0) + atk * sizeMult;
