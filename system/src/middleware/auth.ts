@@ -26,6 +26,9 @@ export async function requireAuth(c: Context<{ Bindings: Env }>, next: Next) {
 // ヘッダーがない場合もCloudflare経由でないリクエストとして拒否する
 export function requireJapan(c: Context, next: Next) {
   const country = c.req.header('CF-IPCountry');
+  // ローカル開発（wrangler dev）ではCloudflareの国判定ヘッダーが付かない。.dev.vars に DEV_SKIP_JAPAN_CHECK=1 を
+  // 置いた環境だけ通す（本番の secret には登録しないこと。wrangler dev では Host が bentenclub.com に見えるためホスト名では判定できない）
+  if (!country && (c.env as { DEV_SKIP_JAPAN_CHECK?: string } | undefined)?.DEV_SKIP_JAPAN_CHECK === '1') return next();
   if (!country || country !== 'JP') {
     return c.text('Access denied', 403);
   }

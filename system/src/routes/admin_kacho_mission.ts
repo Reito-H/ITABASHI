@@ -103,6 +103,7 @@ app.get('/kacho-mission', async (c) => {
   const content = `
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;max-width:820px;">
     ${card(`${ADMIN_PATH}/kacho-mission/contracts`, '労共契約・契約更新アラート', badge)}
+    ${card(`${ADMIN_PATH}/kacho-mission/flu`, 'インフルエンザ予防接種（接種状況・未接種リスト）')}
     ${card(`${ADMIN_PATH}/kacho-mission/joshinsho`, '労供上申書 作成')}
     ${card(`${ADMIN_PATH}/kacho-mission/keiyakusho`, '労供契約書作成依頼書 作成')}
     ${card(`${ADMIN_PATH}/kacho-mission/tenmatsusho`, '顛末書 作成')}

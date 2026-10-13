@@ -25,6 +25,15 @@
         "km-ui/ui"
       ],
       "port": 8765
+    },
+    {
+      "name": "hoshikon-dev-http",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "system/scripts/dev_http_proxy.mjs"
+      ],
+      "port": 8790,
+      "url": "http://localhost:8790"
     }
   ]
 }
