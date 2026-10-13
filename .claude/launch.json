@@ -1,0 +1,39 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hoshikon-dev",
+      "runtimeExecutable": ".claude/skills/cloudflare/cf-wrangler.sh",
+      "runtimeArgs": [
+        "dev",
+        "--port",
+        "8787",
+        "--local-protocol",
+        "https"
+      ],
+      "port": 8787,
+      "url": "https://localhost:8787"
+    },
+    {
+      "name": "km-ui-mock",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--directory",
+        "km-ui/ui"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "hoshikon-dev-http",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "system/scripts/dev_http_proxy.mjs"
+      ],
+      "port": 8790,
+      "url": "http://localhost:8790"
+    }
+  ]
+}

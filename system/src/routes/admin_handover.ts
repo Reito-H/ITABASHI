@@ -875,6 +875,42 @@ app.delete('/api/handover/:division/meter-entries/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// ===== 洗車券（紙の「公出洗車券リスト」の消し込み。現状は2課のみ・migration_187で取込） =====
+// emp_no で社員名簿と紐づけ、フリガナ検索できるよう name_kana を一緒に返す。
+// team は紙に印字された班（異動後の現在の班ではない）で、印刷も紙と同じ並びにする。
+app.get('/api/handover/:division/wash-tickets', async (c) => {
+  const division = c.req.param('division');
+  if (!isValidDivision(division)) return c.json({ error: '課の指定が不正です' }, 400);
+  const rows = await c.env.DB.prepare(
+    `SELECT w.id, w.team, w.emp_no, w.name, w.ticket_count, w.distributed_at, w.distributed_by,
+            COALESCE(e.name_kana, '') AS name_kana
+     FROM handover_wash_tickets w LEFT JOIN employees e ON e.emp_no = w.emp_no
+     WHERE w.division = ? ORDER BY w.team, w.sort_order, w.id`
+  ).bind(parseInt(division, 10)).all();
+  return c.json({ tickets: rows.results ?? [] });
+});
+
+// 配布（undo=trueで配布済みの取り消し）。D1のlocaltimeはUTCなので配布日時は+9時間で日本時間にする
+app.post('/api/handover/:division/wash-tickets/:id/distribute', async (c) => {
+  const division = c.req.param('division');
+  const id = parseInt(c.req.param('id'), 10);
+  if (!isValidDivision(division) || !id) return c.json({ error: '指定が不正です' }, 400);
+  if (!(await canEdit(c))) return c.json({ error: '権限がありません' }, 403);
+  const b = await c.req.json<{ undo?: boolean }>().catch(() => ({}) as { undo?: boolean });
+
+  const r = b.undo
+    ? await c.env.DB.prepare(
+        `UPDATE handover_wash_tickets SET distributed_at = NULL, distributed_by = NULL, updated_at = datetime('now','localtime')
+         WHERE id = ? AND division = ?`
+      ).bind(id, parseInt(division, 10)).run()
+    : await c.env.DB.prepare(
+        `UPDATE handover_wash_tickets SET distributed_at = datetime('now','+9 hours'), distributed_by = ?, updated_at = datetime('now','localtime')
+         WHERE id = ? AND division = ?`
+      ).bind((await adminName(c)).name, id, parseInt(division, 10)).run();
+  if (r.meta.changes === 0) return c.json({ error: 'データが存在しません' }, 404);
+  return c.json({ ok: true });
+});
+
 // カスタムセクションの日次内容の保存（項目単位PATCHと同じ発想のupsert）
 app.patch('/api/handover/:division/:date/section-content/:sectionId', async (c) => {
   const division = c.req.param('division');

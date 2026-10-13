@@ -10,7 +10,7 @@
 // 権限キーの一覧・階層は下部の PERMISSION_TREE（アカウント権限編集UIのカタログ）を参照。
 // 主なもの:
 //   サイドバー: home / kancho-shift / kanri-kobo / handover / newcomers / staff /
-//               kacho-mission / sales-ai / accidents / vehicles / inspection /
+//               kacho-mission / sales-ai / accidents / vehicles / inspection / km-console /
 //               announcements / line / requests / crew-portal / tantosha / todo / crew-shift / shift
 //   「全アカウント共通だった機能」に付けた閲覧ON/OFFキー: benri / garage / shuttle / signage / cc-list
 //     （いずれも編集はフル権限アカウントのみ。index.ts で「キーがあれば通す」形で判定）
@@ -19,7 +19,7 @@
 //              （親 settings.study-sessions を持てば全タブ利用可）
 //   設定サブページ: settings.accounts / settings.liff / settings.line-usage /
 //              settings.notifications / settings.offices / settings.documents / settings.study-notes / settings.tutorial /
-//              settings.cyber / settings.nav-insights / settings.sales-strategy / settings.chosei / settings.announcement-bar / settings.birthday /
+//              settings.cyber / settings.nav-insights / settings.sales-strategy / settings.chosei / settings.tshirt / settings.puzzle / settings.announcement-bar / settings.birthday /
 //              settings.seasonal / settings.cm-popup /
 //              settings.weather-notice /
 //              settings.wage-estimate / settings.driving-risk / settings.vehicle-search-guide /
@@ -53,6 +53,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/settings\/offices/,              'settings.offices'],
   [/^\/settings\/vehicle-search-guide/, 'settings.vehicle-search-guide'],
   // 営業戦略（SR分析＋km-operator連携ピンデータ分析を統合。ページ権限に加え、開くたび専用パスワードも必要）
+  // 配車コンソール（km-operator 新UI組み込み・読み取り専用）
+  [/^\/km-console/,                    'km-console'],
   [/^\/settings\/sales-strategy/,       'settings.sales-strategy'],
   // SR分析・乗降ピン分析は営業戦略ページからiframeで埋め込む内部ページ。権限キーは統合済み（旧settings.sr/settings.km-pinsは廃止）
   [/^\/settings\/sr/,                   'settings.sales-strategy'],
@@ -66,6 +68,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // 旧システムステータス（サイバーへ集約・リダイレクトのみ）
   [/^\/settings\/status/,               'settings.cyber'],
   [/^\/settings\/nav-insights/,         'settings.nav-insights'],
+  [/^\/settings\/takcon-sync/,          'settings.takcon-sync'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
   [/^\/settings\/seasonal/,             'settings.seasonal'],
@@ -75,6 +78,10 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // タブ単位で絞るための子キー（settings.hiyari 等）のいずれかでもページに入れる。
   [/^\/settings\/study-sessions/,       'settings.study-sessions|settings.hiyari|settings.surveys|settings.daihon|settings.office-opinions'],
   [/^\/settings\/chosei/,               'settings.chosei'],
+  // 期間限定 オリジナルTシャツ（詳細設定・注文の修正はさらに admin アカウントのみ。admin_tshirt.ts 側で判定）
+  [/^\/settings\/tshirt/,               'settings.tshirt'],
+  // ホシコンパズル（バトル設定）
+  [/^\/settings\/puzzle/,               'settings.puzzle'],
   [/^\/settings\/kancho-wish/,          'settings.kancho-wish'],
   [/^\/settings\/kancho-roster/,        'settings.kancho-roster'],
   [/^\/settings\/kancho-logic/,         'settings.kancho-logic'],
@@ -100,6 +107,8 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   [/^\/api\/surveys/,                   'settings.surveys|settings.study-sessions'],
   [/^\/api\/daihon/,                    'settings.daihon|settings.study-sessions'],
   [/^\/api\/chosei/,                    'settings.chosei'],
+  [/^\/api\/tshirt/,                    'settings.tshirt'],
+  [/^\/api\/puzzle/,                    'settings.puzzle'],
   [/^\/api\/kancho-wish-settings/,      'settings.kancho-wish'],
   [/^\/api\/kancho-roster/,             'settings.kancho-roster'],
   [/^\/api\/announcement-bar/,          'settings.announcement-bar'],
@@ -294,6 +303,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'tantosha',    label: '担当車表' },
     { key: 'todo',        label: 'やることリスト' },
     { key: 'crew-shift',  label: '乗務員シフト・個人別シフト・配車管理・夏季稼働' },
+    { key: 'km-console',  label: '配車コンソール（スマタク新UI・読み取り専用）', note: '実在の顧客氏名・電話番号等を扱う', viewOnly: true },
   ]},
 
   { label: '全アカウント共通だった機能（閲覧のON/OFF）', note: 'いずれも編集はフル権限アカウントのみ', children: [
@@ -317,12 +327,15 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.cm-popup',         label: '新機能お知らせポップアップ' },
     { key: 'settings.weather-notice',   label: '異常気象警報 周知サイネージ' },
     { key: 'settings.chosei',           label: '調整（日程調整）' },
+    { key: 'settings.tshirt',           label: '期間限定 オリジナルTシャツオーダー', note: '詳細設定・注文の修正はadminのみ', viewOnly: true },
+    { key: 'settings.puzzle',           label: 'バトル設定（ホシコンパズル）', note: '味方キャラ・敵キャラ・ランキング' },
     { key: 'settings.documents',        label: 'データセンター（資料・社員CSV・点検写真AI・シフトPDF）' },
     { key: 'settings.study-notes',      label: '学習ノート（個人用ノート教材のページ保存・PDF出力）' },
     { key: 'settings.tutorial',         label: 'チュートリアル' },
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
     { key: 'settings.cyber',            label: 'サイバー（不正アクセス検知・ログイン監視）', note: '強制ログアウトは編集権限、メンテナンス切替はadminのみ' },
     { key: 'settings.nav-insights',     label: '動線分析（管理画面の利用経路の匿名集計）', viewOnly: true },
+    { key: 'settings.takcon-sync',      label: 'タクコン連携（CSV自動取込の状況・今すぐ取込）' },
     { key: 'settings.sales-strategy',   label: '営業戦略（SR分析＋乗降ピン分析）', note: '別途、専用パスワードでも保護。実在の顧客氏名等を含む場合あり' },
     { key: 'settings.wage-estimate',    label: '賃金試算設定' },
     { key: 'settings.driving-risk',     label: '運転リスク検証設定' },

@@ -23,6 +23,10 @@ binding = "STUDY_NOTES_BUCKET"
 bucket_name = "benten-study-notes"
 
 # ITABASHI BATTLE 2（新卒 繁忙期勉強会のゲームアプリ）のリアルタイム進行。無料プランで使える SQLite 型の Durable Object
+# Workers AI（バジル&ドラゴンズ: キャラ・敵の画像生成 flux-1-schnell。設定→バトル設定の「AIで作る」）
+[ai]
+binding = "AI"
+
 [[durable_objects.bindings]]
 name = "BATTLE_ROOM"
 class_name = "BattleRoom"
@@ -76,6 +80,10 @@ BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/
 # npx wrangler secret put LINE_REG_PWD_CREW_MEMBER   ← 乗務社員 登録パスワード
 # npx wrangler secret put SRIDE_LOGIN_ID              ← SR自動取込: S.RIDE管理画面ログインID
 # npx wrangler secret put SRIDE_PASSWORD              ← SR自動取込: 同上パスワード
+# npx wrangler secret put KM_RELAY_ACCESS_ID          ← 配車コンソール: km-relay トンネルの Cloudflare Access サービストークン(Client ID)
+# npx wrangler secret put KM_RELAY_ACCESS_SECRET      ← 同上(Client Secret)
+# npx wrangler secret put KM_CONSOLE_PASSWORD         ← 配車コンソールの簡易パスワード（任意。未設定時は既定値）
+# npx wrangler secret put TAKCON_SERVE_TOKEN          ← タクコン連携: 板橋PC takcon-sync の serveToken
 # npx wrangler secret put CC_PASSWORD                ← CC名簿（クレーム客記録台帳）ページの専用パスワード
 # npx wrangler secret put KM_OPERATOR_LOGIN_ID        ← km-operator連携: 自動ログインID（現在は社内PC側スクリプトで使用）
 # npx wrangler secret put KM_OPERATOR_PASSWORD        ← km-operator連携: 同上パスワード（同上）
@@ -143,6 +151,16 @@ zone_name = "bentenclub.com"
 # ITABASHI BATTLE 2 の参加用URL（ログイン不要の固定URL・BATTLE_PUBLIC_PATH）
 [[routes]]
 pattern = "bentenclub.com/ib2-8cbb19aa8bae80ec4652540a9cb36da1c9151104*"
+zone_name = "bentenclub.com"
+
+# 期間限定 オリジナルTシャツ注文（ログイン不要の固定URL・TSHIRT_PATH）
+[[routes]]
+pattern = "bentenclub.com/ts-eb1ea85a4d61a02a88671f11baf26e48*"
+zone_name = "bentenclub.com"
+
+# ホシコンパズル（ログイン不要の固定URL・PUZZLE_PATH）
+[[routes]]
+pattern = "bentenclub.com/pz-7c41e9a2d08b4f6e9a3d15c7b2e8f0a4*"
 zone_name = "bentenclub.com"
 
 [[routes]]

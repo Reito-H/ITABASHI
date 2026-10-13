@@ -57,6 +57,9 @@ html,body{background:#000;}
 @keyframes qrGlow{0%{box-shadow:0 0 0 0 rgba(255,255,255,1),0 0 0 0 rgba(47,211,255,1);}50%{box-shadow:0 0 0 3cqw rgba(255,59,107,0),0 0 8cqw 2cqw rgba(47,211,255,.9);}100%{box-shadow:0 0 4cqw rgba(47,211,255,.45);}}
 @keyframes logoSlide{from{transform:translateX(18cqw) scale(1.25);}to{transform:none;}}
 /* 講座スライド（白・まじめ）：ロゴや得点を隠して、画面全体を白に */
+.deckWrap{position:fixed;inset:0;z-index:12;background:#000;}
+.deckWrap iframe{width:100%;height:100%;border:0;display:block;}
+.deckWrap .none{position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-size:2.4cqw;}
 .fml{position:fixed;inset:0;z-index:12;background:#fff;color:#1f2937;font-family:'Hiragino Kaku Gothic ProN','Hiragino Sans','Noto Sans JP','Yu Gothic',sans-serif;text-shadow:none;}
 .fml *{text-shadow:none;}
 .fml .cover{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 8cqw;}
@@ -253,7 +256,9 @@ html,body{background:#000;}
     var k = S.bgm;
     if (S.blackout || (S.step && S.step.kind === 'black')) return null;
     if (S.stage === 'step' && S.step && S.step.kind === 'video') return null;
-    if (S.stage === 'step' && S.step && S.step.kind === 'formal' && !S.bgm) return null;
+    if (S.stage === 'step' && S.step && (S.step.kind === 'formal' || S.step.kind === 'deck') && !S.bgm) return null;
+    // プレゼンの途中でスマホに出題したときは、回答受付中だけ考え中の曲を流す
+    if (S.stage === 'step' && S.step && S.step.fromDeck) return S.phase === 'open' ? 'builtin:think' : (S.bgm || null);
     if (S.stage === 'step' && S.step && S.step.kind === 'announce' && S.revealN >= 1 && S.step.video) return null;
     if (k && k.indexOf('builtin:') === 0 && S.stage === 'step' && S.step && S.phase === 'open' && ['choice', 'number', 'order', 'vote'].indexOf(S.step.kind) >= 0) return ['builtin:think', 'builtin:think3', 'builtin:think2'][S.stepIdx % 3];
     return k;
@@ -268,7 +273,7 @@ html,body{background:#000;}
   }
   var shownScore = {};
   function scoreBar(){
-    var hide = !S || S.stage !== 'step' || (S.step && (S.step.kind === 'scoreboard' || S.step.kind === 'video' || S.step.kind === 'prizes' || S.step.kind === 'announce' || S.step.kind === 'formal'));
+    var hide = !S || S.stage !== 'step' || (S.step && (S.step.kind === 'scoreboard' || S.step.kind === 'video' || S.step.kind === 'prizes' || S.step.kind === 'announce' || S.step.kind === 'formal' || S.step.kind === 'deck'));
     sb.style.display = hide ? 'none' : '';
     main.className = hide ? 'full' : '';
     if (hide) return;
@@ -307,6 +312,21 @@ html,body{background:#000;}
       if (vv) { var showErr = function(){ var e = document.getElementById('vidErr'); if (e) e.style.display = ''; }; vv.addEventListener('error', showErr); vv.addEventListener('loadeddata', function(){ if (!vv.videoWidth) showErr(); }); }
     }
     syncVideo();
+    syncDeck();
+  }
+  // プレゼン（台本スライド）：iframe は作り直さず、表示するページ番号だけを送る
+  function syncDeck(){
+    var w = document.getElementById('dkw');
+    if (!w || !S || !S.deck) return;
+    var f = w.querySelector('iframe');
+    var post = function(){ try { f.contentWindow.postMessage({ dhGo: S.deck ? S.deck.idx : 0 }, location.origin); } catch (e) {} };
+    if (!f) {
+      f = document.createElement('iframe');
+      f.src = w.getAttribute('data-url') + '#' + S.deck.idx;
+      f.addEventListener('load', post);
+      w.appendChild(f);
+    }
+    post();
   }
   // 動画：管理者の再生・一時停止・最初からに合わせる（ずれが1秒を超えたら位置を合わせ直す）
   function syncVideo(){
@@ -374,6 +394,7 @@ html,body{background:#000;}
       + '<div class="sub" style="font-size:1.8cqw">' + (st.kind === 'mygrowth' ? '1乗務あたりの平均売上が、月度ごとにどれだけ伸びたかが表示されます' : '日ごとの売上の記録を見て、CSVで保存できます') + '</div>'
       + '<div class="sub" style="font-size:1.5cqw;margin-top:3cqh">あなたのデータは、あなたのスマホにだけ表示されます</div>';
     if (st.kind === 'video') return st.video ? '<div class="vidWrap"><video id="vid" src="' + escH(st.video) + '" playsinline preload="auto"></video><div id="vidMute" style="display:none;position:absolute;right:2cqw;bottom:2cqh;padding:1cqh 1.4cqw;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:1.3cqw;font-weight:800;">音が出ていません　画面をクリックすると音が出ます</div><div class="none" id="vidErr" style="display:none;position:absolute;text-align:center;line-height:2">この動画はこのブラウザでは再生できない形式です<br><small>MP4（H.264）で書き出して、アップロードし直してください</small></div></div>' : '<div class="vidWrap"><div class="none">NO VIDEO</div></div>';
+    if (st.kind === 'deck') return S.deck && S.deck.url ? '<div class="deckWrap" id="dkw" data-url="' + escH(S.deck.url) + '"></div>' : '<div class="deckWrap"><div class="none">プレゼン（台本）が未設定です</div></div>';
     if (st.kind === 'formal') {
       // 中身が見出しだけなら表紙、本文か画像があれば講座ページ
       var NL2 = String.fromCharCode(10);
@@ -391,6 +412,7 @@ html,body{background:#000;}
         + (st.image ? '<img class="titleImg" src="' + escH(st.image) + '">' : '')
         + (S.timerEnd ? '<div class="timerBig" id="tbig"></div>' : '');
     }
+    if (ph === 'intro' && st.fromDeck) return '<div class="splash"><div class="k2 neon">QUIZ</div><div class="title neon pop" style="margin-top:2cqh">ここで問題です！</div><div class="sub" style="font-size:2.4cqw">スマホで答えよう　｜　正解するとチームに得点</div></div>';
     if (ph === 'intro') return '<div class="splash"><div class="k2 neon">ROUND ' + (S.stepIdx + 1) + '</div><div class="title neon pop" style="margin-top:2cqh">' + escH(st.title) + '</div><div class="sub" style="font-size:2.4cqw">' + kindName(st) + (st.mode === 'leader' ? '　｜　代表者が回答' : '') + (q ? '　｜　全' + S.qCount + '問' : '') + '</div></div>';
     if (st.kind === 'buzzer' && q) return buzzerView();
     if (['choice', 'number', 'order', 'vote'].indexOf(st.kind) >= 0 && q) return quizView();

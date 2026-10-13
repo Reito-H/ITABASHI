@@ -6,7 +6,8 @@
 //   ・早押しは「各スマホで測った反応時間」で並べる。最初の押下から BUZZ_WINDOW_MS 以内に届いた分をまとめて判定し、
 //     同タイムは裏でランダムに並べ、表示タイムには必ず差をつける（電波差・同着をうまく見せる）。
 import type { Env } from '../auth';
-import { BATTLE_PUBLIC_PATH } from '../config';
+import { ADMIN_PATH, BATTLE_PUBLIC_PATH } from '../config';
+import { slideQuiz, quizChoices } from '../html/daihon';
 import { TEAMS, prizeSeq, prizeSteps, type TeamId, type StepRow, type QuestionRow, parseJson } from './types';
 
 const BUZZ_WINDOW_MS = 350;
@@ -15,7 +16,8 @@ interface Att { role: 'player' | 'admin' | 'screen'; emp?: string; name?: string
 interface Buzz { emp: string; name: string; team: TeamId; ms: number; show: number }
 interface Ans { a: string; ms: number; team: TeamId; name: string }
 interface QItem { id: number; prompt: string; image_id: number | null; choices: string[]; answer: string; points: number; time_limit: number; note: string; seq: string[]; steps: string[] }
-interface Step { id: number; kind: string; title: string; config: Record<string, unknown>; qs: QItem[] }
+// slides = プレゼン（kind='deck'）のときの台本スライド（非表示を除く）。q = スマホ出題する問題スライドの問題
+interface Step { id: number; kind: string; title: string; config: Record<string, unknown>; qs: QItem[]; slides?: Array<{ id: number; title: string; q: QItem | null }> }
 interface QBoxItem { id: number; emp: string; name: string; team: TeamId; text: string; likes: string[] }
 // 「わたしの売上」：本人のスマホにだけ送る売上データ（ホシコンの sales_records から読むだけ）
 interface SalesDay { date: string; py: number; pm: number; amount: number; rides: number | null; km: number | null; duty: string | null; start: string | null; ret: string | null; hours: number | null }
@@ -55,13 +57,14 @@ interface Live {
   blackout: boolean;             // トラブル時の黒画面（どの場面でも上にかぶせる）
   streakTeam: string;            // 早押しで連続正解中のチーム（コンボ演出）
   streak: number;
+  quizOn: boolean;               // プレゼン（deck）の問題スライドをスマホに出題中か（revealN = 表示中のスライド番号）
 }
 
 function freshLive(): Live {
   return {
     stage: 'lobby', stepIdx: 0, phase: '', qIdx: 0, openAt: 0, deadline: 0,
     buzz: [], buzzCursor: 0, buzzLocked: [], answers: {}, survivors: null, revealN: 0, picked: null,
-    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0, streakTeam: '', streak: 0, video: { playing: false, offset: 0, at: 0 }, lobbyQr: false, blackout: false,
+    qbox: [], bgm: 'builtin:lobby', result: null, awardedKey: '', timerEnd: 0, seq: 0, streakTeam: '', streak: 0, video: { playing: false, offset: 0, at: 0 }, lobbyQr: false, blackout: false, quizOn: false,
   };
 }
 
@@ -140,6 +143,20 @@ export class BattleRoom {
         answer: q.answer, points: q.points, time_limit: q.time_limit, note: q.note, seq: prizeSeq(q.seq, q.points), steps: prizeSteps(prizeSeq(q.seq, q.points), q.answer),
       })),
     }));
+    // プレゼン（台本スライド）：表示するスライドと、スマホ出題する問題を読み込む
+    for (const st of this.steps) {
+      if (st.kind !== 'deck') continue;
+      const did = Number(st.config.deck_id) || 0;
+      try {
+        const rows = did ? (await db.prepare('SELECT id, layout, title, body, quiz, hidden FROM daihon_slides WHERE deck_id = ? ORDER BY sort_order, id').bind(did)
+          .all<{ id: number; layout: string; title: string; body: string; quiz: string; hidden: number }>()).results ?? [] : [];
+        st.slides = rows.filter((r) => !r.hidden).map((r) => {
+          const qz = slideQuiz(r), ch = quizChoices(r.body);
+          const ok = r.layout === 'question' && qz.phone && ch.length >= 2 && qz.answer >= 0 && qz.answer < ch.length;
+          return { id: r.id, title: r.title, q: ok ? { id: -r.id, prompt: r.title, image_id: null, choices: ch, answer: String(qz.answer), points: qz.points, time_limit: qz.time, note: '', seq: [], steps: [] } : null };
+        });
+      } catch { st.slides = []; }
+    }
     await this.reloadPeople();
     await this.reloadScores();
     const mv = (await db.prepare('SELECT id, size FROM ib2_media').all<{ id: number; size: number }>()).results ?? [];
@@ -243,7 +260,16 @@ export class BattleRoom {
   }
 
   // ---------------- 便利関数 ----------------
-  private curStep(): Step | null { return this.live.stage === 'step' ? this.steps[this.live.stepIdx] ?? null : null; }
+  private rawStep(): Step | null { return this.live.stage === 'step' ? this.steps[this.live.stepIdx] ?? null : null; }
+  // プレゼンの問題スライドをスマホ出題している間は、その1問だけの選択クイズとして扱う（採点・記録・画面は選択クイズと同じ）
+  private curStep(): Step | null {
+    const st = this.rawStep();
+    if (st && st.kind === 'deck' && this.live.quizOn) {
+      const q = st.slides?.[this.live.revealN]?.q;
+      if (q) return { id: st.id, kind: 'choice', title: st.title, config: { mode: 'all', fromDeck: true }, qs: [q] };
+    }
+    return st;
+  }
   // 参加受付・チーム発表・代表者決めもメニューの1項目。画面側には従来どおり stage 名で伝える
   private effStage(): 'lobby' | 'reveal' | 'setup' | 'step' {
     const st = this.curStep();
@@ -292,12 +318,12 @@ export class BattleRoom {
     const L = this.live;
     L.stage = 'step';
     L.stepIdx = Math.max(0, Math.min(idx, this.steps.length - 1));
-    L.qIdx = 0; L.revealN = 0; L.picked = null; L.qbox = []; L.timerEnd = 0;
+    L.qIdx = 0; L.revealN = 0; L.picked = null; L.qbox = []; L.timerEnd = 0; L.quizOn = false;
     this.resetQ();
     const st = this.curStep();
     L.survivors = st && st.kind === 'choice' && st.config.survival ? Array.from(this.players.keys()) : null;
     L.phase = st && ['buzzer', 'choice', 'number', 'order', 'vote'].includes(st.kind) ? 'intro' : st?.kind === 'qbox' ? 'open' : 'show';
-    const defBgm: Record<string, string> = { lobby: 'builtin:lobby', reveal: 'builtin:battle', setup: 'builtin:funk', black: 'none', formal: 'none' };
+    const defBgm: Record<string, string> = { lobby: 'builtin:lobby', reveal: 'builtin:battle', setup: 'builtin:funk', black: 'none', formal: 'none', deck: 'none' };
     const bgm = st ? String(st.config.bgm || defBgm[st.kind] || '') : '';
     if (bgm) L.bgm = bgm === 'none' ? null : bgm;
     // 動画ラウンドは入った瞬間から再生（自動再生オフなら講師が「再生」を押す）
@@ -547,7 +573,7 @@ export class BattleRoom {
       const nk = this.curStep()?.kind;
       if (t !== 'prev') {
         if (nk === 'reveal') { this.sfx('taiko'); this.sfx('cheer', { delay: 600 }); }
-        else if (nk !== 'black' && nk !== 'formal') this.sfx('whoosh');
+        else if (nk !== 'black' && nk !== 'formal' && nk !== 'deck') this.sfx('whoosh');
       }
       const cur = this.curStep();
       if (cur && SALES_KINDS.includes(cur.kind)) await this.loadMySales(Array.from(this.players.keys()));
@@ -596,6 +622,22 @@ export class BattleRoom {
 
   private async onAct(a: string, m: Record<string, unknown>, by: string): Promise<void> {
     const L = this.live;
+    // プレゼン（台本スライド）：ページ送り・問題をスマホに出題・解説スライドへ戻る
+    const raw = this.rawStep();
+    if (raw && raw.kind === 'deck' && ['slideNext', 'slidePrev', 'slideGo', 'quizStart', 'quizEnd'].includes(a)) {
+      const n = raw.slides?.length ?? 0;
+      if (a === 'quizStart') {
+        if (!L.quizOn && raw.slides?.[L.revealN]?.q) { L.quizOn = true; L.qIdx = 0; this.resetQ(); L.phase = 'intro'; this.sfx('quizIntro'); }
+      } else if (a === 'quizEnd') {
+        if (L.quizOn) { L.quizOn = false; L.qIdx = 0; this.resetQ(); L.phase = 'show'; if (L.revealN < n - 1) L.revealN++; }
+      } else if (!L.quizOn) {
+        const to = a === 'slideNext' ? L.revealN + 1 : a === 'slidePrev' ? L.revealN - 1 : Math.trunc(Number(m.to));
+        if (Number.isFinite(to) && to >= 0 && to < n) L.revealN = to;
+      }
+      await this.save();
+      this.broadcast();
+      return;
+    }
     const st = this.curStep();
     if (!st) return;
     const q = this.curQ();
@@ -881,7 +923,16 @@ export class BattleRoom {
       const cfg = st.config;
       s.step = { id: st.id, kind: st.kind, title: st.title, mode: cfg.mode || 'all', survival: !!cfg.survival, unit: cfg.unit || '', zoom: !!cfg.zoom,
         subtitle: cfg.subtitle || '', body: cfg.body || '', kicker: cfg.kicker || '', footer: cfg.footer || '', image: mediaUrl(Number(cfg.image_id) || null), final: !!cfg.final, timer: cfg.timer || 0,
-        video: mediaUrl(Number(cfg.video_id) || null), audio: mediaUrl(Number(cfg.audio_id) || null) };
+        video: mediaUrl(Number(cfg.video_id) || null), audio: mediaUrl(Number(cfg.audio_id) || null), fromDeck: !!cfg.fromDeck };
+      if (st.kind === 'deck') {
+        const sl = st.slides ?? [];
+        const did = Number(cfg.deck_id) || 0;
+        s.deck = {
+          url: did ? `${ADMIN_PATH}/daihon/${did}/present?embed=1` : '', idx: L.revealN, count: sl.length,
+          title: sl[L.revealN]?.title ?? '', hasQuiz: !!sl[L.revealN]?.q,
+          titles: att.role === 'admin' ? sl.map((x) => ({ t: x.title, q: !!x.q })) : undefined,
+        };
+      }
       if (st.kind === 'video') s.video = L.video ?? { playing: false, offset: 0, at: 0 };
       if (st.kind === 'announce') {
         // 発表前の中身は管理画面以外に送らない

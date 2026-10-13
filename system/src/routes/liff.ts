@@ -3,6 +3,8 @@
 // /api/liff/* : LIFFから呼ばれるAPI（LIFFアクセストークンをLINE APIで検証）
 
 import { Hono } from 'hono';
+import type { Context } from 'hono';
+import { liveVehicles, resolveAddress, findByName, findByVehicleNo, minutesAgo, type LiveVehicle } from '../utils/driver_locator';
 import type { Env } from '../auth';
 import { logLineActivity } from '../utils/activity_log';
 import { issueCaseNoIfEmpty } from '../utils/report_case_no';
@@ -54,8 +56,8 @@ const VEHICLE_LOOKUP_JS = `
       if (document.getElementById('vehicle_no').value.trim() !== no) return;
       var v = data && data.vehicle;
       var list = (data && data.employees) || [];
-      if (!v && !list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
-      var html = '';
+      if (!v && !list.length) { box.style.display = 'none'; box.innerHTML = ''; }
+      var html = '<div id="vehicle-live-line"></div>';
       if (v) {
         html += '<div style="font-size:14px;font-weight:700;color:#1e3a5f;margin-bottom:6px;">🚕 ' + no + ' は <span style="color:#1d4ed8;">' + v.division + '課 ' + v.team + '班</span> の車両</div>';
       }
@@ -72,8 +74,29 @@ const VEHICLE_LOOKUP_JS = `
       }
       box.innerHTML = html;
       box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
+      vehicleLiveLookup(no);
     })
     .catch(function() { box.style.display = 'none'; });
+  }
+
+  // 車番→その車の現在地（スマタクの稼働車両データ。運行管理者・統括管理者のみ。出庫していない車は出ない）
+  function vehicleLiveLookup(no) {
+    fetch('/api/liff/driver-finder/by-vehicle?no=' + encodeURIComponent(no), { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) {
+      if (document.getElementById('vehicle_no').value.trim() !== no) return;
+      var box = document.getElementById('vehicle-emp-hint');
+      var line = document.getElementById('vehicle-live-line');
+      if (!d || !d.ok || !d.vehicle) { if (line) line.remove(); if (box && !box.innerHTML.trim()) box.style.display = 'none'; return; }
+      var v = d.vehicle;
+      if (!line) { line = document.createElement('div'); line.id = 'vehicle-live-line'; box.prepend(line); }
+      line.innerHTML = '<div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:6px;">【現在地】' + (v.name ? v.name + ' が乗務中・' : '') + v.status + '（' + v.minutesAgo + '分前の位置）'
+        + (v.address ? '<div style="font-weight:500;color:#374151;margin-top:2px;">' + v.address + '</div>' : '') + '<div style="font-size:11px;color:#6b7280;">無線 ' + v.radio + '</div></div>';
+      box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
+      // 今乗っている人が台帳で特定できて、乗務員が未選択なら自動で登録する
+      if (v.employee && typeof selectedEmp !== 'undefined' && !selectedEmp && typeof selectEmp === 'function') selectEmp(v.employee);
+    })
+    .catch(function() {});
   }
 
   // 乗務員選択→よく使う車番（頻度順）を表示（タップで車番欄にセット）。
@@ -81,6 +104,7 @@ const VEHICLE_LOOKUP_JS = `
   function renderEmpCarHint(e) {
     var box = document.getElementById('emp-car-hint');
     if (!box) return;
+    empLiveCarLookup(e);
     var cars = [];
     try { cars = e.used_cars ? JSON.parse(e.used_cars) : []; } catch (err) { cars = []; }
     if (e.car_no && cars.indexOf(e.car_no) === -1) cars.unshift(e.car_no);
@@ -97,6 +121,29 @@ const VEHICLE_LOOKUP_JS = `
   function selectCarNo(no) {
     document.getElementById('vehicle_no').value = no;
     doVehicleLookup();
+  }
+
+  // 乗務員選択→その人が「今」乗っている車（スマタクの稼働車両データ）。見つかれば車番欄が空のときに自動で入れる。
+  // 見つからない（出庫前・退勤後・名前が一致しない）ときは従来どおり「よく使う車番」だけ表示する
+  function empLiveCarLookup(e) {
+    var name = (e && e.name) ? String(e.name).replace(/[\s　]+/g, '') : '';
+    if (!name) return;
+    fetch('/api/liff/driver-finder/by-name?q=' + encodeURIComponent(name), { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(d) {
+      var box = document.getElementById('emp-car-hint');
+      if (!box || !d || !d.ok || !d.results || !d.results.length) return;
+      var v = d.results[0];
+      var carNo = v.plate || v.radio;
+      var html = '<div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:6px;">【今乗っている車】 車番 ' + (v.plate || '不明') + '（無線 ' + v.radio + '）・' + v.status + '（' + v.minutesAgo + '分前）'
+        + (v.address ? '<div style="font-weight:500;color:#374151;margin-top:2px;">現在地: ' + v.address + '</div>' : '')
+        + (v.plate ? '<span onclick="selectCarNo(' + JSON.stringify(v.plate).replace(/"/g,'&quot;') + ')" style="display:inline-block;margin-top:6px;padding:6px 10px;background:white;border:1px solid #6ee7b7;border-radius:8px;cursor:pointer;font-size:13px;">この車番を入れる</span>' : '') + '</div>';
+      box.insertAdjacentHTML('afterbegin', html);
+      box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
+      var vn = document.getElementById('vehicle_no');
+      if (vn && !vn.value.trim() && v.plate) { vn.value = v.plate; doVehicleLookup(); }
+    })
+    .catch(function() {});
   }
 `;
 
@@ -515,6 +562,48 @@ app.get('/api/liff/employees', async (c) => {
   }>();
 
   return c.json(rows.results ?? []);
+});
+
+// ===== LIFF API: 今どの車に乗っているか／車の現在地（km-operator の稼働車両データ。運行管理者・統括管理者のみ）=====
+// 名前→その人が今乗っている車（車番・無線番号・状態・現在地）。車番→その車の現在地。
+async function liffDriverFinderGuard(c: Context<{ Bindings: Env }>): Promise<Response | null> {
+  const uid = await uidFromRequest(c.req.raw);
+  if (!uid) return c.json({ error: 'unauthorized' }, 401);
+  const liffUser = await c.env.DB.prepare('SELECT role FROM line_liff_users WHERE line_uid = ?').bind(uid).first<{ role: string }>();
+  if (!liffUser || !['general_manager', 'operations_manager'].includes(liffUser.role)) return c.json({ error: 'forbidden' }, 403);
+  return null;
+}
+function liveVehicleJson(v: LiveVehicle, fetchedAt: number) {
+  return { radio: v.radio, plate: v.plate, name: v.name, status: v.statusLabel, excluded: v.excluded, lat: v.lat, lon: v.lon, minutesAgo: minutesAgo(fetchedAt) };
+}
+app.get('/api/liff/driver-finder/by-name', async (c) => {
+  const denied = await liffDriverFinderGuard(c); if (denied) return denied;
+  const q = (c.req.query('q') ?? '').trim();
+  if (!q) return c.json({ ok: true, results: [] });
+  const live = await liveVehicles(c.env);
+  if (!live.ok) return c.json({ ok: false, message: live.message, results: [] });
+  const hits = findByName(live.vehicles, q, 5);
+  const results = await Promise.all(hits.map(async (v) => ({ ...liveVehicleJson(v, live.fetchedAt), address: await resolveAddress(c.env, v.lat, v.lon) })));
+  return c.json({ ok: true, results });
+});
+app.get('/api/liff/driver-finder/by-vehicle', async (c) => {
+  const denied = await liffDriverFinderGuard(c); if (denied) return denied;
+  const no = (c.req.query('no') ?? '').trim();
+  if (!/^\d{2,4}$/.test(no)) return c.json({ ok: true, vehicle: null });
+  const live = await liveVehicles(c.env);
+  if (!live.ok) return c.json({ ok: false, message: live.message, vehicle: null });
+  const v = findByVehicleNo(live.vehicles, no);
+  if (!v) return c.json({ ok: true, vehicle: null });
+  // その車に今乗っている人を社員台帳から引く（氏名一致。空白・全角半角の違いは無視）→ 報告画面の乗務員欄に自動反映できる形で返す
+  let employee: Record<string, unknown> | null = null;
+  const key = v.name.replace(/[\s　]+/g, '').normalize('NFKC');
+  if (key) {
+    const rows = await c.env.DB.prepare(
+      "SELECT id, emp_no, name, division, team, car_no, used_cars FROM employees WHERE is_active = 1 AND REPLACE(REPLACE(name, '　', ''), ' ', '') = ? ORDER BY status = 'completed' DESC, id LIMIT 2",
+    ).bind(key).all<{ id: number; emp_no: string; name: string; division: number | null; team: number | null; car_no: string | null; used_cars: string | null }>();
+    if (rows.results.length === 1) employee = rows.results[0];
+  }
+  return c.json({ ok: true, vehicle: { ...liveVehicleJson(v, live.fetchedAt), address: await resolveAddress(c.env, v.lat, v.lon), employee } });
 });
 
 // ===== LIFF API: 車番→担当乗務員検索（報告フォームの車番入力から課・班を自動表示）=====
@@ -2961,6 +3050,31 @@ ${COPY_SUMMARY_JS}
     document.getElementById(p + '-employee_team').value = e.team || '';
     markVehicleHintPicked(type);
     if (navigator.vibrate) { try { navigator.vibrate(15); } catch (x) {} }
+    empLiveCarLookup(type, e);
+  }
+  // 乗務員を選んだ → その人が「今」乗っている車（スマタクの稼働車両）。車番欄が空なら自動で入れ、現在地も表示する。
+  // 運行管理者・統括管理者のみ（他の権限では何も出ない）。出庫前・退勤後は見つからないので従来どおり。
+  function empLiveCarLookup(type, e) {
+    var p = PREFIX[type];
+    var name = (e && e.name) ? String(e.name).replace(/[\s　]+/g, '') : '';
+    var old = document.getElementById(p + '-emp-live'); if (old) old.remove();
+    if (!name) return;
+    fetch('/api/liff/driver-finder/by-name?q=' + encodeURIComponent(name), { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d || !d.ok || !d.results || !d.results.length) return;
+        if (!selectedEmp[type] || String(selectedEmp[type].name).replace(/[\s　]+/g, '') !== name) return;
+        var v = d.results[0];
+        var card = document.getElementById(p + '-emp-selected');
+        var line = document.createElement('div'); line.id = p + '-emp-live';
+        line.style.cssText = 'margin-top:8px;padding:10px 12px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;font-size:13px;color:#064e3b;line-height:1.5;';
+        line.innerHTML = '<div style="font-weight:800;">今乗っている車: 車番 ' + (v.plate || '不明') + '（無線 ' + v.radio + '）・' + v.status + '</div>'
+          + (v.address ? '<div>現在地: ' + v.address + '</div>' : '') + '<div style="font-size:11px;color:#047857;">' + v.minutesAgo + '分前の位置情報</div>';
+        card.parentNode.insertBefore(line, card.nextSibling);
+        var vn = document.getElementById(p + '-vehicle_no');
+        if (vn && !vn.value.trim() && v.plate) { vn.value = v.plate; doVehicleLookup(type); }
+      })
+      .catch(function() {});
   }
   function clearEmp(type) {
     selectedEmp[type] = null;
@@ -2971,6 +3085,7 @@ ${COPY_SUMMARY_JS}
     document.getElementById(p + '-employee_division').value = '';
     document.getElementById(p + '-employee_team').value = '';
     markVehicleHintPicked(type);
+    var live = document.getElementById(p + '-emp-live'); if (live) live.remove();
   }
   function markVehicleHintPicked(type) {
     var p = PREFIX[type];
@@ -3004,8 +3119,8 @@ ${COPY_SUMMARY_JS}
         if (document.getElementById(p + '-vehicle_no').value.trim() !== no) return;
         var v = data && data.vehicle;
         var list = (data && data.employees) || [];
-        if (!v && !list.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
-        var html = '';
+        if (!v && !list.length) { box.style.display = 'none'; box.innerHTML = ''; vehicleLiveLookup(type, no); return; }
+        var html = '<div id="' + p + '-vehicle-live"></div>';
         if (v) {
           html += '<div class="vh-veh">' + no + ' は <b>' + v.division + '課 ' + v.team + '班</b> の車両</div>';
         }
@@ -3023,8 +3138,28 @@ ${COPY_SUMMARY_JS}
         box.className = 'vh-box';
         box.style.display = 'block';
         markVehicleHintPicked(type);
+        vehicleLiveLookup(type, no);
       })
       .catch(function() { box.style.display = 'none'; });
+  }
+  // 車番を入れた → その車の現在地と「今乗っている人」（スマタクの稼働車両）。乗務員が未選択なら自動で登録する。
+  function vehicleLiveLookup(type, no) {
+    var p = PREFIX[type];
+    fetch('/api/liff/driver-finder/by-vehicle?no=' + encodeURIComponent(no), { headers: { 'Authorization': 'Bearer ' + LIFF_ACCESS_TOKEN } })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (document.getElementById(p + '-vehicle_no').value.trim() !== no) return;
+        var box = document.getElementById(p + '-vehicle-emp-hint');
+        var line = document.getElementById(p + '-vehicle-live');
+        if (!d || !d.ok || !d.vehicle) { if (line) line.remove(); return; }
+        var v = d.vehicle;
+        if (!line) { line = document.createElement('div'); line.id = p + '-vehicle-live'; box.insertBefore(line, box.firstChild); box.className = 'vh-box'; box.style.display = 'block'; }
+        line.innerHTML = '<div style="padding:8px 10px;margin-bottom:6px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;font-size:13px;color:#064e3b;line-height:1.5;">'
+          + '<div style="font-weight:800;">' + (v.name ? v.name + ' が乗務中・' : '') + v.status + '（' + v.minutesAgo + '分前の位置）</div>'
+          + (v.address ? '<div>現在地: ' + v.address + '</div>' : '') + '<div style="font-size:11px;color:#047857;">無線 ' + v.radio + '</div></div>';
+        if (v.employee && !selectedEmp[type]) selectEmp(type, v.employee);
+      })
+      .catch(function() {});
   }
 
   function val(id) {

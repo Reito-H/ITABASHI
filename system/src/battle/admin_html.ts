@@ -201,6 +201,19 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
       var vp = S.video && S.video.playing;
       a.push(st.video ? '<button class="b go" data-act="' + (vp ? 'vpause' : 'vplay') + '">' + (vp ? '一時停止' : '再生') + '</button><button class="b gh" data-act="vrestart">最初から再生</button>' : '<span class="hint">動画が未設定です。「メニュー」でこのラウンドに動画を選んでください</span>');
     }
+    if (st.kind === 'deck') {
+      var dk = S.deck || {};
+      if (!dk.url) h += '<div class="qbox" style="border-color:var(--pink)">表示する台本が未設定です。「メニュー」でこのラウンドに台本を選んでください。</div>';
+      else {
+        a.push('<button class="b gh" data-act="slidePrev"' + (dk.idx > 0 ? '' : ' disabled') + '>◀ 前のスライド</button>', '<button class="b go" data-act="slideNext"' + (dk.idx < dk.count - 1 ? '' : ' disabled') + '>次のスライド ▶</button>');
+        if (dk.hasQuiz) a.push('<button class="b y" data-act="quizStart">この問題をスマホに出題する</button>');
+        var tl = dk.titles || [];
+        h += '<div class="qbox"><b>スライド ' + (dk.idx + 1) + ' / ' + dk.count + '</b>　' + escH(dk.title || '') + (dk.hasQuiz ? '　<b style="color:var(--yellow)">【スマホ出題できる問題】</b>' : '')
+          + (tl[dk.idx + 1] ? '<br><span class="hint">次：' + escH(tl[dk.idx + 1].t) + '</span>' : '')
+          + '<br><select class="f" id="slideJump" style="margin-top:6px">' + tl.map(function(x, i){ return '<option value="' + i + '"' + (i === dk.idx ? ' selected' : '') + '>' + (i + 1) + '. ' + (x.q ? '【問題】' : '') + escH(x.t) + '</option>'; }).join('') + '</select></div>';
+      }
+    }
+    if (st.fromDeck) a.push('<button class="b c" data-act="quizEnd">スライドに戻る（答え・解説へ）▶</button>');
     if (st.kind === 'mygrowth' || st.kind === 'mysales') h += '<div class="qbox">各自のスマホに本人の売上だけを表示中です（読み込み済み ' + (S.salesLoaded || 0) + ' 人）。個人の数字はこの画面やプロジェクターには出ません。</div>';
     if (st.kind === 'qbox') a.push('<button class="b y" data-act="qboxToggle">' + (ph === 'open' ? '受付を終了' : '受付を再開') + '</button>');
     if (st.kind === 'announce') {
@@ -282,6 +295,8 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     n.onclick = function(){ send({ t: 'next' }); }; p.onclick = function(){ send({ t: 'prev' }); };
     Array.prototype.forEach.call(page.querySelectorAll('[data-goto]'), function(b){ b.onclick = function(){ if (confirm('ここへ移動しますか？')) send({ t: 'goto', i: Number(b.getAttribute('data-goto')) }); }; });
     Array.prototype.forEach.call(page.querySelectorAll('[data-act]'), function(b){ b.onclick = function(){ var a = b.getAttribute('data-act'); if (a === 'timer') act('timer', { min: Number((document.getElementById('tmin') || {}).value || 0) }); else act(a); }; });
+    var sj = document.getElementById('slideJump');
+    if (sj) sj.onchange = function(){ act('slideGo', { to: Number(sj.value) }); };
     Array.prototype.forEach.call(page.querySelectorAll('[data-sc]'), function(b){ b.onclick = function(){
       var d = b.getAttribute('data-d'), reason = document.getElementById('reason').value.trim();
       if (d === 'custom') { d = Number(document.getElementById('cst').value); if (!d) { alert('±の点数を入力してください'); return; } }
@@ -346,6 +361,8 @@ label.lb{display:block;font-size:11px;color:var(--mute);margin:8px 0 3px;}
     if (k === 'number') h += cfgField(s, 'unit', '単位（円・分など）');
     if (k === 'timeattack') h += cfgField(s, 'top', '表示する人数（上位）', 'number') + '<div class="hint">タイムは「車椅子タイム」タブで入力します。</div>';
     if (k === 'scoreboard') h += cfgField(s, 'final', '最終結果（優勝チームを紙吹雪で発表）', 'check');
+    if (k === 'deck') h += cfgField(s, 'deck_id', '映す台本（板橋ページ「台本」）', 'select', '<option value="">（選んでください）</option>' + (D.decks || []).map(function(d){ return '<option value="' + d.id + '"' + (String(c.deck_id) === String(d.id) ? ' selected' : '') + '>' + escH(d.title) + '（' + d.n + '枚）</option>'; }).join(''))
+      + '<div class="hint">台本のスライドをそのままプロジェクターに映し、進行画面の「次のスライド」で1枚ずつ送ります。台本で「表示」のチェックを外したスライドは出ません。問題スライドで「板橋バトルでスマホ出題する」にチェックしたものは、進行画面の「この問題をスマホに出題する」で新卒のスマホに選択肢が出て、自動採点されます。台本を直したら、進行画面の再読み込みで反映されます。</div>';
     if (k === 'formal') h += cfgField(s, 'kicker', '上の小さい文字（例：2026年度　板橋営業所）') + cfgField(s, 'subtitle', 'サブタイトル') + cfgField(s, 'body', '本文（1行ずつ箇条書きになります。行頭を空白にすると記号なし）', 'area')
       + '<div class="row2"><div>' + cfgField(s, 'image_id', '画像（右側に表示）', 'select', mediaOpts('image', c.image_id)) + '</div><div>' + cfgField(s, 'footer', '下の小さい文字（日付・場所など）') + '</div></div>'
       + '<div class="hint">本文も画像もなければ表紙（タイトルを中央に大きく）、どちらかがあれば講座ページのレイアウトになります。このスライドではロゴ・ラウンド番号・得点・効果音を出さず、BGMも「変えない」のままなら止まります。</div>';

@@ -192,8 +192,13 @@ battleAdminRoutes.get('/ib2/api/game', async (c) => {
   const media = (await db.prepare('SELECT id, kind, name, mime, size FROM ib2_media ORDER BY id DESC').all()).results ?? [];
   const timeattack = (await db.prepare('SELECT * FROM ib2_timeattack ORDER BY seconds ASC, id ASC').all()).results ?? [];
   const scores = (await db.prepare('SELECT * FROM ib2_scores WHERE game_id = ? ORDER BY id DESC LIMIT 300').bind(g.id).all()).results ?? [];
+  // プレゼン（kind='deck'）で選べる台本の一覧（非表示のスライドは数えない）
+  let decks: unknown[] = [];
+  try {
+    decks = (await db.prepare('SELECT d.id, d.title, (SELECT COUNT(*) FROM daihon_slides s WHERE s.deck_id = d.id AND COALESCE(s.hidden, 0) = 0) AS n FROM daihon_decks d ORDER BY d.sort_order, d.id').all()).results ?? [];
+  } catch { decks = []; }
   return c.json({
-    game: g, roster, media, timeattack, scores, gradYear: 2026,
+    game: g, roster, media, timeattack, scores, decks, gradYear: 2026,
     steps: steps.map((s) => ({
       id: s.id, kind: s.kind, title: s.title, config: parseJson<Record<string, unknown>>(s.config, {}),
       questions: qs.filter((q) => q.step_id === s.id).map((q) => ({ ...q, choices: parseJson<string[]>(q.choices, []) })),

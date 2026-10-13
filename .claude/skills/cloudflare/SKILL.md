@@ -45,6 +45,9 @@ Cloudflareに対する操作（デプロイ、D1マイグレーション適用�
 
 # 本番ログのtail
 .claude/skills/cloudflare/cf-wrangler.sh tail
+
+# 別Workerプロジェクト（km-ui/cloudflare-worker = km-operator新UIプロキシ）のデプロイ
+CF_WRANGLER_DIR=km-ui/cloudflare-worker .claude/skills/cloudflare/cf-wrangler.sh deploy
 ```
 
 ### 2. Cloudflare REST APIを直接呼ぶ場合（wranglerでカバーできない操作）

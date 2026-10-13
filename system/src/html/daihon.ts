@@ -26,13 +26,44 @@ export interface DaihonSlide {
   id: number;
   deck_id: number;
   sort_order: number;
-  layout: string; // cover | section | content | steps | stat | photo | closing
+  layout: string; // cover | section | content | steps | stat | photo | figure | closing
   accent: string; // blue | green | amber | slate
   title: string;
   subtitle: string;
   body: string;
   notes: string;
   images: string; // 写真レイアウト用：R2キーのJSON配列（migration_171）
+  hidden?: number;   // 1 = 非表示（プレゼン・印刷・PDF・板橋バトルに出さない。migration_187）
+  ref_page?: string; // 右上に出す参照ページ（例: "12" → 「P 12」。教材の何ページを開くか）
+  links?: string;    // 開けるリンク。1行に「表示名｜URL」（http/https のみ。migration_190）
+  quiz?: string;     // 問題スライドの出題設定 JSON {answer:正解の行番号, points, time, phone:板橋バトルでスマホ出題}
+}
+export interface DaihonQuiz { answer: number; points: number; time: number; phone: boolean }
+export function slideQuiz(s: { quiz?: string | null }): DaihonQuiz {
+  let q: Record<string, unknown> = {};
+  try { q = JSON.parse(String(s.quiz || '{}')) || {}; } catch { q = {}; }
+  return {
+    answer: Number.isFinite(Number(q.answer)) ? Number(q.answer) : -1,
+    points: Number(q.points) > 0 ? Number(q.points) : 10,
+    time: Number(q.time) >= 5 ? Number(q.time) : 20,
+    phone: !!q.phone,
+  };
+}
+// 問題スライドの選択肢（本文の空でない行。行頭の「■」行は補足なので除く）
+export function quizChoices(body: string): string[] {
+  return String(body || '').split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('■')).slice(0, 4);
+}
+// スライド下部に出すリンク（1行「表示名｜URL」。http/https 以外は無視）
+export function slideLinks(s: { links?: string | null }): Array<{ label: string; url: string }> {
+  return String(s.links || '').split('\n').map((l) => {
+    const i = l.search(/[｜|]/);
+    const label = (i >= 0 ? l.slice(0, i) : '').trim();
+    const url = (i >= 0 ? l.slice(i + 1) : l).trim();
+    return { label: label || url, url };
+  }).filter((x) => /^https?:\/\/[^\s"'<>]+$/.test(x.url)).slice(0, 6);
+}
+export function visibleSlides<T extends { hidden?: number }>(slides: T[]): T[] {
+  return slides.filter((s) => !s.hidden);
 }
 
 export const DAIHON_LAYOUTS: Array<{ v: string; l: string; desc: string }> = [
@@ -42,6 +73,9 @@ export const DAIHON_LAYOUTS: Array<{ v: string; l: string; desc: string }> = [
   { v: 'steps', l: '流れ', desc: '番号つきの手順カードを横に並べる（1行＝「見出し｜説明」）' },
   { v: 'stat', l: '数字', desc: '大きな数字のカードを横に並べる（1行＝「数字｜説明」）' },
   { v: 'photo', l: '写真', desc: '左に写真（最大4枚）、右に箇条書き' },
+  { v: 'question', l: '問題', desc: '「ここで問題です」。見出し＝問題文、本文1行＝選択肢1つ（最大4つ）' },
+  { v: 'answer', l: '答え・解説', desc: '見出し＝答え（大きく）、サブ見出し＝根拠、本文＝解説' },
+  { v: 'figure', l: '図', desc: '地図・図を切り抜かずに大きく表示（本文があれば右に要点）' },
   { v: 'closing', l: '締め', desc: '締めのひとこと' },
 ];
 export const DAIHON_ACCENTS: Array<{ v: string; l: string }> = [
@@ -132,10 +166,49 @@ function renderPhotos(keys: string[]): string {
 }
 
 // ---------- 1スライド ----------
-export function renderSlide(s: DaihonSlide, index: number, total: number): string {
+// 中扉の章番号（何枚目の中扉か）。参照ページ・リンクを使っている台本（ハンドブック解説・知識集など）だけに使い、
+// 従来の台本の表示（スライド番号）は変えない
+function chapterNos(slides: DaihonSlide[]): number[] {
+  if (!slides.some((x) => String(x.ref_page || '').trim() || String(x.links || '').trim())) return slides.map(() => 0);
+  let n = 0;
+  return slides.map((x) => (normLayout(x.layout) === 'section' ? ++n : n));
+}
+export function renderSlide(s: DaihonSlide, index: number, total: number, chapter = 0): string {
   const ac = `ac-${normAccent(s.accent)}`;
   const layout = normLayout(s.layout);
-  const pageno = `<span class="dh-pageno">${index + 1} / ${total}</span>`;
+  const pageno = `<span class="dh-pageno">${index + 1} / ${total}</span>`
+    + (String(s.ref_page || '').trim() ? `<span class="dh-ref">P ${esc(String(s.ref_page).trim())}</span>` : '')
+    + (slideLinks(s).length ? `<div class="dh-links${slideLinks(s).length >= 3 ? ' dh-links-many' : ''}">${slideLinks(s).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer"><span class="dh-link-t">${esc(l.label)}</span><span class="dh-link-u">${esc(l.url.replace(/^https?:\/\//, ''))}</span></a>`).join('')}</div>` : '');
+
+  if (layout === 'question') {
+    const ch = quizChoices(s.body);
+    const lead = String(s.body || '').split('\n').map((x) => x.trim()).filter((x) => x.startsWith('■')).map((x) => x.replace(/^■\s*/, ''));
+    const marks = ['A', 'B', 'C', 'D'];
+    return `<section class="dh-slide dh-question ${ac}" data-i="${index}">
+      <div class="dh-q-inner dh-fit">
+        <div class="dh-q-kick"><span class="dh-q-q">Q</span>${inline(s.subtitle || 'ここで問題です')}</div>
+        <h2 class="dh-q-title"${titleFitStyle(s.title, 4.6, 22)}>${inline(s.title)}</h2>
+        ${ch.length ? `<div class="dh-q-choices dh-q-n${ch.length}">${ch.map((c, i) => `<div class="dh-q-c"><b>${marks[i]}</b><span>${inline(c)}</span></div>`).join('')}</div>` : ''}
+        ${lead.map((l) => `<p class="dh-q-lead">${inline(l)}</p>`).join('')}
+      </div>
+      ${pageno}
+    </section>`;
+  }
+  if (layout === 'answer') {
+    return `<section class="dh-slide dh-answer ${ac}" data-i="${index}">
+      <div class="dh-content-inner dh-fit">
+        <div class="dh-a-head">
+          <span class="dh-a-mark">A</span>
+          <div>
+            <h2 class="dh-a-title"${titleFitStyle(s.title, 5.4, 16)}>${inline(s.title)}</h2>
+            ${s.subtitle ? `<p class="dh-a-sub">${inline(s.subtitle)}</p>` : ''}
+          </div>
+        </div>
+        <div class="dh-body dh-a-body">${renderBody(s.body)}</div>
+      </div>
+      ${pageno}
+    </section>`;
+  }
 
   if (layout === 'cover') {
     return `<section class="dh-slide dh-cover ${ac}" data-i="${index}">
@@ -150,7 +223,7 @@ export function renderSlide(s: DaihonSlide, index: number, total: number): strin
   if (layout === 'section') {
     return `<section class="dh-slide dh-section ${ac}" data-i="${index}">
       <div class="dh-section-inner dh-fit">
-        <span class="dh-section-no">${String(index).padStart(2, '0')}</span>
+        <span class="dh-section-no">${String(chapter || index).padStart(2, '0')}</span>
         <h2 class="dh-section-title"${titleFitStyle(s.title, 9, 10)}>${inline(s.title)}</h2>
         ${s.subtitle ? `<p class="dh-section-sub">${inline(s.subtitle)}</p>` : ''}
       </div>
@@ -175,6 +248,26 @@ export function renderSlide(s: DaihonSlide, index: number, total: number): strin
         ${s.subtitle ? `<p class="dh-sub">${inline(s.subtitle)}</p>` : ''}
       </div>
       <div class="dh-photo-wrap">${renderPhotos(slideImages(s))}<div class="dh-photo-body">${renderBody(s.body)}</div></div>
+    </div>
+    ${pageno}
+  </section>`;
+  }
+  if (layout === 'figure') {
+    // 図・地図：切り抜かずに枠いっぱいへ収める（乗り場の図などは端が欠けると意味が変わるため）
+    const keys = slideImages(s);
+    const fig = keys.length
+      ? keys.map((k) => `<img src="${esc(daihonImageUrl(k))}" alt="">`).join('')
+      : '<span>図（あとで追加）</span>';
+    return `<section class="dh-slide dh-content dh-figure ${ac}" data-i="${index}">
+    <div class="dh-content-inner">
+      <div class="dh-head">
+        <h2 class="dh-title"${titleFitStyle(s.title, 3.6, 28)}>${inline(s.title)}</h2>
+        ${s.subtitle ? `<p class="dh-sub">${inline(s.subtitle)}</p>` : ''}
+      </div>
+      <div class="dh-figure-wrap${s.body.trim() ? '' : ' dh-figure-only'}">
+        <div class="dh-figure-img dh-figure-n${Math.max(1, keys.length)}${keys.length ? '' : ' dh-photos-empty'}">${fig}</div>
+        ${s.body.trim() ? `<div class="dh-figure-body">${renderBody(s.body)}</div>` : ''}
+      </div>
     </div>
     ${pageno}
   </section>`;
@@ -269,6 +362,60 @@ export const DAIHON_CSS = `
   .dh-photo-body .dh-list li{font-size:2.6cqw;padding-left:3.4cqw;}
   .dh-photo-body .dh-list li::before{width:1.3cqw;height:1.3cqw;top:1.3cqh;}
   .dh-photo-body .dh-lead{font-size:2.6cqw;}
+
+  /* 開けるリンク（スライド下部） */
+  .dh-slide:has(.dh-links){padding-bottom:9.5cqw;}
+  .dh-slide:has(.dh-links-many){padding-bottom:12.5cqw;}
+  .dh-links-many{gap:.6cqw;}
+  .dh-links-many a{font-size:1.35cqw;padding:.55cqw 1.1cqw;}
+  .dh-links-many .dh-link-u{display:none;}
+  .dh-links{position:absolute;left:5cqw;right:11cqw;bottom:2.4cqw;display:flex;flex-wrap:wrap;gap:.8cqw;z-index:2;}
+  .dh-links a{display:inline-flex;align-items:baseline;gap:.8cqw;max-width:100%;padding:.7cqw 1.4cqw;border-radius:.8cqw;background:var(--ac-soft);border:.18cqw solid var(--ac);color:var(--ac);text-decoration:none;font-size:1.55cqw;font-weight:800;line-height:1.3;}
+  .dh-links a:hover{background:var(--ac);color:#fff;}
+  .dh-link-u{font-size:1.1cqw;font-weight:600;opacity:.75;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:28cqw;}
+  .dh-embed .dh-hint,.dh-embed .dh-toggle,.dh-embed .dh-bar{display:none!important;}
+  .dh-embed .dh-stage{box-shadow:none;}
+  /* 教材の参照ページ（右上） */
+  .dh-ref{position:absolute;right:2.6cqw;top:2.2cqw;font-size:2cqw;font-weight:800;color:var(--ac);background:var(--ac-soft);border:.2cqw solid var(--ac);border-radius:.8cqw;padding:.4cqw 1.2cqw;letter-spacing:.06em;z-index:2;}
+  .dh-section .dh-ref{background:rgba(255,255,255,.92);}
+
+  /* question（ここで問題です） */
+  .dh-question{background:var(--ac-soft);}
+  .dh-q-inner{flex:1;display:flex;flex-direction:column;justify-content:center;transform-origin:center;}
+  .dh-q-kick{display:flex;align-items:center;gap:1.6cqw;font-size:2.6cqw;font-weight:800;color:var(--ac);letter-spacing:.12em;}
+  .dh-q-q{display:grid;place-items:center;width:6.4cqw;height:6.4cqw;border-radius:50%;background:var(--ac);color:#fff;font-size:4cqw;font-weight:900;letter-spacing:0;}
+  .dh-q-title{margin-top:3cqh;font-size:4.6cqw;font-weight:800;line-height:1.4;color:var(--ink);text-wrap:pretty;}
+  .dh-q-choices{margin-top:4.5cqh;display:grid;gap:1.8cqw;}
+  .dh-q-n2{grid-template-columns:1fr 1fr;}
+  .dh-q-n3{grid-template-columns:1fr;}
+  .dh-q-n4{grid-template-columns:1fr 1fr;}
+  .dh-q-c{display:flex;align-items:center;gap:1.6cqw;background:#fff;border:.3cqw solid var(--ac);border-radius:1.2cqw;padding:2.2cqh 2cqw;}
+  .dh-q-c b{display:grid;place-items:center;flex:none;width:4.4cqw;height:4.4cqw;border-radius:.8cqw;background:var(--ac);color:#fff;font-size:2.6cqw;font-weight:900;}
+  .dh-q-c span{font-size:2.8cqw;font-weight:800;line-height:1.35;color:var(--ink);}
+  .dh-q-lead{margin-top:2.6cqh;font-size:2.2cqw;font-weight:700;color:var(--muted);}
+
+  /* answer（答え・解説） */
+  .dh-a-head{display:flex;align-items:center;gap:2.4cqw;border-bottom:.25cqw solid var(--hair);padding-bottom:2.4cqh;margin-bottom:2.6cqh;flex:none;}
+  .dh-a-mark{display:grid;place-items:center;flex:none;width:8cqw;height:8cqw;border-radius:50%;background:#dc2626;color:#fff;font-size:5cqw;font-weight:900;}
+  .dh-a-title{font-size:5.4cqw;font-weight:900;line-height:1.2;color:#dc2626;}
+  .dh-a-sub{margin-top:1cqh;font-size:2.2cqw;font-weight:700;color:var(--ac);}
+  .dh-a-body{justify-content:flex-start;}
+  .dh-a-body .dh-list li{font-size:2.7cqw;}
+
+  /* figure（図・地図を切り抜かずに大きく） */
+  .dh-figure{padding:3.2cqw 4.4cqw 4.4cqw 5cqw;}
+  .dh-figure .dh-head{padding-bottom:1.2cqh;margin-bottom:1.8cqh;padding-right:9cqw;}
+  .dh-figure .dh-sub{font-size:2cqw;margin-top:.6cqh;}
+  .dh-figure-wrap{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.9fr) minmax(0,1fr);gap:2.6cqw;}
+  .dh-figure-wrap.dh-figure-only{grid-template-columns:minmax(0,1fr);}
+  .dh-figure-img{min-height:0;display:grid;gap:1.2cqw;}
+  .dh-figure-n2{grid-template-columns:1fr 1fr;}
+  .dh-figure-img img{width:100%;height:100%;object-fit:contain;display:block;min-height:0;}
+  .dh-figure-body{display:flex;flex-direction:column;justify-content:safe center;gap:1cqh;overflow:hidden;}
+  .dh-figure-body .dh-list{gap:1.4cqh;}
+  .dh-figure-body .dh-list li{font-size:1.9cqw;padding-left:2.6cqw;line-height:1.5;}
+  .dh-figure-body .dh-list li::before{width:1cqw;height:1cqw;left:.5cqw;top:1.1cqh;}
+  .dh-figure-body .dh-lead{font-size:2cqw;padding:1cqh 1.4cqw;}
 
   /* cover */
   .dh-cover{align-items:flex-start;justify-content:center;}
@@ -394,13 +541,26 @@ export const DAIHON_PRESENT_JS = `
     }
   });
   if(stage) stage.addEventListener('click', function(e){
+    if(/[?&]embed=1/.test(location.search)) return;
+    if(e.target && e.target.closest && e.target.closest('a')) return;
     var r = stage.getBoundingClientRect();
     if(e.clientX - r.left > r.width/2) go(idx+1); else go(idx-1);
   });
   if(toggle) toggle.addEventListener('click', function(){ setNotes(!notesOn); });
   if(hint) setTimeout(function(){ hint.classList.add('gone'); }, 6000);
 
-  setNotes(notesOn);
+  // 板橋バトルのプロジェクター画面に埋め込むとき（?embed=1）は操作UIを隠し、親画面からの指示でだけページを送る
+  var EMBED = /[?&]embed=1/.test(location.search);
+  if(EMBED){ document.documentElement.className += ' dh-embed'; }
+  var h0 = parseInt((location.hash || '').slice(1), 10);
+  if(h0 >= 0 && h0 < total){ idx = h0; }
+  window.addEventListener('message', function(e){
+    if(e.origin !== location.origin) return;
+    var d = e.data || {};
+    if(typeof d.dhGo === 'number'){ go(Math.max(0, Math.min(total - 1, d.dhGo))); }
+  });
+
+  setNotes(EMBED ? false : notesOn);
   render();
 })();
 `;
@@ -409,7 +569,8 @@ export const DAIHON_PRESENT_JS = `
 //  フルドキュメント: present / print
 // =====================================================================
 export function daihonPresentPage(deck: DaihonDeck, slides: DaihonSlide[]): string {
-  const sections = slides.map((s, i) => renderSlide(s, i, slides.length)).join('\n');
+  const ch = chapterNos(slides);
+  const sections = slides.map((s, i) => renderSlide(s, i, slides.length, ch[i])).join('\n');
   const notes = JSON.stringify(slides.map((s) => ({ title: s.title || '', text: s.notes || '' })));
   const cfg = JSON.stringify({ deckId: deck.id });
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
@@ -431,7 +592,7 @@ export function daihonPrintPage(deck: DaihonDeck, slides: DaihonSlide[]): string
   const blocks = slides.map((s, i) => {
     const note = (s.notes || '').trim();
     return `<div class="dh-print-unit">
-      ${renderSlide(s, i, slides.length)}
+      ${renderSlide(s, i, slides.length, chapterNos(slides)[i])}
       ${note ? `<div class="dh-print-note"><b>台本 ${i + 1}</b>${esc(note)}</div>` : ''}
     </div>`;
   }).join('\n');
@@ -485,6 +646,28 @@ export function daihonPrintPage(deck: DaihonDeck, slides: DaihonSlide[]): string
   .dh-photo-body .dh-list li{font-size:13px;padding-left:7mm;}
   .dh-photo-body .dh-list li::before{width:5px;height:5px;top:7px;}
   .dh-photo-body .dh-lead{font-size:13px;}
+  .dh-figure-wrap{gap:4mm;height:120mm;}
+  .dh-slide:has(.dh-links){padding-bottom:16mm;}
+  .dh-slide:has(.dh-links-many){padding-bottom:22mm;}
+  .dh-links{left:8mm;right:20mm;bottom:4mm;gap:2mm;}
+  .dh-links a{font-size:10px;padding:1mm 2.5mm;border-width:1px;border-radius:4px;}
+  .dh-link-u{font-size:8px;max-width:none;}
+  .dh-ref{font-size:11px;padding:1mm 3mm;border-width:1px;border-radius:4px;right:5mm;top:4mm;}
+  .dh-q-kick{font-size:13px;}
+  .dh-q-q{width:28px;height:28px;font-size:16px;}
+  .dh-q-title{font-size:20px;margin-top:4mm;}
+  .dh-q-choices{margin-top:5mm;gap:3mm;}
+  .dh-q-c{padding:3mm;border-width:1px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .dh-q-c b{width:20px;height:20px;font-size:12px;}
+  .dh-q-c span{font-size:14px;}
+  .dh-q-lead{font-size:12px;}
+  .dh-a-mark{width:36px;height:36px;font-size:20px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  .dh-a-title{font-size:24px;}
+  .dh-a-sub{font-size:12px;}
+  .dh-a-body .dh-list li{font-size:13px;}
+  .dh-figure-body .dh-list li{font-size:11px;padding-left:5mm;}
+  .dh-figure-body .dh-list li::before{width:4px;height:4px;top:6px;}
+  .dh-figure-body .dh-lead{font-size:11px;}
   .dh-print-note{margin-top:4mm;border:1px solid #d1d5db;border-radius:6px;padding:6mm;font-size:12px;line-height:1.9;white-space:pre-wrap;background:#f9fafb;}
   .dh-print-note b{display:block;font-size:10px;letter-spacing:.12em;color:#6b7280;margin-bottom:3mm;}
   @page{size:A4;margin:12mm;}
@@ -596,6 +779,34 @@ export const DAIHON_PPTX_JS = `
   function coverImage(sl, im, x, y, w, h){
     var r = Math.max(w / im.w, h / im.h), iw = im.w * r, ih = im.h * r;
     sl.addImage({ data: im.data, x: x, y: y, w: iw, h: ih, sizing: { type: 'crop', x: (iw - w) / 2, y: (ih - h) / 2, w: w, h: h } });
+  }
+  // 切り抜かずに枠内へ収める（図・地図用）
+  function containImage(sl, im, x, y, w, h){
+    var r = Math.min(w / im.w, h / im.h), iw = im.w * r, ih = im.h * r;
+    sl.addImage({ data: im.data, x: x + (w - iw) / 2, y: y + (h - ih) / 2, w: iw, h: ih });
+  }
+  function figureSlide(pres, s, i, total){
+    var b = base(pres, s, i, total), sl = b.sl, ac = b.ac;
+    var top = head(pres, sl, s, ac);
+    var imgs = s.loadedImages || [];
+    var hasBody = lines(s.body).some(function(x){ return x.trim(); });
+    var bottom = H - 0.45, ah = bottom - top, aw = hasBody ? CW * 1.9 / 2.9 - 0.12 : CW, gap = 0.12;
+    if (!imgs.length) {
+      sl.addText('図（あとで追加）', { shape: pres.shapes.RECTANGLE, x: PX, y: top, w: aw, h: ah, fill: { color: 'F8FAFC' }, line: { color: 'CBD5E1', width: 1.5, dashType: 'dash' }, fontFace: FONT, fontSize: 16, bold: true, color: '94A3B8', align: 'center', valign: 'middle' });
+    } else if (imgs.length === 1) {
+      containImage(sl, imgs[0], PX, top, aw, ah);
+    } else {
+      var hw = (aw - gap) / 2;
+      containImage(sl, imgs[0], PX, top, hw, ah); containImage(sl, imgs[1], PX + hw + gap, top, hw, ah);
+    }
+    if (!hasBody) return;
+    var bx = PX + aw + 0.24, bw = PX + CW - bx;
+    var list = lines(s.body).map(function(x){ return x.trim(); }).map(function(t){
+      if (!t) return runs(' ', { fontFace: FONT, fontSize: 6 }, ac[0]);
+      if (t.charAt(0) === '■') return [{ text: '▍', options: { fontFace: FONT, fontSize: 12, bold: true, color: ac[0], paraSpaceBefore: 4, paraSpaceAfter: 4 } }].concat(runs(t.replace(/^■[ 　]*/, ''), { fontFace: FONT, fontSize: 12, bold: true, color: INK }, ac[0]));
+      return [{ text: '●  ', options: { fontFace: FONT, fontSize: 8, color: ac[0], paraSpaceAfter: 5 } }].concat(runs(stripMark(t), { fontFace: FONT, fontSize: 11, bold: true, color: BODY }, ac[0]));
+    });
+    sl.addText(paras(list), { x: bx, y: top, w: bw, h: ah, valign: 'middle', margin: 0, lang: 'ja-JP' });
   }
   function photoSlide(pres, s, i, total){
     var b = base(pres, s, i, total), sl = b.sl, ac = b.ac;
@@ -731,7 +942,7 @@ export const DAIHON_PPTX_JS = `
     return loadLib().then(function(){
       // 写真スライドの画像を先に読み込んでおく
       return Promise.all(slides.map(function(s){
-        if (s.layout !== 'photo' || !s.imageUrls || !s.imageUrls.length) return null;
+        if ((s.layout !== 'photo' && s.layout !== 'figure') || !s.imageUrls || !s.imageUrls.length) return null;
         return Promise.all(s.imageUrls.map(loadImage)).then(function(a){ s.loadedImages = a; });
       }));
     }).then(function(){
@@ -746,6 +957,7 @@ export const DAIHON_PPTX_JS = `
         else if (s.layout === 'closing') closingSlide(pres, s, i, total);
         else if (s.layout === 'steps' || s.layout === 'stat') cardsSlide(pres, s, i, total, s.layout);
         else if (s.layout === 'photo') photoSlide(pres, s, i, total);
+        else if (s.layout === 'figure') figureSlide(pres, s, i, total);
         else contentSlide(pres, s, i, total);
       });
       return pres.writeFile({ fileName: (deck.title || '台本') + '.pptx' });
@@ -757,7 +969,8 @@ export const DAIHON_PPTX_JS = `
 
 // スライドだけを16:9（PowerPointと同じ 254mm×142.875mm）で1枚1ページに並べた PDF 保存用ページ
 export function daihonPdfPage(deck: DaihonDeck, slides: DaihonSlide[]): string {
-  const pages = slides.map((s, i) => `<div class="dh-pg">${renderSlide(s, i, slides.length)}</div>`).join('\n');
+  const ch = chapterNos(slides);
+  const pages = slides.map((s, i) => `<div class="dh-pg">${renderSlide(s, i, slides.length, ch[i])}</div>`).join('\n');
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${esc(deck.title)}</title>
@@ -811,6 +1024,7 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
   const accentsJson = JSON.stringify(DAIHON_ACCENTS);
   const slidesJson = JSON.stringify(slides.map((s) => ({
     id: s.id, layout: s.layout, accent: s.accent, title: s.title, subtitle: s.subtitle, body: s.body, notes: s.notes,
+    hidden: !!s.hidden, ref_page: s.ref_page || '', quiz: slideQuiz(s), links: s.links || '',
     images: slideImages(s).map((k) => ({ key: k, url: daihonImageUrl(k) })),
   })));
   const deckJson = JSON.stringify({ id: deck.id, title: deck.title, subtitle: deck.subtitle, speaker: deck.speaker, intro: deck.intro });
@@ -841,6 +1055,7 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
     .dh-s .f label{font-size:11px;font-weight:700;color:#6b7280;}
     .dh-s .f input,.dh-s .f textarea{border:1px solid #d1d5db;border-radius:7px;padding:7px 9px;font-size:13px;font-family:inherit;}
     .dh-s .f textarea.body{min-height:96px;resize:vertical;}
+    .dh-s .f textarea.links{min-height:44px;resize:vertical;font-size:12px;}
     .dh-s .f textarea.notes{min-height:80px;resize:vertical;background:#fffef5;}
     .dh-add{display:flex;gap:8px;align-items:center;margin-top:6px;}
     .dh-add select{border:1px solid #d1d5db;border-radius:7px;padding:8px;font-size:13px;}
@@ -854,6 +1069,13 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
     .dh-ph .th button{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:11px;cursor:pointer;}
     .dh-ph label.up{display:inline-flex;align-items:center;justify-content:center;width:96px;height:64px;border:1px dashed #94a3b8;border-radius:7px;font-size:11px;font-weight:700;color:#475569;cursor:pointer;background:#f8fafc;text-align:center;line-height:1.4;}
     .dh-ph input[type=file]{display:none;}
+    .dh-s.is-hidden{opacity:.45;background:#f9fafb;}
+    .dh-s .vis{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#374151;cursor:pointer;}
+    .dh-s .ref{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:700;color:#6b7280;}
+    .dh-s .ref input{width:58px;border:1px solid #d1d5db;border-radius:7px;padding:5px 6px;font-size:12px;}
+    .dh-qz{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 10px;margin-bottom:9px;font-size:12px;font-weight:700;color:#1e3a5f;}
+    .dh-qz select,.dh-qz input[type=number]{border:1px solid #d1d5db;border-radius:6px;padding:4px 6px;font-size:12px;}
+    .dh-qz input[type=number]{width:56px;}
     .dh-ro{background:#fef3c7;border:1px solid #fde68a;color:#92400e;font-size:12px;border-radius:8px;padding:10px 12px;margin-bottom:12px;}
   </style>
   <div class="dh-e">
@@ -928,10 +1150,12 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
       var lo = LAYOUTS.map(function(k){ return '<option value="'+k.v+'"'+(k.v===s.layout?' selected':'')+'>'+k.l+'</option>'; }).join('');
       var ac = ACCENTS.map(function(k){ return '<option value="'+k.v+'"'+(k.v===s.accent?' selected':'')+'>'+k.l+'</option>'; }).join('');
       var dis = EDITABLE ? '' : ' disabled';
-      return '<div class="dh-card dh-s" data-id="'+s.id+'">'
-        + '<div class="hd"><span class="no">'+(i+1)+'</span>'
+      return '<div class="dh-card dh-s'+(s.hidden?' is-hidden':'')+'" data-id="'+s.id+'">'
+        + '<div class="hd"><label class="vis" title="チェックを外すと、プレゼン・印刷・PDF・板橋バトルに出しません"><input type="checkbox" data-role="show"'+(s.hidden?'':' checked')+dis+'>表示</label>'
+        + '<span class="no">'+(i+1)+'</span>'
         + '<select data-role="layout"'+dis+'>'+lo+'</select>'
         + '<select data-role="accent"'+dis+'>'+ac+'</select>'
+        + '<span class="ref" title="スライド右上に「P 12」のように出ます（教材の何ページを開くか）">P<input type="text" data-name="ref_page" maxlength="20" value="'+escA(s.ref_page)+'"'+dis+'></span>'
         + '<span class="sp"></span>'
         + (EDITABLE ? ('<button class="dh-ic" type="button" data-act="up" title="上へ">↑</button>'
           + '<button class="dh-ic" type="button" data-act="down" title="下へ">↓</button>'
@@ -940,12 +1164,23 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
         + '</div>'
         + '<div class="f"><label>見出し</label><input type="text" data-name="title" maxlength="120" value="'+escA(s.title)+'"'+dis+'></div>'
         + '<div class="f"><label>サブ見出し（任意）</label><input type="text" data-name="subtitle" maxlength="160" value="'+escA(s.subtitle)+'"'+dis+'></div>'
-        + (s.layout === 'photo' ? photoBox(s) : '')
-        + '<div class="f"><label>本文（1行1項目）</label><textarea class="body" data-name="body"'+dis+'>'+esc(s.body)+'</textarea></div>'
+        + (s.layout === 'photo' || s.layout === 'figure' ? photoBox(s) : '')
+        + (s.layout === 'question' ? quizBox(s) : '')
+        + '<div class="f"><label>'+(s.layout === 'question' ? '選択肢（1行に1つ・最大4つ。行頭「■ 」は選択肢の下に出る補足）' : '本文（1行1項目）')+'</label><textarea class="body" data-name="body"'+dis+'>'+esc(s.body)+'</textarea></div>'
+        + '<div class="f"><label>リンク（任意・1行に「表示名｜https://…」。スライドの下にボタンで出て、クリックで開けます）</label><textarea class="links" data-name="links" rows="2"'+dis+'>'+esc(s.links)+'</textarea></div>'
         + '<div class="f"><label>台本（読み上げ用）</label><textarea class="notes" data-name="notes"'+dis+'>'+esc(s.notes)+'</textarea></div>'
         + '</div>';
     }
 
+    function quizChoices(body){ return String(body||'').split(String.fromCharCode(10)).map(function(x){ return x.trim(); }).filter(function(x){ return x && x.charAt(0) !== '■'; }).slice(0,4); }
+    function quizBox(s){
+      var q = s.quiz || {}, ch = quizChoices(s.body), dis = EDITABLE ? '' : ' disabled';
+      var opts = '<option value="-1">（未設定）</option>' + ch.map(function(c, i){ return '<option value="'+i+'"'+(q.answer===i?' selected':'')+'>'+'ABCD'.charAt(i)+'：'+esc(c)+'</option>'; }).join('');
+      return '<div class="dh-qz"><label><input type="checkbox" data-quiz="phone"'+(q.phone?' checked':'')+dis+'> 板橋バトルでスマホ出題する</label>'
+        + '<label>正解 <select data-quiz="answer"'+dis+'>'+opts+'</select></label>'
+        + '<label>得点 <input type="number" min="1" max="100" data-quiz="points" value="'+(q.points||10)+'"'+dis+'></label>'
+        + '<label>制限時間 <input type="number" min="5" max="120" data-quiz="time" value="'+(q.time||20)+'"'+dis+'>秒</label></div>';
+    }
     function photoBox(s){
       var imgs = s.images || [];
       var h = '<div class="f"><label>写真（最大4枚・スライドの左側に並びます）</label><div class="dh-ph">';
@@ -994,6 +1229,16 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
       Array.prototype.forEach.call(el.querySelectorAll('[data-name]'), function(inp){ p[inp.getAttribute('data-name')] = inp.value; });
       p.layout = el.querySelector('[data-role="layout"]').value;
       p.accent = el.querySelector('[data-role="accent"]').value;
+      var show = el.querySelector('[data-role="show"]');
+      p.hidden = show ? !show.checked : false;
+      if (el.querySelector('[data-quiz]')) {
+        p.quiz = {
+          phone: el.querySelector('[data-quiz="phone"]').checked,
+          answer: Number(el.querySelector('[data-quiz="answer"]').value),
+          points: Number(el.querySelector('[data-quiz="points"]').value),
+          time: Number(el.querySelector('[data-quiz="time"]').value)
+        };
+      }
       return p;
     }
     function saveSlide(el){
@@ -1001,17 +1246,19 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
       var id = Number(el.getAttribute('data-id'));
       var p = collect(el);
       var cur = slides.filter(function(x){ return x.id === id; })[0] || {};
-      var layoutChanged = (p.layout === 'photo') !== (cur.layout === 'photo');
+      var grp = function(l){ return l === 'photo' || l === 'figure' ? 'img' : l === 'question' ? 'q' : ''; };
+      // 画像欄・出題欄の出し入れが変わるとき、問題の選択肢を書き換えたとき（正解の候補が変わる）は描き直す
+      var layoutChanged = grp(p.layout) !== grp(cur.layout) || (p.layout === 'question' && p.body !== cur.body);
       fetch(ADMIN+'/api/daihon/slides/'+id, {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)})
         .then(function(r){return r.json();}).then(function(j){
           if(j && j.ok && layoutChanged){ location.reload(); return; }
-          if(j && j.ok){ cur.layout = p.layout; flash('保存しました'); dhReloadPv(); }
+          if(j && j.ok){ cur.layout = p.layout; cur.body = p.body; cur.hidden = p.hidden; el.classList.toggle('is-hidden', !!p.hidden); flash('保存しました'); dhReloadPv(); }
           else { flash((j&&j.error)||'保存に失敗'); }
         });
     }
     function bind(el){
       if(!EDITABLE) return;
-      Array.prototype.forEach.call(el.querySelectorAll('[data-name],[data-role]'), function(inp){
+      Array.prototype.forEach.call(el.querySelectorAll('[data-name],[data-role],[data-quiz]'), function(inp){
         inp.addEventListener('change', function(){ saveSlide(el); });
       });
       var add = el.querySelector('[data-img-add]');
@@ -1032,7 +1279,7 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
             fetch(ADMIN+'/api/daihon/slides/'+id,{method:'DELETE'}).then(function(){ location.reload(); });
           } else if(act==='dup'){
             var s = slides.filter(function(x){return x.id===id;})[0];
-            var b = {layout:s.layout,accent:s.accent,title:s.title,subtitle:s.subtitle,body:s.body,notes:s.notes,after:id};
+            var b = {layout:s.layout,accent:s.accent,title:s.title,subtitle:s.subtitle,body:s.body,notes:s.notes,ref_page:s.ref_page,quiz:s.quiz,links:s.links,after:id};
             fetch(ADMIN+'/api/daihon/decks/'+DECK.id+'/slides',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})
               .then(function(){ location.reload(); });
           } else {
@@ -1056,8 +1303,12 @@ export function daihonEditPage(deck: DaihonDeck, slides: DaihonSlide[], adminPat
         var p = collect(el);
         var cur = slides.filter(function(x){ return x.id === Number(el.getAttribute('data-id')); })[0] || {};
         p.imageUrls = (cur.images || []).map(function(im){ return im.url; });
+        // 問題・答えのスライドはPowerPointでは通常のスライドとして書き出す
+        if (p.layout === 'question') { p.title = 'Q. ' + p.title; p.layout = 'content'; }
+        if (p.layout === 'answer') { p.title = 'A. ' + p.title; p.layout = 'content'; }
+        if (p.ref_page) p.subtitle = (p.subtitle ? p.subtitle + '　' : '') + '（P ' + p.ref_page + '）';
         return p;
-      });
+      }).filter(function(p){ return !p.hidden; });
       btn.disabled = true; btn.textContent = '作成中…';
       window.DaihonPptx.build(deck, list).then(function(){ flash('PowerPointを書き出しました'); })
         .catch(function(e){ alert((e && e.message) || 'PowerPointの作成に失敗しました'); })

@@ -38,6 +38,8 @@ export type Env = {
   RICHMENU_ID_R?: string;          // ロール「R」（hoshi_viewer）用。星の予定表を開くボタン1つだけのメニュー
   // 資料センター（マニュアルPDF・就業規則等のファイル保管）
   DOCUMENTS_BUCKET: R2Bucket;
+  // Workers AI（バジル&ドラゴンズのキャラ・敵画像の生成に使用。wrangler.toml の [ai]）
+  AI: Ai;
   // ITABASHI BATTLE 2 のリアルタイム進行（Durable Object・src/battle/room.ts）
   BATTLE_ROOM: DurableObjectNamespace;
   // 乗務員証 証明写真の一時保存（30日で自動削除）
@@ -65,6 +67,15 @@ export type Env = {
   KM_OPERATOR_PASSWORD?: string;
   // km-operator連携: 社内PCの収集スクリプト専用キー（ACCIDENTS_UPLOAD_KEYと同じ方式）
   KM_PINS_UPLOAD_KEY?: string;
+  // 配車コンソール（km-operator 新UI組み込み）: 社内PCの cloudflared（Cloudflare Tunnel, km-relay.bentenclub.com）を
+  // 守っている Cloudflare Access のサービストークン。Worker→中継の全リクエストに付ける（utils/km_relay.ts）。
+  // ※KM_OPERATOR_LOGIN_ID / KM_OPERATOR_PASSWORD は配車コンソールの自動ログインで Worker 側でも使うようになった。
+  KM_RELAY_ACCESS_ID?: string;
+  KM_RELAY_ACCESS_SECRET?: string;
+  // 配車コンソールを開くときの簡易パスワード（未設定なら routes/admin_km_console.ts の既定値）
+  KM_CONSOLE_PASSWORD?: string;
+  // タクコン連携: 板橋PCの takcon-sync（pull API）の serveToken（PC側 config.json と同じ値。utils/takcon_sync.ts）
+  TAKCON_SERVE_TOKEN?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

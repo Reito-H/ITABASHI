@@ -47,6 +47,9 @@ import documentsApi from './routes/api/documents';
 import adminStudyNotesRoutes from './routes/admin_study_notes';
 import studyNotesApi from './routes/api/study_notes';
 import adminKachoMissionRoutes from './routes/admin_kacho_mission';
+import adminFluVaccinationRoutes from './routes/admin_flu_vaccination';
+import adminTakconSyncRoutes from './routes/admin_takcon_sync';
+import adminDriverFinderRoutes from './routes/admin_driver_finder';
 import adminKachoHiyariRoutes from './routes/admin_kacho_hiyari';
 import adminSummerSafety2026Routes from './routes/admin_summer_safety_2026';
 import adminAutumnSafety2026Routes from './routes/admin_autumn_safety_2026';
@@ -93,13 +96,17 @@ import adminAccidentsDivisionRoutes from './routes/admin_accidents_division';
 import adminAccidentsMaterialRoutes from './routes/admin_accidents_material';
 import adminStudySessionsRoutes from './routes/admin_study_sessions';
 import adminChoseiRoutes from './routes/admin_chosei';
+import adminTshirtRoutes from './routes/admin_tshirt';
 import adminSignageRoutes from './routes/admin_signage';
 import adminWeatherNoticeRoutes from './routes/admin_weather_notice';
 import adminDaihonRoutes from './routes/admin_daihon';
+import adminTutorialRoutes from './routes/admin_tutorial';
+import adminPuzzleRoutes from './routes/admin_puzzle';
 import { battlePublicRoutes, battleAdminRoutes } from './routes/battle';
 export { BattleRoom } from './battle/room';
 import adminSrRoutes from './routes/admin_sr';
 import adminKmPinsRoutes from './routes/admin_km_pins';
+import adminKmConsoleRoutes from './routes/admin_km_console';
 import adminSalesStrategyRoutes from './routes/admin_sales_strategy';
 import adminNavInsightsRoutes from './routes/admin_nav_insights';
 import requestsApi from './routes/api/requests';
@@ -111,6 +118,8 @@ import publicKmPinsUploadRoutes from './routes/public_km_pins_upload';
 import publicStudyNotesUploadRoutes from './routes/public_study_notes_upload';
 import publicStudySessionsRoutes from './routes/public_study_sessions';
 import publicChoseiRoutes from './routes/public_chosei';
+import publicTshirtRoutes from './routes/public_tshirt';
+import publicPuzzleRoutes from './routes/public_puzzle';
 import publicHiyariRoutes from './routes/public_hiyari';
 import publicHanedaFlightsRoutes from './routes/public_haneda_flights';
 import publicSignageRoutes from './routes/public_signage';
@@ -120,7 +129,7 @@ import { getSessionFromCookie, validateSession } from './auth';
 import { isMaintenanceActive, isAdminAccount, maintenancePage, replyMaintenanceToLineEvent } from './utils/maintenance';
 import { clientInfo, logSecurityEventBg, isProbePath } from './utils/security';
 import adminCyberRoutes from './routes/admin_cyber';
-import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH, BATTLE_PUBLIC_PATH } from './config';
+import { ADMIN_PATH, SECRET, SIGNAGE_PUBLIC_PATH, BATTLE_PUBLIC_PATH, PUZZLE_PATH } from './config';
 import { FAVICON_DATA_URI } from './html/layout';
 
 const app = new Hono<{ Bindings: Env; Variables: { adminId: number } }>();
@@ -202,10 +211,17 @@ app.use('*', async (c, next) => {
   // 乗務員証 証明写真: MediaPipe(WebAssembly)による顔検出とカメラ撮影のため、
   // このページのみ CSP に wasm-unsafe-eval / blob: を、Permissions-Policy にカメラ許可を追加する。
   const isIdPhotosPage = pathname === `/${SECRET}/admin/kacho-mission/id-photos`;
+  // 配車コンソール（km-operator 新UI）: ZENRIN 地図（*.zmaps-api.com）をブラウザから直接読む。
+  // ZENRIN の鍵は Referer 認証なので、このページだけ Referrer-Policy を origin 送信に緩める
+  const isKmConsolePage = pathname === `/${SECRET}/admin/km-console`;
   const isWasmCameraPage = isIdPhotosPage;
   // ITABASHI BATTLE 2: 参加者のスマホ画面・管理者画面・プロジェクター画面。Google Fonts・WebSocket・音声再生を許可し、
   // 管理者画面から同一オリジンでの表示も許可する
-  const isBattlePage = pathname === BATTLE_PUBLIC_PATH || pathname.startsWith(BATTLE_PUBLIC_PATH + '/') || /^\/[^/]+\/admin\/ib2(\/|$)/.test(pathname);
+  // 台本のプレゼン（?embed=1）は板橋バトルのプロジェクター画面・進行画面に同一オリジンで埋め込むため、フレーム表示を許可する
+  const isDaihonEmbed = /^\/[^/]+\/admin\/daihon\/\d+\/present$/.test(pathname) && reqUrl.searchParams.get('embed') === '1';
+  const isBattlePage = pathname === BATTLE_PUBLIC_PATH || pathname.startsWith(BATTLE_PUBLIC_PATH + '/') || /^\/[^/]+\/admin\/ib2(\/|$)/.test(pathname)
+    // ホシコンパズル（ログイン不要のゲーム画面）も Google Fonts を使うため同じ分類にする
+    || pathname === PUZZLE_PATH;
   c.res.headers.set('X-Robots-Tag', 'noindex, nofollow');
   c.res.headers.set('X-Content-Type-Options', 'nosniff');
   // 中身が変わらない配信物（URLにバージョンを含むPDF解析バンドル・ログイン背景画像）は、
@@ -223,6 +239,16 @@ app.use('*', async (c, next) => {
       "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' 'unsafe-eval' https://cdn.jsdelivr.net https://static.cloudflareinsights.com blob:; " +
       "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
       "connect-src 'self' https://cloudflareinsights.com https://cdn.jsdelivr.net blob: data:; " +
+      "worker-src 'self' blob:; frame-ancestors 'none';"
+    );
+  } else if (isKmConsolePage) {
+    c.res.headers.set('X-Frame-Options', 'DENY');
+    c.res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    c.res.headers.set('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.zmaps-api.com blob:; " +
+      "style-src 'self' 'unsafe-inline' https://*.zmaps-api.com; font-src 'self' data: https://*.zmaps-api.com; " +
+      "img-src 'self' data: blob: https://*.zmaps-api.com; connect-src 'self' https://*.zmaps-api.com; " +
       "worker-src 'self' blob:; frame-ancestors 'none';"
     );
   } else if (isBattlePage) {
@@ -258,7 +284,7 @@ app.use('*', async (c, next) => {
   } else {
     // やることリストのembedページのみ、引き継ぎシートのフローティングパネルから
     // 同一オリジンでiframe表示できるようフレーム制限を緩和する（他のadminページは従来通りDENY）
-    const allowSameOriginFrame = isTodoEmbed || isAutumnTefudaPrint || isSalesStrategyEmbed;
+    const allowSameOriginFrame = isTodoEmbed || isAutumnTefudaPrint || isSalesStrategyEmbed || isDaihonEmbed;
     c.res.headers.set('X-Frame-Options', allowSameOriginFrame ? 'SAMEORIGIN' : 'DENY');
     c.res.headers.set('Referrer-Policy', 'no-referrer');
     c.res.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -330,6 +356,8 @@ app.use(`/${SECRET}/admin/*`, async (c, next) => {
   if (subPath.startsWith('/api/kancho-personal/')) return next();
   // 動線収集（匿名）: どのアカウントの画面遷移も集計対象にするため、ページ権限に関わらず記録を受け付ける（ログインは必須）
   if (subPath === '/api/nav-log') return next();
+  // 乗務員クイック検索（全ページ右下）: ログイン済みなら誰でも（ページ権限に関わらず）使える
+  if (subPath.startsWith('/api/driver-finder/') || subPath === '/driver-finder.js') return next();
 
   const adminId = c.get('adminId');
   const perms = adminId ? await getAdminPermissions(c.env.DB, adminId) : null;
@@ -396,6 +424,9 @@ app.route(`/${SECRET}/admin`, adminVehicleDeadlinesRoutes);
 app.route(`/${SECRET}/admin`, adminDocumentsRoutes);
 app.route(`/${SECRET}/admin`, adminStudyNotesRoutes);
 app.route(`/${SECRET}/admin`, adminKachoMissionRoutes);
+app.route(`/${SECRET}/admin`, adminFluVaccinationRoutes);
+app.route(`/${SECRET}/admin`, adminTakconSyncRoutes);
+app.route(`/${SECRET}/admin`, adminDriverFinderRoutes);
 app.route(`/${SECRET}/admin`, adminKachoHiyariRoutes);
 app.route(`/${SECRET}/admin`, adminSummerSafety2026Routes);
 app.route(`/${SECRET}/admin`, adminAutumnSafety2026Routes);
@@ -415,6 +446,7 @@ app.route(`/${SECRET}/admin`, adminAttendanceBoardRoutes);
 app.route(`/${SECRET}/admin`, adminDispatchRoutes);
 app.route(`/${SECRET}/admin`, adminSrRoutes);
 app.route(`/${SECRET}/admin`, adminKmPinsRoutes);
+app.route(`/${SECRET}/admin`, adminKmConsoleRoutes);
 app.route(`/${SECRET}/admin`, adminSalesStrategyRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverRoutes);
 app.route(`/${SECRET}/admin`, adminHandoverHoshiRoutes);
@@ -443,9 +475,12 @@ app.route(`/${SECRET}/admin`, adminAccidentsDivisionRoutes);
 app.route(`/${SECRET}/admin`, adminAccidentsMaterialRoutes);
 app.route(`/${SECRET}/admin`, adminStudySessionsRoutes);
 app.route(`/${SECRET}/admin`, adminChoseiRoutes);
+app.route(`/${SECRET}/admin`, adminTshirtRoutes);
 app.route(`/${SECRET}/admin`, adminSignageRoutes);
 app.route(`/${SECRET}/admin`, adminWeatherNoticeRoutes);
 app.route(`/${SECRET}/admin`, adminDaihonRoutes);
+app.route(`/${SECRET}/admin`, adminTutorialRoutes);
+app.route(`/${SECRET}/admin`, adminPuzzleRoutes);
 app.route(`/${SECRET}/admin`, battleAdminRoutes);
 app.route(`/${SECRET}/admin`, adminNavInsightsRoutes);
 app.route(`/${SECRET}/admin`, adminCyberRoutes);
@@ -569,6 +604,8 @@ app.route('', publicKmPinsUploadRoutes);
 app.route('', publicStudyNotesUploadRoutes);
 app.route('', publicStudySessionsRoutes);
 app.route('', publicChoseiRoutes);
+app.route('', publicTshirtRoutes);
+app.route('', publicPuzzleRoutes);
 app.route('', publicHiyariRoutes);
 app.route('', publicHanedaFlightsRoutes);
 app.route('', publicSignageRoutes);

@@ -7,3 +7,9 @@ node_modules/
 
 # 高速地図ビルドのOSMキャッシュ（再取得可・巨大）
 scripts/highway_map/kanto_osm.json
+
+# 配車コンソール中継（km-relay）: トンネルの接続トークン（秘密）。HANDOFF.md の手順で社内PCへ手渡しする
+km-ui/relay-pc/tunnel_token.txt
+
+# タクコン連携: 板橋PC側 takcon-sync の serveToken（秘密）。PC側 config.json にも同じ値を設定する
+km-ui/relay-pc/takcon_serve_token.txt

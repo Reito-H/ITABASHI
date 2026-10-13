@@ -1,5 +1,6 @@
 // 共通HTMLレイアウト
 import { ADMIN_PATH, APP_VERSION, BATTLE_PUBLIC_PATH, BATTLE_NAV_UNTIL } from '../config';
+import { DRIVER_FINDER_VERSION } from '../assets/km_console_ui';
 import { quickReportModalHtml, quickReportModalScript } from './quick_report_modal';
 import { announcementBarHtml, announcementBarScript } from './announcement_bar';
 import { birthdayPopupHtml, birthdayPopupScript } from './birthday_popup';
@@ -84,6 +85,7 @@ export function layout(title: string, content: string, activePage: string = '', 
     { href: `${ADMIN_PATH}/sales-ai`,      label: 'AI売上分析',      id: 'sales-ai' },
     { href: `${ADMIN_PATH}/settings/sales-strategy`, label: '営業戦略', id: 'sales-strategy', permKey: 'settings.sales-strategy' },
     { href: 'https://km-operator.smartaxicenter.com/kmx/HS/HSHS/HSHS0199.do', label: 'スマタク', id: 'km-operator-external', public: true, newTab: true },
+    { href: `${ADMIN_PATH}/km-console`, label: '配車コンソール', id: 'km-console' },
     { href: `${ADMIN_PATH}/accidents`,     label: '事故分析',        id: 'accidents' },
     // 車両検索はサイドバーから廃止（ホームの横断検索バーへ一本化）。/vehicles ルートと vehicles 権限は存置。
     { href: `${ADMIN_PATH}/settings`,      label: '設定',            id: 'settings' },
@@ -859,6 +861,16 @@ export function layout(title: string, content: string, activePage: string = '', 
     ${showReportFab ? quickReportModalScript() : ''}
     ${NAV_LOG_SCRIPT}
   </script>
+  <!-- 乗務員クイック検索（右下）。ホシコンの中継APIを使う（配車コンソールのパスワードは不要） -->
+  <script>window.DRIVER_FINDER = { refreshSec: 60, transport: function(path, params) {
+    var base = ${JSON.stringify(ADMIN_PATH)} + '/api/driver-finder/';
+    if (path === 'employees/search') return fetch(base + 'employees?q=' + encodeURIComponent(params.q || ''), { credentials: 'include' }).then(function(r){ return r.json(); });
+    if (path === 'map_vehicles/get_map_vehicle') return fetch(base + 'vehicles', { credentials: 'include' }).then(function(r){ return r.json(); });
+    if (path === 'trip_infos/get_address') return fetch(base + 'address?lat=' + encodeURIComponent(params.latitude) + '&lon=' + encodeURIComponent(params.longitude), { credentials: 'include' }).then(function(r){ return r.json(); });
+    return Promise.resolve({ isSuccess: false });
+  } };</script>
+  <script src="${ADMIN_PATH}/driver-finder.js?v=${DRIVER_FINDER_VERSION}"></script>
+  <style>.dfw{right:170px}@media (max-width:700px){.dfw{right:16px;bottom:84px}}</style>
 </body>
 </html>`;
 }
