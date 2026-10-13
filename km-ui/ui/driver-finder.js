@@ -111,9 +111,10 @@
       res.hidden=false;return;
     }
     var v=lives[0];
-    res.innerHTML=head+'<div class="big"><span><span class="lbl">車番</span><br><span class="val">'+esc(v.plate||'不明')+'</span></span><span><span class="lbl">無線番号</span><br><span class="val">'+esc(v.radio)+'</span></span>'+
-      '<span style="align-self:center"><button type="button" class="dfw-btn" data-copy="'+esc(v.plate||v.radio)+'">車番をコピー</button></span></div>'+
-      '<div class="ad" id="dfw-ad">現在地を取得中…</div>'+(lives.length>1?'<div class="note">同じ名前の稼働車が '+lives.length+' 台あります（無線 '+lives.map(function(x){return x.radio}).join(' / ')+'）</div>':'')+
+    var car=v.plate||v.radio;
+    res.innerHTML=head+'<div class="big"><span><span class="lbl">車番</span><br><span class="val">'+esc(car)+'</span></span>'+
+      '<span style="align-self:center"><button type="button" class="dfw-btn" data-copy="'+esc(car)+'">車番をコピー</button></span></div>'+
+      '<div class="ad" id="dfw-ad">現在地を取得中…</div>'+(lives.length>1?'<div class="note">同じ名前の稼働車が '+lives.length+' 台あります（車番 '+lives.map(function(x){return x.plate||x.radio}).join(' / ')+'）</div>':'')+
       '<div class="note">'+(loadedAt?loadedAt.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' 時点の位置':'')+'</div>';
     res.hidden=false;
     address(v).then(function(a){var el=$('#dfw-ad');if(el&&selected===c)el.textContent='現在地: '+a});

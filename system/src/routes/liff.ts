@@ -91,7 +91,7 @@ const VEHICLE_LOOKUP_JS = `
       var v = d.vehicle;
       if (!line) { line = document.createElement('div'); line.id = 'vehicle-live-line'; box.prepend(line); }
       line.innerHTML = '<div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:6px;">【現在地】' + (v.name ? v.name + ' が乗務中・' : '') + v.status + '（' + v.minutesAgo + '分前の位置）'
-        + (v.address ? '<div style="font-weight:500;color:#374151;margin-top:2px;">' + v.address + '</div>' : '') + '<div style="font-size:11px;color:#6b7280;">無線 ' + v.radio + '</div></div>';
+        + (v.address ? '<div style="font-weight:500;color:#374151;margin-top:2px;">' + v.address + '</div>' : '') + '</div>';
       box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
       // 今乗っている人が分かったので「よく使う乗務員」の候補は不要（紛らわしいので消す）。台帳で特定できて未選択なら自動で登録する
       var cands = document.getElementById('vehicle-emp-cands'); if (cands) cands.remove();
@@ -136,13 +136,13 @@ const VEHICLE_LOOKUP_JS = `
       if (!box || !d || !d.ok || !d.results || !d.results.length) return;
       var v = d.results[0];
       var carNo = v.plate || v.radio;
-      var html = '<div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:6px;">【今乗っている車】 車番 ' + (v.plate || '不明') + '（無線 ' + v.radio + '）・' + v.status + '（' + v.minutesAgo + '分前）'
+      var html = '<div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:6px;">【今乗っている車】 車番 ' + (v.plate || v.radio) + '・' + v.status + '（' + v.minutesAgo + '分前）'
         + (v.address ? '<div style="font-weight:500;color:#374151;margin-top:2px;">現在地: ' + v.address + '</div>' : '')
-        + (v.plate ? '<span onclick="selectCarNo(' + JSON.stringify(v.plate).replace(/"/g,'&quot;') + ')" style="display:inline-block;margin-top:6px;padding:6px 10px;background:white;border:1px solid #6ee7b7;border-radius:8px;cursor:pointer;font-size:13px;">この車番を入れる</span>' : '') + '</div>';
+        + (carNo ? '<span onclick="selectCarNo(' + JSON.stringify(carNo).replace(/"/g,'&quot;') + ')" style="display:inline-block;margin-top:6px;padding:6px 10px;background:white;border:1px solid #6ee7b7;border-radius:8px;cursor:pointer;font-size:13px;">この車番を入れる</span>' : '') + '</div>';
       box.insertAdjacentHTML('afterbegin', html);
       box.style.cssText = 'display:block;margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:8px;';
       var vn = document.getElementById('vehicle_no');
-      if (vn && !vn.value.trim() && v.plate) { vn.value = v.plate; doVehicleLookup(); }
+      if (vn && !vn.value.trim() && carNo) { vn.value = carNo; doVehicleLookup(); }
     })
     .catch(function() {});
   }
@@ -3069,11 +3069,12 @@ ${COPY_SUMMARY_JS}
         var card = document.getElementById(p + '-emp-selected');
         var line = document.createElement('div'); line.id = p + '-emp-live';
         line.style.cssText = 'margin-top:8px;padding:10px 12px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;font-size:13px;color:#064e3b;line-height:1.5;';
-        line.innerHTML = '<div style="font-weight:800;">今乗っている車: 車番 ' + (v.plate || '不明') + '（無線 ' + v.radio + '）・' + v.status + '</div>'
+        line.innerHTML = '<div style="font-weight:800;">今乗っている車: 車番 ' + (v.plate || v.radio) + '・' + v.status + '</div>'
           + (v.address ? '<div>現在地: ' + v.address + '</div>' : '') + '<div style="font-size:11px;color:#047857;">' + v.minutesAgo + '分前の位置情報</div>';
         card.parentNode.insertBefore(line, card.nextSibling);
         var vn = document.getElementById(p + '-vehicle_no');
-        if (vn && !vn.value.trim() && v.plate) { vn.value = v.plate; doVehicleLookup(type); }
+        var carNo = v.plate || v.radio;
+        if (vn && !vn.value.trim() && carNo) { vn.value = carNo; doVehicleLookup(type); }
       })
       .catch(function() {});
   }
@@ -3157,7 +3158,7 @@ ${COPY_SUMMARY_JS}
         if (!line) { line = document.createElement('div'); line.id = p + '-vehicle-live'; box.insertBefore(line, box.firstChild); box.className = 'vh-box'; box.style.display = 'block'; }
         line.innerHTML = '<div style="padding:8px 10px;margin-bottom:6px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:10px;font-size:13px;color:#064e3b;line-height:1.5;">'
           + '<div style="font-weight:800;">' + (v.name ? v.name + ' が乗務中・' : '') + v.status + '（' + v.minutesAgo + '分前の位置）</div>'
-          + (v.address ? '<div>現在地: ' + v.address + '</div>' : '') + '<div style="font-size:11px;color:#047857;">無線 ' + v.radio + '</div></div>';
+          + (v.address ? '<div>現在地: ' + v.address + '</div>' : '') + '</div>';
         // 今乗っている人が分かったので、推定の「乗務員候補」は出さない
         box.querySelectorAll('.vh-cap, .vh-emp').forEach(function(el) { el.remove(); });
         if (v.employee && !selectedEmp[type]) selectEmp(type, v.employee);
