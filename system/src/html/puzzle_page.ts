@@ -199,6 +199,17 @@ export function puzzlePageHtml(): string {
   .tabs button { flex: 1; padding: 8px; border-radius: 10px; border: 1px solid #3b4968; background: transparent; color: #cbd5e1; font-family: inherit; font-weight: 900; font-size: 12px; cursor: pointer; }
   .tabs button.on { background: var(--gold); color: #1f1300; border-color: var(--gold); }
 
+  /* チーム編成: 決定ボタンは画面下に固定（スクロールしても常に見える） */
+  #scr-team { padding-bottom: 110px; }
+  .team-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; display: none; align-items: center; gap: 10px; max-width: 480px; margin: 0 auto; padding: 10px 12px calc(10px + var(--sab));
+    background: linear-gradient(180deg, rgba(11,16,32,0), rgba(11,16,32,0.96) 30%); }
+  #scr-team.on ~ .team-bar, #scr-team.on .team-bar { display: flex; }
+  .team-bar .btn { margin: 0; flex: 1; padding: 13px; }
+  .team-bar-sel { display: flex; gap: 4px; flex-shrink: 0; }
+  .team-bar-sel .ph { width: 40px; height: 40px; border-radius: 10px; background: #1e293b center/cover no-repeat; border: 2px solid #2b3650; position: relative; }
+  .team-bar-sel .ph.empty { border-style: dashed; }
+  .team-bar-sel .ph .ring { position: absolute; right: -4px; bottom: -4px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #0b1020; }
+
   /* ===== ガチャ ===== */
   .gacha-stage { position: relative; height: 230px; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 16px; background: radial-gradient(ellipse at 50% 80%, rgba(255,111,174,0.25), transparent 65%); margin-bottom: 10px; }
   .capsule { width: 110px; height: 110px; border-radius: 50%; position: relative; background: linear-gradient(180deg, #ffd6e7 0 50%, #ff6fae 50% 100%); box-shadow: inset 0 -10px 20px rgba(0,0,0,0.25), inset 0 6px 10px rgba(255,255,255,0.5), 0 14px 30px rgba(0,0,0,0.5); animation: capsule-idle 2s ease-in-out infinite; }
@@ -558,6 +569,9 @@ ${ORB_DEFS}
       <div class="help" style="margin-bottom:10px;">色（属性）をばらけさせると、いろんな玉で攻撃できます。持っていないキャラはガチャで手に入ります。</div>
       <div class="tabs" id="team-tabs"><button data-k="all" class="on">すべて</button><button data-k="photo">社員</button><button data-k="art">ガチャキャラ</button></div>
       <div class="grid" id="ally-grid"></div>
+    </div>
+    <div class="team-bar" id="team-bar">
+      <div class="team-bar-sel" id="team-bar-sel"></div>
       <button class="btn" id="btn-team-ok" disabled>決定</button>
     </div>
   </div>
@@ -909,13 +923,16 @@ ${ORB_DEFS}
     return '<div class="ch r' + a.rarity + (extraCls || '') + '" data-id="' + a.id + '" style="' + (o ? '' : 'opacity:0.45;') + '">' + (inner || '') +
       '<span class="ring" style="background:' + EL_COLOR[a.element] + '"></span>' + allyPh(a, 'ph') +
       (a.kind === 'art' ? '<div class="rr">' + stars(a.rarity) + '</div>' : '') +
-      '<span class="lv">Lv.' + s.lv + '</span><div class="nm">' + esc(a.name) + '</div><div class="st">' + elDot(a.element) + ' HP' + s.hp + ' 攻' + s.atk + '</div><div class="st" style="color:#fde68a;padding-top:0;">' + (a.skill && a.skill.type === 'heal' ? '癒' : '技') + ' ' + esc(a.skill ? a.skill.name : '') + '</div></div>';
+      '<div class="nm">' + esc(a.name) + '</div><div class="st">Lv.' + s.lv + ' ' + elDot(a.element) + ' HP' + s.hp + ' 攻' + s.atk + '</div><div class="st" style="color:#fde68a;padding-top:0;">' + (a.skill && a.skill.type === 'heal' ? '癒' : '技') + ' ' + esc(a.skill ? a.skill.name : '') + '</div></div>';
   }
   function renderGrid(){
     var n = Math.min(CFG.team_size, STATE.chars.length);
     var list = CFG.allies.filter(function(a){ return owned(a) && (teamFilter === 'all' || a.kind === teamFilter); });
     $('ally-grid').innerHTML = list.length ? list.map(function(a){ var idx = pick.indexOf(a.id); return charCard(a, idx >= 0 ? ' sel' : '', '<div class="num">' + (idx + 1) + '</div>'); }).join('') : '<div class="help" style="grid-column:1/-1;">このカテゴリーのキャラはまだ持っていません</div>';
     $('btn-team-ok').disabled = pick.length !== n;
+    $('btn-team-ok').textContent = pick.length === n ? '決定（' + n + '人そろった）' : 'あと ' + (n - pick.length) + '人えらぶ';
+    var sel = ''; for (var si = 0; si < n; si++) { var a2 = pick[si] !== undefined ? allyById(pick[si]) : null; sel += a2 ? allyPh(a2, 'ph', true) : '<div class="ph empty"></div>'; }
+    $('team-bar-sel').innerHTML = sel;
     document.querySelectorAll('#ally-grid .ch').forEach(function(el){
       el.onclick = function(){
         var id = parseInt(el.getAttribute('data-id'), 10); var i = pick.indexOf(id);
