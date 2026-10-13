@@ -1146,6 +1146,7 @@ app.get('/settings/admin-tools', (c) => {
     { heading: 'システム', cards: [
       { href: `${ADMIN}/settings/documents`, perm: 'settings.documents',      title: 'データセンター' },
       { href: `${ADMIN}/settings/nav-insights`, perm: 'settings.nav-insights', title: '動線分析' },
+      { href: `${ADMIN}/settings/takcon-sync`, perm: 'settings.takcon-sync', title: 'タクコン連携（CSV自動取込）' },
       { href: `${ADMIN}/request-review`,     perm: 'settings.requests-admin', title: '要望欄（収集一覧）' },
     ]},
   ];

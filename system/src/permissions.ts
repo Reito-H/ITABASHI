@@ -68,6 +68,7 @@ const PATH_PERMISSIONS: Array<[RegExp, string]> = [
   // 旧システムステータス（サイバーへ集約・リダイレクトのみ）
   [/^\/settings\/status/,               'settings.cyber'],
   [/^\/settings\/nav-insights/,         'settings.nav-insights'],
+  [/^\/settings\/takcon-sync/,          'settings.takcon-sync'],
   [/^\/settings\/announcement-bar/,     'settings.announcement-bar'],
   [/^\/settings\/birthday/,             'settings.birthday'],
   [/^\/settings\/seasonal/,             'settings.seasonal'],
@@ -334,6 +335,7 @@ export const PERMISSION_TREE: PermNode[] = [
     { key: 'settings.vehicle-search-guide', label: '車番検索ガイド' },
     { key: 'settings.cyber',            label: 'サイバー（不正アクセス検知・ログイン監視）', note: '強制ログアウトは編集権限、メンテナンス切替はadminのみ' },
     { key: 'settings.nav-insights',     label: '動線分析（管理画面の利用経路の匿名集計）', viewOnly: true },
+    { key: 'settings.takcon-sync',      label: 'タクコン連携（CSV自動取込の状況・今すぐ取込）' },
     { key: 'settings.sales-strategy',   label: '営業戦略（SR分析＋乗降ピン分析）', note: '別途、専用パスワードでも保護。実在の顧客氏名等を含む場合あり' },
     { key: 'settings.wage-estimate',    label: '賃金試算設定' },
     { key: 'settings.driving-risk',     label: '運転リスク検証設定' },

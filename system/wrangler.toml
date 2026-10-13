@@ -83,6 +83,7 @@ BENTEN_FONT_URL = "https://raw.githubusercontent.com/minoryorg/Noto-Sans-CJK-JP/
 # npx wrangler secret put KM_RELAY_ACCESS_ID          ← 配車コンソール: km-relay トンネルの Cloudflare Access サービストークン(Client ID)
 # npx wrangler secret put KM_RELAY_ACCESS_SECRET      ← 同上(Client Secret)
 # npx wrangler secret put KM_CONSOLE_PASSWORD         ← 配車コンソールの簡易パスワード（任意。未設定時は既定値）
+# npx wrangler secret put TAKCON_SERVE_TOKEN          ← タクコン連携: 板橋PC takcon-sync の serveToken
 # npx wrangler secret put CC_PASSWORD                ← CC名簿（クレーム客記録台帳）ページの専用パスワード
 # npx wrangler secret put KM_OPERATOR_LOGIN_ID        ← km-operator連携: 自動ログインID（現在は社内PC側スクリプトで使用）
 # npx wrangler secret put KM_OPERATOR_PASSWORD        ← km-operator連携: 同上パスワード（同上）

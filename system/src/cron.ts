@@ -1,4 +1,5 @@
 import type { Env } from './auth';
+import { runTakconSync } from './utils/takcon_sync';
 import { getPeriodSettings, getPeriodRange, getPeriod } from './auth';
 import { importJmaMonthlyWeather } from './utils/weather_jma';
 
@@ -195,6 +196,9 @@ export async function handleCron(env: Env): Promise<void> {
 
   // 退職日到達チェック（毎時実行）
   await checkRetirements(env, todayStr);
+
+  // タクコンCSVの自動取込（毎時。板橋PCが落ちていれば失敗ログだけ残して続行。migration_199未適用でも他処理を止めない）
+  try { await runTakconSync(env, 'cron'); } catch (e) { console.error('[takcon-sync] failed', e instanceof Error ? e.message : e); }
 
   // 前月分の気象庁データ自動取込（毎月3日4時）
   await checkMonthlyWeatherImport(env, nowJST, currentHour);

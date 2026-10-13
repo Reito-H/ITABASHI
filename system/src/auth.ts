@@ -74,6 +74,8 @@ export type Env = {
   KM_RELAY_ACCESS_SECRET?: string;
   // 配車コンソールを開くときの簡易パスワード（未設定なら routes/admin_km_console.ts の既定値）
   KM_CONSOLE_PASSWORD?: string;
+  // タクコン連携: 板橋PCの takcon-sync（pull API）の serveToken（PC側 config.json と同じ値。utils/takcon_sync.ts）
+  TAKCON_SERVE_TOKEN?: string;
 };
 
 // Cloudflare Workers の Web Crypto は PBKDF2 の反復回数が最大100000回

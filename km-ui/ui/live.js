@@ -79,7 +79,34 @@ window.LIVE={
     for(let i=1;i<pts.length;i++){const dt=(pts[i].t-pts[i-1].t)/3600000;pts[i].speed=dt>0?Math.round(Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y)/1000/dt):0}
     return pts;
   },
-  async masters(name){const map={'グレード':['grade_types/search','gradeTypeList','gradeTypeName'],'色':['colors/search','colorList','name'],'メーカー':['makers/search','makerList','name'],'車種':['car_types/search','carTypeList','name'],'営業所':['offices/search','officeList','name'],'会員優先度':['customer_ranks/search','customerRankList','name'],'商品種別':['product_types/search','productTypeList','name'],'商品情報':['products/search','productList','name'],'待機場所':['taxi_stand_infos/search','taxiStandList','name']};const m=map[name];if(!m)return null;const r=await call(m[0],{pageLimit:'',pageNo:'',nonDetailFlag:'1'});const list=r[m[1]]||Object.values(r).find(Array.isArray)||[];return list.map(x=>({code:x.originalId||x.id||x.code||'',name:x[m[2]]||x.name||JSON.stringify(x).slice(0,60),updated:(x.updatedAt||'').slice(0,10),by:x.companyGroupName||x.companyName||''}))}
+  async masters(name){
+    const KNOWN={'グレード':['grade_types/search'],'色':['colors/search'],'メーカー':['makers/search'],'車種':['car_types/search'],'営業所':['offices/search'],'会員優先度':['customer_ranks/search'],'商品種別':['product_types/search'],'商品情報':['products/search'],'待機場所':['taxi_stand_infos/search'],
+      'ユーザー':['users/search'],'顧客':['customers/search'],'車両':['vehicles/search'],'乗務員':['drivers/search'],
+      'システム種別':['system_types/search?type=1','system_types/search?type=2','system_types/search?type=3']};
+    const GUESS={'形状':['shapes/search','vehicle_shapes/search','car_shapes/search'],'燃料':['fuels/search','fuel_types/search'],'ロール':['roles/search'],'ロール制限':['role_restrictions/search','role_limits/search'],'特別顧客':['particular_customers/search'],'企業':['companies/search','enterprises/search','corporations/search'],
+      'スキル':['skills/search','driver_skills/search'],'乗務員連絡':['driver_messages/search'],'タクシー料金':['taxi_fares/search','fares/search'],'スマホ即時VIP優先設定':['sp_vip_priorities/search','sp_immediate_vip_settings/search'],'車両予約枠':['vehicle_reserve_capacities/search','reserve_capacities/search'],'予約枠係数':['reserve_capacity_rates/search','reserve_coefficients/search'],
+      '配車ルール':['dispatch_rules/search'],'時間ゲタマスタ':['time_offsets/search','time_getas/search'],'エリア':['areas/search'],'配車先':['dispatch_destinations/search','dispatch_points/search'],'滞留禁止':['no_stay_areas/search','stay_prohibitions/search'],'タクシー付け場所':['approach_points/search','taxi_approach_points/search'],'住宅地図文字図形':['residential_map_figures/search','character_figures/search'],
+      '待機場所要求台数':['taxi_stand_demands/search','taxi_stand_required_vehicles/search'],'会社グループ':['company_groups/search'],'会社':['companies/search'],'スマホシステム設定':['sp_system_settings/search'],'スマホ条件':['sp_conditions/search'],'航空会社':['airlines/search','sp_app_airlines/search'],'ターミナル':['terminals/search'],
+      'システム設定':['system_settings/search'],'システム設定(システム管理者)':['system_settings/search_admin','admin_system_settings/search'],'祝日':['holidays/search'],'日次情報入力':['daily_infos/search','daily_informations/search']};
+    const cands=KNOWN[name]||GUESS[name]; if(!cands)return null;
+    const norm=(list)=>list.map(x=>({code:x.originalId||x.id||x.code||x.wirelessLineNumber||'',name:x.name||x.gradeTypeName||x.title||x.userName||x.loginName||[x.lastName,x.firstName].filter(Boolean).join(' ')||[x.lastNameKana,x.firstNameKana].filter(Boolean).join(' ')||x.companyName||x.vehicleNumber||Object.values(x).find(v=>typeof v==='string'&&/[^\d\/:.\- ]/.test(v)&&v.length<40)||'',updated:(x.updatedAt||'').slice(0,10),by:x.companyGroupName||x.companyName||x.officeName||''}));
+    const notes=[]; let merged=[];
+    for(const c of cands){
+      const [path,qs]=c.split('?'); const base=Object.fromEntries(new URLSearchParams(qs||'')); let p={pageLimit:'',pageNo:'',nonDetailFlag:'1',...base};
+      for(let attempt=0;attempt<4;attempt++){
+        let r; try{r=await call(path,p)}catch(e){notes.push(`${path}: 呼び出し失敗(${e.message})`);break}
+        if(r.isSuccess){const list=Object.values(r).find(Array.isArray)||[];merged=merged.concat(norm(list));notes.push(`${path}: OK ${list.length}件`);break}
+        const msgs=(r.msgs||[]).map(m=>m.msg+(m.path?`[${m.path}]`:'')).join(' / ');
+        const need=(r.msgs||[]).find(m=>m.path&&!(m.path in p));
+        if(need&&attempt<3){ // 必須パラメータを推定して再試行(searchKind は 1,2,3 の順)
+          const v=need.path==='searchKind'?String(attempt+1):need.path==='type'?'1':(/date|Date|At$/.test(need.path)?fmtD(new Date()):'1');p={...p,[need.path]:v};notes.push(`${path}: ${msgs} → ${need.path}=${v} で再試行`);continue}
+        if(need&&need.path==='searchKind'&&attempt<3){p={...p,searchKind:String(attempt+1)};continue}
+        notes.push(`${path}: ${msgs||('HTTP応答に isSuccess なし')}`);break;
+      }
+      if(merged.length&&KNOWN[name]&&!/system_types/.test(c))break;
+    }
+    merged.__notes=notes; return merged;
+  }
 };
 document.querySelector('.brand small').textContent=(K.officeName||'')+' / 実データ';
 if(K.loginName)document.querySelector('.user b').textContent=K.loginName;
