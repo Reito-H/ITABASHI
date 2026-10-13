@@ -18,7 +18,7 @@ SELECT id, 1, 'content', 'slate', '今日のゴール', '90分で「繁忙期の
 FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026' AND NOT EXISTS (SELECT 1 FROM daihon_slides s WHERE s.deck_id = daihon_decks.id AND s.sort_order = 1);
 
 INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes)
-SELECT id, 2, 'steps', 'blue', 'タイムテーブル', '約90分', '0:00｜導入（10分）' || char(10) || '0:10｜年末年始、日本人は何をしている？（15分）' || char(10) || '0:25｜繁忙期の街とお客様・酔っぱらい対応（20分）' || char(10) || '0:45｜流しとつけ待ち、どっちがいい？（10分）' || char(10) || '0:55｜エリア攻略 恵比寿・東京駅・渋谷（25分）' || char(10) || '1:20｜銀座乗禁・給料明細・まとめ（10分）', '流れはこの6つです。前半は年末年始の全体像、中盤はお客様の対応、後半が今日のメインのエリア攻略です。途中で何度か皆さんに聞きますので、答えを考えながら聞いてください。'
+SELECT id, 2, 'content', 'blue', 'タイムテーブル', '約90分', '0:00｜導入（10分）' || char(10) || '0:10｜年末年始、日本人は何をしている？（15分）' || char(10) || '0:25｜繁忙期の街とお客様・酔っぱらい対応（20分）' || char(10) || '0:45｜流しとつけ待ち、どっちがいい？（10分）' || char(10) || '0:55｜エリア攻略 恵比寿・東京駅・渋谷（25分）' || char(10) || '1:20｜銀座乗禁・給料明細・まとめ（10分）', '流れはこの6つです。前半は年末年始の全体像、中盤はお客様の対応、後半が今日のメインのエリア攻略です。途中で何度か皆さんに聞きますので、答えを考えながら聞いてください。'
 FROM daihon_decks WHERE title = '繁忙期対策勉強会 2026' AND NOT EXISTS (SELECT 1 FROM daihon_slides s WHERE s.deck_id = daihon_decks.id AND s.sort_order = 2);
 
 INSERT INTO daihon_slides (deck_id, sort_order, layout, accent, title, subtitle, body, notes)
